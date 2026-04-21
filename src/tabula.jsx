@@ -1806,7 +1806,7 @@ export default function Tabula(){
             <>
               {/* STEP content fills space above tabs */}
               {page==="step"&&(
-                <div style={{...S.stepPage, minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
+                <div style={{...S.stepPage, height:"calc(100dvh - 110px)", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                   <div style={S.stepPageHdr}>
                     <div style={S.stepPagePat}>{activePat?.name||""}</div>
                     <div style={{flex:1}}/>
@@ -1862,7 +1862,7 @@ export default function Tabula(){
               )}
               {/* SOUND content in right column */}
               {page==="sound"&&(
-                <div style={{...S.soundPage, minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
+                <div style={{...S.soundPage, height:"calc(100dvh - 110px)", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                   <SynthSection title="OSCILLATOR" accent={C_OSC}>
                     <div style={S.wfRow}>
                       {WAVEFORMS.map((w,i)=>(
@@ -1967,11 +1967,11 @@ const S={
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
   brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
-  sel:       {background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:10,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
+  sel:       {background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
   hdrWidget: {display:"flex",alignItems:"center",gap:2,flexShrink:0},
   widgetBox: {textAlign:"center",minWidth:26},
   widgetN:   {fontSize:IS_MOBILE?20:22,fontWeight:700,display:"block",lineHeight:1.1},
-  widgetU:   {fontSize:IS_MOBILE?8:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,display:"block"},
+  widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(255,255,255,0.3)",letterSpacing:1,display:"block"},
   bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"10px 18px",borderRadius:8,border:"1px solid rgba(255,255,255,0.18)",background:"rgba(255,255,255,0.05)",minWidth:IS_MOBILE?52:64,touchAction:"none",userSelect:"none",flexShrink:0},
   bpmOverlay:    {position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.88)",zIndex:999,pointerEvents:"none"},
   bpmOverlayNum: {fontFamily:"'Orbitron',sans-serif",fontSize:88,fontWeight:900,color:"#fff",lineHeight:1,letterSpacing:-2},
@@ -1985,7 +1985,7 @@ const S={
   loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?9:10,letterSpacing:2,cursor:"pointer",transition:"all .12s"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
-  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?7:9,letterSpacing:2,cursor:"pointer",borderRadius:6,transition:"all .12s"},
+  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?7:12,letterSpacing:2,cursor:"pointer",borderRadius:6,transition:"all .12s"},
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
   stepVaryDivider:{height:1,background:"rgba(255,255,255,0.06)",margin:"16px 0 8px"},
   speedRow:  {display:"flex",gap:4,marginBottom:IS_MOBILE?10:14},
@@ -2012,7 +2012,7 @@ const S={
   // Chain strip
   chainStrip:     {display:"flex",flexDirection:"row",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"8px 4px",marginTop:6,borderTop:"1px solid rgba(255,255,255,0.06)",minHeight:46,alignItems:"center",transition:"background .12s",borderRadius:6},
   chainStripHot:  {background:"rgba(255,255,255,0.04)",borderTop:"1px solid rgba(255,255,255,0.18)"},
-  chainStripEmpty:{fontSize:7,color:"rgba(255,255,255,0.18)",letterSpacing:2,whiteSpace:"nowrap"},
+  chainStripEmpty:{fontSize:IS_MOBILE?7:11,color:"rgba(255,255,255,0.18)",letterSpacing:2,whiteSpace:"nowrap"},
   chainChip:      {flexShrink:0,minWidth:30,height:30,borderRadius:8,border:"1px solid",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,letterSpacing:1,touchAction:"none",cursor:"grab",transition:"opacity .1s"},
   chainInsertLine:{width:2,height:30,background:"rgba(255,255,255,0.6)",borderRadius:1,flexShrink:0},
   chainGhost:     {position:"fixed",zIndex:500,pointerEvents:"none",width:36,height:36,borderRadius:10,background:"rgba(30,30,30,0.95)",border:"1px solid rgba(255,255,255,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(0,0,0,0.6)"},
@@ -2020,7 +2020,7 @@ const S={
   // SOUND — classic synth panel look
   soundPage:      {paddingTop:4,display:"flex",flexDirection:"column",gap:6},
   synthSection:   {background:"#0c0c0c",borderRadius:8,border:"1px solid",padding:"0 0 12px",overflow:"hidden"},
-  synthSectionHdr:{fontSize:7,fontWeight:700,letterSpacing:5,padding:"7px 12px",borderBottom:"1px solid",marginBottom:10},
+  synthSectionHdr:{fontSize:IS_MOBILE?7:11,fontWeight:700,letterSpacing:5,padding:"7px 12px",borderBottom:"1px solid",marginBottom:10},
   wfRow:          {display:"flex",gap:4,padding:"0 12px",marginBottom:6},
   wfBtn:          {flex:1,padding:"7px 0",border:"1px solid",background:"transparent",fontSize:8,letterSpacing:1,cursor:"pointer",borderRadius:5,textAlign:"center",fontWeight:700,transition:"all .12s"},
   synthRow:       {padding:"0 12px"},
@@ -2035,12 +2035,12 @@ const S={
 
   // Knob slider — synth style
   knobWrap:       {display:"flex",flexDirection:"column",gap:3},
-  knobLabel:      {fontSize:6,letterSpacing:2,fontWeight:700},
+  knobLabel:      {fontSize:IS_MOBILE?6:10,letterSpacing:2,fontWeight:700},
   knobTrackWrap:  {position:"relative",height:26,display:"flex",alignItems:"center",cursor:"pointer",touchAction:"none"},
   knobTrackBg:    {position:"absolute",left:0,right:0,height:4,borderRadius:3,background:"rgba(255,255,255,0.08)"},
   knobTrackFill:  {position:"absolute",left:0,height:4,borderRadius:3,pointerEvents:"none"},
   knobThumb:      {position:"absolute",top:"50%",transform:"translate(-50%,-50%)",width:18,height:18,borderRadius:"50%",pointerEvents:"none"},
-  knobValue:      {fontSize:10,fontWeight:700,letterSpacing:1},
+  knobValue:      {fontSize:IS_MOBILE?10:13,fontWeight:700,letterSpacing:1},
 
   spRow:          {display:"flex",alignItems:"center",justifyContent:"space-between",height:44},
   spValLg:        {fontSize:28,fontWeight:700,letterSpacing:2},
@@ -2055,24 +2055,24 @@ const S={
   mBtnLit:      {border:"1px solid rgba(255,255,255,0.45)",color:"#fff"},
   mBtnDanger:   {border:"1px solid rgba(255,80,80,0.35)",color:"rgba(255,100,100,0.8)"},
   menuDivider:  {height:1,background:"rgba(255,255,255,0.08)",marginBottom:14},
-  menuSaveLabel:{fontSize:7,letterSpacing:4,color:"rgba(255,255,255,0.3)",marginBottom:10},
+  menuSaveLabel:{fontSize:IS_MOBILE?7:11,letterSpacing:4,color:"rgba(255,255,255,0.3)",marginBottom:10},
   menuFlash:    {padding:"6px 10px",background:"rgba(105,240,174,0.08)",border:"1px solid rgba(105,240,174,0.25)",borderRadius:5,fontSize:9,color:"#69f0ae",letterSpacing:3,textAlign:"center",marginBottom:10},
   menuSlots:    {display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8},
   menuSlot:     {display:"flex",flexDirection:"column",gap:5,alignItems:"center"},
   menuSlotName: {fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.5)",letterSpacing:2,position:"relative"},
-  menuSlotDot:  {color:"#69f0ae",fontSize:8,marginLeft:2},
-  menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",borderRadius:5},
+  menuSlotDot:  {color:"#69f0ae",fontSize:IS_MOBILE?8:10,marginLeft:2},
+  menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.45)",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
   menuSlotBtnLit:{border:"1px solid rgba(105,240,174,0.45)",color:"#69f0ae",background:"rgba(105,240,174,0.04)"},
   // STEP page
   stepPage:     {paddingTop:4,display:"flex",flexDirection:"column",gap:14},
   stepPageHdr:  {display:"flex",alignItems:"center",gap:10},
   stepPagePat:  {fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.4)",letterSpacing:3,flex:1},
   stepPageBtns: {display:"flex",gap:8},
-  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.5)",fontSize:9,letterSpacing:2,cursor:"pointer",borderRadius:6},
+  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.5)",fontSize:IS_MOBILE?9:12,letterSpacing:2,cursor:"pointer",borderRadius:6},
   stepPageBtnRand:{border:"1px solid rgba(255,229,0,0.4)",color:"#ffe500",background:"rgba(255,229,0,0.05)"},
   stepLaneSection:{display:"flex",flexDirection:"column",gap:6},
   stepLaneHdr:  {display:"flex",alignItems:"center",gap:8},
-  stepLaneName: {fontSize:9,fontWeight:700,letterSpacing:3,minWidth:32},
+  stepLaneName: {fontSize:IS_MOBILE?9:12,fontWeight:700,letterSpacing:3,minWidth:32},
   stepLiveVal:  {fontSize:13,fontWeight:700,letterSpacing:1,minWidth:36,textAlign:"right"},
-  stepLaneBtn:  {padding:"5px 10px",border:"1px solid",background:"transparent",fontSize:8,letterSpacing:1,cursor:"pointer",borderRadius:5},
+  stepLaneBtn:  {padding:"5px 10px",border:"1px solid",background:"transparent",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
 };

@@ -4159,6 +4159,7 @@ function Tabula() {
     }
   }, gridLen)))), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, page === "step" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
+      height: "calc(100dvh - 110px)",
       minHeight: 0,
       overflowY: "scroll",
       paddingBottom: 40,
@@ -4345,6 +4346,7 @@ function Tabula() {
     accent: "#00e5ff"
   })))), page === "sound" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.soundPage), {}, {
+      height: "calc(100dvh - 110px)",
       minHeight: 0,
       overflowY: "scroll",
       paddingBottom: 40,
@@ -4613,7 +4615,7 @@ var S = {
     background: "rgba(255,255,255,0.05)",
     border: "1px solid rgba(255,255,255,0.14)",
     color: "rgba(255,255,255,0.7)",
-    fontSize: 10,
+    fontSize: IS_MOBILE ? 10 : 13,
     padding: "7px 8px",
     borderRadius: 6,
     cursor: "pointer",
@@ -4636,7 +4638,7 @@ var S = {
     lineHeight: 1.1
   },
   widgetU: {
-    fontSize: IS_MOBILE ? 8 : 9,
+    fontSize: IS_MOBILE ? 8 : 11,
     color: "rgba(255,255,255,0.3)",
     letterSpacing: 1,
     display: "block"
@@ -4765,7 +4767,7 @@ var S = {
     border: "1px solid rgba(255,255,255,0.1)",
     background: "transparent",
     color: "rgba(255,255,255,0.3)",
-    fontSize: IS_MOBILE ? 7 : 9,
+    fontSize: IS_MOBILE ? 7 : 12,
     letterSpacing: 2,
     cursor: "pointer",
     borderRadius: 6,
@@ -4947,7 +4949,7 @@ var S = {
     borderTop: "1px solid rgba(255,255,255,0.18)"
   },
   chainStripEmpty: {
-    fontSize: 7,
+    fontSize: IS_MOBILE ? 7 : 11,
     color: "rgba(255,255,255,0.18)",
     letterSpacing: 2,
     whiteSpace: "nowrap"
@@ -5006,7 +5008,7 @@ var S = {
     overflow: "hidden"
   },
   synthSectionHdr: {
-    fontSize: 7,
+    fontSize: IS_MOBILE ? 7 : 11,
     fontWeight: 700,
     letterSpacing: 5,
     padding: "7px 12px",
@@ -5089,7 +5091,7 @@ var S = {
     gap: 3
   },
   knobLabel: {
-    fontSize: 6,
+    fontSize: IS_MOBILE ? 6 : 10,
     letterSpacing: 2,
     fontWeight: 700
   },
@@ -5126,7 +5128,7 @@ var S = {
     pointerEvents: "none"
   },
   knobValue: {
-    fontSize: 10,
+    fontSize: IS_MOBILE ? 10 : 13,
     fontWeight: 700,
     letterSpacing: 1
   },
@@ -5220,7 +5222,7 @@ var S = {
     marginBottom: 14
   },
   menuSaveLabel: {
-    fontSize: 7,
+    fontSize: IS_MOBILE ? 7 : 11,
     letterSpacing: 4,
     color: "rgba(255,255,255,0.3)",
     marginBottom: 10
@@ -5256,7 +5258,7 @@ var S = {
   },
   menuSlotDot: {
     color: "#69f0ae",
-    fontSize: 8,
+    fontSize: IS_MOBILE ? 8 : 10,
     marginLeft: 2
   },
   menuSlotBtn: {
@@ -5265,7 +5267,7 @@ var S = {
     border: "1px solid rgba(255,255,255,0.14)",
     background: "transparent",
     color: "rgba(255,255,255,0.45)",
-    fontSize: 8,
+    fontSize: IS_MOBILE ? 8 : 11,
     letterSpacing: 1,
     cursor: "pointer",
     borderRadius: 5
@@ -5303,7 +5305,7 @@ var S = {
     border: "1px solid rgba(255,255,255,0.15)",
     background: "transparent",
     color: "rgba(255,255,255,0.5)",
-    fontSize: 9,
+    fontSize: IS_MOBILE ? 9 : 12,
     letterSpacing: 2,
     cursor: "pointer",
     borderRadius: 6
@@ -5324,7 +5326,7 @@ var S = {
     gap: 8
   },
   stepLaneName: {
-    fontSize: 9,
+    fontSize: IS_MOBILE ? 9 : 12,
     fontWeight: 700,
     letterSpacing: 3,
     minWidth: 32
@@ -5340,7 +5342,7 @@ var S = {
     padding: "5px 10px",
     border: "1px solid",
     background: "transparent",
-    fontSize: 8,
+    fontSize: IS_MOBILE ? 8 : 11,
     letterSpacing: 1,
     cursor: "pointer",
     borderRadius: 5
