@@ -1442,28 +1442,62 @@ export default function Tabula(){
               </div>
             </>
           )}
-          {/* Pattern pills — desktop only (mobile rendered above) */}
+          {/* Pattern pills + inline actions — desktop only */}
           {!IS_MOBILE&&(
-            <div style={S.patRow}>
-              {pats.map((p,i)=>{
-                const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
-                const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
-                return(
-                  <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
-                    onClick={()=>setActiveId(p.id)}
-                    onPointerDown={e=>startPillDrag(e,p.id)}
-                    onPointerMove={onDragMove}
-                    onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                    onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                    onContextMenu={e=>handlePillContextMenu(e,p.id)}>
-                    {isP&&<span className="pp">●</span>}{p.name}
-                  </div>
-                );
-              })}
-              {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
-              <div style={{flex:1}}/>
-              <button style={S.menuBtn} onClick={()=>setShowMenu(m=>!m)}>⋯</button>
-            </div>
+            <>
+              <div style={S.patRow}>
+                {pats.map((p,i)=>{
+                  const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
+                  const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
+                  return(
+                    <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
+                      onClick={()=>setActiveId(p.id)}
+                      onPointerDown={e=>startPillDrag(e,p.id)}
+                      onPointerMove={onDragMove}
+                      onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                      onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                      onContextMenu={e=>handlePillContextMenu(e,p.id)}>
+                      {isP&&<span className="pp">●</span>}{p.name}
+                    </div>
+                  );
+                })}
+                {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
+              </div>
+              {/* Inline pattern actions — no dropdown needed on desktop */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:10}}>
+                {[
+                  ["RAND", randPat,   false, false],
+                  ["CLR",  clearPat,  false, false],
+                  ["CPY",  copyPat,   false, false],
+                  ["PST",  pastePat,  !clipboard, false],
+                  ["DUP",  dupPat,    pats.length>=8, false],
+                  ["DEL",  delPat,    pats.length<=1, true],
+                ].map(([label,fn,disabled,danger])=>(
+                  <button key={label} disabled={!!disabled}
+                    style={{padding:"6px 0",border:"1px solid "+(danger?"rgba(255,80,80,0.3)":"rgba(255,255,255,0.1)"),
+                      background:"transparent",borderRadius:5,
+                      color:disabled?"rgba(255,255,255,0.15)":danger?"rgba(255,80,80,0.7)":"rgba(255,255,255,0.5)",
+                      fontSize:9,fontWeight:700,letterSpacing:1,cursor:disabled?"default":"pointer",transition:"all .1s"}}
+                    onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.07)";}}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                    onClick={disabled?undefined:fn}>{label}</button>
+                ))}
+              </div>
+              {/* Save/load inline */}
+              <div style={{marginBottom:10}}>
+                <div style={S.menuSaveLabel}>SAVE / LOAD</div>
+                {flash&&<div style={S.menuFlash}>{flash}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
+                    <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
+                      <span style={{...S.menuSlotName}}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
+                      <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
+                      <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                    </div>
+                  );})}
+                </div>
+              </div>
+            </>
           )}
 
           {/* Speed row */}
@@ -1627,7 +1661,7 @@ export default function Tabula(){
         </div>
 
         {/* ── RIGHT COLUMN (desktop) / main area (mobile) ── */}
-        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:4}}>
+        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:4,alignItems:"center",justifyContent:"center"}}>
           {/* Grid — always visible on desktop, only on EDIT tab on mobile */}
           {(page==="edit"||!IS_MOBILE)&&(
             <div style={IS_MOBILE?{}:{
@@ -1636,6 +1670,7 @@ export default function Tabula(){
               display:"flex",
               flexDirection:"column",
               flexShrink:0,
+              alignSelf:"center",
             }}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},IS_MOBILE?{}:{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -1721,8 +1756,8 @@ export default function Tabula(){
         </div>
       </div>
 
-      {/* Save/load menu */}
-      {showMenu&&(
+      {/* Save/load menu — mobile only (desktop has inline) */}
+      {IS_MOBILE&&showMenu&&(
         <div style={S.menuOverlay} onPointerDown={()=>setShowMenu(false)}>
           <div style={S.menuPanel} onPointerDown={e=>e.stopPropagation()}>
             <div style={S.menuSaveLabel}>SAVE / LOAD</div>
