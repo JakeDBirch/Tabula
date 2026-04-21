@@ -279,12 +279,15 @@ class Bell{
     this.dly=dl;this.dlyFb=fb;this.dlyHp=dHp;this.dlyLp=dLp;
     this.ready=true;
   }
-  play(freq,at,sp,noteDur){
+  play(freq,at,sp,noteDur,globalSend){
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=this.p;
     const velMul   = sp ? (sp.vel/127) : 1;
     const cutOff   = sp ? ((sp.cut-50)/50)*40 : 0;
-    const dlyMul   = sp ? sp.dly/100 : 1;
+    const stepDly  = sp ? sp.dly/100 : 0;
+    const globalDly= (globalSend!=null) ? globalSend/100 : 0;
+    // dly=0 means "use global send"; any other value overrides it entirely
+    const dlyMul   = (sp && sp.dly > 0) ? stepDly : globalDly;
     const octShift = sp ? (sp.oct-2) : 0;
     const playFreq = freq * Math.pow(2, octShift);
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
@@ -331,10 +334,10 @@ class Bell{
     vca.connect(this.master);
     // Reverb: fixed send
     vca.connect(this.rev);
-    // Delay send: per-step scale → global send gain → delay line
+    // Delay send: additive (global + step), capped at 1 — computed in dlyMul
     if(dlyMul>0){
       const stepSend=this.ctx.createGain();stepSend.gain.value=dlyMul;
-      vca.connect(stepSend);stepSend.connect(this.dlySend);
+      vca.connect(stepSend);stepSend.connect(this.dly);
     }
   }
   setDlyTime(s){if(!this.ready)return;if(this.dly){this.dly.delayTime.cancelScheduledValues(this.ctx.currentTime);this.dly.delayTime.setValueAtTime(s,this.ctx.currentTime);}}
@@ -462,7 +465,8 @@ export default function Tabula(){
 
   useEffect(()=>{bell.current.setDlyTime((60/bpm)*DLY_NOTES[dlyIdx].mult);},[bpm,dlyIdx]);
   useEffect(()=>{bell.current.setDlyFb(dlyFbPct/100);},[dlyFbPct]);
-  useEffect(()=>{bell.current.setDelaySend(dlyWetPct);},[dlyWetPct]);
+  const dlyWetPctR = useRef(50);
+  useEffect(()=>{dlyWetPctR.current=dlyWetPct;bell.current.setDelaySend(dlyWetPct);},[dlyWetPct]);
   useEffect(()=>{bell.current.setDlyHp(dlyHpVal);},[dlyHpVal]);
   useEffect(()=>{bell.current.setDlyLp(dlyLpVal);},[dlyLpVal]);
 
@@ -540,9 +544,10 @@ export default function Tabula(){
           if(isTie)continue; // tied step: previous note already extended, skip
           const f=freqs[r]*ratio;
           if(ratch>1){
-            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9);
+            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,dlyWetPctR.current);
+
           } else {
-            bell.current.play(f,at,sp,noteDur);
+            bell.current.play(f,at,sp,noteDur,dlyWetPctR.current);
           }
         }
         setStep(s);setCpos(cp);setPlayId(pid);
@@ -652,6 +657,29 @@ export default function Tabula(){
     e.preventDefault();
     pointerCountR.current++;
     const g=gesture.current;
+
+    // Shift+click on desktop = two-finger drag (pattern shift)
+    if(e.shiftKey&&!IS_MOBILE){
+      clearTimeout(longPressR.current);longPressR.current=null;
+      if(popupR.current){
+        const {col}=popupR.current;
+        const vals=paramPopupValuesR.current;
+        if(vals)setPats(ps=>ps.map(p=>{
+          if(p.id!==activeIdR.current)return p;
+          const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,vals):sp);
+          return Object.assign({},p,{params});
+        }));
+        setParamPopup(null);popupR.current=null;
+      }
+      g.state="shift";setShifting(true);
+      g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
+      g.shiftPointerID=e.pointerId;
+      gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+      const pat=patsR.current.find(p=>p.id===activeIdR.current);
+      g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
+      g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
+      return;
+    }
 
     // Second finger down → shift mode, dismiss popup
     if(pointerCountR.current>=2){
@@ -1421,7 +1449,7 @@ export default function Tabula(){
       <div style={IS_MOBILE?{}:{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
 
         {/* ── LEFT COLUMN (desktop) / above-grid controls (mobile) ── */}
-        <div style={IS_MOBILE?{}:{width:280,flexShrink:0,display:"flex",flexDirection:"column",gap:0,overflowY:"auto",scrollbarWidth:"none"}}>
+        <div style={IS_MOBILE?{}:{width:280,flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
           {/* Brand + widgets — desktop only */}
           {!IS_MOBILE&&(
             <>
@@ -1442,28 +1470,10 @@ export default function Tabula(){
               </div>
             </>
           )}
-          {/* Pattern pills + inline actions — desktop only */}
+          {/* Scrollable middle section — actions, speed, save/load */}
           {!IS_MOBILE&&(
-            <>
-              <div style={S.patRow}>
-                {pats.map((p,i)=>{
-                  const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
-                  const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
-                  return(
-                    <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
-                      onClick={()=>setActiveId(p.id)}
-                      onPointerDown={e=>startPillDrag(e,p.id)}
-                      onPointerMove={onDragMove}
-                      onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                      onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                      onContextMenu={e=>handlePillContextMenu(e,p.id)}>
-                      {isP&&<span className="pp">●</span>}{p.name}
-                    </div>
-                  );
-                })}
-                {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
-              </div>
-              {/* Inline pattern actions — no dropdown needed on desktop */}
+            <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
+              {/* Inline pattern actions */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:10}}>
                 {[
                   ["RAND", randPat,   false, false],
@@ -1483,6 +1493,13 @@ export default function Tabula(){
                     onClick={disabled?undefined:fn}>{label}</button>
                 ))}
               </div>
+              {/* Speed row */}
+              <div style={S.speedRow}>
+                {SPEED_OPTS.map(({label,mult})=>(
+                  <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})}
+                    onClick={()=>setSpeedMult(mult)}>{label}</button>
+                ))}
+              </div>
               {/* Save/load inline */}
               <div style={{marginBottom:10}}>
                 <div style={S.menuSaveLabel}>SAVE / LOAD</div>
@@ -1497,7 +1514,7 @@ export default function Tabula(){
                   );})}
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           {/* Speed row */}
@@ -1508,15 +1525,18 @@ export default function Tabula(){
             ))}
           </div>
 
-          {/* Tabs */}
-          <div style={S.tabs}>
-            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-            ))}
-          </div>
+          {/* Tabs — mobile only; desktop tabs live below the grid in the right column */}
+          {IS_MOBILE&&(
+            <div style={S.tabs}>
+              {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+                <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+              ))}
+            </div>
+          )}
 
-          {/* STEP and SOUND page content — always in left column */}
-          {page==="step"&&(
+          {/* STEP and SOUND page content */}
+          {/* Mobile: driven by tab selection. Desktop: always show in left column scroll area */}
+          {(IS_MOBILE ? page==="step" : false)&&(
             <div style={S.stepPage}>
               <div style={S.stepPageHdr}>
                 <div style={S.stepPagePat}>{activePat?.name||""}</div>
@@ -1572,7 +1592,7 @@ export default function Tabula(){
             </div>
           )}
 
-          {page==="sound"&&(
+          {(IS_MOBILE ? page==="sound" : false)&&(
             <div style={S.soundPage}>
               <SynthSection title="OSCILLATOR" accent={C_OSC}>
                 <div style={S.wfRow}>
@@ -1611,9 +1631,28 @@ export default function Tabula(){
               </SynthSection>
             </div>
           )}
-          {/* Transport — desktop only (mobile uses fixed play bar) */}
+          {/* Transport — desktop only: pills + chain + buttons pinned to bottom */}
           {!IS_MOBILE&&(
             <>
+              {/* Pattern pills — pinned above transport */}
+              <div style={{...S.patRow, flexShrink:0, paddingBottom:6, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8, marginTop:4}}>
+                {pats.map((p,i)=>{
+                  const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
+                  const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
+                  return(
+                    <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
+                      onClick={()=>setActiveId(p.id)}
+                      onPointerDown={e=>startPillDrag(e,p.id)}
+                      onPointerMove={onDragMove}
+                      onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                      onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                      onContextMenu={e=>handlePillContextMenu(e,p.id)}>
+                      {isP&&<span className="pp">●</span>}{p.name}
+                    </div>
+                  );
+                })}
+                {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
+              </div>
               {/* Chain strip */}
               {(()=>{
                 const overStrip = chainDrag && isOverStrip(chainDrag.y);
@@ -1653,7 +1692,7 @@ export default function Tabula(){
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
                 <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/3",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
               </div>
             </>
@@ -1661,17 +1700,17 @@ export default function Tabula(){
         </div>
 
         {/* ── RIGHT COLUMN (desktop) / main area (mobile) ── */}
-        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:4,alignItems:"center",justifyContent:"center"}}>
-          {/* Grid — always visible on desktop, only on EDIT tab on mobile */}
-          {(page==="edit"||!IS_MOBILE)&&(
-            <div style={IS_MOBILE?{}:{
-              width:"min(100%, calc(100dvh - 120px))",
-              aspectRatio:"1",
-              display:"flex",
-              flexDirection:"column",
-              flexShrink:0,
-              alignSelf:"center",
-            }}>
+        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto",overflow:"hidden"}}>
+          {/* Grid — wrapped in flex:1 centered container on desktop */}
+          {page==="edit"&&(
+            <div style={IS_MOBILE?{}:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              <div style={IS_MOBILE?{}:{
+                width:"min(100%, calc(100dvh - 120px))",
+                aspectRatio:"1",
+                display:"flex",
+                flexDirection:"column",
+                flexShrink:0,
+              }}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},IS_MOBILE?{}:{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
@@ -1748,10 +1787,119 @@ export default function Tabula(){
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                 <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(255,255,255,0.18)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
                 <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(255,255,255,0.04)",borderRadius:"0 3px 3px 0"}}/>
-                <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(gridLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                <div style={{position:"absolute",top:IS_MOBILE?-3:-5,bottom:IS_MOBILE?-3:-5,width:IS_MOBILE?3:5,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:2}px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(255,255,255,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
+              </div>
             </div>
+          )}
+
+          {/* Desktop: STEP/SOUND content + tabs pinned to bottom */}
+          {!IS_MOBILE&&(
+            <>
+              {/* STEP content fills space above tabs */}
+              {page==="step"&&(
+                <div style={{...S.stepPage, minHeight:0, overflowY:"auto", paddingBottom:20, paddingLeft:4, paddingRight:4}}>
+                  <div style={S.stepPageHdr}>
+                    <div style={S.stepPagePat}>{activePat?.name||""}</div>
+                    <div style={{flex:1}}/>
+                    <button style={S.stepPageBtn} onClick={resetStepAll}>RST ALL</button>
+                    <button style={Object.assign({},S.stepPageBtn,S.stepPageBtnRand)} onClick={randStepAll}>RAND ALL</button>
+                  </div>
+                  {LANES.map(lane=>{
+                    const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
+                    const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
+                    const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
+                    const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?(curVal===0?"TIE":curVal===1?"—":"×"+curVal):String(curVal);
+                    return(
+                      <div key={lane.key} style={S.stepLaneSection}>
+                        <div style={S.stepLaneHdr}>
+                          <div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>
+                          {liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}
+                          <div style={{flex:1}}/>
+                          <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button>
+                          <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button>
+                        </div>
+                        <StepLane lane={lane} values={vals} colHasNote={colHasNote}
+                          activeStep={playing&&playId===activeId?step:-1}
+                          onChange={(col,val)=>setStepParam(col,lane.key,val)}
+                          tall/>
+                      </div>
+                    );
+                  })}
+                  <div style={S.stepVaryDivider}/>
+                  <SynthSection title="RHYTHM VARY" accent="#ff9800">
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#ff9800"/>
+                      <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#ff9800"/>
+                      <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#ff9800"/>
+                    </div>
+                  </SynthSection>
+                  <SynthSection title="MELODY VARY" accent="#e040fb">
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#e040fb"/>
+                      <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#e040fb"/>
+                      <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#e040fb"/>
+                    </div>
+                  </SynthSection>
+                  <SynthSection title="STEP VARY" accent="#00e5ff">
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="VEL" value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#00e5ff"/>
+                      <KnobSlider label="CUT" value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#00e5ff"/>
+                      <KnobSlider label="DLY" value={vDlyJitter}  min={0} max={100} onChange={setVDlyJitter}  display={vDlyJitter+"%"}  accent="#00e5ff"/>
+                      <KnobSlider label="RHY" value={vRhyJitter}  min={0} max={100} onChange={setVRhyJitter}  display={vRhyJitter+"%"}  accent="#00e5ff"/>
+                      <KnobSlider label="OCT" value={vOctJitter}  min={0} max={100} onChange={setVOctJitter}  display={vOctJitter+"%"}  accent="#00e5ff"/>
+                    </div>
+                  </SynthSection>
+                </div>
+              )}
+              {/* SOUND content in right column */}
+              {page==="sound"&&(
+                <div style={{...S.soundPage, minHeight:0, overflowY:"auto", paddingBottom:20, paddingLeft:4, paddingRight:4}}>
+                  <SynthSection title="OSCILLATOR" accent={C_OSC}>
+                    <div style={S.wfRow}>
+                      {WAVEFORMS.map((w,i)=>(
+                        <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(255,255,255,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                          {WF_LABELS[i]}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                    </div>
+                  </SynthSection>
+                  <SynthSection title="ENV" accent={C_ENV}>
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="ATK" value={attack}  min={0} max={100} onChange={setAttack}  display={(attack/10).toFixed(1)+"s"} accent={C_ENV}/>
+                      <KnobSlider label="DEC" value={decay}   min={0} max={100} onChange={setDecay}   display={(decay/10).toFixed(1)+"s"}  accent={C_ENV}/>
+                      <KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"}                accent={C_ENV}/>
+                    </div>
+                  </SynthSection>
+                  <SynthSection title="FILTER" accent={C_FILT}>
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfCutoff+"%"}    accent={C_FILT}/>
+                      <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}       accent={C_FILT}/>
+                      <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/>
+                    </div>
+                  </SynthSection>
+                  <SynthSection title="DELAY" accent={C_DLY}>
+                    <div style={S.threeGrid}>
+                      <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/>
+                      <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
+                      <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                      <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={dlyHpVal+"%"}             accent={C_DLY}/>
+                      <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={dlyLpVal+"%"}             accent={C_DLY}/>
+                    </div>
+                  </SynthSection>
+                </div>
+              )}
+              {/* Tabs — always at bottom, marginTop:auto pushes them down */}
+              <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
+                {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+                  <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -1783,7 +1931,7 @@ export default function Tabula(){
         <button style={Object.assign({},S.playBtn,playing?S.playOn:{})} onClick={startStop}>
           {playing?"■":"▶"}
         </button>
-        <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT</button>
+        <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
         <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
       </div>
       )}
@@ -1851,7 +1999,7 @@ const S={
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:IS_MOBILE?10:12,marginTop:4,borderRadius:3,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
+  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
   stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
