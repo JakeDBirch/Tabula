@@ -1,31 +1,23 @@
 #!/bin/bash
 set -e
 
-# Tabula build script
-# Requires: node, npm
-# Usage: ./build.sh
-
 SRC="src/tabula.jsx"
-OUT="tabula.html"
+OUT="index.html"
 TMP_JSX="/tmp/tabula-src.jsx"
 TMP_JS="/tmp/tabula-compiled.js"
 
-# Install babel if needed
 if [ ! -f "node_modules/.bin/babel" ]; then
   echo "Installing babel..."
   npm install --save-dev @babel/core @babel/cli @babel/preset-react @babel/preset-env
 fi
 
-# Strip the import line and export keyword, add render call
 sed 's/^import React.*$//' "$SRC" | \
 sed 's/^export default function Tabula/function Tabula/' > "$TMP_JSX"
 echo '' >> "$TMP_JSX"
 echo 'ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Tabula));' >> "$TMP_JSX"
 
-# Compile JSX
 ./node_modules/.bin/babel "$TMP_JSX" -o "$TMP_JS"
 
-# Wrap in HTML
 cat > "$OUT" << 'HTML'
 <!DOCTYPE html>
 <html lang="en">

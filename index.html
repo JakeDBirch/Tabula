@@ -1521,7 +1521,10 @@ function Tabula() {
       return e.preventDefault();
     };
     var noContext = function noContext(e) {
-      return e.preventDefault();
+      var _e$target$dataset, _e$target$closest, _e$target;
+      // Allow right-click on the grid (handled by onContextMenu for param popup)
+      if (e.target && ((_e$target$dataset = e.target.dataset) !== null && _e$target$dataset !== void 0 && _e$target$dataset.grid || (_e$target$closest = (_e$target = e.target).closest) !== null && _e$target$closest !== void 0 && _e$target$closest.call(_e$target, '[data-grid]'))) return;
+      e.preventDefault();
     };
     var clearSel = function clearSel() {
       try {
@@ -1539,15 +1542,15 @@ function Tabula() {
       try {
         for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
           var t = _step2.value;
-          var _el = document.elementFromPoint(t.clientX, t.clientY);
+          var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
-          while (_el && _el !== document.body) {
-            var ov = window.getComputedStyle(_el).overflowY;
-            if ((ov === 'scroll' || ov === 'auto') && _el.scrollHeight > _el.clientHeight + 2) {
+          while (el && el !== document.body) {
+            var ov = window.getComputedStyle(el).overflowY;
+            if ((ov === 'scroll' || ov === 'auto') && el.scrollHeight > el.clientHeight + 2) {
               scrollable = true;
               break;
             }
-            _el = _el.parentElement;
+            el = el.parentElement;
           }
           scrollableStarts.set(t.identifier, scrollable);
         }
@@ -1803,9 +1806,10 @@ function Tabula() {
 
     // Start long press timer on an ON note
     if (isOnNote) {
-      var _rect = el.getBoundingClientRect();
-      var ox = _rect.left + _rect.width / 2,
-        oy = _rect.top + _rect.height / 2;
+      var gridEl2 = gridRef.current;
+      var _rect = gridEl2 ? gridEl2.getBoundingClientRect() : null;
+      var ox = _rect ? _rect.left + _rect.width / COLS * (c + 0.5) : e.clientX;
+      var oy = _rect ? _rect.top + _rect.height / ROWS * (r + 0.5) : e.clientY;
       var baseVals = Object.assign({}, pat.params && pat.params[c] || defaultStepParams()[0]);
       g.longPressCell = {
         r: r,
@@ -1816,33 +1820,58 @@ function Tabula() {
       };
       longPressR.current = setTimeout(function () {
         if (g.state !== "pending") return;
-        g.state = "popup";
-        var vw2 = window.innerWidth,
-          REACH2 = 150;
-        var fc = 90;
-        if (oy < REACH2 + 20) fc = -90;else if (ox < REACH2) fc = 0;else if (ox > vw2 - REACH2) fc = 180;
-        var adaptedArms = PARAM_ARMS.map(function (arm, i) {
-          return _objectSpread(_objectSpread({}, arm), {}, {
-            angle: fc + (i - 2) * 30
-          });
-        });
-        popupR.current = {
-          col: c,
-          originX: ox,
-          originY: oy,
-          baseValues: baseVals,
-          adaptedArms: adaptedArms
-        };
-        setParamPopup({
-          col: c,
-          x: ox,
-          y: oy,
-          activeArm: null,
-          values: _objectSpread({}, baseVals)
-        });
+        openParamPopup(c, ox, oy, baseVals);
       }, 320);
     }
   }, []);
+
+  // Shared popup-open logic — called by both long press and right-click
+  var openParamPopup = useCallback(function (c, ox, oy, baseVals) {
+    var g = gesture.current;
+    g.state = "popup";
+    var vw2 = window.innerWidth,
+      REACH2 = 150;
+    var fc = 90;
+    if (oy < REACH2 + 20) fc = -90;else if (ox < REACH2) fc = 0;else if (ox > vw2 - REACH2) fc = 180;
+    var adaptedArms = PARAM_ARMS.map(function (arm, i) {
+      return _objectSpread(_objectSpread({}, arm), {}, {
+        angle: fc + (i - 2) * 30
+      });
+    });
+    popupR.current = {
+      col: c,
+      originX: ox,
+      originY: oy,
+      baseValues: baseVals,
+      adaptedArms: adaptedArms
+    };
+    setParamPopup({
+      col: c,
+      x: ox,
+      y: oy,
+      activeArm: null,
+      values: _objectSpread({}, baseVals)
+    });
+  }, []);
+  var handleGridContextMenu = useCallback(function (e) {
+    e.preventDefault();
+    var gridEl = gridRef.current;
+    if (!gridEl) return;
+    var rect = gridEl.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    var r = Math.floor((e.clientY - rect.top) / (rect.height / ROWS));
+    var c = Math.floor((e.clientX - rect.left) / (rect.width / COLS));
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return;
+    var pat = patsR.current.find(function (p) {
+      return p.id === activeIdR.current;
+    });
+    if (!pat || !pat.grid[r] || !pat.grid[r][c]) return; // only on lit notes
+    var ox = rect.left + rect.width / COLS * (c + 0.5);
+    var oy = rect.top + rect.height / ROWS * (r + 0.5);
+    var baseVals = Object.assign({}, pat.params && pat.params[c] || defaultStepParams()[0]);
+    clearTimeout(longPressR.current);
+    openParamPopup(c, ox, oy, baseVals);
+  }, [openParamPopup]);
   var handleGridMove = useCallback(function (e) {
     var g = gesture.current;
     if (g.state === "idle" || g.state === "pending-dismiss") return;
@@ -2894,7 +2923,8 @@ function Tabula() {
     onPointerDown: handleGridDown,
     onPointerMove: handleGridMove,
     onPointerUp: handleGridUp,
-    onPointerCancel: handleGridUp
+    onPointerCancel: handleGridUp,
+    onContextMenu: handleGridContextMenu
   }, Array.from({
     length: ROWS
   }, function (_, r) {

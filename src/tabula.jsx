@@ -566,7 +566,11 @@ export default function Tabula(){
   // Lock the interface against iOS sheet-dismiss swipe and long-press selection
   useEffect(()=>{
     const noSelect=e=>e.preventDefault();
-    const noContext=e=>e.preventDefault();
+    const noContext=e=>{
+      // Allow right-click on the grid (handled by onContextMenu for param popup)
+      if(e.target&&(e.target.dataset?.grid||e.target.closest?.('[data-grid]')))return;
+      e.preventDefault();
+    };
     const clearSel=()=>{try{window.getSelection()?.removeAllRanges();}catch(e){}};
 
     // Block touchmove for any touch that didn't start inside a scrollable container.
@@ -726,24 +730,49 @@ export default function Tabula(){
 
     // Start long press timer on an ON note
     if(isOnNote){
-      const rect=el.getBoundingClientRect();
-      const ox=rect.left+rect.width/2, oy=rect.top+rect.height/2;
+      const gridEl2=gridRef.current;
+      const rect=gridEl2?gridEl2.getBoundingClientRect():null;
+      const ox=rect?rect.left+rect.width/COLS*(c+0.5):e.clientX;
+      const oy=rect?rect.top+rect.height/ROWS*(r+0.5):e.clientY;
       const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
       g.longPressCell={r,c,ox,oy,baseVals};
       longPressR.current=setTimeout(()=>{
         if(g.state!=="pending")return;
-        g.state="popup";
-        const vw2=window.innerWidth,REACH2=150;
-        let fc=90;
-        if(oy<REACH2+20)fc=-90;
-        else if(ox<REACH2)fc=0;
-        else if(ox>vw2-REACH2)fc=180;
-        const adaptedArms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fc+(i-2)*30}));
-        popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms};
-        setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
+        openParamPopup(c,ox,oy,baseVals);
       },320);
     }
   },[]);
+
+  // Shared popup-open logic — called by both long press and right-click
+  const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
+    const g=gesture.current;
+    g.state="popup";
+    const vw2=window.innerWidth,REACH2=150;
+    let fc=90;
+    if(oy<REACH2+20)fc=-90;
+    else if(ox<REACH2)fc=0;
+    else if(ox>vw2-REACH2)fc=180;
+    const adaptedArms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fc+(i-2)*30}));
+    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms};
+    setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
+  },[]);
+
+  const handleGridContextMenu=useCallback(e=>{
+    e.preventDefault();
+    const gridEl=gridRef.current;if(!gridEl)return;
+    const rect=gridEl.getBoundingClientRect();
+    if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)return;
+    const r=Math.floor((e.clientY-rect.top)/(rect.height/ROWS));
+    const c=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
+    if(r<0||r>=ROWS||c<0||c>=COLS)return;
+    const pat=patsR.current.find(p=>p.id===activeIdR.current);
+    if(!pat||!pat.grid[r]||!pat.grid[r][c])return; // only on lit notes
+    const ox=rect.left+rect.width/COLS*(c+0.5);
+    const oy=rect.top+rect.height/ROWS*(r+0.5);
+    const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
+    clearTimeout(longPressR.current);
+    openParamPopup(c,ox,oy,baseVals);
+  },[openParamPopup]);
 
   const handleGridMove=useCallback(e=>{
     const g=gesture.current;
@@ -1307,7 +1336,8 @@ export default function Tabula(){
             <button style={S.menuBtn} onClick={()=>setShowMenu(m=>!m)}>⋯</button>
           </div>
           <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{})}
-            onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}>
+            onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
+            onContextMenu={handleGridContextMenu}>
             {Array.from({length:ROWS},(_,r)=>{
               const fromBot=ROWS-1-r;
               const isOct=fromBot%SCALE_SPAN===0;
