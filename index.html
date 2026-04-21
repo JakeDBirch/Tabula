@@ -2367,6 +2367,105 @@ function Tabula() {
       return mkGrid();
     });
   };
+
+  // ID-targeted versions — used by pill context menu so activeId is never involved
+  var dupPatId = function dupPatId(id) {
+    if (pats.length >= 8) return;
+    var src = pats.find(function (p) {
+      return p.id === id;
+    });
+    if (!src) return;
+    var p = Object.assign({}, mkPat("ABCDEFGH"[pats.length]), {
+      grid: src.grid.map(function (r) {
+        return _toConsumableArray(r);
+      }),
+      params: (src.params || defaultStepParams()).map(function (s) {
+        return Object.assign({}, s);
+      })
+    });
+    setPats(function (ps) {
+      return [].concat(_toConsumableArray(ps), [p]);
+    });
+    setActiveId(p.id);
+  };
+  var delPatId = function delPatId(id) {
+    if (pats.length <= 1) return;
+    var rem = pats.filter(function (p) {
+      return p.id !== id;
+    });
+    setPats(rem);
+    setChain(function (c) {
+      return c.filter(function (pid) {
+        return pid !== id;
+      });
+    });
+    setActiveId(function (a) {
+      return a === id ? rem[0].id : a;
+    });
+  };
+  var copyPatId = function copyPatId(id) {
+    var src = pats.find(function (p) {
+      return p.id === id;
+    });
+    if (src) setClipboard({
+      grid: src.grid.map(function (r) {
+        return _toConsumableArray(r);
+      }),
+      params: (src.params || defaultStepParams()).map(function (s) {
+        return Object.assign({}, s);
+      })
+    });
+  };
+  var pastePatId = function pastePatId(id) {
+    if (!clipboard) return;
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== id ? p : Object.assign({}, p, {
+          grid: clipboard.grid.map(function (r) {
+            return _toConsumableArray(r);
+          }),
+          params: clipboard.params.map(function (s) {
+            return Object.assign({}, s);
+          })
+        });
+      });
+    });
+  };
+  var clearPatId = function clearPatId(id) {
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== id ? p : Object.assign({}, p, {
+          grid: mkGrid()
+        });
+      });
+    });
+  };
+  var randPatId = function randPatId(id) {
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== id) return p;
+        var grid = monoMode ? mkGrid() : Array.from({
+          length: ROWS
+        }, function () {
+          return Array.from({
+            length: COLS
+          }, function () {
+            return Math.random() < .12;
+          });
+        });
+        if (monoMode) {
+          for (var c = 0; c < COLS; c++) {
+            var hits = [];
+            for (var r = 0; r < ROWS; r++) if (Math.random() < .12) hits.push(r);
+            if (hits.length) grid[hits[Math.floor(Math.random() * hits.length)]][c] = true;
+          }
+        }
+        return Object.assign({}, p, {
+          grid: grid
+        });
+      });
+    });
+  };
   var randPat = function randPat() {
     return mutatePat(function () {
       if (monoMode) {
@@ -2902,9 +3001,6 @@ function Tabula() {
       close();
     };
     var targetId = pm.id;
-    var switchActive = function switchActive() {
-      return setActiveId(targetId);
-    };
     var isOnlyPat = pats.length <= 1;
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2947,33 +3043,27 @@ function Tabula() {
       }
     }, [["RAND", function () {
       return act(function () {
-        switchActive();
-        randPat();
+        return randPatId(targetId);
       });
     }], ["CLR", function () {
       return act(function () {
-        switchActive();
-        clearPat();
+        return clearPatId(targetId);
       });
     }], ["CPY", function () {
       return act(function () {
-        switchActive();
-        copyPat();
+        return copyPatId(targetId);
       });
     }], ["PST", function () {
       return act(function () {
-        switchActive();
-        pastePat();
+        return pastePatId(targetId);
       });
     }, !clipboard], ["DUP", function () {
       return act(function () {
-        switchActive();
-        dupPat();
+        return dupPatId(targetId);
       });
     }, pats.length >= 8], ["DEL", function () {
       return act(function () {
-        switchActive();
-        setTimeout(delPat, 0);
+        return delPatId(targetId);
       });
     }, isOnlyPat, true]].map(function (_ref11) {
       var _ref12 = _slicedToArray(_ref11, 4),
@@ -3440,7 +3530,7 @@ function Tabula() {
   }), /*#__PURE__*/React.createElement("div", {
     style: S.stepVaryDivider
   }), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "RHYTHM VARY",
+    title: "RHYTHM VARY / MUT8",
     accent: "#ff9800"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -3469,7 +3559,7 @@ function Tabula() {
     display: vShiftRange + "st",
     accent: "#ff9800"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "MELODY VARY",
+    title: "MELODY VARY / MUT8",
     accent: "#e040fb"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -3498,7 +3588,7 @@ function Tabula() {
     display: vGhostRate + "%",
     accent: "#e040fb"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "STEP VARY",
+    title: "STEP VARY / MUT8",
     accent: "#00e5ff"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -4070,8 +4160,8 @@ function Tabula() {
   }, gridLen)))), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, page === "step" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
       minHeight: 0,
-      overflowY: "auto",
-      paddingBottom: 20,
+      overflowY: "scroll",
+      paddingBottom: 40,
       paddingLeft: 4,
       paddingRight: 4
     })
@@ -4151,7 +4241,7 @@ function Tabula() {
   }), /*#__PURE__*/React.createElement("div", {
     style: S.stepVaryDivider
   }), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "RHYTHM VARY",
+    title: "RHYTHM VARY / MUT8",
     accent: "#ff9800"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -4180,7 +4270,7 @@ function Tabula() {
     display: vShiftRange + "st",
     accent: "#ff9800"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "MELODY VARY",
+    title: "MELODY VARY / MUT8",
     accent: "#e040fb"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -4209,7 +4299,7 @@ function Tabula() {
     display: vGhostRate + "%",
     accent: "#e040fb"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "STEP VARY",
+    title: "STEP VARY / MUT8",
     accent: "#00e5ff"
   }, /*#__PURE__*/React.createElement("div", {
     style: S.threeGrid
@@ -4256,8 +4346,8 @@ function Tabula() {
   })))), page === "sound" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.soundPage), {}, {
       minHeight: 0,
-      overflowY: "auto",
-      paddingBottom: 20,
+      overflowY: "scroll",
+      paddingBottom: 40,
       paddingLeft: 4,
       paddingRight: 4
     })

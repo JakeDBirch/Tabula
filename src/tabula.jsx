@@ -1034,6 +1034,14 @@ export default function Tabula(){
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
+
+  // ID-targeted versions — used by pill context menu so activeId is never involved
+  const dupPatId=(id)=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const delPatId=(id)=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
+  const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
+  const pastePatId=(id)=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
+  const clearPatId=(id)=>{setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
+  const randPatId=(id)=>{setPats(ps=>ps.map(p=>{if(p.id!==id)return p;const grid=monoMode?mkGrid():Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));if(monoMode){for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(Math.random()<.12)hits.push(r);if(hits.length)grid[hits[Math.floor(Math.random()*hits.length)]][c]=true;}}return Object.assign({},p,{grid});}));};
   const randPat=()=>mutatePat(()=>{
     if(monoMode){
       // Generate poly-density grid then collapse each column to at most one note
@@ -1322,7 +1330,6 @@ export default function Tabula(){
         const close=()=>setPatMenu(null);
         const act=(fn)=>{fn();close();};
         const targetId=pm.id;
-        const switchActive=()=>setActiveId(targetId);
         const isOnlyPat=pats.length<=1;
         return(
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
@@ -1333,12 +1340,12 @@ export default function Tabula(){
               pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(255,255,255,0.06)"}}>
                 {[
-                  ["RAND",  ()=>act(()=>{switchActive();randPat();})],
-                  ["CLR",   ()=>act(()=>{switchActive();clearPat();})],
-                  ["CPY",   ()=>act(()=>{switchActive();copyPat();})],
-                  ["PST",   ()=>act(()=>{switchActive();pastePat();}), !clipboard],
-                  ["DUP",   ()=>act(()=>{switchActive();dupPat();}),   pats.length>=8],
-                  ["DEL",   ()=>act(()=>{switchActive();setTimeout(delPat,0);}), isOnlyPat, true],
+                  ["RAND",  ()=>act(()=>randPatId(targetId))],
+                  ["CLR",   ()=>act(()=>clearPatId(targetId))],
+                  ["CPY",   ()=>act(()=>copyPatId(targetId))],
+                  ["PST",   ()=>act(()=>pastePatId(targetId)), !clipboard],
+                  ["DUP",   ()=>act(()=>dupPatId(targetId)),   pats.length>=8],
+                  ["DEL",   ()=>act(()=>delPatId(targetId)),   isOnlyPat, true],
                 ].map(([label,fn,disabled,danger])=>(
                   <button key={label} disabled={!!disabled}
                     style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",
@@ -1566,21 +1573,21 @@ export default function Tabula(){
                 );
               })}
               <div style={S.stepVaryDivider}/>
-              <SynthSection title="RHYTHM VARY" accent="#ff9800">
+              <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800">
                 <div style={S.threeGrid}>
                   <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#ff9800"/>
                   <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#ff9800"/>
                   <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#ff9800"/>
                 </div>
               </SynthSection>
-              <SynthSection title="MELODY VARY" accent="#e040fb">
+              <SynthSection title="MELODY VARY / MUT8" accent="#e040fb">
                 <div style={S.threeGrid}>
                   <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#e040fb"/>
                   <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#e040fb"/>
                   <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#e040fb"/>
                 </div>
               </SynthSection>
-              <SynthSection title="STEP VARY" accent="#00e5ff">
+              <SynthSection title="STEP VARY / MUT8" accent="#00e5ff">
                 <div style={S.threeGrid}>
                   <KnobSlider label="VEL"   value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#00e5ff"/>
                   <KnobSlider label="CUT"   value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#00e5ff"/>
@@ -1799,7 +1806,7 @@ export default function Tabula(){
             <>
               {/* STEP content fills space above tabs */}
               {page==="step"&&(
-                <div style={{...S.stepPage, minHeight:0, overflowY:"auto", paddingBottom:20, paddingLeft:4, paddingRight:4}}>
+                <div style={{...S.stepPage, minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                   <div style={S.stepPageHdr}>
                     <div style={S.stepPagePat}>{activePat?.name||""}</div>
                     <div style={{flex:1}}/>
@@ -1828,21 +1835,21 @@ export default function Tabula(){
                     );
                   })}
                   <div style={S.stepVaryDivider}/>
-                  <SynthSection title="RHYTHM VARY" accent="#ff9800">
+                  <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800">
                     <div style={S.threeGrid}>
                       <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#ff9800"/>
                       <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#ff9800"/>
                       <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#ff9800"/>
                     </div>
                   </SynthSection>
-                  <SynthSection title="MELODY VARY" accent="#e040fb">
+                  <SynthSection title="MELODY VARY / MUT8" accent="#e040fb">
                     <div style={S.threeGrid}>
                       <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#e040fb"/>
                       <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#e040fb"/>
                       <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#e040fb"/>
                     </div>
                   </SynthSection>
-                  <SynthSection title="STEP VARY" accent="#00e5ff">
+                  <SynthSection title="STEP VARY / MUT8" accent="#00e5ff">
                     <div style={S.threeGrid}>
                       <KnobSlider label="VEL" value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#00e5ff"/>
                       <KnobSlider label="CUT" value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#00e5ff"/>
@@ -1855,7 +1862,7 @@ export default function Tabula(){
               )}
               {/* SOUND content in right column */}
               {page==="sound"&&(
-                <div style={{...S.soundPage, minHeight:0, overflowY:"auto", paddingBottom:20, paddingLeft:4, paddingRight:4}}>
+                <div style={{...S.soundPage, minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                   <SynthSection title="OSCILLATOR" accent={C_OSC}>
                     <div style={S.wfRow}>
                       {WAVEFORMS.map((w,i)=>(
