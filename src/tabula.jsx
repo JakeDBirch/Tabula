@@ -1418,10 +1418,10 @@ export default function Tabula(){
       })()}
 
       {/* ── Two-column layout on desktop, single column on mobile ── */}
-      <div style={IS_MOBILE?{}:{display:"flex",gap:24,alignItems:"flex-start"}}>
+      <div style={IS_MOBILE?{}:{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
 
         {/* ── LEFT COLUMN (desktop) / above-grid controls (mobile) ── */}
-        <div style={IS_MOBILE?{}:{width:260,flexShrink:0,display:"flex",flexDirection:"column",gap:0,height:"calc(100dvh - 48px)",overflowY:"auto",scrollbarWidth:"none"}}>
+        <div style={IS_MOBILE?{}:{width:280,flexShrink:0,display:"flex",flexDirection:"column",gap:0,overflowY:"auto",scrollbarWidth:"none"}}>
           {/* Brand + widgets — desktop only */}
           {!IS_MOBILE&&(
             <>
@@ -1579,22 +1579,65 @@ export default function Tabula(){
           )}
           {/* Transport — desktop only (mobile uses fixed play bar) */}
           {!IS_MOBILE&&(
-            <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"center",marginTop:"auto",paddingTop:20,flexWrap:"wrap"}}>
-              <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-              <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
-              <button style={Object.assign({},S.playBtn,playing?S.playOn:{})} onClick={startStop}>{playing?"■":"▶"}</button>
-              <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT</button>
-              <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
-            </div>
+            <>
+              {/* Chain strip */}
+              {(()=>{
+                const overStrip = chainDrag && isOverStrip(chainDrag.y);
+                const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
+                return (
+                  <div ref={chainStripRef} style={Object.assign({},S.chainStrip, overStrip?S.chainStripHot:{})}>
+                    {chain.length===0&&!chainDrag&&(
+                      <span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>
+                    )}
+                    {chain.map((pid,i)=>{
+                      const pi=Math.max(0,pats.findIndex(p=>p.id===pid));
+                      const p=pats.find(p=>p.id===pid);
+                      const col=patCol(pi);
+                      const here=playing&&!loopMode&&i===cpos;
+                      const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;
+                      const showInsert=overStrip&&insertIdx===i;
+                      return (
+                        <React.Fragment key={i}>
+                          {showInsert&&<div style={S.chainInsertLine}/>}
+                          <div data-chainslot={i}
+                            style={Object.assign({},S.chainChip,{borderColor:col,background:here?col:col+"18",color:here?"#000":col,opacity:isDragging?0.3:1,touchAction:"none"})}
+                            onPointerDown={e=>startChainDrag(e,i)}
+                            onPointerMove={onDragMove}
+                            onPointerUp={onDragUp}
+                            onPointerCancel={onDragUp}>
+                            {p?p.name:"?"}
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                    {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
+                  </div>
+                );
+              })()}
+              {/* Transport: 2×2 grid flanking the play button */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/3",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              </div>
+            </>
           )}
         </div>
 
         {/* ── RIGHT COLUMN (desktop) / main area (mobile) ── */}
-        <div style={IS_MOBILE?{}:{flex:1,minWidth:0}}>
+        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:4}}>
           {/* Grid — always visible on desktop, only on EDIT tab on mobile */}
           {(page==="edit"||!IS_MOBILE)&&(
-            <>
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{})}
+            <div style={IS_MOBILE?{}:{
+              width:"min(100%, calc(100dvh - 120px))",
+              aspectRatio:"1",
+              display:"flex",
+              flexDirection:"column",
+              flexShrink:0,
+            }}>
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},IS_MOBILE?{}:{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {Array.from({length:ROWS},(_,r)=>{
@@ -1673,41 +1716,7 @@ export default function Tabula(){
                 <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(gridLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(255,255,255,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
-              {/* Chain strip */}
-              {(()=>{
-                const overStrip = chainDrag && isOverStrip(chainDrag.y);
-                const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
-                return (
-                  <div ref={chainStripRef} style={Object.assign({},S.chainStrip, overStrip?S.chainStripHot:{})}>
-                    {chain.length===0&&!chainDrag&&(
-                      <span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>
-                    )}
-                    {chain.map((pid,i)=>{
-                      const pi=Math.max(0,pats.findIndex(p=>p.id===pid));
-                      const p=pats.find(p=>p.id===pid);
-                      const col=patCol(pi);
-                      const here=playing&&!loopMode&&i===cpos;
-                      const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;
-                      const showInsert=overStrip&&insertIdx===i;
-                      return (
-                        <React.Fragment key={i}>
-                          {showInsert&&<div style={S.chainInsertLine}/>}
-                          <div data-chainslot={i}
-                            style={Object.assign({},S.chainChip,{borderColor:col,background:here?col:col+"18",color:here?"#000":col,opacity:isDragging?0.3:1,touchAction:"none"})}
-                            onPointerDown={e=>startChainDrag(e,i)}
-                            onPointerMove={onDragMove}
-                            onPointerUp={onDragUp}
-                            onPointerCancel={onDragUp}>
-                            {p?p.name:"?"}
-                          </div>
-                        </React.Fragment>
-                      );
-                    })}
-                    {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
-                  </div>
-                );
-              })()}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -1764,7 +1773,7 @@ const CSS=`
 `;
 
 const S={
-  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:"auto",overscrollBehavior:"contain",maxWidth:IS_MOBILE?430:780,margin:"0 auto",padding:IS_MOBILE?"16px 10px 100px":"24px 28px 120px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
+  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:IS_MOBILE?"auto":"hidden",overscrollBehavior:"contain",maxWidth:IS_MOBILE?430:"none",margin:"0 auto",padding:IS_MOBILE?"16px 10px 100px":"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
   brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
@@ -1803,8 +1812,8 @@ const S={
   laneBar:   {width:"100%",borderRadius:"1px 1px 0 0",minHeight:1,transition:"height .05s"},
   laneCenterLine:{position:"absolute",left:0,right:0,borderTop:"1px solid",pointerEvents:"none"},
   gridShifting:{outline:"1px solid rgba(255,229,0,0.2)",borderRadius:4},
-  gridRow:     {display:"flex",gap:IS_MOBILE?2:3,alignItems:"center",touchAction:"none"},
-  cell:        {flex:1,aspectRatio:"1",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
+  gridRow:     {display:"flex",gap:IS_MOBILE?2:3,alignItems:"stretch",touchAction:"none",flex:"1 1 0"},
+  cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
   lenSlider:   {position:"relative",height:IS_MOBILE?10:12,marginTop:4,borderRadius:3,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},

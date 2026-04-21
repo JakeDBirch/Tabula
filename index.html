@@ -3117,17 +3117,17 @@ function Tabula() {
   }(), /*#__PURE__*/React.createElement("div", {
     style: IS_MOBILE ? {} : {
       display: "flex",
-      gap: 24,
-      alignItems: "flex-start"
+      gap: 20,
+      height: "calc(100dvh - 52px)",
+      alignItems: "stretch"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: IS_MOBILE ? {} : {
-      width: 260,
+      width: 280,
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
       gap: 0,
-      height: "calc(100dvh - 48px)",
       overflowY: "auto",
       scrollbarWidth: "none"
     }
@@ -3593,18 +3593,62 @@ function Tabula() {
     onChange: setDlyLpVal,
     display: dlyLpVal + "%",
     accent: C_DLY
-  })))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+  })))), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, function () {
+    var overStrip = chainDrag && isOverStrip(chainDrag.y);
+    var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
+    return /*#__PURE__*/React.createElement("div", {
+      ref: chainStripRef,
+      style: Object.assign({}, S.chainStrip, overStrip ? S.chainStripHot : {})
+    }, chain.length === 0 && !chainDrag && /*#__PURE__*/React.createElement("span", {
+      style: S.chainStripEmpty
+    }, "drag patterns here to build a sequence"), chain.map(function (pid, i) {
+      var pi = Math.max(0, pats.findIndex(function (p) {
+        return p.id === pid;
+      }));
+      var p = pats.find(function (p) {
+        return p.id === pid;
+      });
+      var col = patCol(pi);
+      var here = playing && !loopMode && i === cpos;
+      var isDragging = chainDrag && chainDrag.type === 'chain' && chainDrag.fromIdx === i;
+      var showInsert = overStrip && insertIdx === i;
+      return /*#__PURE__*/React.createElement(React.Fragment, {
+        key: i
+      }, showInsert && /*#__PURE__*/React.createElement("div", {
+        style: S.chainInsertLine
+      }), /*#__PURE__*/React.createElement("div", {
+        "data-chainslot": i,
+        style: Object.assign({}, S.chainChip, {
+          borderColor: col,
+          background: here ? col : col + "18",
+          color: here ? "#000" : col,
+          opacity: isDragging ? 0.3 : 1,
+          touchAction: "none"
+        }),
+        onPointerDown: function onPointerDown(e) {
+          return startChainDrag(e, i);
+        },
+        onPointerMove: onDragMove,
+        onPointerUp: onDragUp,
+        onPointerCancel: onDragUp
+      }, p ? p.name : "?"));
+    }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
+      style: S.chainInsertLine
+    }));
+  }(), /*#__PURE__*/React.createElement("div", {
     style: {
-      display: "flex",
+      display: "grid",
+      gridTemplateColumns: "1fr auto 1fr",
+      gridTemplateRows: "1fr 1fr",
       gap: 8,
-      alignItems: "center",
-      justifyContent: "center",
       marginTop: "auto",
-      paddingTop: 20,
-      flexWrap: "wrap"
+      paddingTop: 16,
+      alignItems: "center"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, varyMode ? {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, varyMode ? {
       border: "1px solid #ffe500",
       color: "#ffe500",
       background: "rgba(255,229,0,0.08)"
@@ -3615,34 +3659,59 @@ function Tabula() {
       });
     }
   }, "VARY"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, monoMode ? {
+    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}, {
+      gridColumn: 2,
+      gridRow: "1/3",
+      alignSelf: "center"
+    }),
+    onClick: startStop
+  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, monoMode ? {
       border: "1px solid #00e5ff",
       color: "#00e5ff",
       background: "rgba(0,229,255,0.08)"
     } : {}),
     onClick: toggleMono
   }, "MONO"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}),
-    onClick: startStop
-  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
-    style: S.loopBtnBottom,
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }),
     onClick: mutatePat1
   }, "MUT"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, loopMode ? S.loopOn : {}),
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, loopMode ? S.loopOn : {}),
     onClick: function onClick() {
       return setLoopMode(function (l) {
         return !l;
       });
     }
-  }, "LOOP"))), /*#__PURE__*/React.createElement("div", {
+  }, "LOOP")))), /*#__PURE__*/React.createElement("div", {
     style: IS_MOBILE ? {} : {
       flex: 1,
-      minWidth: 0
+      minWidth: 0,
+      display: "flex",
+      flexDirection: "column",
+      gap: 4
     }
-  }, (page === "edit" || !IS_MOBILE) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, (page === "edit" || !IS_MOBILE) && /*#__PURE__*/React.createElement("div", {
+    style: IS_MOBILE ? {} : {
+      width: "min(100%, calc(100dvh - 120px))",
+      aspectRatio: "1",
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     ref: gridRef,
     "data-grid": "1",
-    style: Object.assign({}, S.gridWrap, shifting ? S.gridShifting : {}),
+    style: Object.assign({}, S.gridWrap, shifting ? S.gridShifting : {}, IS_MOBILE ? {} : {
+      flex: 1,
+      display: "flex",
+      flexDirection: "column"
+    }),
     onPointerDown: handleGridDown,
     onPointerMove: handleGridMove,
     onPointerUp: handleGridUp,
@@ -3854,49 +3923,7 @@ function Tabula() {
       letterSpacing: 1,
       pointerEvents: "none"
     }
-  }, gridLen)), function () {
-    var overStrip = chainDrag && isOverStrip(chainDrag.y);
-    var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
-    return /*#__PURE__*/React.createElement("div", {
-      ref: chainStripRef,
-      style: Object.assign({}, S.chainStrip, overStrip ? S.chainStripHot : {})
-    }, chain.length === 0 && !chainDrag && /*#__PURE__*/React.createElement("span", {
-      style: S.chainStripEmpty
-    }, "drag patterns here to build a sequence"), chain.map(function (pid, i) {
-      var pi = Math.max(0, pats.findIndex(function (p) {
-        return p.id === pid;
-      }));
-      var p = pats.find(function (p) {
-        return p.id === pid;
-      });
-      var col = patCol(pi);
-      var here = playing && !loopMode && i === cpos;
-      var isDragging = chainDrag && chainDrag.type === 'chain' && chainDrag.fromIdx === i;
-      var showInsert = overStrip && insertIdx === i;
-      return /*#__PURE__*/React.createElement(React.Fragment, {
-        key: i
-      }, showInsert && /*#__PURE__*/React.createElement("div", {
-        style: S.chainInsertLine
-      }), /*#__PURE__*/React.createElement("div", {
-        "data-chainslot": i,
-        style: Object.assign({}, S.chainChip, {
-          borderColor: col,
-          background: here ? col : col + "18",
-          color: here ? "#000" : col,
-          opacity: isDragging ? 0.3 : 1,
-          touchAction: "none"
-        }),
-        onPointerDown: function onPointerDown(e) {
-          return startChainDrag(e, i);
-        },
-        onPointerMove: onDragMove,
-        onPointerUp: onDragUp,
-        onPointerCancel: onDragUp
-      }, p ? p.name : "?"));
-    }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
-      style: S.chainInsertLine
-    }));
-  }()))), showMenu && /*#__PURE__*/React.createElement("div", {
+  }, gridLen))))), showMenu && /*#__PURE__*/React.createElement("div", {
     style: S.menuOverlay,
     onPointerDown: function onPointerDown() {
       return setShowMenu(false);
@@ -3976,11 +4003,11 @@ var S = {
     background: "#000",
     color: "#fff",
     height: "100dvh",
-    overflowY: "auto",
+    overflowY: IS_MOBILE ? "auto" : "hidden",
     overscrollBehavior: "contain",
-    maxWidth: IS_MOBILE ? 430 : 780,
+    maxWidth: IS_MOBILE ? 430 : "none",
     margin: "0 auto",
-    padding: IS_MOBILE ? "16px 10px 100px" : "24px 28px 120px",
+    padding: IS_MOBILE ? "16px 10px 100px" : "16px 20px 20px",
     userSelect: "none",
     WebkitUserSelect: "none",
     WebkitTouchCallout: "none"
@@ -4282,12 +4309,13 @@ var S = {
   gridRow: {
     display: "flex",
     gap: IS_MOBILE ? 2 : 3,
-    alignItems: "center",
-    touchAction: "none"
+    alignItems: "stretch",
+    touchAction: "none",
+    flex: "1 1 0"
   },
   cell: {
     flex: 1,
-    aspectRatio: "1",
+    aspectRatio: IS_MOBILE ? "1" : "unset",
     borderRadius: IS_MOBILE ? 2 : 3,
     touchAction: "none",
     transition: "box-shadow .06s, background .06s",
