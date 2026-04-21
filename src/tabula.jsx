@@ -645,6 +645,7 @@ export default function Tabula(){
   });
 
   const handleGridDown=useCallback(e=>{
+    if(e.button===2)return; // right-click handled by onContextMenu only
     e.preventDefault();
     pointerCountR.current++;
     const g=gesture.current;
@@ -744,7 +745,31 @@ export default function Tabula(){
   },[]);
 
   // Shared popup-open logic — called by both long press and right-click
-  const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
+  const commitAndClose=useCallback(()=>{
+    const pr=popupR.current;
+    if(!pr)return;
+    const {col}=pr;
+    const vals=paramPopupValuesR.current;
+    if(vals&&col!=null)setPats(ps=>ps.map(p=>{
+      if(p.id!==activeIdR.current)return p;
+      const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,vals):sp);
+      return Object.assign({},p,{params});
+    }));
+    setParamPopup(null);popupR.current=null;
+    gesture.current.state="idle";
+  },[]);
+
+  const stepPopupVal=useCallback((armKey,armMin,armMax,dir)=>{
+    const step=(armKey==="oct"||armKey==="rhy")?1:Math.max(1,Math.round((armMax-armMin)/20));
+    setParamPopup(p=>{
+      if(!p)return p;
+      const cur=p.values?.[armKey]??armMin;
+      const nv=Math.max(armMin,Math.min(armMax,cur+dir*step));
+      return {...p,activeArm:armKey,values:{...p.values,[armKey]:nv}};
+    });
+  },[]);
+
+  const openParamPopup=useCallback((c,ox,oy,baseVals,clickOnly=false)=>{
     const g=gesture.current;
     g.state="popup";
     const vw2=window.innerWidth,REACH2=150;
@@ -753,7 +778,7 @@ export default function Tabula(){
     else if(ox<REACH2)fc=0;
     else if(ox>vw2-REACH2)fc=180;
     const adaptedArms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fc+(i-2)*30}));
-    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms};
+    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms,clickOnly};
     setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
   },[]);
 
@@ -766,12 +791,12 @@ export default function Tabula(){
     const c=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
     if(r<0||r>=ROWS||c<0||c>=COLS)return;
     const pat=patsR.current.find(p=>p.id===activeIdR.current);
-    if(!pat||!pat.grid[r]||!pat.grid[r][c])return; // only on lit notes
+    if(!pat||!pat.grid[r]||!pat.grid[r][c])return;
     const ox=rect.left+rect.width/COLS*(c+0.5);
     const oy=rect.top+rect.height/ROWS*(r+0.5);
     const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
     clearTimeout(longPressR.current);
-    openParamPopup(c,ox,oy,baseVals);
+    openParamPopup(c,ox,oy,baseVals,true);
   },[openParamPopup]);
 
   const handleGridMove=useCallback(e=>{
@@ -781,6 +806,7 @@ export default function Tabula(){
 
     if(g.state==="popup"&&popupR.current){
       const pr=popupR.current;
+      if(pr.clickOnly)return; // right-click popup: values change on click only, not drag
       const fdx=e.clientX-pr.originX, fdy=e.clientY-pr.originY;
       const dist=Math.sqrt(fdx*fdx+fdy*fdy);
       if(dist<14){setParamPopup(p=>p?{...p,activeArm:null}:p);return;}
@@ -1184,23 +1210,32 @@ export default function Tabula(){
         const ox=paramPopup.x, oy=paramPopup.y;
         const vw=window.innerWidth, vh=window.innerHeight;
         const REACH=ARM_LEN+55;
-        // Determine fan center angle to keep all labels visible
-        let fanCenter=90; // default: fan above
-        if(oy<REACH+20) fanCenter=-90;              // near top → fan below
-        else if(ox<REACH) fanCenter=0;               // near left edge → fan right
-        else if(ox>vw-REACH) fanCenter=180;          // near right edge → fan left
-        // Build adapted arm angles: 5 arms evenly spaced 30° apart around fanCenter
+        let fanCenter=90;
+        if(oy<REACH+20) fanCenter=-90;
+        else if(ox<REACH) fanCenter=0;
+        else if(ox>vw-REACH) fanCenter=180;
         const arms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fanCenter+(i-2)*30}));
-        // Scrim direction
         const scrimAngle=fanCenter*Math.PI/180;
+        // Background panel bounds — covers arm area
+        const panW=300, panH=280;
+        const panX=Math.max(8,Math.min(vw-panW-8, ox-panW/2));
+        const panY=Math.max(8,Math.min(vh-panH-8, oy-panH/2));
         return(
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}}>
-            <div style={{position:"absolute",
-              left:ox+Math.cos(scrimAngle)*60-130,
-              top:oy-Math.sin(scrimAngle)*60-60,
-              width:260,height:180,
-              background:"radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.75) 0%, transparent 70%)",
-              pointerEvents:"none"}}/>
+            {/* Translucent background panel */}
+            <div style={{position:"absolute",left:panX,top:panY,width:panW,height:panH,
+              background:"rgba(10,10,10,0.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",
+              borderRadius:16,border:"1px solid rgba(255,255,255,0.1)",
+              boxShadow:"0 8px 32px rgba(0,0,0,0.6)",pointerEvents:"none"}}/>
+            {/* X close button */}
+            <div onClick={commitAndClose} style={{position:"absolute",
+              left:panX+panW-40,top:panY+6,width:34,height:34,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              color:"rgba(255,255,255,0.5)",fontSize:22,fontWeight:300,cursor:"pointer",
+              pointerEvents:"all",borderRadius:17,
+              transition:"color .1s, background .1s"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#fff";e.currentTarget.style.background="rgba(255,255,255,0.1)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.5)";e.currentTarget.style.background="transparent";}}>×</div>
             <svg style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none"}}>
               {arms.map(arm=>{
                 const rad=arm.angle*Math.PI/180;
@@ -1228,10 +1263,20 @@ export default function Tabula(){
               const displayVal=arm.key==="oct"?(val-2===0?"0":(val-2>0?"+":"")+(val-2))
                 :arm.key==="rhy"?(val===0?"TIE":val===1?"—":"×"+val)
                 :val;
+              const isClickOnly=popupR.current?.clickOnly;
               return(
-                <div key={arm.key} style={{position:"absolute",left:lx-28,top:ly-18,width:56,textAlign:"center",pointerEvents:"none"}}>
+                <div key={arm.key} style={{position:"absolute",left:lx-32,top:ly-22,width:64,textAlign:"center",
+                  pointerEvents:isClickOnly?"all":"none",cursor:isClickOnly?"default":"none"}}>
+                  {isClickOnly&&<div onClick={()=>stepPopupVal(arm.key,arm.min,arm.max,1)}
+                    style={{fontSize:11,color:arm.color+"99",lineHeight:1,paddingBottom:2,cursor:"pointer",userSelect:"none"}}
+                    onMouseEnter={e=>e.currentTarget.style.color=arm.color}
+                    onMouseLeave={e=>e.currentTarget.style.color=arm.color+"99"}>&#9650;</div>}
                   <div style={{fontSize:9,fontWeight:700,letterSpacing:2,color:active?arm.color:arm.color+"99",transition:"color .1s"}}>{arm.label}</div>
                   <div style={{fontSize:15,fontWeight:700,color:active?"#fff":arm.color+"cc",lineHeight:1.1,transition:"color .1s"}}>{displayVal}</div>
+                  {isClickOnly&&<div onClick={()=>stepPopupVal(arm.key,arm.min,arm.max,-1)}
+                    style={{fontSize:11,color:arm.color+"99",lineHeight:1,paddingTop:2,cursor:"pointer",userSelect:"none"}}
+                    onMouseEnter={e=>e.currentTarget.style.color=arm.color}
+                    onMouseLeave={e=>e.currentTarget.style.color=arm.color+"99"}>&#9660;</div>}
                 </div>
               );
             })}

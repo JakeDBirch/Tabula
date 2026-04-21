@@ -8,9 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Tabula">
   <title>Tabula</title>
-  <style>
-    html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden;}
-  </style>
+  <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden;}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -1665,6 +1663,7 @@ function Tabula() {
     });
   };
   var handleGridDown = useCallback(function (e) {
+    if (e.button === 2) return; // right-click handled by onContextMenu only
     e.preventDefault();
     pointerCountR.current++;
     var g = gesture.current;
@@ -1826,7 +1825,41 @@ function Tabula() {
   }, []);
 
   // Shared popup-open logic — called by both long press and right-click
+  var commitAndClose = useCallback(function () {
+    var pr = popupR.current;
+    if (!pr) return;
+    var col = pr.col;
+    var vals = paramPopupValuesR.current;
+    if (vals && col != null) setPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeIdR.current) return p;
+        var params = (p.params || defaultStepParams()).map(function (sp, i) {
+          return i === col ? Object.assign({}, sp, vals) : sp;
+        });
+        return Object.assign({}, p, {
+          params: params
+        });
+      });
+    });
+    setParamPopup(null);
+    popupR.current = null;
+    gesture.current.state = "idle";
+  }, []);
+  var stepPopupVal = useCallback(function (armKey, armMin, armMax, dir) {
+    var step = armKey === "oct" || armKey === "rhy" ? 1 : Math.max(1, Math.round((armMax - armMin) / 20));
+    setParamPopup(function (p) {
+      var _p$values$armKey, _p$values;
+      if (!p) return p;
+      var cur = (_p$values$armKey = (_p$values = p.values) === null || _p$values === void 0 ? void 0 : _p$values[armKey]) !== null && _p$values$armKey !== void 0 ? _p$values$armKey : armMin;
+      var nv = Math.max(armMin, Math.min(armMax, cur + dir * step));
+      return _objectSpread(_objectSpread({}, p), {}, {
+        activeArm: armKey,
+        values: _objectSpread(_objectSpread({}, p.values), {}, _defineProperty({}, armKey, nv))
+      });
+    });
+  }, []);
   var openParamPopup = useCallback(function (c, ox, oy, baseVals) {
+    var clickOnly = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
     var g = gesture.current;
     g.state = "popup";
     var vw2 = window.innerWidth,
@@ -1843,7 +1876,8 @@ function Tabula() {
       originX: ox,
       originY: oy,
       baseValues: baseVals,
-      adaptedArms: adaptedArms
+      adaptedArms: adaptedArms,
+      clickOnly: clickOnly
     };
     setParamPopup({
       col: c,
@@ -1865,12 +1899,12 @@ function Tabula() {
     var pat = patsR.current.find(function (p) {
       return p.id === activeIdR.current;
     });
-    if (!pat || !pat.grid[r] || !pat.grid[r][c]) return; // only on lit notes
+    if (!pat || !pat.grid[r] || !pat.grid[r][c]) return;
     var ox = rect.left + rect.width / COLS * (c + 0.5);
     var oy = rect.top + rect.height / ROWS * (r + 0.5);
     var baseVals = Object.assign({}, pat.params && pat.params[c] || defaultStepParams()[0]);
     clearTimeout(longPressR.current);
-    openParamPopup(c, ox, oy, baseVals);
+    openParamPopup(c, ox, oy, baseVals, true);
   }, [openParamPopup]);
   var handleGridMove = useCallback(function (e) {
     var g = gesture.current;
@@ -1880,6 +1914,7 @@ function Tabula() {
     if (g.state === "popup" && popupR.current) {
       var _popupR$current2;
       var pr = popupR.current;
+      if (pr.clickOnly) return; // right-click popup: values change on click only, not drag
       var fdx = e.clientX - pr.originX,
         fdy = e.clientY - pr.originY;
       var dist = Math.sqrt(fdx * fdx + fdy * fdy);
@@ -2633,19 +2668,19 @@ function Tabula() {
     var vw = window.innerWidth,
       vh = window.innerHeight;
     var REACH = ARM_LEN + 55;
-    // Determine fan center angle to keep all labels visible
-    var fanCenter = 90; // default: fan above
-    if (oy < REACH + 20) fanCenter = -90; // near top → fan below
-    else if (ox < REACH) fanCenter = 0; // near left edge → fan right
-    else if (ox > vw - REACH) fanCenter = 180; // near right edge → fan left
-    // Build adapted arm angles: 5 arms evenly spaced 30° apart around fanCenter
+    var fanCenter = 90;
+    if (oy < REACH + 20) fanCenter = -90;else if (ox < REACH) fanCenter = 0;else if (ox > vw - REACH) fanCenter = 180;
     var arms = PARAM_ARMS.map(function (arm, i) {
       return _objectSpread(_objectSpread({}, arm), {}, {
         angle: fanCenter + (i - 2) * 30
       });
     });
-    // Scrim direction
     var scrimAngle = fanCenter * Math.PI / 180;
+    // Background panel bounds — covers arm area
+    var panW = 300,
+      panH = 280;
+    var panX = Math.max(8, Math.min(vw - panW - 8, ox - panW / 2));
+    var panY = Math.max(8, Math.min(vh - panH - 8, oy - panH / 2));
     return /*#__PURE__*/React.createElement("div", {
       style: {
         position: "fixed",
@@ -2659,14 +2694,46 @@ function Tabula() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        left: ox + Math.cos(scrimAngle) * 60 - 130,
-        top: oy - Math.sin(scrimAngle) * 60 - 60,
-        width: 260,
-        height: 180,
-        background: "radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.75) 0%, transparent 70%)",
+        left: panX,
+        top: panY,
+        width: panW,
+        height: panH,
+        background: "rgba(10,10,10,0.82)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.1)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
         pointerEvents: "none"
       }
-    }), /*#__PURE__*/React.createElement("svg", {
+    }), /*#__PURE__*/React.createElement("div", {
+      onClick: commitAndClose,
+      style: {
+        position: "absolute",
+        left: panX + panW - 40,
+        top: panY + 6,
+        width: 34,
+        height: 34,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "rgba(255,255,255,0.5)",
+        fontSize: 22,
+        fontWeight: 300,
+        cursor: "pointer",
+        pointerEvents: "all",
+        borderRadius: 17,
+        transition: "color .1s, background .1s"
+      },
+      onMouseEnter: function onMouseEnter(e) {
+        e.currentTarget.style.color = "#fff";
+        e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+      },
+      onMouseLeave: function onMouseLeave(e) {
+        e.currentTarget.style.color = "rgba(255,255,255,0.5)";
+        e.currentTarget.style.background = "transparent";
+      }
+    }, "\xD7"), /*#__PURE__*/React.createElement("svg", {
       style: {
         position: "absolute",
         top: 0,
@@ -2719,24 +2786,44 @@ function Tabula() {
       fill: "#fff",
       opacity: 0.9
     })), arms.map(function (arm) {
-      var _paramPopup$values$ar2, _paramPopup$values2;
+      var _paramPopup$values$ar2, _paramPopup$values2, _popupR$current3;
       var rad = arm.angle * Math.PI / 180;
       var lx = ox + Math.cos(rad) * (ARM_LEN + 26);
       var ly = oy - Math.sin(rad) * (ARM_LEN + 26);
       var active = paramPopup.activeArm === arm.key;
       var val = (_paramPopup$values$ar2 = (_paramPopup$values2 = paramPopup.values) === null || _paramPopup$values2 === void 0 ? void 0 : _paramPopup$values2[arm.key]) !== null && _paramPopup$values$ar2 !== void 0 ? _paramPopup$values$ar2 : arm.min;
       var displayVal = arm.key === "oct" ? val - 2 === 0 ? "0" : (val - 2 > 0 ? "+" : "") + (val - 2) : arm.key === "rhy" ? val === 0 ? "TIE" : val === 1 ? "—" : "×" + val : val;
+      var isClickOnly = (_popupR$current3 = popupR.current) === null || _popupR$current3 === void 0 ? void 0 : _popupR$current3.clickOnly;
       return /*#__PURE__*/React.createElement("div", {
         key: arm.key,
         style: {
           position: "absolute",
-          left: lx - 28,
-          top: ly - 18,
-          width: 56,
+          left: lx - 32,
+          top: ly - 22,
+          width: 64,
           textAlign: "center",
-          pointerEvents: "none"
+          pointerEvents: isClickOnly ? "all" : "none",
+          cursor: isClickOnly ? "default" : "none"
         }
-      }, /*#__PURE__*/React.createElement("div", {
+      }, isClickOnly && /*#__PURE__*/React.createElement("div", {
+        onClick: function onClick() {
+          return stepPopupVal(arm.key, arm.min, arm.max, 1);
+        },
+        style: {
+          fontSize: 11,
+          color: arm.color + "99",
+          lineHeight: 1,
+          paddingBottom: 2,
+          cursor: "pointer",
+          userSelect: "none"
+        },
+        onMouseEnter: function onMouseEnter(e) {
+          return e.currentTarget.style.color = arm.color;
+        },
+        onMouseLeave: function onMouseLeave(e) {
+          return e.currentTarget.style.color = arm.color + "99";
+        }
+      }, "\u25B2"), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 9,
           fontWeight: 700,
@@ -2752,7 +2839,25 @@ function Tabula() {
           lineHeight: 1.1,
           transition: "color .1s"
         }
-      }, displayVal));
+      }, displayVal), isClickOnly && /*#__PURE__*/React.createElement("div", {
+        onClick: function onClick() {
+          return stepPopupVal(arm.key, arm.min, arm.max, -1);
+        },
+        style: {
+          fontSize: 11,
+          color: arm.color + "99",
+          lineHeight: 1,
+          paddingTop: 2,
+          cursor: "pointer",
+          userSelect: "none"
+        },
+        onMouseEnter: function onMouseEnter(e) {
+          return e.currentTarget.style.color = arm.color;
+        },
+        onMouseLeave: function onMouseLeave(e) {
+          return e.currentTarget.style.color = arm.color + "99";
+        }
+      }, "\u25BC"));
     }));
   }(), chainDrag && /*#__PURE__*/React.createElement("div", {
     style: Object.assign({}, S.chainGhost, {
