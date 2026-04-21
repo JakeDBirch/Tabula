@@ -27,6 +27,8 @@ const DLY_NOTES = [
   {label:"1/2",  mult:2},  {label:"½·",  mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
+// Device detection — maxTouchPoints is the most reliable signal
+const IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600;
 const PAT_COLORS=["#00e5ff","#ff4d6d","#ffe500","#69f0ae","#e040fb","#ff6d00","#40c4ff","#ff80ab"];
 const SLOTS=["S1","S2","S3","S4"];
 const SPEED_OPTS=[
@@ -384,6 +386,7 @@ export default function Tabula(){
   const gridLenR   = useRef(16);
   const speedMultR = useRef(1);
   const [showMenu,  setShowMenu]  = useState(false);
+  const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   const longPressR   = useRef(null); // setTimeout id
@@ -759,17 +762,7 @@ export default function Tabula(){
     gesture.current.state="idle";
   },[]);
 
-  const stepPopupVal=useCallback((armKey,armMin,armMax,dir)=>{
-    const step=(armKey==="oct"||armKey==="rhy")?1:Math.max(1,Math.round((armMax-armMin)/20));
-    setParamPopup(p=>{
-      if(!p)return p;
-      const cur=p.values?.[armKey]??armMin;
-      const nv=Math.max(armMin,Math.min(armMax,cur+dir*step));
-      return {...p,activeArm:armKey,values:{...p.values,[armKey]:nv}};
-    });
-  },[]);
-
-  const openParamPopup=useCallback((c,ox,oy,baseVals,clickOnly=false)=>{
+  const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
     const g=gesture.current;
     g.state="popup";
     const vw2=window.innerWidth,REACH2=150;
@@ -778,7 +771,7 @@ export default function Tabula(){
     else if(ox<REACH2)fc=0;
     else if(ox>vw2-REACH2)fc=180;
     const adaptedArms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fc+(i-2)*30}));
-    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms,clickOnly};
+    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms};
     setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
   },[]);
 
@@ -796,7 +789,7 @@ export default function Tabula(){
     const oy=rect.top+rect.height/ROWS*(r+0.5);
     const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
     clearTimeout(longPressR.current);
-    openParamPopup(c,ox,oy,baseVals,true);
+    openParamPopup(c,ox,oy,baseVals);
   },[openParamPopup]);
 
   const handleGridMove=useCallback(e=>{
@@ -806,7 +799,8 @@ export default function Tabula(){
 
     if(g.state==="popup"&&popupR.current){
       const pr=popupR.current;
-      if(pr.clickOnly)return; // right-click popup: values change on click only, not drag
+      // For mouse (right-click popup): only update on drag with button held; touch always has buttons>0
+      if(e.pointerType==='mouse'&&e.buttons===0)return;
       const fdx=e.clientX-pr.originX, fdy=e.clientY-pr.originY;
       const dist=Math.sqrt(fdx*fdx+fdy*fdy);
       if(dist<14){setParamPopup(p=>p?{...p,activeArm:null}:p);return;}
@@ -1150,11 +1144,25 @@ export default function Tabula(){
     return cy >= r.top - 20 && cy <= r.bottom + 20;
   },[]);
 
+  const pillLongPressR = useRef(null);
+
   const startPillDrag = useCallback((e, patId)=>{
+    if(e.button===2) return; // right-click handled by onContextMenu
     e.preventDefault(); e.stopPropagation();
+    // Long press opens context menu
+    pillLongPressR.current = setTimeout(()=>{
+      pillLongPressR.current = null;
+      chainDragR.current = null; setChainDrag(null);
+      setPatMenu({id:patId, x:e.clientX, y:e.clientY});
+    }, 320);
     const d = {type:'pill', id:patId, fromIdx:-1, x:e.clientX, y:e.clientY};
     chainDragR.current = d; setChainDrag({...d});
     e.currentTarget.setPointerCapture(e.pointerId);
+  },[]);
+
+  const handlePillContextMenu = useCallback((e, patId)=>{
+    e.preventDefault(); e.stopPropagation();
+    setPatMenu({id:patId, x:e.clientX, y:e.clientY});
   },[]);
 
   const startChainDrag = useCallback((e, idx)=>{
@@ -1167,6 +1175,8 @@ export default function Tabula(){
   const onDragMove = useCallback((e)=>{
     if(!chainDragR.current) return;
     e.stopPropagation();
+    // Cancel long press if dragging
+    if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}
     const d = {...chainDragR.current, x:e.clientX, y:e.clientY};
     chainDragR.current = d; setChainDrag({...d});
   },[]);
@@ -1221,7 +1231,7 @@ export default function Tabula(){
         const panX=Math.max(8,Math.min(vw-panW-8, ox-panW/2));
         const panY=Math.max(8,Math.min(vh-panH-8, oy-panH/2));
         return(
-          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}}>
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}} onPointerMove={handleGridMove}>
             {/* Translucent background panel */}
             <div style={{position:"absolute",left:panX,top:panY,width:panW,height:panH,
               background:"rgba(10,10,10,0.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",
@@ -1263,23 +1273,56 @@ export default function Tabula(){
               const displayVal=arm.key==="oct"?(val-2===0?"0":(val-2>0?"+":"")+(val-2))
                 :arm.key==="rhy"?(val===0?"TIE":val===1?"—":"×"+val)
                 :val;
-              const isClickOnly=popupR.current?.clickOnly;
               return(
-                <div key={arm.key} style={{position:"absolute",left:lx-32,top:ly-22,width:64,textAlign:"center",
-                  pointerEvents:isClickOnly?"all":"none",cursor:isClickOnly?"default":"none"}}>
-                  {isClickOnly&&<div onClick={()=>stepPopupVal(arm.key,arm.min,arm.max,1)}
-                    style={{fontSize:11,color:arm.color+"99",lineHeight:1,paddingBottom:2,cursor:"pointer",userSelect:"none"}}
-                    onMouseEnter={e=>e.currentTarget.style.color=arm.color}
-                    onMouseLeave={e=>e.currentTarget.style.color=arm.color+"99"}>&#9650;</div>}
+                <div key={arm.key} style={{position:"absolute",left:lx-28,top:ly-18,width:56,textAlign:"center",pointerEvents:"none"}}>
                   <div style={{fontSize:9,fontWeight:700,letterSpacing:2,color:active?arm.color:arm.color+"99",transition:"color .1s"}}>{arm.label}</div>
                   <div style={{fontSize:15,fontWeight:700,color:active?"#fff":arm.color+"cc",lineHeight:1.1,transition:"color .1s"}}>{displayVal}</div>
-                  {isClickOnly&&<div onClick={()=>stepPopupVal(arm.key,arm.min,arm.max,-1)}
-                    style={{fontSize:11,color:arm.color+"99",lineHeight:1,paddingTop:2,cursor:"pointer",userSelect:"none"}}
-                    onMouseEnter={e=>e.currentTarget.style.color=arm.color}
-                    onMouseLeave={e=>e.currentTarget.style.color=arm.color+"99"}>&#9660;</div>}
                 </div>
               );
             })}
+          </div>
+        );
+      })()}
+
+      {/* Pattern pill context menu */}
+      {patMenu&&(()=>{
+        const pm=patMenu;
+        const vw=window.innerWidth,vh=window.innerHeight;
+        const W=200,H=160;
+        const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));
+        const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
+        const close=()=>setPatMenu(null);
+        const act=(fn)=>{fn();close();};
+        const targetId=pm.id;
+        const switchActive=()=>setActiveId(targetId);
+        const isOnlyPat=pats.length<=1;
+        return(
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
+            <div style={{position:"absolute",left:px,top:py,width:W,
+              background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+              borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
+              boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",
+              pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(255,255,255,0.06)"}}>
+                {[
+                  ["RAND",  ()=>act(()=>{switchActive();randPat();})],
+                  ["CLR",   ()=>act(()=>{switchActive();clearPat();})],
+                  ["CPY",   ()=>act(()=>{switchActive();copyPat();})],
+                  ["PST",   ()=>act(()=>{switchActive();pastePat();}), !clipboard],
+                  ["DUP",   ()=>act(()=>{switchActive();dupPat();}),   pats.length>=8],
+                  ["DEL",   ()=>act(()=>{switchActive();setTimeout(delPat,0);}), isOnlyPat, true],
+                ].map(([label,fn,disabled,danger])=>(
+                  <button key={label} disabled={!!disabled}
+                    style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",
+                      color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(255,80,80,0.9)":"rgba(255,255,255,0.8)",
+                      fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer",
+                      transition:"background .1s"}}
+                    onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}}
+                    onMouseLeave={e=>e.currentTarget.style.background="rgba(10,10,10,0.9)"}
+                    onClick={disabled?undefined:fn}>{label}</button>
+                ))}
+              </div>
+            </div>
           </div>
         );
       })()}
@@ -1370,8 +1413,9 @@ export default function Tabula(){
                   onClick={()=>setActiveId(p.id)}
                   onPointerDown={e=>startPillDrag(e,p.id)}
                   onPointerMove={onDragMove}
-                  onPointerUp={onDragUp}
-                  onPointerCancel={onDragUp}>
+                  onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                  onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                  onContextMenu={e=>handlePillContextMenu(e,p.id)}>
                   {isP&&<span className="pp">●</span>}{p.name}
                 </div>
               );
@@ -1503,15 +1547,6 @@ export default function Tabula(){
           {showMenu&&(
             <div style={S.menuOverlay} onPointerDown={()=>setShowMenu(false)}>
               <div style={S.menuPanel} onPointerDown={e=>e.stopPropagation()}>
-                <div style={S.menuGrid}>
-                  <button style={S.mBtn} onClick={()=>{randPat();setShowMenu(false);}}>RAND</button>
-                  <button style={S.mBtn} onClick={()=>{clearPat();setShowMenu(false);}}>CLR</button>
-                  <button style={S.mBtn} onClick={()=>{copyPat();setShowMenu(false);}}>CPY</button>
-                  <button style={Object.assign({},S.mBtn,clipboard?S.mBtnLit:{})} onClick={()=>{pastePat();setShowMenu(false);}} disabled={!clipboard}>PST</button>
-                  <button style={S.mBtn} onClick={()=>{dupPat();setShowMenu(false);}} disabled={pats.length>=8}>DUP</button>
-                  <button style={Object.assign({},S.mBtn,S.mBtnDanger)} onClick={()=>{delPat();setShowMenu(false);}} disabled={pats.length<=1}>DEL</button>
-                </div>
-                <div style={S.menuDivider}/>
                 <div style={S.menuSaveLabel}>SAVE / LOAD</div>
                 {flash?<div style={S.menuFlash}>{flash}</div>:null}
                 <div style={S.menuSlots}>
@@ -1674,37 +1709,37 @@ const CSS=`
 `;
 
 const S={
-  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:"auto",overscrollBehavior:"contain",maxWidth:430,margin:"0 auto",padding:"16px 10px 100px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
-  hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:4},
-  brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
-  hdrR:      {display:"flex",alignItems:"center",gap:6},
+  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:"auto",overscrollBehavior:"contain",maxWidth:IS_MOBILE?430:780,margin:"0 auto",padding:IS_MOBILE?"16px 10px 100px":"24px 28px 120px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
+  hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
+  brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
+  hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
   sel:       {background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:10,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
   hdrWidget: {display:"flex",alignItems:"center",gap:2,flexShrink:0},
   widgetBox: {textAlign:"center",minWidth:26},
-  widgetN:   {fontSize:20,fontWeight:700,display:"block",lineHeight:1.1},
-  widgetU:   {fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:1,display:"block"},
-  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:"8px 14px",borderRadius:8,border:"1px solid rgba(255,255,255,0.18)",background:"rgba(255,255,255,0.05)",minWidth:52,touchAction:"none",userSelect:"none",flexShrink:0},
+  widgetN:   {fontSize:IS_MOBILE?20:22,fontWeight:700,display:"block",lineHeight:1.1},
+  widgetU:   {fontSize:IS_MOBILE?8:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,display:"block"},
+  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"10px 18px",borderRadius:8,border:"1px solid rgba(255,255,255,0.18)",background:"rgba(255,255,255,0.05)",minWidth:IS_MOBILE?52:64,touchAction:"none",userSelect:"none",flexShrink:0},
   bpmOverlay:    {position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.88)",zIndex:999,pointerEvents:"none"},
   bpmOverlayNum: {fontFamily:"'Orbitron',sans-serif",fontSize:88,fontWeight:900,color:"#fff",lineHeight:1,letterSpacing:-2},
   bpmOverlayLbl: {fontSize:11,letterSpacing:8,color:"rgba(255,255,255,0.4)",marginTop:6},
   bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:3},
   loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
   loopOn:    {border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"},
-  playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,padding:"12px 20px 28px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:16,zIndex:100},
-  playBtn:   {width:64,height:64,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.05)",color:"#fff",fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
+  playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
+  playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(255,255,255,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
-  loopBtnBottom:{padding:"0 12px",height:40,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s"},
+  loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?9:10,letterSpacing:2,cursor:"pointer",transition:"all .12s"},
 
-  tabs:      {display:"flex",gap:3,marginBottom:14},
-  tab:       {flex:1,padding:"11px 0",border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:7,letterSpacing:2,cursor:"pointer",borderRadius:6,transition:"all .12s"},
+  tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
+  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?7:9,letterSpacing:2,cursor:"pointer",borderRadius:6,transition:"all .12s"},
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
   stepVaryDivider:{height:1,background:"rgba(255,255,255,0.06)",margin:"16px 0 8px"},
-  speedRow:  {display:"flex",gap:4,marginBottom:10},
-  speedBtn:  {flex:1,padding:"7px 0",border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:"rgba(255,255,255,0.35)",fontSize:11,cursor:"pointer",borderRadius:6,transition:"all .12s"},
+  speedRow:  {display:"flex",gap:4,marginBottom:IS_MOBILE?10:14},
+  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:"rgba(255,255,255,0.35)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:6,transition:"all .12s"},
   speedBtnOn:{border:"1px solid rgba(255,255,255,0.5)",color:"#fff",background:"rgba(255,255,255,0.08)"},
 
-  patRow:    {display:"flex",gap:6,overflowX:"auto",padding:"0 0 10px",scrollbarWidth:"none"},
-  pill:      {padding:"5px 13px",borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:2,cursor:"pointer",flexShrink:0,transition:"all .12s",display:"flex",alignItems:"center",gap:2},
+  patRow:    {display:"flex",gap:IS_MOBILE?6:8,overflowX:"auto",padding:"0 0 10px",scrollbarWidth:"none"},
+  pill:      {padding:IS_MOBILE?"5px 13px":"7px 16px",borderRadius:20,fontSize:IS_MOBILE?11:12,fontWeight:700,letterSpacing:2,cursor:"pointer",flexShrink:0,transition:"all .12s",display:"flex",alignItems:"center",gap:2},
   newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
   laneRow:   {display:"flex",alignItems:"stretch",gap:4,height:22},
   laneLabel: {width:20,flexShrink:0,fontSize:6,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",justifyContent:"flex-end"},
@@ -1713,13 +1748,11 @@ const S={
   laneBar:   {width:"100%",borderRadius:"1px 1px 0 0",minHeight:1,transition:"height .05s"},
   laneCenterLine:{position:"absolute",left:0,right:0,borderTop:"1px solid",pointerEvents:"none"},
   gridShifting:{outline:"1px solid rgba(255,229,0,0.2)",borderRadius:4},
-  gridRow:     {display:"flex",gap:2,alignItems:"center",touchAction:"none"},
-  gridShifting:{outline:"1px solid rgba(255,229,0,0.2)",borderRadius:4},
-  gridRow:     {display:"flex",gap:2,alignItems:"center",touchAction:"none"},
-  cell:        {flex:1,aspectRatio:"1",borderRadius:2,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
-  stepBar:     {display:"flex",gap:2,marginTop:2,alignItems:"center"},
-  stepColWrap: {flex:1,height:12,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:10,marginTop:4,borderRadius:3,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
+  gridRow:     {display:"flex",gap:IS_MOBILE?2:3,alignItems:"center",touchAction:"none"},
+  cell:        {flex:1,aspectRatio:"1",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
+  stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
+  stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
+  lenSlider:   {position:"relative",height:IS_MOBILE?10:12,marginTop:4,borderRadius:3,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
   stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
