@@ -1593,11 +1593,11 @@ export default function Tabula(){
                   <KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"}                accent={C_ENV}/>
                 </div>
               </SynthSection>
-              <SynthSection title="FILTER" accent={C_VCF}>
+              <SynthSection title="FILTER" accent={C_FILT}>
                 <div style={S.threeGrid}>
-                  <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfCutoff+"%"}    accent={C_VCF}/>
-                  <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}       accent={C_VCF}/>
-                  <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_VCF}/>
+                  <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfCutoff+"%"}    accent={C_FILT}/>
+                  <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}       accent={C_FILT}/>
+                  <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/>
                 </div>
               </SynthSection>
               <SynthSection title="DELAY" accent={C_DLY}>
