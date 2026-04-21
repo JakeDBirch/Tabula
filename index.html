@@ -2999,7 +2999,7 @@ function Tabula() {
     style: S.bpmOverlayLbl
   }, "SEMITONES"), /*#__PURE__*/React.createElement("div", {
     style: S.bpmOverlayHint
-  }, "\u2191 drag \u2193")), /*#__PURE__*/React.createElement("div", {
+  }, "\u2191 drag \u2193")), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.hdr
   }, /*#__PURE__*/React.createElement("div", {
     style: S.brand
@@ -3126,9 +3126,78 @@ function Tabula() {
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
-      gap: 0
+      gap: 0,
+      height: "calc(100dvh - 48px)",
+      overflowY: "auto",
+      scrollbarWidth: "none"
     }
-  }, !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+  }, !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: _objectSpread(_objectSpread({}, S.brand), {}, {
+      marginBottom: 16
+    })
+  }, "TABULA"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    style: _objectSpread(_objectSpread({}, S.sel), {}, {
+      flex: "1 1 100%"
+    }),
+    value: scale,
+    onChange: function onChange(e) {
+      return setScale(e.target.value);
+    }
+  }, Object.entries(SCALES).map(function (_ref15) {
+    var _ref16 = _slicedToArray(_ref15, 2),
+      k = _ref16[0],
+      v = _ref16[1];
+    return /*#__PURE__*/React.createElement("option", {
+      key: k,
+      value: k
+    }, v.label);
+  })), /*#__PURE__*/React.createElement("div", {
+    ref: bpmDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleBpmDown,
+    onPointerMove: handleBpmMove,
+    onPointerUp: handleBpmUp,
+    onPointerCancel: handleBpmUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, bpm), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "BPM \u2195")), /*#__PURE__*/React.createElement("div", {
+    ref: stDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleStDown,
+    onPointerMove: handleStMove,
+    onPointerUp: handleStUp,
+    onPointerCancel: handleStUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, stLabel), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "ST \u2195")), /*#__PURE__*/React.createElement("div", {
+    ref: swingDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleSwingDown,
+    onPointerMove: handleSwingMove,
+    onPointerUp: handleSwingUp,
+    onPointerCancel: handleSwingUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, swing), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "SWG \u2195")))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.patRow
   }, pats.map(function (p, i) {
     var isA = p.id === activeId,
@@ -3188,9 +3257,9 @@ function Tabula() {
     }
   }, "\u22EF")), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref15) {
-    var label = _ref15.label,
-      mult = _ref15.mult;
+  }, SPEED_OPTS.map(function (_ref17) {
+    var label = _ref17.label,
+      mult = _ref17.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3200,10 +3269,10 @@ function Tabula() {
     }, label);
   })), /*#__PURE__*/React.createElement("div", {
     style: S.tabs
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref16) {
-    var _ref17 = _slicedToArray(_ref16, 2),
-      p = _ref17[0],
-      lbl = _ref17[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref18) {
+    var _ref19 = _slicedToArray(_ref18, 2),
+      p = _ref19[0],
+      lbl = _ref19[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -3524,7 +3593,48 @@ function Tabula() {
     onChange: setDlyLpVal,
     display: dlyLpVal + "%",
     accent: C_DLY
-  }))))), /*#__PURE__*/React.createElement("div", {
+  })))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: "auto",
+      paddingTop: 20,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, varyMode ? {
+      border: "1px solid #ffe500",
+      color: "#ffe500",
+      background: "rgba(255,229,0,0.08)"
+    } : {}),
+    onClick: function onClick() {
+      return setVaryMode(function (v) {
+        return !v;
+      });
+    }
+  }, "VARY"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, monoMode ? {
+      border: "1px solid #00e5ff",
+      color: "#00e5ff",
+      background: "rgba(0,229,255,0.08)"
+    } : {}),
+    onClick: toggleMono
+  }, "MONO"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}),
+    onClick: startStop
+  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+    style: S.loopBtnBottom,
+    onClick: mutatePat1
+  }, "MUT"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, loopMode ? S.loopOn : {}),
+    onClick: function onClick() {
+      return setLoopMode(function (l) {
+        return !l;
+      });
+    }
+  }, "LOOP"))), /*#__PURE__*/React.createElement("div", {
     style: IS_MOBILE ? {} : {
       flex: 1,
       minWidth: 0
@@ -3824,7 +3934,7 @@ function Tabula() {
       },
       disabled: !has
     }, "LOAD"));
-  })))), /*#__PURE__*/React.createElement("div", {
+  })))), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.playBar
   }, /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, varyMode ? {

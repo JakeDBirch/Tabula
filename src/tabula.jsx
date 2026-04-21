@@ -1359,33 +1359,35 @@ export default function Tabula(){
         </div>
       )}
 
-      {/* Header */}
-      <div style={S.hdr}>
-        <div style={S.brand}>TABULA</div>
-        <div style={S.hdrR}>
-          <select style={S.sel} value={scale} onChange={e=>setScale(e.target.value)}>
-            {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-          </select>
-          <div ref={bpmDragRef} style={S.bpmDragTarget}
-            onPointerDown={handleBpmDown} onPointerMove={handleBpmMove}
-            onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-            <span style={S.widgetN}>{bpm}</span>
-            <span style={S.widgetU}>BPM ↕</span>
-          </div>
-          <div ref={stDragRef} style={S.bpmDragTarget}
-            onPointerDown={handleStDown} onPointerMove={handleStMove}
-            onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-            <span style={S.widgetN}>{stLabel}</span>
-            <span style={S.widgetU}>ST ↕</span>
-          </div>
-          <div ref={swingDragRef} style={S.bpmDragTarget}
-            onPointerDown={handleSwingDown} onPointerMove={handleSwingMove}
-            onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-            <span style={S.widgetN}>{swing}</span>
-            <span style={S.widgetU}>SWG ↕</span>
+      {/* Header — mobile only */}
+      {IS_MOBILE&&(
+        <div style={S.hdr}>
+          <div style={S.brand}>TABULA</div>
+          <div style={S.hdrR}>
+            <select style={S.sel} value={scale} onChange={e=>setScale(e.target.value)}>
+              {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <div ref={bpmDragRef} style={S.bpmDragTarget}
+              onPointerDown={handleBpmDown} onPointerMove={handleBpmMove}
+              onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+              <span style={S.widgetN}>{bpm}</span>
+              <span style={S.widgetU}>BPM ↕</span>
+            </div>
+            <div ref={stDragRef} style={S.bpmDragTarget}
+              onPointerDown={handleStDown} onPointerMove={handleStMove}
+              onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+              <span style={S.widgetN}>{stLabel}</span>
+              <span style={S.widgetU}>ST ↕</span>
+            </div>
+            <div ref={swingDragRef} style={S.bpmDragTarget}
+              onPointerDown={handleSwingDown} onPointerMove={handleSwingMove}
+              onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+              <span style={S.widgetN}>{swing}</span>
+              <span style={S.widgetU}>SWG ↕</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── Pattern pills (always visible) ── */}
       {(()=>{
@@ -1419,7 +1421,27 @@ export default function Tabula(){
       <div style={IS_MOBILE?{}:{display:"flex",gap:24,alignItems:"flex-start"}}>
 
         {/* ── LEFT COLUMN (desktop) / above-grid controls (mobile) ── */}
-        <div style={IS_MOBILE?{}:{width:260,flexShrink:0,display:"flex",flexDirection:"column",gap:0}}>
+        <div style={IS_MOBILE?{}:{width:260,flexShrink:0,display:"flex",flexDirection:"column",gap:0,height:"calc(100dvh - 48px)",overflowY:"auto",scrollbarWidth:"none"}}>
+          {/* Brand + widgets — desktop only */}
+          {!IS_MOBILE&&(
+            <>
+              <div style={{...S.brand,marginBottom:16}}>TABULA</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+                <select style={{...S.sel,flex:"1 1 100%"}} value={scale} onChange={e=>setScale(e.target.value)}>
+                  {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                  <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM ↕</span>
+                </div>
+                <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                  <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST ↕</span>
+                </div>
+                <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                  <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG ↕</span>
+                </div>
+              </div>
+            </>
+          )}
           {/* Pattern pills — desktop only (mobile rendered above) */}
           {!IS_MOBILE&&(
             <div style={S.patRow}>
@@ -1553,6 +1575,16 @@ export default function Tabula(){
                   <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={dlyLpVal+"%"}             accent={C_DLY}/>
                 </div>
               </SynthSection>
+            </div>
+          )}
+          {/* Transport — desktop only (mobile uses fixed play bar) */}
+          {!IS_MOBILE&&(
+            <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"center",marginTop:"auto",paddingTop:20,flexWrap:"wrap"}}>
+              <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+              <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
+              <button style={Object.assign({},S.playBtn,playing?S.playOn:{})} onClick={startStop}>{playing?"■":"▶"}</button>
+              <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT</button>
+              <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
             </div>
           )}
         </div>
@@ -1699,7 +1731,8 @@ export default function Tabula(){
         </div>
       )}
 
-      {/* Fixed play button at bottom */}
+      {/* Fixed play bar — mobile only */}
+      {IS_MOBILE&&(
       <div style={S.playBar}>
         <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
         <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
@@ -1709,6 +1742,7 @@ export default function Tabula(){
         <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT</button>
         <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
       </div>
+      )}
     </div>
   );
 }
