@@ -18,12 +18,12 @@
 const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
-function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
-function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
-function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
 function _classCallCheck(a, n) { if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function"); }
 function _defineProperties(e, r) { for (var t = 0; t < r.length; t++) { var o = r[t]; o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, _toPropertyKey(o.key), o); } }
 function _createClass(e, r, t) { return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", { writable: !1 }), e; }
+function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
+function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
+function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
 function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
 function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
@@ -179,7 +179,8 @@ var defaultStepParams = function defaultStepParams() {
       cut: 50,
       dly: 0,
       rhy: 1,
-      oct: 2
+      oct: 2,
+      glide: 0
     };
   });
 };
@@ -188,7 +189,8 @@ var mkPat = function mkPat(name) {
     id: ++_id,
     name: name,
     grid: mkGrid(),
-    params: defaultStepParams()
+    params: defaultStepParams(),
+    gridLen: 16
   };
 };
 var vcfHz = function vcfHz(v) {
@@ -500,6 +502,15 @@ var LANES = [{
   def: 2,
   center: 2,
   bool: false
+}, {
+  key: "glide",
+  label: "GLIDE",
+  color: "#00bcd4",
+  min: 0,
+  max: 1,
+  def: 0,
+  center: null,
+  bool: true
 }];
 // rhy: 0=tie (extend into next step), 1=normal, 2/3/4=ratchet (N notes per step)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
@@ -558,6 +569,58 @@ function StepLane(_ref5) {
   var drag = useRef({
     active: false
   });
+
+  // Bool lanes (GLIDE): tap-to-toggle, no drag
+  if (lane.bool) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: Object.assign({}, S.laneRow, tall ? {
+        height: 36
+      } : {})
+    }, !tall && /*#__PURE__*/React.createElement("div", {
+      style: Object.assign({}, S.laneLabel, {
+        color: lane.color + "99"
+      })
+    }, lane.label), /*#__PURE__*/React.createElement("div", {
+      style: _objectSpread(_objectSpread({}, S.laneBars), {}, {
+        alignItems: "center",
+        gap: 2
+      })
+    }, Array.from({
+      length: COLS
+    }, function (_, c) {
+      var _values$c;
+      var on = !!((_values$c = values[c]) !== null && _values$c !== void 0 ? _values$c : lane.def);
+      var isAct = c === activeStep;
+      var locked = colHasNote && !colHasNote[c];
+      return /*#__PURE__*/React.createElement("div", {
+        key: c,
+        style: {
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100%",
+          opacity: locked ? 0.15 : 1,
+          cursor: locked ? "default" : "pointer"
+        },
+        onPointerDown: function onPointerDown(e) {
+          e.stopPropagation();
+          if (locked) return;
+          onChange(c, on ? 0 : 1);
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: "70%",
+          aspectRatio: "1",
+          borderRadius: "50%",
+          background: on ? isAct ? "#fff" : lane.color : lane.color + "22",
+          border: "1px solid " + (on ? lane.color : lane.color + "44"),
+          boxShadow: on && isAct ? "0 0 6px " + lane.color : "none",
+          transition: "background .08s, box-shadow .08s"
+        }
+      }));
+    })));
+  }
   var getCV = useCallback(function (e) {
     var rect = ref.current.getBoundingClientRect();
     var col = Math.max(0, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / rect.width * COLS)));
@@ -617,8 +680,8 @@ function StepLane(_ref5) {
   }, Array.from({
     length: COLS
   }, function (_, c) {
-    var _values$c;
-    var v = (_values$c = values[c]) !== null && _values$c !== void 0 ? _values$c : lane.def;
+    var _values$c2;
+    var v = (_values$c2 = values[c]) !== null && _values$c2 !== void 0 ? _values$c2 : lane.def;
     var isAct = c === activeStep;
     var locked = colHasNote && !colHasNote[c];
     var isRhy = lane.key === 'rhy';
@@ -783,7 +846,7 @@ var Bell = /*#__PURE__*/function () {
     }()
   }, {
     key: "play",
-    value: function play(freq, at, sp, noteDur, globalSend) {
+    value: function play(freq, at, sp, noteDur, globalSend, prevFreq, glideTime) {
       if (!this.ready || this.ctx.state !== "running") return;
       var t = at != null ? at : this.ctx.currentTime,
         p = this.p;
@@ -828,14 +891,26 @@ var Bell = /*#__PURE__*/function () {
       vca.gain.exponentialRampToValueAtTime(0.0001, t + end);
       var o1 = this.ctx.createOscillator();
       o1.type = p.waveform;
-      o1.frequency.value = playFreq;
+      if (prevFreq && glideTime > 0) {
+        var startF = prevFreq * Math.pow(2, octShift);
+        o1.frequency.setValueAtTime(Math.max(1, startF), t);
+        o1.frequency.exponentialRampToValueAtTime(Math.max(1, playFreq), t + glideTime);
+      } else {
+        o1.frequency.value = playFreq;
+      }
       o1.connect(vcf);
       o1.start(t);
       o1.stop(t + end + .05);
       if (p.detune > 2) {
         var o2 = this.ctx.createOscillator();
         o2.type = p.waveform;
-        o2.frequency.value = playFreq;
+        if (prevFreq && glideTime > 0) {
+          var _startF = prevFreq * Math.pow(2, octShift);
+          o2.frequency.setValueAtTime(Math.max(1, _startF), t);
+          o2.frequency.exponentialRampToValueAtTime(Math.max(1, playFreq), t + glideTime);
+        } else {
+          o2.frequency.value = playFreq;
+        }
         o2.detune.value = p.detune;
         o2.connect(vcf);
         o2.start(t);
@@ -930,6 +1005,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
+  var _activePat$gridLen;
   var _useState = useState(function () {
       var a = mkPat("A");
       return [a];
@@ -1002,33 +1078,34 @@ function Tabula() {
     _useState30 = _slicedToArray(_useState29, 2),
     flash = _useState30[0],
     setFlash = _useState30[1];
-  var _useState31 = useState(false),
+  var _useState31 = useState(""),
     _useState32 = _slicedToArray(_useState31, 2),
-    shifting = _useState32[0],
-    setShifting = _useState32[1];
+    shareFlash = _useState32[0],
+    setShareFlash = _useState32[1];
+  var importRef = useRef(null);
   var _useState33 = useState(false),
     _useState34 = _slicedToArray(_useState33, 2),
-    varyMode = _useState34[0],
-    setVaryMode = _useState34[1];
+    shifting = _useState34[0],
+    setShifting = _useState34[1];
   var _useState35 = useState(false),
     _useState36 = _slicedToArray(_useState35, 2),
-    monoMode = _useState36[0],
-    setMonoMode = _useState36[1];
-  var monoModeR = useRef(false);
-  var _useState37 = useState(0),
+    varyMode = _useState36[0],
+    setVaryMode = _useState36[1];
+  var _useState37 = useState(false),
     _useState38 = _slicedToArray(_useState37, 2),
-    swing = _useState38[0],
-    setSwing = _useState38[1]; // 0–100, 0=straight, 100=full triplet swing
-  var swingR = useRef(0);
-  var _useState39 = useState(16),
+    monoMode = _useState38[0],
+    setMonoMode = _useState38[1];
+  var monoModeR = useRef(false);
+  var _useState39 = useState(0),
     _useState40 = _slicedToArray(_useState39, 2),
-    gridLen = _useState40[0],
-    setGridLen = _useState40[1];
+    swing = _useState40[0],
+    setSwing = _useState40[1]; // 0–100, 0=straight, 100=full triplet swing
+  var swingR = useRef(0);
+  var gridLenR = useRef(16);
   var _useState41 = useState(1),
     _useState42 = _slicedToArray(_useState41, 2),
     speedMult = _useState42[0],
     setSpeedMult = _useState42[1];
-  var gridLenR = useRef(16);
   var speedMultR = useRef(1);
   var _useState43 = useState(false),
     _useState44 = _slicedToArray(_useState43, 2),
@@ -1179,6 +1256,7 @@ function Tabula() {
     octJitter: 0
   });
   var variedGrids = useRef(new Map());
+  var prevFreqByRowR = useRef({});
   var flashTmr = useRef(null),
     gridRef = useRef(null);
   var gesture = useRef({
@@ -1228,9 +1306,6 @@ function Tabula() {
   useEffect(function () {
     swingR.current = swing;
   }, [swing]);
-  useEffect(function () {
-    gridLenR.current = gridLen;
-  }, [gridLen]);
   useEffect(function () {
     speedMultR.current = speedMult;
   }, [speedMult]);
@@ -1329,7 +1404,6 @@ function Tabula() {
               scale: scale,
               transpose: transpose,
               swing: swing,
-              gridLen: gridLen,
               speedMult: speedMult,
               activeId: activeId,
               waveform: waveform,
@@ -1374,7 +1448,6 @@ function Tabula() {
     setScale(s.scale);
     setTranspose(s.transpose || 0);
     if (s.swing != null) setSwing(s.swing);
-    if (s.gridLen != null) setGridLen(s.gridLen);
     if (s.speedMult != null) setSpeedMult(s.speedMult);
     setActiveId(s.activeId);
     if (s.waveform) setWaveform(s.waveform);
@@ -1389,6 +1462,143 @@ function Tabula() {
   var activePat = pats.find(function (p) {
     return p.id === activeId;
   });
+  var gridLen = (_activePat$gridLen = activePat === null || activePat === void 0 ? void 0 : activePat.gridLen) !== null && _activePat$gridLen !== void 0 ? _activePat$gridLen : 16;
+  useEffect(function () {
+    gridLenR.current = gridLen;
+  }, [gridLen]);
+
+  // ── Share / Export / Import ──────────────────────────────────────────────
+  var getShareState = function getShareState() {
+    return {
+      pats: pats,
+      chain: chain,
+      bpm: bpm,
+      scale: scale,
+      transpose: transpose,
+      swing: swing,
+      speedMult: speedMult,
+      activeId: activeId,
+      waveform: waveform,
+      detune: detune,
+      attack: attack,
+      decay: decay,
+      sustain: sustain,
+      vcfCutoff: vcfCutoff,
+      vcfRes: vcfRes,
+      filterEnvAmt: filterEnvAmt,
+      dlyIdx: dlyIdx,
+      dlyFbPct: dlyFbPct,
+      dlyWetPct: dlyWetPct,
+      dlyHpVal: dlyHpVal,
+      dlyLpVal: dlyLpVal,
+      vDropRate: vDropRate,
+      vShiftRate: vShiftRate,
+      vShiftRange: vShiftRange,
+      vPitchRate: vPitchRate,
+      vPitchRange: vPitchRange,
+      vGhostRate: vGhostRate,
+      vVelJitter: vVelJitter,
+      vCutJitter: vCutJitter,
+      vDlyJitter: vDlyJitter,
+      vRhyJitter: vRhyJitter,
+      vOctJitter: vOctJitter,
+      monoMode: monoMode,
+      loopMode: loopMode
+    };
+  };
+  var applyShareState = function applyShareState(s) {
+    if (!s) return;
+    var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray((s.pats || []).map(function (p) {
+      return p.id;
+    }))));
+    if (maxId >= _id) _id = maxId + 1;
+    if (s.pats) setPats(s.pats);
+    if (s.chain) setChain(s.chain);
+    if (s.bpm) setBpm(s.bpm);
+    if (s.scale) setScale(s.scale);
+    if (s.transpose != null) setTranspose(s.transpose);
+    if (s.swing != null) setSwing(s.swing);
+    if (s.gridLen != null) setGridLen(s.gridLen);
+    if (s.speedMult != null) setSpeedMult(s.speedMult);
+    if (s.activeId) setActiveId(s.activeId);
+    if (s.waveform) setWaveform(s.waveform);
+    if (s.monoMode != null) setMonoMode(s.monoMode);
+    if (s.loopMode != null) setLoopMode(s.loopMode);
+    [["detune", setDetune], ["attack", setAttack], ["decay", setDecay], ["sustain", setSustain], ["vcfCutoff", setVcfCutoff], ["vcfRes", setVcfRes], ["filterEnvAmt", setFilterEnvAmt], ["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyWetPct", setDlyWetPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vCutJitter", setVCutJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter]].forEach(function (_ref1) {
+      var _ref10 = _slicedToArray(_ref1, 2),
+        k = _ref10[0],
+        fn = _ref10[1];
+      if (s[k] != null) fn(s[k]);
+    });
+  };
+  var encodeState = function encodeState(s) {
+    try {
+      return btoa(unescape(encodeURIComponent(JSON.stringify(s))));
+    } catch (e) {
+      return null;
+    }
+  };
+  var decodeState = function decodeState(str) {
+    try {
+      return JSON.parse(decodeURIComponent(escape(atob(str))));
+    } catch (e) {
+      return null;
+    }
+  };
+  var copyShareLink = function copyShareLink() {
+    var url = window.location.origin + window.location.pathname + '#' + encodeState(getShareState());
+    navigator.clipboard.writeText(url).then(function () {
+      setShareFlash("LINK COPIED");
+      setTimeout(function () {
+        return setShareFlash("");
+      }, 2000);
+    });
+  };
+  var exportJSON = function exportJSON() {
+    var blob = new Blob([JSON.stringify(getShareState(), null, 2)], {
+      type: "application/json"
+    });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "tabula-preset.json";
+    a.click();
+  };
+  var handleImport = function handleImport(e) {
+    var _e$target$files;
+    var file = (_e$target$files = e.target.files) === null || _e$target$files === void 0 ? void 0 : _e$target$files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var s = decodeState(btoa(unescape(encodeURIComponent(ev.target.result)))) || JSON.parse(ev.target.result || "null");
+      try {
+        var parsed = JSON.parse(ev.target.result);
+        applyShareState(parsed);
+        setShareFlash("PRESET LOADED");
+        setTimeout(function () {
+          return setShareFlash("");
+        }, 2000);
+      } catch (err) {
+        setShareFlash("IMPORT FAILED");
+        setTimeout(function () {
+          return setShareFlash("");
+        }, 2000);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  // Load from URL hash on mount
+  useEffect(function () {
+    var hash = window.location.hash.slice(1);
+    if (hash) {
+      var s = decodeState(hash);
+      if (s) {
+        applyShareState(s);
+        window.location.hash = "";
+      }
+    }
+  }, []);
 
   // Lookahead scheduler — runs every 25ms, schedules notes 100ms ahead.
   // Decouples JS timer jitter from audio precision so delay stays locked to grid.
@@ -1397,22 +1607,20 @@ function Tabula() {
     var ctx = bell.current.ctx;
     var LOOKAHEAD = 0.1; // seconds ahead to schedule
     var stepDur = 60 / bpmR.current / 4 * speedMultR.current;
-    var activeLen = gridLenR.current;
     var _loop = function _loop() {
       var s_ = stepR.current;
-      // Swing: odd 16ths (1,3,5…) are pushed forward by swingOffset
-      // swing=0→straight, swing=100→full triplet (1/3 of stepDur delay)
       var swingOffset = s_ % 2 === 1 ? stepDur * (swingR.current / 100) * 0.33 : 0;
       var at = nextNoteR.current + swingOffset;
       var ch = loopR.current ? [activeIdR.current] : chainR.current;
       if (ch.length) {
-        var _sp$rhy;
+        var _p$gridLen, _sp$rhy;
         var cp = cposR.current,
           s = s_,
           pid = ch[cp];
         var p = patsR.current.find(function (x) {
           return x.id === pid;
         });
+        var activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
         if (s === 0 && varyModeR.current && p) {
           var vg = genVariation(p.grid, varyParamsR.current);
           if (monoModeR.current) {
@@ -1456,10 +1664,15 @@ function Tabula() {
           if (!grid[_r][s]) continue;
           if (isTie) continue; // tied step: previous note already extended, skip
           var f = freqs[_r] * ratio;
+          // Glide: if this step has glide on, slide from previous freq on this row
+          var hasGlide = sp && sp.glide;
+          var prevF = hasGlide ? prevFreqByRowR.current[_r] : null;
+          var glideTime = prevF ? stepDur * 0.4 : 0;
+          prevFreqByRowR.current[_r] = f; // track for next step
           if (ratch > 1) {
-            for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, dlyWetPctR.current);
+            for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, dlyWetPctR.current, ri === 0 ? prevF : null, ri === 0 ? glideTime : 0);
           } else {
-            bell.current.play(f, at, sp, noteDur, dlyWetPctR.current);
+            bell.current.play(f, at, sp, noteDur, dlyWetPctR.current, prevF, glideTime);
           }
         }
         setStep(s);
@@ -1476,7 +1689,7 @@ function Tabula() {
     }
   }, []);
   var startStop = /*#__PURE__*/function () {
-    var _ref1 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7() {
+    var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7() {
       var dlyT;
       return _regenerator().w(function (_context7) {
         while (1) switch (_context7.n) {
@@ -1489,6 +1702,7 @@ function Tabula() {
             setPlaying(false);
             setStep(-1);
             setPlayId(null);
+            prevFreqByRowR.current = {};
             return _context7.a(2);
           case 1:
             dlyT = 60 / bpm * DLY_NOTES[dlyIdx].mult;
@@ -1521,7 +1735,7 @@ function Tabula() {
       }, _callee7);
     }));
     return function startStop() {
-      return _ref1.apply(this, arguments);
+      return _ref11.apply(this, arguments);
     };
   }();
   useEffect(function () {
@@ -2310,6 +2524,7 @@ function Tabula() {
     setActiveId(p.id);
   };
   var dupPat = function dupPat() {
+    var _src$gridLen;
     if (pats.length >= 8) return;
     var src = pats.find(function (p) {
       return p.id === activeId;
@@ -2321,7 +2536,8 @@ function Tabula() {
       }),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
-      })
+      }),
+      gridLen: (_src$gridLen = src.gridLen) !== null && _src$gridLen !== void 0 ? _src$gridLen : 16
     });
     setPats(function (ps) {
       return [].concat(_toConsumableArray(ps), [p]);
@@ -2377,6 +2593,7 @@ function Tabula() {
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
   var dupPatId = function dupPatId(id) {
+    var _src$gridLen2;
     if (pats.length >= 8) return;
     var src = pats.find(function (p) {
       return p.id === id;
@@ -2388,7 +2605,8 @@ function Tabula() {
       }),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
-      })
+      }),
+      gridLen: (_src$gridLen2 = src.gridLen) !== null && _src$gridLen2 !== void 0 ? _src$gridLen2 : 16
     });
     setPats(function (ps) {
       return [].concat(_toConsumableArray(ps), [p]);
@@ -2569,9 +2787,9 @@ function Tabula() {
     if (j < 0 || j >= chain.length) return;
     setChain(function (c) {
       var n = _toConsumableArray(c);
-      var _ref10 = [n[j], n[i]];
-      n[i] = _ref10[0];
-      n[j] = _ref10[1];
+      var _ref12 = [n[j], n[i]];
+      n[i] = _ref12[0];
+      n[j] = _ref12[1];
       return n;
     });
   };
@@ -2682,7 +2900,14 @@ function Tabula() {
     if (!el) return;
     var rect = el.getBoundingClientRect();
     var pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    setGridLen(Math.max(1, Math.round(pct * COLS)));
+    var len = Math.max(1, Math.round(pct * COLS));
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id === activeIdR.current ? Object.assign({}, p, {
+          gridLen: len
+        }) : p;
+      });
+    });
   }, []);
   var handleLenDown = useCallback(function (e) {
     e.stopPropagation();
@@ -3072,12 +3297,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref11) {
-      var _ref12 = _slicedToArray(_ref11, 4),
-        label = _ref12[0],
-        fn = _ref12[1],
-        disabled = _ref12[2],
-        danger = _ref12[3];
+    }, isOnlyPat, true]].map(function (_ref13) {
+      var _ref14 = _slicedToArray(_ref13, 4),
+        label = _ref14[0],
+        fn = _ref14[1],
+        disabled = _ref14[2],
+        danger = _ref14[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -3154,10 +3379,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref13) {
-    var _ref14 = _slicedToArray(_ref13, 2),
-      k = _ref14[0],
-      v = _ref14[1];
+  }, Object.entries(SCALES).map(function (_ref15) {
+    var _ref16 = _slicedToArray(_ref15, 2),
+      k = _ref16[0],
+      v = _ref16[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -3293,10 +3518,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref15) {
-    var _ref16 = _slicedToArray(_ref15, 2),
-      k = _ref16[0],
-      v = _ref16[1];
+  }, Object.entries(SCALES).map(function (_ref17) {
+    var _ref18 = _slicedToArray(_ref17, 2),
+      k = _ref18[0],
+      v = _ref18[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -3348,9 +3573,9 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref17) {
-    var label = _ref17.label,
-      mult = _ref17.mult;
+  }, SPEED_OPTS.map(function (_ref19) {
+    var label = _ref19.label,
+      mult = _ref19.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3398,11 +3623,51 @@ function Tabula() {
       },
       disabled: !has
     }, "LOAD"));
-  })))), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.menuSaveLabel
+  }, "SHARE"), shareFlash && /*#__PURE__*/React.createElement("div", {
+    style: S.menuFlash
+  }, shareFlash), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: copyShareLink
+  }, "LINK"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: exportJSON
+  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: function onClick() {
+      var _importRef$current;
+      return (_importRef$current = importRef.current) === null || _importRef$current === void 0 ? void 0 : _importRef$current.click();
+    }
+  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
+    ref: importRef,
+    type: "file",
+    accept: ".json",
+    style: {
+      display: "none"
+    },
+    onChange: handleImport
+  }))), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref18) {
-    var label = _ref18.label,
-      mult = _ref18.mult;
+  }, SPEED_OPTS.map(function (_ref20) {
+    var label = _ref20.label,
+      mult = _ref20.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3412,10 +3677,10 @@ function Tabula() {
     }, label);
   })), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.tabs
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref19) {
-    var _ref20 = _slicedToArray(_ref19, 2),
-      p = _ref20[0],
-      lbl = _ref20[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
+    var _ref22 = _slicedToArray(_ref21, 2),
+      p = _ref22[0],
+      lbl = _ref22[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -4487,10 +4752,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
-    var _ref22 = _slicedToArray(_ref21, 2),
-      p = _ref22[0],
-      lbl = _ref22[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref23) {
+    var _ref24 = _slicedToArray(_ref23, 2),
+      p = _ref24[0],
+      lbl = _ref24[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -4536,7 +4801,48 @@ function Tabula() {
       },
       disabled: !has
     }, "LOAD"));
-  })))), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _objectSpread(_objectSpread({}, S.menuDivider), {}, {
+      margin: "12px 0"
+    })
+  }), /*#__PURE__*/React.createElement("div", {
+    style: S.menuSaveLabel
+  }, "SHARE"), shareFlash ? /*#__PURE__*/React.createElement("div", {
+    style: S.menuFlash
+  }, shareFlash) : null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: 6,
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: copyShareLink
+  }, "LINK"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: exportJSON
+  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: function onClick() {
+      var _importRef$current2;
+      return (_importRef$current2 = importRef.current) === null || _importRef$current2 === void 0 ? void 0 : _importRef$current2.click();
+    }
+  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
+    ref: importRef,
+    type: "file",
+    accept: ".json",
+    style: {
+      display: "none"
+    },
+    onChange: handleImport
+  }))), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.playBar
   }, /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, varyMode ? {

@@ -49,8 +49,8 @@ const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
-const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,oct:2}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams()});
+const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,oct:2,glide:0}));
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16});
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
 const vcfLbl=v=>{const f=vcfHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
@@ -156,6 +156,7 @@ const LANES=[
   {key:"dly", label:"DLY", color:"#69f0ae",min:0,  max:100,def:0,  center:null, bool:false},
   {key:"rhy", label:"RHY", color:"#ffe500",min:0,  max:4,  def:1,  center:null, bool:false},
   {key:"oct", label:"OCT", color:"#e040fb",min:0,  max:4,  def:2,  center:2,   bool:false},
+  {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,max:1,  def:0,  center:null, bool:true},
 ];
 // rhy: 0=tie (extend into next step), 1=normal, 2/3/4=ratchet (N notes per step)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
@@ -173,6 +174,34 @@ const PARAM_ARMS=[
 function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
   const ref=useRef(null);
   const drag=useRef({active:false});
+
+  // Bool lanes (GLIDE): tap-to-toggle, no drag
+  if(lane.bool){
+    return(
+      <div style={Object.assign({},S.laneRow,tall?{height:36}:{})}>
+        {!tall&&<div style={Object.assign({},S.laneLabel,{color:lane.color+"99"})}>{lane.label}</div>}
+        <div style={{...S.laneBars,alignItems:"center",gap:2}}>
+          {Array.from({length:COLS},(_,c)=>{
+            const on=!!(values[c]??lane.def);
+            const isAct=c===activeStep;
+            const locked=colHasNote&&!colHasNote[c];
+            return(
+              <div key={c} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
+                height:"100%",opacity:locked?0.15:1,cursor:locked?"default":"pointer"}}
+                onPointerDown={e=>{e.stopPropagation();if(locked)return;onChange(c,on?0:1);}}>
+                <div style={{width:"70%",aspectRatio:"1",borderRadius:"50%",
+                  background:on?(isAct?"#fff":lane.color):lane.color+"22",
+                  border:"1px solid "+(on?lane.color:lane.color+"44"),
+                  boxShadow:on&&isAct?"0 0 6px "+lane.color:"none",
+                  transition:"background .08s, box-shadow .08s"}}/>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   const getCV=useCallback(e=>{
     const rect=ref.current.getBoundingClientRect();
     const col=Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/rect.width*COLS)));
@@ -279,7 +308,7 @@ class Bell{
     this.dly=dl;this.dlyFb=fb;this.dlyHp=dHp;this.dlyLp=dLp;
     this.ready=true;
   }
-  play(freq,at,sp,noteDur,globalSend){
+  play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime){
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=this.p;
     const velMul   = sp ? (sp.vel/127) : 1;
@@ -322,11 +351,26 @@ class Bell{
     vca.gain.exponentialRampToValueAtTime(0.0001,t+end);
 
     const o1=this.ctx.createOscillator();
-    o1.type=p.waveform;o1.frequency.value=playFreq;
+    o1.type=p.waveform;
+    if(prevFreq&&glideTime>0){
+      const startF=prevFreq*Math.pow(2,octShift);
+      o1.frequency.setValueAtTime(Math.max(1,startF),t);
+      o1.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
+    } else {
+      o1.frequency.value=playFreq;
+    }
     o1.connect(vcf);o1.start(t);o1.stop(t+end+.05);
     if(p.detune>2){
       const o2=this.ctx.createOscillator();
-      o2.type=p.waveform;o2.frequency.value=playFreq;o2.detune.value=p.detune;
+      o2.type=p.waveform;
+      if(prevFreq&&glideTime>0){
+        const startF=prevFreq*Math.pow(2,octShift);
+        o2.frequency.setValueAtTime(Math.max(1,startF),t);
+        o2.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
+      } else {
+        o2.frequency.value=playFreq;
+      }
+      o2.detune.value=p.detune;
       o2.connect(vcf);o2.start(t);o2.stop(t+end+.05);
     }
     vcf.connect(vca);
@@ -379,15 +423,16 @@ export default function Tabula(){
   const [clipboard, setClipboard] = useState(null);
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
   const [flash,     setFlash]     = useState("");
+  const [shareFlash,setShareFlash]= useState("");
+  const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
   const [varyMode,  setVaryMode]  = useState(false);
   const [monoMode,  setMonoMode]  = useState(false);
   const monoModeR = useRef(false);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
   const swingR = useRef(0);
-  const [gridLen,   setGridLen]   = useState(16);
-  const [speedMult, setSpeedMult] = useState(1);
   const gridLenR   = useRef(16);
+  const [speedMult, setSpeedMult] = useState(1);
   const speedMultR = useRef(1);
   const [showMenu,  setShowMenu]  = useState(false);
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
@@ -436,6 +481,7 @@ export default function Tabula(){
   const transpR=useRef(0),varyModeR=useRef(false);
   const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,cutJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
   const variedGrids=useRef(new Map());
+  const prevFreqByRowR=useRef({});
   const flashTmr=useRef(null),gridRef=useRef(null);
   const gesture=useRef({state:"idle",startX:0,startY:0,baseGrid:null,cellPx:24,appliedDX:0,appliedDY:0});
 
@@ -451,7 +497,6 @@ export default function Tabula(){
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
   useEffect(()=>{monoModeR.current=monoMode;},[monoMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
-  useEffect(()=>{gridLenR.current=gridLen;},[gridLen]);
   useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
   useEffect(()=>{
     varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter};
@@ -479,14 +524,14 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const saveSlot=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,gridLen,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
   const loadSlot=slot=>{
     const s=slotData[slot];if(!s)return;
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
-    setPats(s.pats);setChain(s.chain);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.gridLen!=null)setGridLen(s.gridLen);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
+    setPats(s.pats);setChain(s.chain);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
     if(s.waveform)setWaveform(s.waveform);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
@@ -496,6 +541,74 @@ export default function Tabula(){
   };
 
   const activePat=pats.find(p=>p.id===activeId);
+  const gridLen=activePat?.gridLen??16;
+  useEffect(()=>{gridLenR.current=gridLen;},[gridLen]);
+
+  // ── Share / Export / Import ──────────────────────────────────────────────
+  const getShareState=()=>({
+    pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
+    waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
+    dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
+    vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
+    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,
+    monoMode,loopMode
+  });
+
+  const applyShareState=s=>{
+    if(!s)return;
+    const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
+    if(s.pats)setPats(s.pats);
+    if(s.chain)setChain(s.chain);
+    if(s.bpm)setBpm(s.bpm);
+    if(s.scale)setScale(s.scale);
+    if(s.transpose!=null)setTranspose(s.transpose);
+    if(s.swing!=null)setSwing(s.swing);
+    if(s.gridLen!=null)setGridLen(s.gridLen);
+    if(s.speedMult!=null)setSpeedMult(s.speedMult);
+    if(s.activeId)setActiveId(s.activeId);
+    if(s.waveform)setWaveform(s.waveform);
+    if(s.monoMode!=null)setMonoMode(s.monoMode);
+    if(s.loopMode!=null)setLoopMode(s.loopMode);
+    [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
+     ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
+     ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
+     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
+     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
+     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],
+    ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
+  };
+
+  const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};
+  const decodeState=str=>{try{return JSON.parse(decodeURIComponent(escape(atob(str))));}catch(e){return null;}};
+
+  const copyShareLink=()=>{
+    const url=window.location.origin+window.location.pathname+'#'+encodeState(getShareState());
+    navigator.clipboard.writeText(url).then(()=>{setShareFlash("LINK COPIED");setTimeout(()=>setShareFlash(""),2000);});
+  };
+
+  const exportJSON=()=>{
+    const blob=new Blob([JSON.stringify(getShareState(),null,2)],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tabula-preset.json";a.click();
+  };
+
+  const handleImport=e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const s=decodeState(btoa(unescape(encodeURIComponent(ev.target.result))))||JSON.parse(ev.target.result||"null");
+      try{const parsed=JSON.parse(ev.target.result);applyShareState(parsed);setShareFlash("PRESET LOADED");setTimeout(()=>setShareFlash(""),2000);}
+      catch(err){setShareFlash("IMPORT FAILED");setTimeout(()=>setShareFlash(""),2000);}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
+
+  // Load from URL hash on mount
+  useEffect(()=>{
+    const hash=window.location.hash.slice(1);
+    if(hash){const s=decodeState(hash);if(s){applyShareState(s);window.location.hash="";}}
+  },[]);
 
   // Lookahead scheduler — runs every 25ms, schedules notes 100ms ahead.
   // Decouples JS timer jitter from audio precision so delay stays locked to grid.
@@ -504,18 +617,16 @@ export default function Tabula(){
     const ctx=bell.current.ctx;
     const LOOKAHEAD=0.1; // seconds ahead to schedule
     const stepDur=(60/bpmR.current/4)*speedMultR.current;
-    const activeLen=gridLenR.current;
 
     while(nextNoteR.current < ctx.currentTime + LOOKAHEAD){
       const s_=stepR.current;
-      // Swing: odd 16ths (1,3,5…) are pushed forward by swingOffset
-      // swing=0→straight, swing=100→full triplet (1/3 of stepDur delay)
       const swingOffset = (s_%2===1) ? stepDur*(swingR.current/100)*0.33 : 0;
       const at=nextNoteR.current + swingOffset;
       const ch=loopR.current?[activeIdR.current]:chainR.current;
       if(ch.length){
         const cp=cposR.current,s=s_,pid=ch[cp];
         const p=patsR.current.find(x=>x.id===pid);
+        const activeLen=p?(p.gridLen??16):16;
         if(s===0&&varyModeR.current&&p){
           let vg=genVariation(p.grid,varyParamsR.current);
           if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(vg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}vg=out;}
@@ -545,11 +656,16 @@ export default function Tabula(){
           if(!grid[r][s])continue;
           if(isTie)continue; // tied step: previous note already extended, skip
           const f=freqs[r]*ratio;
+          // Glide: if this step has glide on, slide from previous freq on this row
+          const hasGlide=sp&&sp.glide;
+          const prevF=hasGlide?prevFreqByRowR.current[r]:null;
+          const glideTime=prevF?stepDur*0.4:0;
+          prevFreqByRowR.current[r]=f; // track for next step
           if(ratch>1){
-            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,dlyWetPctR.current);
+            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,dlyWetPctR.current,ri===0?prevF:null,ri===0?glideTime:0);
 
           } else {
-            bell.current.play(f,at,sp,noteDur,dlyWetPctR.current);
+            bell.current.play(f,at,sp,noteDur,dlyWetPctR.current,prevF,glideTime);
           }
         }
         setStep(s);setCpos(cp);setPlayId(pid);
@@ -561,7 +677,7 @@ export default function Tabula(){
   },[]);
 
   const startStop=async()=>{
-    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);return;}
+    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};return;}
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
@@ -1031,14 +1147,14 @@ export default function Tabula(){
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
   const addPat=()=>{if(pats.length>=8)return;const p=mkPat("ABCDEFGH"[pats.length]);setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPatId=(id)=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePatId=(id)=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
@@ -1147,7 +1263,8 @@ export default function Tabula(){
     const el=lenSliderRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
     const pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
-    setGridLen(Math.max(1,Math.round(pct*COLS)));
+    const len=Math.max(1,Math.round(pct*COLS));
+    setPats(ps=>ps.map(p=>p.id===activeIdR.current?Object.assign({},p,{gridLen:len}):p));
   },[]);
   const handleLenDown = useCallback(e=>{
     e.stopPropagation();e.preventDefault();
@@ -1502,6 +1619,17 @@ export default function Tabula(){
                     </div>
                   );})}
                 </div>
+              </div>
+              {/* Share / Export / Import */}
+              <div style={{marginBottom:10}}>
+                <div style={S.menuSaveLabel}>SHARE</div>
+                {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+                </div>
+                <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
             </div>
           )}
@@ -1911,6 +2039,15 @@ export default function Tabula(){
                 </div>
               );})}
             </div>
+            <div style={{...S.menuDivider,margin:"12px 0"}}/>
+            <div style={S.menuSaveLabel}>SHARE</div>
+            {shareFlash?<div style={S.menuFlash}>{shareFlash}</div>:null}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6}}>
+              <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
+              <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
+              <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+            </div>
+            <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
           </div>
         </div>
       )}
