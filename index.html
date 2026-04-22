@@ -977,177 +977,181 @@ function Tabula() {
     _useState20 = _slicedToArray(_useState19, 2),
     loopMode = _useState20[0],
     setLoopMode = _useState20[1];
-  var _useState21 = useState(0),
+  var _useState21 = useState(false),
     _useState22 = _slicedToArray(_useState21, 2),
-    transpose = _useState22[0],
-    setTranspose = _useState22[1];
-  var _useState23 = useState(null),
+    followSeq = _useState22[0],
+    setFollowSeq = _useState22[1];
+  var _useState23 = useState(0),
     _useState24 = _slicedToArray(_useState23, 2),
-    clipboard = _useState24[0],
-    setClipboard = _useState24[1];
-  var _useState25 = useState({
+    transpose = _useState24[0],
+    setTranspose = _useState24[1];
+  var _useState25 = useState(null),
+    _useState26 = _slicedToArray(_useState25, 2),
+    clipboard = _useState26[0],
+    setClipboard = _useState26[1];
+  var _useState27 = useState({
       S1: null,
       S2: null,
       S3: null,
       S4: null
     }),
-    _useState26 = _slicedToArray(_useState25, 2),
-    slotData = _useState26[0],
-    setSlotData = _useState26[1];
-  var _useState27 = useState(""),
     _useState28 = _slicedToArray(_useState27, 2),
-    flash = _useState28[0],
-    setFlash = _useState28[1];
-  var _useState29 = useState(false),
+    slotData = _useState28[0],
+    setSlotData = _useState28[1];
+  var _useState29 = useState(""),
     _useState30 = _slicedToArray(_useState29, 2),
-    shifting = _useState30[0],
-    setShifting = _useState30[1];
+    flash = _useState30[0],
+    setFlash = _useState30[1];
   var _useState31 = useState(false),
     _useState32 = _slicedToArray(_useState31, 2),
-    varyMode = _useState32[0],
-    setVaryMode = _useState32[1];
+    shifting = _useState32[0],
+    setShifting = _useState32[1];
   var _useState33 = useState(false),
     _useState34 = _slicedToArray(_useState33, 2),
-    monoMode = _useState34[0],
-    setMonoMode = _useState34[1];
-  var monoModeR = useRef(false);
-  var _useState35 = useState(0),
+    varyMode = _useState34[0],
+    setVaryMode = _useState34[1];
+  var _useState35 = useState(false),
     _useState36 = _slicedToArray(_useState35, 2),
-    swing = _useState36[0],
-    setSwing = _useState36[1]; // 0–100, 0=straight, 100=full triplet swing
-  var swingR = useRef(0);
-  var _useState37 = useState(16),
+    monoMode = _useState36[0],
+    setMonoMode = _useState36[1];
+  var monoModeR = useRef(false);
+  var _useState37 = useState(0),
     _useState38 = _slicedToArray(_useState37, 2),
-    gridLen = _useState38[0],
-    setGridLen = _useState38[1];
-  var _useState39 = useState(1),
+    swing = _useState38[0],
+    setSwing = _useState38[1]; // 0–100, 0=straight, 100=full triplet swing
+  var swingR = useRef(0);
+  var _useState39 = useState(16),
     _useState40 = _slicedToArray(_useState39, 2),
-    speedMult = _useState40[0],
-    setSpeedMult = _useState40[1];
+    gridLen = _useState40[0],
+    setGridLen = _useState40[1];
+  var _useState41 = useState(1),
+    _useState42 = _slicedToArray(_useState41, 2),
+    speedMult = _useState42[0],
+    setSpeedMult = _useState42[1];
   var gridLenR = useRef(16);
   var speedMultR = useRef(1);
-  var _useState41 = useState(false),
-    _useState42 = _slicedToArray(_useState41, 2),
-    showMenu = _useState42[0],
-    setShowMenu = _useState42[1];
-  var _useState43 = useState(null),
+  var _useState43 = useState(false),
     _useState44 = _slicedToArray(_useState43, 2),
-    patMenu = _useState44[0],
-    setPatMenu = _useState44[1]; // {id, x, y}
+    showMenu = _useState44[0],
+    setShowMenu = _useState44[1];
   var _useState45 = useState(null),
     _useState46 = _slicedToArray(_useState45, 2),
-    paramPopup = _useState46[0],
-    setParamPopup = _useState46[1]; // {col,x,y,activeArm,values}
+    patMenu = _useState46[0],
+    setPatMenu = _useState46[1]; // {id, x, y}
+  var _useState47 = useState(null),
+    _useState48 = _slicedToArray(_useState47, 2),
+    paramPopup = _useState48[0],
+    setParamPopup = _useState48[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState47 = useState(null),
-    _useState48 = _slicedToArray(_useState47, 2),
-    chainDrag = _useState48[0],
-    setChainDrag = _useState48[1]; // {type,id,fromIdx,x,y}
+  var _useState49 = useState(null),
+    _useState50 = _slicedToArray(_useState49, 2),
+    chainDrag = _useState50[0],
+    setChainDrag = _useState50[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
   // Vary params
-  var _useState49 = useState(13),
-    _useState50 = _slicedToArray(_useState49, 2),
-    vDropRate = _useState50[0],
-    setVDropRate = _useState50[1];
-  var _useState51 = useState(17),
+  var _useState51 = useState(13),
     _useState52 = _slicedToArray(_useState51, 2),
-    vShiftRate = _useState52[0],
-    setVShiftRate = _useState52[1];
-  var _useState53 = useState(1),
+    vDropRate = _useState52[0],
+    setVDropRate = _useState52[1];
+  var _useState53 = useState(17),
     _useState54 = _slicedToArray(_useState53, 2),
-    vShiftRange = _useState54[0],
-    setVShiftRange = _useState54[1];
-  var _useState55 = useState(0),
+    vShiftRate = _useState54[0],
+    setVShiftRate = _useState54[1];
+  var _useState55 = useState(1),
     _useState56 = _slicedToArray(_useState55, 2),
-    vPitchRate = _useState56[0],
-    setVPitchRate = _useState56[1];
-  var _useState57 = useState(1),
+    vShiftRange = _useState56[0],
+    setVShiftRange = _useState56[1];
+  var _useState57 = useState(0),
     _useState58 = _slicedToArray(_useState57, 2),
-    vPitchRange = _useState58[0],
-    setVPitchRange = _useState58[1];
-  var _useState59 = useState(0),
+    vPitchRate = _useState58[0],
+    setVPitchRate = _useState58[1];
+  var _useState59 = useState(1),
     _useState60 = _slicedToArray(_useState59, 2),
-    vGhostRate = _useState60[0],
-    setVGhostRate = _useState60[1];
+    vPitchRange = _useState60[0],
+    setVPitchRange = _useState60[1];
   var _useState61 = useState(0),
     _useState62 = _slicedToArray(_useState61, 2),
-    vVelJitter = _useState62[0],
-    setVVelJitter = _useState62[1];
+    vGhostRate = _useState62[0],
+    setVGhostRate = _useState62[1];
   var _useState63 = useState(0),
     _useState64 = _slicedToArray(_useState63, 2),
-    vCutJitter = _useState64[0],
-    setVCutJitter = _useState64[1];
+    vVelJitter = _useState64[0],
+    setVVelJitter = _useState64[1];
   var _useState65 = useState(0),
     _useState66 = _slicedToArray(_useState65, 2),
-    vDlyJitter = _useState66[0],
-    setVDlyJitter = _useState66[1];
+    vCutJitter = _useState66[0],
+    setVCutJitter = _useState66[1];
   var _useState67 = useState(0),
     _useState68 = _slicedToArray(_useState67, 2),
-    vRhyJitter = _useState68[0],
-    setVRhyJitter = _useState68[1];
+    vDlyJitter = _useState68[0],
+    setVDlyJitter = _useState68[1];
   var _useState69 = useState(0),
     _useState70 = _slicedToArray(_useState69, 2),
-    vOctJitter = _useState70[0],
-    setVOctJitter = _useState70[1];
+    vRhyJitter = _useState70[0],
+    setVRhyJitter = _useState70[1];
+  var _useState71 = useState(0),
+    _useState72 = _slicedToArray(_useState71, 2),
+    vOctJitter = _useState72[0],
+    setVOctJitter = _useState72[1];
 
   // Synth
-  var _useState71 = useState("sawtooth"),
-    _useState72 = _slicedToArray(_useState71, 2),
-    waveform = _useState72[0],
-    setWaveform = _useState72[1];
-  var _useState73 = useState(8),
+  var _useState73 = useState("sawtooth"),
     _useState74 = _slicedToArray(_useState73, 2),
-    detune = _useState74[0],
-    setDetune = _useState74[1];
-  var _useState75 = useState(5),
+    waveform = _useState74[0],
+    setWaveform = _useState74[1];
+  var _useState75 = useState(8),
     _useState76 = _slicedToArray(_useState75, 2),
-    attack = _useState76[0],
-    setAttack = _useState76[1];
-  var _useState77 = useState(300),
+    detune = _useState76[0],
+    setDetune = _useState76[1];
+  var _useState77 = useState(5),
     _useState78 = _slicedToArray(_useState77, 2),
-    decay = _useState78[0],
-    setDecay = _useState78[1];
-  var _useState79 = useState(40),
+    attack = _useState78[0],
+    setAttack = _useState78[1];
+  var _useState79 = useState(300),
     _useState80 = _slicedToArray(_useState79, 2),
-    sustain = _useState80[0],
-    setSustain = _useState80[1];
-  var _useState81 = useState(80),
+    decay = _useState80[0],
+    setDecay = _useState80[1];
+  var _useState81 = useState(40),
     _useState82 = _slicedToArray(_useState81, 2),
-    vcfCutoff = _useState82[0],
-    setVcfCutoff = _useState82[1];
-  var _useState83 = useState(15),
+    sustain = _useState82[0],
+    setSustain = _useState82[1];
+  var _useState83 = useState(80),
     _useState84 = _slicedToArray(_useState83, 2),
-    vcfRes = _useState84[0],
-    setVcfRes = _useState84[1];
-  var _useState85 = useState(0),
+    vcfCutoff = _useState84[0],
+    setVcfCutoff = _useState84[1];
+  var _useState85 = useState(15),
     _useState86 = _slicedToArray(_useState85, 2),
-    filterEnvAmt = _useState86[0],
-    setFilterEnvAmt = _useState86[1];
+    vcfRes = _useState86[0],
+    setVcfRes = _useState86[1];
+  var _useState87 = useState(0),
+    _useState88 = _slicedToArray(_useState87, 2),
+    filterEnvAmt = _useState88[0],
+    setFilterEnvAmt = _useState88[1];
 
   // Delay
-  var _useState87 = useState(3),
-    _useState88 = _slicedToArray(_useState87, 2),
-    dlyIdx = _useState88[0],
-    setDlyIdx = _useState88[1];
-  var _useState89 = useState(45),
+  var _useState89 = useState(3),
     _useState90 = _slicedToArray(_useState89, 2),
-    dlyFbPct = _useState90[0],
-    setDlyFbPct = _useState90[1];
-  var _useState91 = useState(50),
+    dlyIdx = _useState90[0],
+    setDlyIdx = _useState90[1];
+  var _useState91 = useState(45),
     _useState92 = _slicedToArray(_useState91, 2),
-    dlyWetPct = _useState92[0],
-    setDlyWetPct = _useState92[1];
-  var _useState93 = useState(8),
+    dlyFbPct = _useState92[0],
+    setDlyFbPct = _useState92[1];
+  var _useState93 = useState(50),
     _useState94 = _slicedToArray(_useState93, 2),
-    dlyHpVal = _useState94[0],
-    setDlyHpVal = _useState94[1];
-  var _useState95 = useState(78),
+    dlyWetPct = _useState94[0],
+    setDlyWetPct = _useState94[1];
+  var _useState95 = useState(8),
     _useState96 = _slicedToArray(_useState95, 2),
-    dlyLpVal = _useState96[0],
-    setDlyLpVal = _useState96[1];
+    dlyHpVal = _useState96[0],
+    setDlyHpVal = _useState96[1];
+  var _useState97 = useState(78),
+    _useState98 = _slicedToArray(_useState97, 2),
+    dlyLpVal = _useState98[0],
+    setDlyLpVal = _useState98[1];
   var bell = useRef(new Bell());
   var stepR = useRef(0),
     cposR = useRef(0),
@@ -1206,6 +1210,9 @@ function Tabula() {
   useEffect(function () {
     loopR.current = loopMode;
   }, [loopMode]);
+  useEffect(function () {
+    if (followSeq && playing && playId) setActiveId(playId);
+  }, [playId, followSeq, playing]);
   useEffect(function () {
     activeIdR.current = activeId;
   }, [activeId]);
@@ -2570,10 +2577,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState97 = useState(false),
-    _useState98 = _slicedToArray(_useState97, 2),
-    bpmDragging = _useState98[0],
-    setBpmDragging = _useState98[1];
+  var _useState99 = useState(false),
+    _useState100 = _slicedToArray(_useState99, 2),
+    bpmDragging = _useState100[0],
+    setBpmDragging = _useState100[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -2602,10 +2609,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState99 = useState(false),
-    _useState100 = _slicedToArray(_useState99, 2),
-    stDragging = _useState100[0],
-    setStDragging = _useState100[1];
+  var _useState101 = useState(false),
+    _useState102 = _slicedToArray(_useState101, 2),
+    stDragging = _useState102[0],
+    setStDragging = _useState102[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -2634,10 +2641,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState101 = useState(false),
-    _useState102 = _slicedToArray(_useState101, 2),
-    swingDragging = _useState102[0],
-    setSwingDragging = _useState102[1];
+  var _useState103 = useState(false),
+    _useState104 = _slicedToArray(_useState103, 2),
+    swingDragging = _useState104[0],
+    setSwingDragging = _useState104[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -3340,46 +3347,10 @@ function Tabula() {
       scrollbarWidth: "none"
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(6,1fr)",
-      gap: 4,
-      marginBottom: 10
-    }
-  }, [["RAND", randPat, false, false], ["CLR", clearPat, false, false], ["CPY", copyPat, false, false], ["PST", pastePat, !clipboard, false], ["DUP", dupPat, pats.length >= 8, false], ["DEL", delPat, pats.length <= 1, true]].map(function (_ref17) {
-    var _ref18 = _slicedToArray(_ref17, 4),
-      label = _ref18[0],
-      fn = _ref18[1],
-      disabled = _ref18[2],
-      danger = _ref18[3];
-    return /*#__PURE__*/React.createElement("button", {
-      key: label,
-      disabled: !!disabled,
-      style: {
-        padding: "6px 0",
-        border: "1px solid " + (danger ? "rgba(255,80,80,0.3)" : "rgba(255,255,255,0.1)"),
-        background: "transparent",
-        borderRadius: 5,
-        color: disabled ? "rgba(255,255,255,0.15)" : danger ? "rgba(255,80,80,0.7)" : "rgba(255,255,255,0.5)",
-        fontSize: 9,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: disabled ? "default" : "pointer",
-        transition: "all .1s"
-      },
-      onMouseEnter: function onMouseEnter(e) {
-        if (!disabled) e.currentTarget.style.background = "rgba(255,255,255,0.07)";
-      },
-      onMouseLeave: function onMouseLeave(e) {
-        return e.currentTarget.style.background = "transparent";
-      },
-      onClick: disabled ? undefined : fn
-    }, label);
-  })), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref19) {
-    var label = _ref19.label,
-      mult = _ref19.mult;
+  }, SPEED_OPTS.map(function (_ref17) {
+    var label = _ref17.label,
+      mult = _ref17.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3429,9 +3400,9 @@ function Tabula() {
     }, "LOAD"));
   })))), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref20) {
-    var label = _ref20.label,
-      mult = _ref20.mult;
+  }, SPEED_OPTS.map(function (_ref18) {
+    var label = _ref18.label,
+      mult = _ref18.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3441,10 +3412,10 @@ function Tabula() {
     }, label);
   })), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: S.tabs
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
-    var _ref22 = _slicedToArray(_ref21, 2),
-      p = _ref22[0],
-      lbl = _ref22[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref19) {
+    var _ref20 = _slicedToArray(_ref19, 2),
+      p = _ref20[0],
+      lbl = _ref20[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -3462,13 +3433,7 @@ function Tabula() {
     style: {
       flex: 1
     }
-  }), /*#__PURE__*/React.createElement("button", {
-    style: S.stepPageBtn,
-    onClick: resetStepAll
-  }, "RST ALL"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.stepPageBtn, S.stepPageBtnRand),
-    onClick: randStepAll
-  }, "RAND ALL")), LANES.map(function (lane) {
+  })), LANES.map(function (lane) {
     var vals = (activePat ? activePat.params || defaultStepParams() : defaultStepParams()).map(function (sp) {
       var _sp$lane$key;
       return (_sp$lane$key = sp[lane.key]) !== null && _sp$lane$key !== void 0 ? _sp$lane$key : lane.def;
@@ -3822,8 +3787,47 @@ function Tabula() {
     var overStrip = chainDrag && isOverStrip(chainDrag.y);
     var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
     return /*#__PURE__*/React.createElement("div", {
+      style: {
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        marginBottom: 2
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: IS_MOBILE ? 7 : 10,
+        letterSpacing: 3,
+        color: "rgba(255,255,255,0.25)",
+        fontWeight: 700
+      }
+    }, "SEQ"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      style: Object.assign({}, S.loopBtnBottom, {
+        height: 22,
+        padding: "0 8px",
+        fontSize: IS_MOBILE ? 7 : 9
+      }, followSeq ? {
+        border: "1px solid #69f0ae",
+        color: "#69f0ae",
+        background: "rgba(105,240,174,0.08)"
+      } : {}),
+      onClick: function onClick() {
+        return setFollowSeq(function (f) {
+          return !f;
+        });
+      }
+    }, "FOLLOW")), /*#__PURE__*/React.createElement("div", {
       ref: chainStripRef,
-      style: Object.assign({}, S.chainStrip, overStrip ? S.chainStripHot : {})
+      style: Object.assign({}, S.chainStrip, {
+        marginTop: 0
+      }, overStrip ? S.chainStripHot : {})
     }, chain.length === 0 && !chainDrag && /*#__PURE__*/React.createElement("span", {
       style: S.chainStripEmpty
     }, "drag patterns here to build a sequence"), chain.map(function (pid, i) {
@@ -3859,7 +3863,7 @@ function Tabula() {
       }, p ? p.name : "?"));
     }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
       style: S.chainInsertLine
-    }));
+    })));
   }(), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -4174,13 +4178,7 @@ function Tabula() {
     style: {
       flex: 1
     }
-  }), /*#__PURE__*/React.createElement("button", {
-    style: S.stepPageBtn,
-    onClick: resetStepAll
-  }, "RST ALL"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.stepPageBtn, S.stepPageBtnRand),
-    onClick: randStepAll
-  }, "RAND ALL")), LANES.map(function (lane) {
+  })), LANES.map(function (lane) {
     var vals = (activePat ? activePat.params || defaultStepParams() : defaultStepParams()).map(function (sp) {
       var _sp$lane$key2;
       return (_sp$lane$key2 = sp[lane.key]) !== null && _sp$lane$key2 !== void 0 ? _sp$lane$key2 : lane.def;
@@ -4489,10 +4487,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref23) {
-    var _ref24 = _slicedToArray(_ref23, 2),
-      p = _ref24[0],
-      lbl = _ref24[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
+    var _ref22 = _slicedToArray(_ref21, 2),
+      p = _ref22[0],
+      lbl = _ref22[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -4571,7 +4569,18 @@ function Tabula() {
         return !l;
       });
     }
-  }, "LOOP")));
+  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, followSeq ? {
+      border: "1px solid #69f0ae",
+      color: "#69f0ae",
+      background: "rgba(105,240,174,0.08)"
+    } : {}),
+    onClick: function onClick() {
+      return setFollowSeq(function (f) {
+        return !f;
+      });
+    }
+  }, "FOLLOW")));
 }
 var CSS = "\n  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=JetBrains+Mono:wght@400;700&display=swap');\n  html,body{overscroll-behavior:none;overflow:hidden;position:fixed;width:100%;height:100%;touch-action:pan-y;}\n  *,*::before,*::after{\n    box-sizing:border-box;\n    -webkit-tap-highlight-color:transparent;\n    -webkit-user-select:none!important;\n    -webkit-touch-callout:none!important;\n    -webkit-user-drag:none!important;\n    user-select:none!important;\n  }\n  .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}\n  @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}\n  select option{background:#111;color:#fff;}\n";
 var S = {

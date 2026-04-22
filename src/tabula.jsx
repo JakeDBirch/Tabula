@@ -374,6 +374,7 @@ export default function Tabula(){
   const [cpos,      setCpos]      = useState(0);
   const [playId,    setPlayId]    = useState(null);
   const [loopMode,  setLoopMode]  = useState(false);
+  const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
@@ -444,6 +445,7 @@ export default function Tabula(){
   useEffect(()=>{speedMultR.current=speedMult;bell.current.stepDur=60/bpmR.current/4*speedMult;},[speedMult]);
   useEffect(()=>{scaleR.current=scale;},[scale]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
+  useEffect(()=>{if(followSeq&&playing&&playId)setActiveId(playId);},[playId,followSeq,playing]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
@@ -1480,26 +1482,6 @@ export default function Tabula(){
           {/* Scrollable middle section — actions, speed, save/load */}
           {!IS_MOBILE&&(
             <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
-              {/* Inline pattern actions */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:10}}>
-                {[
-                  ["RAND", randPat,   false, false],
-                  ["CLR",  clearPat,  false, false],
-                  ["CPY",  copyPat,   false, false],
-                  ["PST",  pastePat,  !clipboard, false],
-                  ["DUP",  dupPat,    pats.length>=8, false],
-                  ["DEL",  delPat,    pats.length<=1, true],
-                ].map(([label,fn,disabled,danger])=>(
-                  <button key={label} disabled={!!disabled}
-                    style={{padding:"6px 0",border:"1px solid "+(danger?"rgba(255,80,80,0.3)":"rgba(255,255,255,0.1)"),
-                      background:"transparent",borderRadius:5,
-                      color:disabled?"rgba(255,255,255,0.15)":danger?"rgba(255,80,80,0.7)":"rgba(255,255,255,0.5)",
-                      fontSize:9,fontWeight:700,letterSpacing:1,cursor:disabled?"default":"pointer",transition:"all .1s"}}
-                    onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.07)";}}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}
-                    onClick={disabled?undefined:fn}>{label}</button>
-                ))}
-              </div>
               {/* Speed row */}
               <div style={S.speedRow}>
                 {SPEED_OPTS.map(({label,mult})=>(
@@ -1548,8 +1530,6 @@ export default function Tabula(){
               <div style={S.stepPageHdr}>
                 <div style={S.stepPagePat}>{activePat?.name||""}</div>
                 <div style={{flex:1}}/>
-                <button style={S.stepPageBtn} onClick={resetStepAll}>RST ALL</button>
-                <button style={Object.assign({},S.stepPageBtn,S.stepPageBtnRand)} onClick={randStepAll}>RAND ALL</button>
               </div>
               {LANES.map(lane=>{
                 const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
@@ -1660,37 +1640,44 @@ export default function Tabula(){
                 })}
                 {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
               </div>
-              {/* Chain strip */}
+              {/* Chain strip with FOLLOW toggle */}
               {(()=>{
                 const overStrip = chainDrag && isOverStrip(chainDrag.y);
                 const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
                 return (
-                  <div ref={chainStripRef} style={Object.assign({},S.chainStrip, overStrip?S.chainStripHot:{})}>
-                    {chain.length===0&&!chainDrag&&(
-                      <span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>
-                    )}
-                    {chain.map((pid,i)=>{
-                      const pi=Math.max(0,pats.findIndex(p=>p.id===pid));
-                      const p=pats.find(p=>p.id===pid);
-                      const col=patCol(pi);
-                      const here=playing&&!loopMode&&i===cpos;
-                      const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;
-                      const showInsert=overStrip&&insertIdx===i;
-                      return (
-                        <React.Fragment key={i}>
-                          {showInsert&&<div style={S.chainInsertLine}/>}
-                          <div data-chainslot={i}
-                            style={Object.assign({},S.chainChip,{borderColor:col,background:here?col:col+"18",color:here?"#000":col,opacity:isDragging?0.3:1,touchAction:"none"})}
-                            onPointerDown={e=>startChainDrag(e,i)}
-                            onPointerMove={onDragMove}
-                            onPointerUp={onDragUp}
-                            onPointerCancel={onDragUp}>
-                            {p?p.name:"?"}
-                          </div>
-                        </React.Fragment>
-                      );
-                    })}
-                    {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
+                  <div style={{flexShrink:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                      <span style={{fontSize:IS_MOBILE?7:10,letterSpacing:3,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
+                      <div style={{flex:1}}/>
+                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:IS_MOBILE?7:9},followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+                    </div>
+                    <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0}, overStrip?S.chainStripHot:{})}>
+                      {chain.length===0&&!chainDrag&&(
+                        <span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>
+                      )}
+                      {chain.map((pid,i)=>{
+                        const pi=Math.max(0,pats.findIndex(p=>p.id===pid));
+                        const p=pats.find(p=>p.id===pid);
+                        const col=patCol(pi);
+                        const here=playing&&!loopMode&&i===cpos;
+                        const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;
+                        const showInsert=overStrip&&insertIdx===i;
+                        return (
+                          <React.Fragment key={i}>
+                            {showInsert&&<div style={S.chainInsertLine}/>}
+                            <div data-chainslot={i}
+                              style={Object.assign({},S.chainChip,{borderColor:col,background:here?col:col+"18",color:here?"#000":col,opacity:isDragging?0.3:1,touchAction:"none"})}
+                              onPointerDown={e=>startChainDrag(e,i)}
+                              onPointerMove={onDragMove}
+                              onPointerUp={onDragUp}
+                              onPointerCancel={onDragUp}>
+                              {p?p.name:"?"}
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
+                      {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
+                    </div>
                   </div>
                 );
               })()}
@@ -1810,8 +1797,6 @@ export default function Tabula(){
                   <div style={S.stepPageHdr}>
                     <div style={S.stepPagePat}>{activePat?.name||""}</div>
                     <div style={{flex:1}}/>
-                    <button style={S.stepPageBtn} onClick={resetStepAll}>RST ALL</button>
-                    <button style={Object.assign({},S.stepPageBtn,S.stepPageBtnRand)} onClick={randStepAll}>RAND ALL</button>
                   </div>
                   {LANES.map(lane=>{
                     const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
@@ -1940,6 +1925,7 @@ export default function Tabula(){
         </button>
         <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
         <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+        <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
       </div>
       )}
     </div>
