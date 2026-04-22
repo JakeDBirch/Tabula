@@ -7,23 +7,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Tabula">
-  <title>Tabula v3</title>
+  <title>Tabula v4</title>
   <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden;}</style>
 
 <script>
-window.addEventListener('DOMContentLoaded', function() {
-  var d = document.createElement('div');
-  d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:red;color:white;font-size:11px;padding:4px 8px;font-family:monospace;';
-  d.textContent = 'MOBILE:' + IS_MOBILE + ' iW:' + window.innerWidth + ' sW:' + window.screen.width + ' touch:' + navigator.maxTouchPoints + ' coarse:' + window.matchMedia('(pointer:coarse)').matches + ' UA:' + navigator.userAgent.slice(0,40);
-  document.body.prepend(d);
-});
-</script>
-</head>
-<body>
-  <div id="root"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script>
 const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
@@ -5163,8 +5150,7 @@ function Tabula() {
       backdropFilter: "blur(20px)",
       WebkitBackdropFilter: "blur(20px)",
       borderBottom: "1px solid rgba(255,255,255,0.1)",
-      transform: topTrayOpen ? "translateY(0)" : "translateY(-110%)",
-      transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+      display: topTrayOpen ? "block" : "none",
       padding: "14px 16px 18px"
     }
   }, /*#__PURE__*/React.createElement("select", {
@@ -5240,8 +5226,7 @@ function Tabula() {
       backdropFilter: "blur(20px)",
       WebkitBackdropFilter: "blur(20px)",
       borderTop: "1px solid rgba(255,255,255,0.1)",
-      transform: bottomTrayOpen ? "translateY(0)" : "translateY(110%)",
-      transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+      display: bottomTrayOpen ? "block" : "none",
       padding: "14px 16px 20px"
     }
   }, /*#__PURE__*/React.createElement("div", {

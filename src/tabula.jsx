@@ -1995,8 +1995,8 @@ export default function Tabula(){
           <div style={{position:"fixed",top:52,left:0,right:0,zIndex:200,
             background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
             borderBottom:"1px solid rgba(255,255,255,0.1)",
-            transform:topTrayOpen?"translateY(0)":"translateY(-110%)",
-            transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+            display:topTrayOpen?"block":"none",
+            
             padding:"14px 16px 18px"}}>
             <select style={{...S.sel,width:"100%",marginBottom:12,fontSize:13}} value={scale} onChange={e=>setScale(e.target.value)}>
               {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -2018,8 +2018,8 @@ export default function Tabula(){
           <div style={{position:"fixed",bottom:112,left:0,right:0,zIndex:200,
             background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
             borderTop:"1px solid rgba(255,255,255,0.1)",
-            transform:bottomTrayOpen?"translateY(0)":"translateY(110%)",
-            transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+            display:bottomTrayOpen?"block":"none",
+            
             padding:"14px 16px 20px"}}>
             {/* Speed */}
             <div style={{...S.speedRow,marginBottom:14}}>
