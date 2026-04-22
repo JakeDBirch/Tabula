@@ -9,6 +9,15 @@
   <meta name="apple-mobile-web-app-title" content="Tabula">
   <title>Tabula v3</title>
   <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden;}</style>
+
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:red;color:white;font-size:11px;padding:4px 8px;font-family:monospace;';
+  d.textContent = 'MOBILE:' + IS_MOBILE + ' iW:' + window.innerWidth + ' sW:' + window.screen.width + ' touch:' + navigator.maxTouchPoints + ' coarse:' + window.matchMedia('(pointer:coarse)').matches + ' UA:' + navigator.userAgent.slice(0,40);
+  document.body.prepend(d);
+});
+</script>
 </head>
 <body>
   <div id="root"></div>
