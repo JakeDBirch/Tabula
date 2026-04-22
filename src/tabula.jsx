@@ -27,8 +27,16 @@ const DLY_NOTES = [
   {label:"1/2",  mult:2},  {label:"½·",  mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
-// Device detection — maxTouchPoints + UA string covers iframe contexts where touch events may not propagate
-const IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// Device detection — multiple signals for reliability across browsers and iframe contexts
+const IS_MOBILE = (()=>{
+  try {
+    return navigator.maxTouchPoints > 0
+      || window.innerWidth < 768
+      || window.screen.width < 768
+      || window.matchMedia('(pointer: coarse)').matches
+      || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
+  } catch(e) { return false; }
+})();
 const PAT_COLORS=["#00e5ff","#ff4d6d","#ffe500","#69f0ae","#e040fb","#ff6d00","#40c4ff","#ff80ab"];
 const SLOTS=["S1","S2","S3","S4"];
 const SPEED_OPTS=[

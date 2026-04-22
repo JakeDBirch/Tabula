@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Tabula">
-  <title>Tabula v2</title>
+  <title>Tabula v3</title>
   <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden;}</style>
 </head>
 <body>
@@ -124,8 +124,14 @@ var DLY_NOTES = [{
 }];
 var ROWS = 16,
   COLS = 16;
-// Device detection — maxTouchPoints + UA string covers iframe contexts where touch events may not propagate
-var IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// Device detection — multiple signals for reliability across browsers and iframe contexts
+var IS_MOBILE = function () {
+  try {
+    return navigator.maxTouchPoints > 0 || window.innerWidth < 768 || window.screen.width < 768 || window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
+  } catch (e) {
+    return false;
+  }
+}();
 var PAT_COLORS = ["#00e5ff", "#ff4d6d", "#ffe500", "#69f0ae", "#e040fb", "#ff6d00", "#40c4ff", "#ff80ab"];
 var SLOTS = ["S1", "S2", "S3", "S4"];
 var SPEED_OPTS = [{
