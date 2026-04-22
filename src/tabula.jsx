@@ -427,6 +427,7 @@ export default function Tabula(){
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
   const [varyMode,  setVaryMode]  = useState(false);
+  const [recMode,   setRecMode]   = useState(false);
   const [monoMode,  setMonoMode]  = useState(false);
   const monoModeR = useRef(false);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -478,7 +479,7 @@ export default function Tabula(){
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
-  const transpR=useRef(0),varyModeR=useRef(false);
+  const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false);
   const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,cutJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
   const variedGrids=useRef(new Map());
   const prevFreqByRowR=useRef({});
@@ -495,6 +496,7 @@ export default function Tabula(){
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
+  useEffect(()=>{recModeR.current=recMode;},[recMode]);
   useEffect(()=>{monoModeR.current=monoMode;},[monoMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
   useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
@@ -631,6 +633,17 @@ export default function Tabula(){
           let vg=genVariation(p.grid,varyParamsR.current);
           if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(vg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}vg=out;}
           variedGrids.current.set(pid,vg);
+          // Self-record: capture this variation as a new pattern and append to sequence
+          if(recModeR.current&&patsR.current.length<8){
+            const vp=varyParamsR.current;
+            const newParams=(p.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
+            const newPat={id:++_id,name:"ABCDEFGH"[patsR.current.length],grid:vg.map(r=>[...r]),params:newParams,gridLen:p.gridLen??16};
+            setPats(ps=>{
+              if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
+              return [...ps,newPat];
+            });
+            setChain(c=>[...c,newPat.id]);
+          }
         }
         const grid=varyModeR.current?(variedGrids.current.get(pid)||(p&&p.grid)):(p&&p.grid);
         const freqs=SCALES[scaleR.current].freqs;
@@ -677,7 +690,7 @@ export default function Tabula(){
   },[]);
 
   const startStop=async()=>{
-    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};return;}
+    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};setRecMode(false);recModeR.current=false;return;}
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
@@ -1809,13 +1822,17 @@ export default function Tabula(){
                   </div>
                 );
               })()}
-              {/* Transport: 2×2 grid flanking the play button */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
+              {/* Transport: 3-row grid — VARY/REC/MUT8 left, ▶ center, MONO/LOOP right */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/3",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
+                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>
+                  {recMode?"■ REC":"● REC"}
+                </button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
+                <div/>
               </div>
             </>
           )}
@@ -2056,7 +2073,7 @@ export default function Tabula(){
       {IS_MOBILE&&(
       <div style={S.playBar}>
         <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-        <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
+        <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
         <button style={Object.assign({},S.playBtn,playing?S.playOn:{})} onClick={startStop}>
           {playing?"■":"▶"}
         </button>

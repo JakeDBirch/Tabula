@@ -1093,142 +1093,146 @@ function Tabula() {
     setVaryMode = _useState36[1];
   var _useState37 = useState(false),
     _useState38 = _slicedToArray(_useState37, 2),
-    monoMode = _useState38[0],
-    setMonoMode = _useState38[1];
-  var monoModeR = useRef(false);
-  var _useState39 = useState(0),
+    recMode = _useState38[0],
+    setRecMode = _useState38[1];
+  var _useState39 = useState(false),
     _useState40 = _slicedToArray(_useState39, 2),
-    swing = _useState40[0],
-    setSwing = _useState40[1]; // 0–100, 0=straight, 100=full triplet swing
+    monoMode = _useState40[0],
+    setMonoMode = _useState40[1];
+  var monoModeR = useRef(false);
+  var _useState41 = useState(0),
+    _useState42 = _slicedToArray(_useState41, 2),
+    swing = _useState42[0],
+    setSwing = _useState42[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState41 = useState(1),
-    _useState42 = _slicedToArray(_useState41, 2),
-    speedMult = _useState42[0],
-    setSpeedMult = _useState42[1];
-  var speedMultR = useRef(1);
-  var _useState43 = useState(false),
+  var _useState43 = useState(1),
     _useState44 = _slicedToArray(_useState43, 2),
-    showMenu = _useState44[0],
-    setShowMenu = _useState44[1];
-  var _useState45 = useState(null),
+    speedMult = _useState44[0],
+    setSpeedMult = _useState44[1];
+  var speedMultR = useRef(1);
+  var _useState45 = useState(false),
     _useState46 = _slicedToArray(_useState45, 2),
-    patMenu = _useState46[0],
-    setPatMenu = _useState46[1]; // {id, x, y}
+    showMenu = _useState46[0],
+    setShowMenu = _useState46[1];
   var _useState47 = useState(null),
     _useState48 = _slicedToArray(_useState47, 2),
-    paramPopup = _useState48[0],
-    setParamPopup = _useState48[1]; // {col,x,y,activeArm,values}
+    patMenu = _useState48[0],
+    setPatMenu = _useState48[1]; // {id, x, y}
+  var _useState49 = useState(null),
+    _useState50 = _slicedToArray(_useState49, 2),
+    paramPopup = _useState50[0],
+    setParamPopup = _useState50[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState49 = useState(null),
-    _useState50 = _slicedToArray(_useState49, 2),
-    chainDrag = _useState50[0],
-    setChainDrag = _useState50[1]; // {type,id,fromIdx,x,y}
+  var _useState51 = useState(null),
+    _useState52 = _slicedToArray(_useState51, 2),
+    chainDrag = _useState52[0],
+    setChainDrag = _useState52[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
   // Vary params
-  var _useState51 = useState(13),
-    _useState52 = _slicedToArray(_useState51, 2),
-    vDropRate = _useState52[0],
-    setVDropRate = _useState52[1];
-  var _useState53 = useState(17),
+  var _useState53 = useState(13),
     _useState54 = _slicedToArray(_useState53, 2),
-    vShiftRate = _useState54[0],
-    setVShiftRate = _useState54[1];
-  var _useState55 = useState(1),
+    vDropRate = _useState54[0],
+    setVDropRate = _useState54[1];
+  var _useState55 = useState(17),
     _useState56 = _slicedToArray(_useState55, 2),
-    vShiftRange = _useState56[0],
-    setVShiftRange = _useState56[1];
-  var _useState57 = useState(0),
+    vShiftRate = _useState56[0],
+    setVShiftRate = _useState56[1];
+  var _useState57 = useState(1),
     _useState58 = _slicedToArray(_useState57, 2),
-    vPitchRate = _useState58[0],
-    setVPitchRate = _useState58[1];
-  var _useState59 = useState(1),
+    vShiftRange = _useState58[0],
+    setVShiftRange = _useState58[1];
+  var _useState59 = useState(0),
     _useState60 = _slicedToArray(_useState59, 2),
-    vPitchRange = _useState60[0],
-    setVPitchRange = _useState60[1];
-  var _useState61 = useState(0),
+    vPitchRate = _useState60[0],
+    setVPitchRate = _useState60[1];
+  var _useState61 = useState(1),
     _useState62 = _slicedToArray(_useState61, 2),
-    vGhostRate = _useState62[0],
-    setVGhostRate = _useState62[1];
+    vPitchRange = _useState62[0],
+    setVPitchRange = _useState62[1];
   var _useState63 = useState(0),
     _useState64 = _slicedToArray(_useState63, 2),
-    vVelJitter = _useState64[0],
-    setVVelJitter = _useState64[1];
+    vGhostRate = _useState64[0],
+    setVGhostRate = _useState64[1];
   var _useState65 = useState(0),
     _useState66 = _slicedToArray(_useState65, 2),
-    vCutJitter = _useState66[0],
-    setVCutJitter = _useState66[1];
+    vVelJitter = _useState66[0],
+    setVVelJitter = _useState66[1];
   var _useState67 = useState(0),
     _useState68 = _slicedToArray(_useState67, 2),
-    vDlyJitter = _useState68[0],
-    setVDlyJitter = _useState68[1];
+    vCutJitter = _useState68[0],
+    setVCutJitter = _useState68[1];
   var _useState69 = useState(0),
     _useState70 = _slicedToArray(_useState69, 2),
-    vRhyJitter = _useState70[0],
-    setVRhyJitter = _useState70[1];
+    vDlyJitter = _useState70[0],
+    setVDlyJitter = _useState70[1];
   var _useState71 = useState(0),
     _useState72 = _slicedToArray(_useState71, 2),
-    vOctJitter = _useState72[0],
-    setVOctJitter = _useState72[1];
+    vRhyJitter = _useState72[0],
+    setVRhyJitter = _useState72[1];
+  var _useState73 = useState(0),
+    _useState74 = _slicedToArray(_useState73, 2),
+    vOctJitter = _useState74[0],
+    setVOctJitter = _useState74[1];
 
   // Synth
-  var _useState73 = useState("sawtooth"),
-    _useState74 = _slicedToArray(_useState73, 2),
-    waveform = _useState74[0],
-    setWaveform = _useState74[1];
-  var _useState75 = useState(8),
+  var _useState75 = useState("sawtooth"),
     _useState76 = _slicedToArray(_useState75, 2),
-    detune = _useState76[0],
-    setDetune = _useState76[1];
-  var _useState77 = useState(5),
+    waveform = _useState76[0],
+    setWaveform = _useState76[1];
+  var _useState77 = useState(8),
     _useState78 = _slicedToArray(_useState77, 2),
-    attack = _useState78[0],
-    setAttack = _useState78[1];
-  var _useState79 = useState(300),
+    detune = _useState78[0],
+    setDetune = _useState78[1];
+  var _useState79 = useState(5),
     _useState80 = _slicedToArray(_useState79, 2),
-    decay = _useState80[0],
-    setDecay = _useState80[1];
-  var _useState81 = useState(40),
+    attack = _useState80[0],
+    setAttack = _useState80[1];
+  var _useState81 = useState(300),
     _useState82 = _slicedToArray(_useState81, 2),
-    sustain = _useState82[0],
-    setSustain = _useState82[1];
-  var _useState83 = useState(80),
+    decay = _useState82[0],
+    setDecay = _useState82[1];
+  var _useState83 = useState(40),
     _useState84 = _slicedToArray(_useState83, 2),
-    vcfCutoff = _useState84[0],
-    setVcfCutoff = _useState84[1];
-  var _useState85 = useState(15),
+    sustain = _useState84[0],
+    setSustain = _useState84[1];
+  var _useState85 = useState(80),
     _useState86 = _slicedToArray(_useState85, 2),
-    vcfRes = _useState86[0],
-    setVcfRes = _useState86[1];
-  var _useState87 = useState(0),
+    vcfCutoff = _useState86[0],
+    setVcfCutoff = _useState86[1];
+  var _useState87 = useState(15),
     _useState88 = _slicedToArray(_useState87, 2),
-    filterEnvAmt = _useState88[0],
-    setFilterEnvAmt = _useState88[1];
+    vcfRes = _useState88[0],
+    setVcfRes = _useState88[1];
+  var _useState89 = useState(0),
+    _useState90 = _slicedToArray(_useState89, 2),
+    filterEnvAmt = _useState90[0],
+    setFilterEnvAmt = _useState90[1];
 
   // Delay
-  var _useState89 = useState(3),
-    _useState90 = _slicedToArray(_useState89, 2),
-    dlyIdx = _useState90[0],
-    setDlyIdx = _useState90[1];
-  var _useState91 = useState(45),
+  var _useState91 = useState(3),
     _useState92 = _slicedToArray(_useState91, 2),
-    dlyFbPct = _useState92[0],
-    setDlyFbPct = _useState92[1];
-  var _useState93 = useState(50),
+    dlyIdx = _useState92[0],
+    setDlyIdx = _useState92[1];
+  var _useState93 = useState(45),
     _useState94 = _slicedToArray(_useState93, 2),
-    dlyWetPct = _useState94[0],
-    setDlyWetPct = _useState94[1];
-  var _useState95 = useState(8),
+    dlyFbPct = _useState94[0],
+    setDlyFbPct = _useState94[1];
+  var _useState95 = useState(50),
     _useState96 = _slicedToArray(_useState95, 2),
-    dlyHpVal = _useState96[0],
-    setDlyHpVal = _useState96[1];
-  var _useState97 = useState(78),
+    dlyWetPct = _useState96[0],
+    setDlyWetPct = _useState96[1];
+  var _useState97 = useState(8),
     _useState98 = _slicedToArray(_useState97, 2),
-    dlyLpVal = _useState98[0],
-    setDlyLpVal = _useState98[1];
+    dlyHpVal = _useState98[0],
+    setDlyHpVal = _useState98[1];
+  var _useState99 = useState(78),
+    _useState100 = _slicedToArray(_useState99, 2),
+    dlyLpVal = _useState100[0],
+    setDlyLpVal = _useState100[1];
   var bell = useRef(new Bell());
   var stepR = useRef(0),
     cposR = useRef(0),
@@ -1241,7 +1245,8 @@ function Tabula() {
   var loopR = useRef(false),
     activeIdR = useRef(activeId);
   var transpR = useRef(0),
-    varyModeR = useRef(false);
+    varyModeR = useRef(false),
+    recModeR = useRef(false);
   var varyParamsR = useRef({
     dropRate: 13,
     shiftRate: 17,
@@ -1300,6 +1305,9 @@ function Tabula() {
   useEffect(function () {
     varyModeR.current = varyMode;
   }, [varyMode]);
+  useEffect(function () {
+    recModeR.current = recMode;
+  }, [recMode]);
   useEffect(function () {
     monoModeR.current = monoMode;
   }, [monoMode]);
@@ -1637,6 +1645,34 @@ function Tabula() {
             vg = out;
           }
           variedGrids.current.set(pid, vg);
+          // Self-record: capture this variation as a new pattern and append to sequence
+          if (recModeR.current && patsR.current.length < 8) {
+            var _p$gridLen2;
+            var vp = varyParamsR.current;
+            var newParams = (p.params || defaultStepParams()).map(function (sp) {
+              return jitterStepParam(sp, vp);
+            });
+            var newPat = {
+              id: ++_id,
+              name: "ABCDEFGH"[patsR.current.length],
+              grid: vg.map(function (r) {
+                return _toConsumableArray(r);
+              }),
+              params: newParams,
+              gridLen: (_p$gridLen2 = p.gridLen) !== null && _p$gridLen2 !== void 0 ? _p$gridLen2 : 16
+            };
+            setPats(function (ps) {
+              if (ps.length >= 8) {
+                recModeR.current = false;
+                setRecMode(false);
+                return ps;
+              }
+              return [].concat(_toConsumableArray(ps), [newPat]);
+            });
+            setChain(function (c) {
+              return [].concat(_toConsumableArray(c), [newPat.id]);
+            });
+          }
         }
         var grid = varyModeR.current ? variedGrids.current.get(pid) || p && p.grid : p && p.grid;
         var freqs = SCALES[scaleR.current].freqs;
@@ -1703,6 +1739,8 @@ function Tabula() {
             setStep(-1);
             setPlayId(null);
             prevFreqByRowR.current = {};
+            setRecMode(false);
+            recModeR.current = false;
             return _context7.a(2);
           case 1:
             dlyT = 60 / bpm * DLY_NOTES[dlyIdx].mult;
@@ -2795,10 +2833,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState99 = useState(false),
-    _useState100 = _slicedToArray(_useState99, 2),
-    bpmDragging = _useState100[0],
-    setBpmDragging = _useState100[1];
+  var _useState101 = useState(false),
+    _useState102 = _slicedToArray(_useState101, 2),
+    bpmDragging = _useState102[0],
+    setBpmDragging = _useState102[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -2827,10 +2865,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState101 = useState(false),
-    _useState102 = _slicedToArray(_useState101, 2),
-    stDragging = _useState102[0],
-    setStDragging = _useState102[1];
+  var _useState103 = useState(false),
+    _useState104 = _slicedToArray(_useState103, 2),
+    stDragging = _useState104[0],
+    setStDragging = _useState104[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -2859,10 +2897,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState103 = useState(false),
-    _useState104 = _slicedToArray(_useState103, 2),
-    swingDragging = _useState104[0],
-    setSwingDragging = _useState104[1];
+  var _useState105 = useState(false),
+    _useState106 = _slicedToArray(_useState105, 2),
+    swingDragging = _useState106[0],
+    setSwingDragging = _useState106[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -4133,7 +4171,7 @@ function Tabula() {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr auto 1fr",
-      gridTemplateRows: "1fr 1fr",
+      gridTemplateRows: "1fr 1fr 1fr",
       gap: 8,
       marginTop: "auto",
       paddingTop: 16,
@@ -4155,7 +4193,7 @@ function Tabula() {
   }, "VARY"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.playBtn, playing ? S.playOn : {}, {
       gridColumn: 2,
-      gridRow: "1/3",
+      gridRow: "1/4",
       alignSelf: "center"
     }),
     onClick: startStop
@@ -4171,9 +4209,21 @@ function Tabula() {
   }, "MONO"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, {
       width: "100%"
+    }, recMode ? {
+      border: "1px solid #ff4d4d",
+      color: "#ff4d4d",
+      background: "rgba(255,77,77,0.15)",
+      fontWeight: 900
+    } : {
+      border: "1px solid rgba(255,77,77,0.4)",
+      color: "rgba(255,77,77,0.6)"
     }),
-    onClick: mutatePat1
-  }, "MUT8"), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setRecMode(function (r) {
+        return !r;
+      });
+    }
+  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, {
       width: "100%"
     }, loopMode ? S.loopOn : {}),
@@ -4182,7 +4232,12 @@ function Tabula() {
         return !l;
       });
     }
-  }, "LOOP")))), /*#__PURE__*/React.createElement("div", {
+  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }),
+    onClick: mutatePat1
+  }, "MUT8"), /*#__PURE__*/React.createElement("div", null)))), /*#__PURE__*/React.createElement("div", {
     style: IS_MOBILE ? {} : {
       flex: 1,
       minWidth: 0,
@@ -4856,13 +4911,21 @@ function Tabula() {
       });
     }
   }, "VARY"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, monoMode ? {
-      border: "1px solid #00e5ff",
-      color: "#00e5ff",
-      background: "rgba(0,229,255,0.08)"
-    } : {}),
-    onClick: toggleMono
-  }, "MONO"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, recMode ? {
+      border: "1px solid #ff4d4d",
+      color: "#ff4d4d",
+      background: "rgba(255,77,77,0.15)",
+      fontWeight: 900
+    } : {
+      border: "1px solid rgba(255,77,77,0.4)",
+      color: "rgba(255,77,77,0.6)"
+    }),
+    onClick: function onClick() {
+      return setRecMode(function (r) {
+        return !r;
+      });
+    }
+  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.playBtn, playing ? S.playOn : {}),
     onClick: startStop
   }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
