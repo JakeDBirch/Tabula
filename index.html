@@ -124,8 +124,8 @@ var DLY_NOTES = [{
 }];
 var ROWS = 16,
   COLS = 16;
-// Device detection — maxTouchPoints is the most reliable signal
-var IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600;
+// Device detection — maxTouchPoints + UA string covers iframe contexts where touch events may not propagate
+var IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 var PAT_COLORS = ["#00e5ff", "#ff4d6d", "#ffe500", "#69f0ae", "#e040fb", "#ff6d00", "#40c4ff", "#ff80ab"];
 var SLOTS = ["S1", "S2", "S3", "S4"];
 var SPEED_OPTS = [{
@@ -1005,7 +1005,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _activePat$gridLen;
+  var _activePat$gridLen, _SCALES$scale;
   var _useState = useState(function () {
       var a = mkPat("A");
       return [a];
@@ -1115,124 +1115,132 @@ function Tabula() {
     _useState46 = _slicedToArray(_useState45, 2),
     showMenu = _useState46[0],
     setShowMenu = _useState46[1];
-  var _useState47 = useState(null),
+  var _useState47 = useState(false),
     _useState48 = _slicedToArray(_useState47, 2),
-    patMenu = _useState48[0],
-    setPatMenu = _useState48[1]; // {id, x, y}
-  var _useState49 = useState(null),
+    topTrayOpen = _useState48[0],
+    setTopTrayOpen = _useState48[1];
+  var _useState49 = useState(false),
     _useState50 = _slicedToArray(_useState49, 2),
-    paramPopup = _useState50[0],
-    setParamPopup = _useState50[1]; // {col,x,y,activeArm,values}
+    bottomTrayOpen = _useState50[0],
+    setBottomTrayOpen = _useState50[1];
+  var _useState51 = useState(null),
+    _useState52 = _slicedToArray(_useState51, 2),
+    patMenu = _useState52[0],
+    setPatMenu = _useState52[1]; // {id, x, y}
+  var _useState53 = useState(null),
+    _useState54 = _slicedToArray(_useState53, 2),
+    paramPopup = _useState54[0],
+    setParamPopup = _useState54[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState51 = useState(null),
-    _useState52 = _slicedToArray(_useState51, 2),
-    chainDrag = _useState52[0],
-    setChainDrag = _useState52[1]; // {type,id,fromIdx,x,y}
+  var _useState55 = useState(null),
+    _useState56 = _slicedToArray(_useState55, 2),
+    chainDrag = _useState56[0],
+    setChainDrag = _useState56[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
   // Vary params
-  var _useState53 = useState(13),
-    _useState54 = _slicedToArray(_useState53, 2),
-    vDropRate = _useState54[0],
-    setVDropRate = _useState54[1];
-  var _useState55 = useState(17),
-    _useState56 = _slicedToArray(_useState55, 2),
-    vShiftRate = _useState56[0],
-    setVShiftRate = _useState56[1];
-  var _useState57 = useState(1),
+  var _useState57 = useState(13),
     _useState58 = _slicedToArray(_useState57, 2),
-    vShiftRange = _useState58[0],
-    setVShiftRange = _useState58[1];
-  var _useState59 = useState(0),
+    vDropRate = _useState58[0],
+    setVDropRate = _useState58[1];
+  var _useState59 = useState(17),
     _useState60 = _slicedToArray(_useState59, 2),
-    vPitchRate = _useState60[0],
-    setVPitchRate = _useState60[1];
+    vShiftRate = _useState60[0],
+    setVShiftRate = _useState60[1];
   var _useState61 = useState(1),
     _useState62 = _slicedToArray(_useState61, 2),
-    vPitchRange = _useState62[0],
-    setVPitchRange = _useState62[1];
+    vShiftRange = _useState62[0],
+    setVShiftRange = _useState62[1];
   var _useState63 = useState(0),
     _useState64 = _slicedToArray(_useState63, 2),
-    vGhostRate = _useState64[0],
-    setVGhostRate = _useState64[1];
-  var _useState65 = useState(0),
+    vPitchRate = _useState64[0],
+    setVPitchRate = _useState64[1];
+  var _useState65 = useState(1),
     _useState66 = _slicedToArray(_useState65, 2),
-    vVelJitter = _useState66[0],
-    setVVelJitter = _useState66[1];
+    vPitchRange = _useState66[0],
+    setVPitchRange = _useState66[1];
   var _useState67 = useState(0),
     _useState68 = _slicedToArray(_useState67, 2),
-    vCutJitter = _useState68[0],
-    setVCutJitter = _useState68[1];
+    vGhostRate = _useState68[0],
+    setVGhostRate = _useState68[1];
   var _useState69 = useState(0),
     _useState70 = _slicedToArray(_useState69, 2),
-    vDlyJitter = _useState70[0],
-    setVDlyJitter = _useState70[1];
+    vVelJitter = _useState70[0],
+    setVVelJitter = _useState70[1];
   var _useState71 = useState(0),
     _useState72 = _slicedToArray(_useState71, 2),
-    vRhyJitter = _useState72[0],
-    setVRhyJitter = _useState72[1];
+    vCutJitter = _useState72[0],
+    setVCutJitter = _useState72[1];
   var _useState73 = useState(0),
     _useState74 = _slicedToArray(_useState73, 2),
-    vOctJitter = _useState74[0],
-    setVOctJitter = _useState74[1];
+    vDlyJitter = _useState74[0],
+    setVDlyJitter = _useState74[1];
+  var _useState75 = useState(0),
+    _useState76 = _slicedToArray(_useState75, 2),
+    vRhyJitter = _useState76[0],
+    setVRhyJitter = _useState76[1];
+  var _useState77 = useState(0),
+    _useState78 = _slicedToArray(_useState77, 2),
+    vOctJitter = _useState78[0],
+    setVOctJitter = _useState78[1];
 
   // Synth
-  var _useState75 = useState("sawtooth"),
-    _useState76 = _slicedToArray(_useState75, 2),
-    waveform = _useState76[0],
-    setWaveform = _useState76[1];
-  var _useState77 = useState(8),
-    _useState78 = _slicedToArray(_useState77, 2),
-    detune = _useState78[0],
-    setDetune = _useState78[1];
-  var _useState79 = useState(5),
+  var _useState79 = useState("sawtooth"),
     _useState80 = _slicedToArray(_useState79, 2),
-    attack = _useState80[0],
-    setAttack = _useState80[1];
-  var _useState81 = useState(300),
+    waveform = _useState80[0],
+    setWaveform = _useState80[1];
+  var _useState81 = useState(8),
     _useState82 = _slicedToArray(_useState81, 2),
-    decay = _useState82[0],
-    setDecay = _useState82[1];
-  var _useState83 = useState(40),
+    detune = _useState82[0],
+    setDetune = _useState82[1];
+  var _useState83 = useState(5),
     _useState84 = _slicedToArray(_useState83, 2),
-    sustain = _useState84[0],
-    setSustain = _useState84[1];
-  var _useState85 = useState(80),
+    attack = _useState84[0],
+    setAttack = _useState84[1];
+  var _useState85 = useState(300),
     _useState86 = _slicedToArray(_useState85, 2),
-    vcfCutoff = _useState86[0],
-    setVcfCutoff = _useState86[1];
-  var _useState87 = useState(15),
+    decay = _useState86[0],
+    setDecay = _useState86[1];
+  var _useState87 = useState(40),
     _useState88 = _slicedToArray(_useState87, 2),
-    vcfRes = _useState88[0],
-    setVcfRes = _useState88[1];
-  var _useState89 = useState(0),
+    sustain = _useState88[0],
+    setSustain = _useState88[1];
+  var _useState89 = useState(80),
     _useState90 = _slicedToArray(_useState89, 2),
-    filterEnvAmt = _useState90[0],
-    setFilterEnvAmt = _useState90[1];
+    vcfCutoff = _useState90[0],
+    setVcfCutoff = _useState90[1];
+  var _useState91 = useState(15),
+    _useState92 = _slicedToArray(_useState91, 2),
+    vcfRes = _useState92[0],
+    setVcfRes = _useState92[1];
+  var _useState93 = useState(0),
+    _useState94 = _slicedToArray(_useState93, 2),
+    filterEnvAmt = _useState94[0],
+    setFilterEnvAmt = _useState94[1];
 
   // Delay
-  var _useState91 = useState(3),
-    _useState92 = _slicedToArray(_useState91, 2),
-    dlyIdx = _useState92[0],
-    setDlyIdx = _useState92[1];
-  var _useState93 = useState(45),
-    _useState94 = _slicedToArray(_useState93, 2),
-    dlyFbPct = _useState94[0],
-    setDlyFbPct = _useState94[1];
-  var _useState95 = useState(50),
+  var _useState95 = useState(3),
     _useState96 = _slicedToArray(_useState95, 2),
-    dlyWetPct = _useState96[0],
-    setDlyWetPct = _useState96[1];
-  var _useState97 = useState(8),
+    dlyIdx = _useState96[0],
+    setDlyIdx = _useState96[1];
+  var _useState97 = useState(45),
     _useState98 = _slicedToArray(_useState97, 2),
-    dlyHpVal = _useState98[0],
-    setDlyHpVal = _useState98[1];
-  var _useState99 = useState(78),
+    dlyFbPct = _useState98[0],
+    setDlyFbPct = _useState98[1];
+  var _useState99 = useState(50),
     _useState100 = _slicedToArray(_useState99, 2),
-    dlyLpVal = _useState100[0],
-    setDlyLpVal = _useState100[1];
+    dlyWetPct = _useState100[0],
+    setDlyWetPct = _useState100[1];
+  var _useState101 = useState(8),
+    _useState102 = _slicedToArray(_useState101, 2),
+    dlyHpVal = _useState102[0],
+    setDlyHpVal = _useState102[1];
+  var _useState103 = useState(78),
+    _useState104 = _slicedToArray(_useState103, 2),
+    dlyLpVal = _useState104[0],
+    setDlyLpVal = _useState104[1];
   var bell = useRef(new Bell());
   var stepR = useRef(0),
     cposR = useRef(0),
@@ -2833,10 +2841,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState101 = useState(false),
-    _useState102 = _slicedToArray(_useState101, 2),
-    bpmDragging = _useState102[0],
-    setBpmDragging = _useState102[1];
+  var _useState105 = useState(false),
+    _useState106 = _slicedToArray(_useState105, 2),
+    bpmDragging = _useState106[0],
+    setBpmDragging = _useState106[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -2865,10 +2873,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState103 = useState(false),
-    _useState104 = _slicedToArray(_useState103, 2),
-    stDragging = _useState104[0],
-    setStDragging = _useState104[1];
+  var _useState107 = useState(false),
+    _useState108 = _slicedToArray(_useState107, 2),
+    stDragging = _useState108[0],
+    setStDragging = _useState108[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -2897,10 +2905,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState105 = useState(false),
-    _useState106 = _slicedToArray(_useState105, 2),
-    swingDragging = _useState106[0],
-    setSwingDragging = _useState106[1];
+  var _useState109 = useState(false),
+    _useState110 = _slicedToArray(_useState109, 2),
+    swingDragging = _useState110[0],
+    setSwingDragging = _useState110[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -3405,130 +3413,15 @@ function Tabula() {
     style: S.bpmOverlayLbl
   }, "SEMITONES"), /*#__PURE__*/React.createElement("div", {
     style: S.bpmOverlayHint
-  }, "\u2191 drag \u2193")), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
-    style: S.hdr
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.brand
-  }, "TABULA"), /*#__PURE__*/React.createElement("div", {
-    style: S.hdrR
-  }, /*#__PURE__*/React.createElement("select", {
-    style: S.sel,
-    value: scale,
-    onChange: function onChange(e) {
-      return setScale(e.target.value);
-    }
-  }, Object.entries(SCALES).map(function (_ref15) {
-    var _ref16 = _slicedToArray(_ref15, 2),
-      k = _ref16[0],
-      v = _ref16[1];
-    return /*#__PURE__*/React.createElement("option", {
-      key: k,
-      value: k
-    }, v.label);
-  })), /*#__PURE__*/React.createElement("div", {
-    ref: bpmDragRef,
-    style: S.bpmDragTarget,
-    onPointerDown: handleBpmDown,
-    onPointerMove: handleBpmMove,
-    onPointerUp: handleBpmUp,
-    onPointerCancel: handleBpmUp
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.widgetN
-  }, bpm), /*#__PURE__*/React.createElement("span", {
-    style: S.widgetU
-  }, "BPM \u2195")), /*#__PURE__*/React.createElement("div", {
-    ref: stDragRef,
-    style: S.bpmDragTarget,
-    onPointerDown: handleStDown,
-    onPointerMove: handleStMove,
-    onPointerUp: handleStUp,
-    onPointerCancel: handleStUp
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.widgetN
-  }, stLabel), /*#__PURE__*/React.createElement("span", {
-    style: S.widgetU
-  }, "ST \u2195")), /*#__PURE__*/React.createElement("div", {
-    ref: swingDragRef,
-    style: S.bpmDragTarget,
-    onPointerDown: handleSwingDown,
-    onPointerMove: handleSwingMove,
-    onPointerUp: handleSwingUp,
-    onPointerCancel: handleSwingUp
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.widgetN
-  }, swing), /*#__PURE__*/React.createElement("span", {
-    style: S.widgetU
-  }, "SWG \u2195")))), function () {
-    var pillRow = /*#__PURE__*/React.createElement("div", {
-      style: S.patRow
-    }, pats.map(function (p, i) {
-      var isA = p.id === activeId,
-        isP = playing && playId === p.id,
-        col = patCol(i);
-      var isDragging = chainDrag && chainDrag.type === 'pill' && chainDrag.id === p.id;
-      return /*#__PURE__*/React.createElement("div", {
-        key: p.id,
-        style: Object.assign({}, S.pill, {
-          border: "1.5px solid " + col,
-          background: isA ? col : "transparent",
-          color: isA ? "#000" : col,
-          boxShadow: isDragging ? "0 0 20px " + col : isP ? "0 0 14px " + col + "88" : "none",
-          opacity: isDragging ? 0.5 : 1,
-          touchAction: "none"
-        }),
-        onClick: function onClick() {
-          return setActiveId(p.id);
-        },
-        onPointerDown: function onPointerDown(e) {
-          return startPillDrag(e, p.id);
-        },
-        onPointerMove: onDragMove,
-        onPointerUp: function onPointerUp(e) {
-          if (pillLongPressR.current) {
-            clearTimeout(pillLongPressR.current);
-            pillLongPressR.current = null;
-          }
-          onDragUp(e);
-        },
-        onPointerCancel: function onPointerCancel(e) {
-          if (pillLongPressR.current) {
-            clearTimeout(pillLongPressR.current);
-            pillLongPressR.current = null;
-          }
-          onDragUp(e);
-        },
-        onContextMenu: function onContextMenu(e) {
-          return handlePillContextMenu(e, p.id);
-        }
-      }, isP && /*#__PURE__*/React.createElement("span", {
-        className: "pp"
-      }, "\u25CF"), p.name);
-    }), pats.length < 8 && /*#__PURE__*/React.createElement("button", {
-      style: S.newPill,
-      onClick: addPat
-    }, "\uFF0B"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1
-      }
-    }), /*#__PURE__*/React.createElement("button", {
-      style: S.menuBtn,
-      onClick: function onClick() {
-        return setShowMenu(function (m) {
-          return !m;
-        });
-      }
-    }, "\u22EF"));
-    if (!IS_MOBILE) return null; // desktop renders pills inside left column
-    return pillRow;
-  }(), /*#__PURE__*/React.createElement("div", {
-    style: IS_MOBILE ? {} : {
+  }, "\u2191 drag \u2193")), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    style: {
       display: "flex",
       gap: 20,
       height: "calc(100dvh - 52px)",
       alignItems: "stretch"
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: IS_MOBILE ? {} : {
+    style: {
       width: 280,
       flexShrink: 0,
       minHeight: 0,
@@ -3556,10 +3449,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref17) {
-    var _ref18 = _slicedToArray(_ref17, 2),
-      k = _ref18[0],
-      v = _ref18[1];
+  }, Object.entries(SCALES).map(function (_ref15) {
+    var _ref16 = _slicedToArray(_ref15, 2),
+      k = _ref16[0],
+      v = _ref16[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -3611,9 +3504,9 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref19) {
-    var label = _ref19.label,
-      mult = _ref19.mult;
+  }, SPEED_OPTS.map(function (_ref17) {
+    var label = _ref17.label,
+      mult = _ref17.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3703,9 +3596,9 @@ function Tabula() {
     onChange: handleImport
   }))), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref20) {
-    var label = _ref20.label,
-      mult = _ref20.mult;
+  }, SPEED_OPTS.map(function (_ref18) {
+    var label = _ref18.label,
+      mult = _ref18.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -3713,327 +3606,7 @@ function Tabula() {
         return setSpeedMult(mult);
       }
     }, label);
-  })), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
-    style: S.tabs
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
-    var _ref22 = _slicedToArray(_ref21, 2),
-      p = _ref22[0],
-      lbl = _ref22[1];
-    return /*#__PURE__*/React.createElement("button", {
-      key: p,
-      style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
-      onClick: function onClick() {
-        return setPage(p);
-      }
-    }, lbl);
-  })), (IS_MOBILE ? page === "step" : false) && /*#__PURE__*/React.createElement("div", {
-    style: S.stepPage
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.stepPageHdr
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.stepPagePat
-  }, (activePat === null || activePat === void 0 ? void 0 : activePat.name) || ""), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  })), LANES.map(function (lane) {
-    var vals = (activePat ? activePat.params || defaultStepParams() : defaultStepParams()).map(function (sp) {
-      var _sp$lane$key;
-      return (_sp$lane$key = sp[lane.key]) !== null && _sp$lane$key !== void 0 ? _sp$lane$key : lane.def;
-    });
-    var colHasNote = Array.from({
-      length: COLS
-    }, function (_, c) {
-      return !!(activePat && Array.from({
-        length: ROWS
-      }, function (_, r) {
-        return activePat.grid[r][c];
-      }).some(Boolean));
-    });
-    var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
-    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? curVal === 0 ? "TIE" : curVal === 1 ? "—" : "×" + curVal : String(curVal);
-    return /*#__PURE__*/React.createElement("div", {
-      key: lane.key,
-      style: S.stepLaneSection
-    }, /*#__PURE__*/React.createElement("div", {
-      style: S.stepLaneHdr
-    }, /*#__PURE__*/React.createElement("div", {
-      style: Object.assign({}, S.stepLaneName, {
-        color: lane.color
-      })
-    }, lane.label), liveLabel && /*#__PURE__*/React.createElement("div", {
-      style: Object.assign({}, S.stepLiveVal, {
-        color: lane.color
-      })
-    }, liveLabel), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1
-      }
-    }), /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.stepLaneBtn, {
-        borderColor: lane.color + "33",
-        color: lane.color + "99"
-      }),
-      onClick: function onClick() {
-        return resetStepLane(lane.key);
-      }
-    }, "RST"), /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.stepLaneBtn, {
-        borderColor: lane.color + "55",
-        color: lane.color
-      }),
-      onClick: function onClick() {
-        return randStepLane(lane.key);
-      }
-    }, "RAND")), /*#__PURE__*/React.createElement(StepLane, {
-      lane: lane,
-      values: vals,
-      colHasNote: colHasNote,
-      activeStep: playing && playId === activeId ? step : -1,
-      onChange: function onChange(col, val) {
-        return setStepParam(col, lane.key, val);
-      },
-      tall: true
-    }));
-  }), /*#__PURE__*/React.createElement("div", {
-    style: S.stepVaryDivider
-  }), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "RHYTHM VARY / MUT8",
-    accent: "#ff9800"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "DROP",
-    value: vDropRate,
-    min: 0,
-    max: 60,
-    onChange: setVDropRate,
-    display: vDropRate + "%",
-    accent: "#ff9800"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SHIFT",
-    value: vShiftRate,
-    min: 0,
-    max: 60,
-    onChange: setVShiftRate,
-    display: vShiftRate + "%",
-    accent: "#ff9800"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "RANGE",
-    value: vShiftRange,
-    min: 1,
-    max: 8,
-    onChange: setVShiftRange,
-    display: vShiftRange + "st",
-    accent: "#ff9800"
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "MELODY VARY / MUT8",
-    accent: "#e040fb"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "PITCH",
-    value: vPitchRate,
-    min: 0,
-    max: 60,
-    onChange: setVPitchRate,
-    display: vPitchRate + "%",
-    accent: "#e040fb"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "RANGE",
-    value: vPitchRange,
-    min: 1,
-    max: 12,
-    onChange: setVPitchRange,
-    display: vPitchRange + "st",
-    accent: "#e040fb"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "GHOST",
-    value: vGhostRate,
-    min: 0,
-    max: 60,
-    onChange: setVGhostRate,
-    display: vGhostRate + "%",
-    accent: "#e040fb"
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "STEP VARY / MUT8",
-    accent: "#00e5ff"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "VEL",
-    value: vVelJitter,
-    min: 0,
-    max: 100,
-    onChange: setVVelJitter,
-    display: vVelJitter + "%",
-    accent: "#00e5ff"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "CUT",
-    value: vCutJitter,
-    min: 0,
-    max: 100,
-    onChange: setVCutJitter,
-    display: vCutJitter + "%",
-    accent: "#00e5ff"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "DLY",
-    value: vDlyJitter,
-    min: 0,
-    max: 100,
-    onChange: setVDlyJitter,
-    display: vDlyJitter + "%",
-    accent: "#00e5ff"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "RHY",
-    value: vRhyJitter,
-    min: 0,
-    max: 100,
-    onChange: setVRhyJitter,
-    display: vRhyJitter + "%",
-    accent: "#00e5ff"
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "OCT",
-    value: vOctJitter,
-    min: 0,
-    max: 100,
-    onChange: setVOctJitter,
-    display: vOctJitter + "%",
-    accent: "#00e5ff"
-  })))), (IS_MOBILE ? page === "sound" : false) && /*#__PURE__*/React.createElement("div", {
-    style: S.soundPage
-  }, /*#__PURE__*/React.createElement(SynthSection, {
-    title: "OSCILLATOR",
-    accent: C_OSC
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.wfRow
-  }, WAVEFORMS.map(function (w, i) {
-    return /*#__PURE__*/React.createElement("button", {
-      key: w,
-      style: Object.assign({}, S.wfBtn, {
-        borderColor: C_OSC + (waveform === w ? "" : "22"),
-        color: waveform === w ? C_OSC : "rgba(255,255,255,0.35)",
-        background: waveform === w ? C_OSC + "14" : "transparent"
-      }),
-      onClick: function onClick() {
-        return setWaveform(w);
-      }
-    }, WF_LABELS[i]);
-  })), /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "DETUNE",
-    value: detune,
-    min: 0,
-    max: 50,
-    onChange: setDetune,
-    display: detune + "¢",
-    accent: C_OSC
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "ENV",
-    accent: C_ENV
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "ATK",
-    value: attack,
-    min: 0,
-    max: 100,
-    onChange: setAttack,
-    display: (attack / 10).toFixed(1) + "s",
-    accent: C_ENV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "DEC",
-    value: decay,
-    min: 0,
-    max: 100,
-    onChange: setDecay,
-    display: (decay / 10).toFixed(1) + "s",
-    accent: C_ENV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SUS",
-    value: sustain,
-    min: 0,
-    max: 100,
-    onChange: setSustain,
-    display: sustain + "%",
-    accent: C_ENV
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "FILTER",
-    accent: C_FILT
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "CUT",
-    value: vcfCutoff,
-    min: 0,
-    max: 100,
-    onChange: setVcfCutoff,
-    display: vcfCutoff + "%",
-    accent: C_FILT
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "RES",
-    value: vcfRes,
-    min: 0,
-    max: 100,
-    onChange: setVcfRes,
-    display: vcfRes + "%",
-    accent: C_FILT
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "ENV",
-    value: filterEnvAmt,
-    min: 0,
-    max: 100,
-    onChange: setFilterEnvAmt,
-    display: filterEnvAmt + "%",
-    accent: C_FILT
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "DELAY",
-    accent: C_DLY
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.threeGrid
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "TIME",
-    value: dlyIdx,
-    min: 0,
-    max: DLY_NOTES.length - 1,
-    onChange: setDlyIdx,
-    display: DLY_NOTES[dlyIdx].label,
-    accent: C_DLY,
-    steps: DLY_NOTES.length
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SEND",
-    value: dlyWetPct,
-    min: 0,
-    max: 100,
-    onChange: setDlyWetPct,
-    display: dlyWetPct + "%",
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "FDBK",
-    value: dlyFbPct,
-    min: 0,
-    max: 95,
-    onChange: setDlyFbPct,
-    display: dlyFbPct + "%",
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HP",
-    value: dlyHpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyHpVal,
-    display: dlyHpVal + "%",
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "LP",
-    value: dlyLpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyLpVal,
-    display: dlyLpVal + "%",
-    accent: C_DLY
-  })))), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  })), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.patRow), {}, {
       flexShrink: 0,
       paddingBottom: 6,
@@ -4238,7 +3811,7 @@ function Tabula() {
     }),
     onClick: mutatePat1
   }, "MUT8"), /*#__PURE__*/React.createElement("div", null)))), /*#__PURE__*/React.createElement("div", {
-    style: IS_MOBILE ? {} : {
+    style: {
       flex: 1,
       minWidth: 0,
       minHeight: 0,
@@ -4247,7 +3820,7 @@ function Tabula() {
       overflow: "hidden"
     }
   }, page === "edit" && /*#__PURE__*/React.createElement("div", {
-    style: IS_MOBILE ? {} : {
+    style: {
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
@@ -4255,7 +3828,7 @@ function Tabula() {
       overflow: "hidden"
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: IS_MOBILE ? {} : {
+    style: {
       width: "min(100%, calc(100dvh - 120px))",
       aspectRatio: "1",
       display: "flex",
@@ -4265,7 +3838,7 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     ref: gridRef,
     "data-grid": "1",
-    style: Object.assign({}, S.gridWrap, shifting ? S.gridShifting : {}, IS_MOBILE ? {} : {
+    style: Object.assign({}, S.gridWrap, shifting ? S.gridShifting : {}, {
       flex: 1,
       display: "flex",
       flexDirection: "column"
@@ -4500,8 +4073,8 @@ function Tabula() {
     }
   })), LANES.map(function (lane) {
     var vals = (activePat ? activePat.params || defaultStepParams() : defaultStepParams()).map(function (sp) {
-      var _sp$lane$key2;
-      return (_sp$lane$key2 = sp[lane.key]) !== null && _sp$lane$key2 !== void 0 ? _sp$lane$key2 : lane.def;
+      var _sp$lane$key;
+      return (_sp$lane$key = sp[lane.key]) !== null && _sp$lane$key !== void 0 ? _sp$lane$key : lane.def;
     });
     var colHasNote = Array.from({
       length: COLS
@@ -4807,10 +4380,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref23) {
-    var _ref24 = _slicedToArray(_ref23, 2),
-      p = _ref24[0],
-      lbl = _ref24[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref19) {
+    var _ref20 = _slicedToArray(_ref19, 2),
+      p = _ref20[0],
+      lbl = _ref20[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -4818,27 +4391,1029 @@ function Tabula() {
         return setPage(p);
       }
     }, lbl);
-  }))))), IS_MOBILE && showMenu && /*#__PURE__*/React.createElement("div", {
-    style: S.menuOverlay,
-    onPointerDown: function onPointerDown() {
-      return setShowMenu(false);
+  }))))), " ", IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      display: "flex",
+      flexDirection: "column",
+      background: "#000",
+      overflow: "hidden"
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: S.menuPanel,
-    onPointerDown: function onPointerDown(e) {
-      return e.stopPropagation();
+    style: {
+      height: 52,
+      flexShrink: 0,
+      display: "flex",
+      alignItems: "center",
+      padding: "0 14px",
+      gap: 10,
+      borderBottom: "1px solid rgba(255,255,255,0.07)",
+      zIndex: 10,
+      touchAction: "none"
+    },
+    onClick: function onClick() {
+      setTopTrayOpen(function (t) {
+        return !t;
+      });
+      setBottomTrayOpen(false);
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Orbitron',sans-serif",
+      fontSize: 15,
+      fontWeight: 900,
+      letterSpacing: 4,
+      background: "linear-gradient(135deg,#00e5ff,#e040fb)",
+      WebkitBackgroundClip: "text",
+      WebkitTextFillColor: "transparent"
+    }
+  }, "TABULA"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: "rgba(255,255,255,0.35)",
+      letterSpacing: 1
+    }
+  }, (_SCALES$scale = SCALES[scale]) === null || _SCALES$scale === void 0 || (_SCALES$scale = _SCALES$scale.label) === null || _SCALES$scale === void 0 ? void 0 : _SCALES$scale.slice(0, 5)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      color: "rgba(255,255,255,0.85)"
+    }
+  }, bpm), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: "rgba(255,255,255,0.3)",
+      letterSpacing: 1
+    }
+  }, "BPM"), transpose !== 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      color: "rgba(255,255,255,0.85)"
+    }
+  }, stLabel), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: "rgba(255,255,255,0.3)"
+    }
+  }, "ST")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 18,
+      color: "rgba(255,255,255,0.3)",
+      lineHeight: 1,
+      transition: "transform .2s",
+      display: "inline-block",
+      transform: topTrayOpen ? "rotate(180deg)" : "none"
+    }
+  }, "\u2304")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minHeight: 0,
+      overflow: "hidden",
+      position: "relative"
+    }
+  }, page === "edit" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "min(100%,calc(100dvh - 174px))",
+      aspectRatio: "1",
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    ref: gridRef,
+    "data-grid": "1",
+    style: Object.assign({}, S.gridWrap, shifting ? S.gridShifting : {}, {
+      flex: 1,
+      display: "flex",
+      flexDirection: "column"
+    }),
+    onPointerDown: handleGridDown,
+    onPointerMove: handleGridMove,
+    onPointerUp: handleGridUp,
+    onPointerCancel: handleGridUp,
+    onContextMenu: handleGridContextMenu
+  }, Array.from({
+    length: ROWS
+  }, function (_, r) {
+    var fromBot = ROWS - 1 - r;
+    var isOct = fromBot % SCALE_SPAN === 0;
+    var isFifth = !isOct && fromBot % SCALE_SPAN === 4;
+    var rowBorder = isOct ? "1px solid rgba(255,255,255,0.2)" : isFifth ? "1px solid rgba(120,200,255,0.12)" : "none";
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      style: Object.assign({}, S.gridRow, {
+        borderTop: rowBorder,
+        position: "relative"
+      })
+    }, Array.from({
+      length: COLS
+    }, function (_, c) {
+      var isCol = playing && playId === activeId && c === step,
+        isQ = c % 4 === 0;
+      var on = activePat ? activePat.grid[r][c] : false;
+      var inactive = c >= gridLen;
+      return /*#__PURE__*/React.createElement("div", {
+        key: c,
+        "data-row": r,
+        "data-col": c,
+        style: Object.assign({}, S.cell, {
+          aspectRatio: "1",
+          background: inactive ? "rgba(255,255,255,0.008)" : isCol ? "rgba(255,255,255,0.10)" : isQ ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.015)",
+          outline: isQ && !on && !inactive ? "1px solid rgba(255,255,255,0.06)" : "none",
+          outlineOffset: "-1px"
+        })
+      });
+    }), function () {
+      var rects = [];
+      var ci = 0;
+      while (ci < COLS) {
+        var on = activePat ? activePat.grid[r][ci] : false;
+        if (on) {
+          var _activePat$params3, _p$rhy2, _p$vel2;
+          var p = activePat === null || activePat === void 0 || (_activePat$params3 = activePat.params) === null || _activePat$params3 === void 0 ? void 0 : _activePat$params3[ci];
+          var rhy = p ? Math.round((_p$rhy2 = p.rhy) !== null && _p$rhy2 !== void 0 ? _p$rhy2 : 1) : 1;
+          if (rhy === 0) {
+            ci++;
+            continue;
+          }
+          var span = 1,
+            nc = ci + 1;
+          while (nc < COLS && activePat !== null && activePat !== void 0 && activePat.grid[r][nc]) {
+            var _activePat$params4, _np2$rhy2;
+            var np2 = activePat === null || activePat === void 0 || (_activePat$params4 = activePat.params) === null || _activePat$params4 === void 0 ? void 0 : _activePat$params4[nc];
+            if (np2 && Math.round((_np2$rhy2 = np2.rhy) !== null && _np2$rhy2 !== void 0 ? _np2$rhy2 : 1) === 0) {
+              span++;
+              nc++;
+            } else break;
+          }
+          var vel = p ? (_p$vel2 = p.vel) !== null && _p$vel2 !== void 0 ? _p$vel2 : 100 : 100;
+          var b = 0.35 + vel / 127 * 0.65;
+          var inactive = ci >= gridLen;
+          var bright = inactive ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,".concat(b, ")");
+          var glow = inactive ? "none" : "0 0 4px rgba(255,255,255,".concat(b * 0.5, "),0 0 10px rgba(255,255,255,").concat(b * 0.22, ")");
+          var isActive = !inactive && playing && playId === activeId && step >= ci && step < ci + span;
+          var L = "calc(".concat(ci / COLS, "*(100% + 2px))");
+          var W = "calc(".concat(span / COLS, "*(100% + 2px) - 2px)");
+          rects.push(/*#__PURE__*/React.createElement("div", {
+            key: ci,
+            style: {
+              position: "absolute",
+              left: L,
+              width: W,
+              top: 1,
+              bottom: 1,
+              borderRadius: span > 1 ? 3 : 2,
+              background: isActive ? bright : inactive ? bright : "rgba(255,255,255,".concat(b * 0.75, ")"),
+              boxShadow: isActive ? glow : "none",
+              pointerEvents: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              gap: "2px",
+              padding: "0 2px"
+            }
+          }, !inactive && rhy === 2 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+            style: {
+              flex: 1,
+              height: "72%",
+              borderRadius: 1,
+              background: "rgba(0,0,0,0.25)"
+            }
+          }), /*#__PURE__*/React.createElement("div", {
+            style: {
+              flex: 1,
+              height: "72%",
+              borderRadius: 1,
+              background: "rgba(0,0,0,0.25)"
+            }
+          })), !inactive && rhy === 3 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+            style: {
+              flex: 1,
+              height: "72%",
+              borderRadius: 1,
+              background: "rgba(0,0,0,0.25)"
+            }
+          }), /*#__PURE__*/React.createElement("div", {
+            style: {
+              flex: 1,
+              height: "72%",
+              borderRadius: 1,
+              background: "rgba(0,0,0,0.25)"
+            }
+          }), /*#__PURE__*/React.createElement("div", {
+            style: {
+              flex: 1,
+              height: "72%",
+              borderRadius: 1,
+              background: "rgba(0,0,0,0.25)"
+            }
+          })), !inactive && rhy >= 4 && /*#__PURE__*/React.createElement("div", {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "1px",
+              width: "80%",
+              height: "80%"
+            }
+          }, [0, 1, 2, 3].map(function (i) {
+            return /*#__PURE__*/React.createElement("div", {
+              key: i,
+              style: {
+                borderRadius: 1,
+                background: "rgba(0,0,0,0.25)"
+              }
+            });
+          }))));
+          ci += span;
+        } else {
+          ci++;
+        }
+      }
+      return rects;
+    }());
+  })), /*#__PURE__*/React.createElement("div", {
+    style: S.stepBar
+  }, Array.from({
+    length: COLS
+  }, function (_, c) {
+    var isA = playing && c === step,
+      isQ = c % 4 === 0,
+      inactive = c >= gridLen;
+    return /*#__PURE__*/React.createElement("div", {
+      key: c,
+      style: S.stepColWrap
+    }, /*#__PURE__*/React.createElement("div", {
+      style: Object.assign({}, S.stepDot, {
+        background: inactive ? "rgba(255,255,255,0.06)" : isA ? "rgba(255,255,255,0.9)" : isQ ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
+        transform: inactive ? "scaleY(0.2)" : isA ? "scaleY(1)" : isQ ? "scaleY(0.6)" : "scaleY(0.3)"
+      })
+    }));
+  })), /*#__PURE__*/React.createElement("div", {
+    ref: lenSliderRef,
+    style: S.lenSlider,
+    onPointerDown: handleLenDown,
+    onPointerMove: handleLenMove,
+    onPointerUp: handleLenUp,
+    onPointerCancel: handleLenUp
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: "".concat(gridLen / COLS * 100, "%"),
+      background: "rgba(255,255,255,0.18)",
+      borderRadius: "3px 0 0 3px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: "".concat((COLS - gridLen) / COLS * 100, "%"),
+      background: "rgba(255,255,255,0.04)",
+      borderRadius: "0 3px 3px 0"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: -3,
+      bottom: -3,
+      width: 3,
+      left: "calc(".concat(gridLen / COLS * 100, "% - 1px)"),
+      background: "rgba(255,255,255,0.8)",
+      borderRadius: 2,
+      boxShadow: "0 0 6px rgba(255,255,255,0.4)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute",
+      right: 4,
+      top: "50%",
+      transform: "translateY(-50%)",
+      fontSize: 7,
+      color: "rgba(255,255,255,0.3)",
+      pointerEvents: "none"
+    }
+  }, gridLen)))), page === "step" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      overflowY: "scroll",
+      padding: "12px 12px 20px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.stepPageHdr
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.stepPagePat
+  }, (activePat === null || activePat === void 0 ? void 0 : activePat.name) || "")), LANES.map(function (lane) {
+    var vals = (activePat ? activePat.params || defaultStepParams() : defaultStepParams()).map(function (sp) {
+      var _sp$lane$key2;
+      return (_sp$lane$key2 = sp[lane.key]) !== null && _sp$lane$key2 !== void 0 ? _sp$lane$key2 : lane.def;
+    });
+    var colHasNote = Array.from({
+      length: COLS
+    }, function (_, c) {
+      return !!(activePat && Array.from({
+        length: ROWS
+      }, function (_, r) {
+        return activePat.grid[r][c];
+      }).some(Boolean));
+    });
+    var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
+    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? curVal === 0 ? "TIE" : curVal === 1 ? "—" : "×" + curVal : String(curVal);
+    return /*#__PURE__*/React.createElement("div", {
+      key: lane.key,
+      style: S.stepLaneSection
+    }, /*#__PURE__*/React.createElement("div", {
+      style: S.stepLaneHdr
+    }, /*#__PURE__*/React.createElement("div", {
+      style: Object.assign({}, S.stepLaneName, {
+        color: lane.color
+      })
+    }, lane.label), liveLabel && /*#__PURE__*/React.createElement("div", {
+      style: Object.assign({}, S.stepLiveVal, {
+        color: lane.color
+      })
+    }, liveLabel), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      style: Object.assign({}, S.stepLaneBtn, {
+        borderColor: lane.color + "33",
+        color: lane.color + "99"
+      }),
+      onClick: function onClick() {
+        return resetStepLane(lane.key);
+      }
+    }, "RST"), /*#__PURE__*/React.createElement("button", {
+      style: Object.assign({}, S.stepLaneBtn, {
+        borderColor: lane.color + "55",
+        color: lane.color
+      }),
+      onClick: function onClick() {
+        return randStepLane(lane.key);
+      }
+    }, "RAND")), /*#__PURE__*/React.createElement(StepLane, {
+      lane: lane,
+      values: vals,
+      colHasNote: colHasNote,
+      activeStep: playing && playId === activeId ? step : -1,
+      onChange: function onChange(col, val) {
+        return setStepParam(col, lane.key, val);
+      },
+      tall: true
+    }));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: S.stepVaryDivider
+  }), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "RHYTHM VARY / MUT8",
+    accent: "#ff9800"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "DROP",
+    value: vDropRate,
+    min: 0,
+    max: 60,
+    onChange: setVDropRate,
+    display: vDropRate + "%",
+    accent: "#ff9800"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SHIFT",
+    value: vShiftRate,
+    min: 0,
+    max: 60,
+    onChange: setVShiftRate,
+    display: vShiftRate + "%",
+    accent: "#ff9800"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "RANGE",
+    value: vShiftRange,
+    min: 1,
+    max: 8,
+    onChange: setVShiftRange,
+    display: vShiftRange + "st",
+    accent: "#ff9800"
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "MELODY VARY / MUT8",
+    accent: "#e040fb"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "PITCH",
+    value: vPitchRate,
+    min: 0,
+    max: 60,
+    onChange: setVPitchRate,
+    display: vPitchRate + "%",
+    accent: "#e040fb"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "RANGE",
+    value: vPitchRange,
+    min: 1,
+    max: 12,
+    onChange: setVPitchRange,
+    display: vPitchRange + "st",
+    accent: "#e040fb"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "GHOST",
+    value: vGhostRate,
+    min: 0,
+    max: 60,
+    onChange: setVGhostRate,
+    display: vGhostRate + "%",
+    accent: "#e040fb"
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "STEP VARY / MUT8",
+    accent: "#00e5ff"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "VEL",
+    value: vVelJitter,
+    min: 0,
+    max: 100,
+    onChange: setVVelJitter,
+    display: vVelJitter + "%",
+    accent: "#00e5ff"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "CUT",
+    value: vCutJitter,
+    min: 0,
+    max: 100,
+    onChange: setVCutJitter,
+    display: vCutJitter + "%",
+    accent: "#00e5ff"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "DLY",
+    value: vDlyJitter,
+    min: 0,
+    max: 100,
+    onChange: setVDlyJitter,
+    display: vDlyJitter + "%",
+    accent: "#00e5ff"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "RHY",
+    value: vRhyJitter,
+    min: 0,
+    max: 100,
+    onChange: setVRhyJitter,
+    display: vRhyJitter + "%",
+    accent: "#00e5ff"
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "OCT",
+    value: vOctJitter,
+    min: 0,
+    max: 100,
+    onChange: setVOctJitter,
+    display: vOctJitter + "%",
+    accent: "#00e5ff"
+  })))), page === "sound" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      overflowY: "scroll",
+      padding: "12px 12px 20px"
+    }
+  }, /*#__PURE__*/React.createElement(SynthSection, {
+    title: "OSCILLATOR",
+    accent: C_OSC
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.wfRow
+  }, WAVEFORMS.map(function (w, i) {
+    return /*#__PURE__*/React.createElement("button", {
+      key: w,
+      style: Object.assign({}, S.wfBtn, {
+        borderColor: C_OSC + (waveform === w ? "" : "22"),
+        color: waveform === w ? C_OSC : "rgba(255,255,255,0.35)",
+        background: waveform === w ? C_OSC + "14" : "transparent"
+      }),
+      onClick: function onClick() {
+        return setWaveform(w);
+      }
+    }, WF_LABELS[i]);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "DETUNE",
+    value: detune,
+    min: 0,
+    max: 50,
+    onChange: setDetune,
+    display: detune + "¢",
+    accent: C_OSC
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "ENV",
+    accent: C_ENV
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "ATK",
+    value: attack,
+    min: 0,
+    max: 100,
+    onChange: setAttack,
+    display: (attack / 10).toFixed(1) + "s",
+    accent: C_ENV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "DEC",
+    value: decay,
+    min: 0,
+    max: 100,
+    onChange: setDecay,
+    display: (decay / 10).toFixed(1) + "s",
+    accent: C_ENV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SUS",
+    value: sustain,
+    min: 0,
+    max: 100,
+    onChange: setSustain,
+    display: sustain + "%",
+    accent: C_ENV
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "FILTER",
+    accent: C_FILT
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "CUT",
+    value: vcfCutoff,
+    min: 0,
+    max: 100,
+    onChange: setVcfCutoff,
+    display: vcfCutoff + "%",
+    accent: C_FILT
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "RES",
+    value: vcfRes,
+    min: 0,
+    max: 100,
+    onChange: setVcfRes,
+    display: vcfRes + "%",
+    accent: C_FILT
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "ENV",
+    value: filterEnvAmt,
+    min: 0,
+    max: 100,
+    onChange: setFilterEnvAmt,
+    display: filterEnvAmt + "%",
+    accent: C_FILT
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "DELAY",
+    accent: C_DLY
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.threeGrid
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "TIME",
+    value: dlyIdx,
+    min: 0,
+    max: DLY_NOTES.length - 1,
+    onChange: setDlyIdx,
+    display: DLY_NOTES[dlyIdx].label,
+    accent: C_DLY,
+    steps: DLY_NOTES.length
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SEND",
+    value: dlyWetPct,
+    min: 0,
+    max: 100,
+    onChange: setDlyWetPct,
+    display: dlyWetPct + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "FDBK",
+    value: dlyFbPct,
+    min: 0,
+    max: 95,
+    onChange: setDlyFbPct,
+    display: dlyFbPct + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "HP",
+    value: dlyHpVal,
+    min: 0,
+    max: 100,
+    onChange: setDlyHpVal,
+    display: dlyHpVal + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "LP",
+    value: dlyLpVal,
+    min: 0,
+    max: 100,
+    onChange: setDlyLpVal,
+    display: dlyLpVal + "%",
+    accent: C_DLY
+  }))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flexShrink: 0,
+      borderTop: "1px solid rgba(255,255,255,0.07)",
+      background: "rgba(0,0,0,0.98)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 5,
+      overflowX: "auto",
+      scrollbarWidth: "none",
+      padding: "7px 12px 3px",
+      alignItems: "center",
+      touchAction: "none"
+    }
+  }, pats.map(function (p, i) {
+    var isA = p.id === activeId,
+      isP = playing && playId === p.id,
+      col = patCol(i);
+    var isDragging = chainDrag && chainDrag.type === 'pill' && chainDrag.id === p.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      style: Object.assign({}, S.pill, {
+        border: "1.5px solid " + col,
+        background: isA ? col : "transparent",
+        color: isA ? "#000" : col,
+        boxShadow: isDragging ? "0 0 20px " + col : isP ? "0 0 14px " + col + "88" : "none",
+        opacity: isDragging ? 0.5 : 1,
+        touchAction: "none"
+      }),
+      onClick: function onClick() {
+        return setActiveId(p.id);
+      },
+      onPointerDown: function onPointerDown(e) {
+        return startPillDrag(e, p.id);
+      },
+      onPointerMove: onDragMove,
+      onPointerUp: function onPointerUp(e) {
+        if (pillLongPressR.current) {
+          clearTimeout(pillLongPressR.current);
+          pillLongPressR.current = null;
+        }
+        onDragUp(e);
+      },
+      onPointerCancel: function onPointerCancel(e) {
+        if (pillLongPressR.current) {
+          clearTimeout(pillLongPressR.current);
+          pillLongPressR.current = null;
+        }
+        onDragUp(e);
+      },
+      onContextMenu: function onContextMenu(e) {
+        return handlePillContextMenu(e, p.id);
+      }
+    }, isP && /*#__PURE__*/React.createElement("span", {
+      className: "pp"
+    }, "\u25CF"), p.name);
+  }), pats.length < 8 && /*#__PURE__*/React.createElement("button", {
+    style: S.newPill,
+    onClick: addPat
+  }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+      padding: "3px 12px 10px"
+    }
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"]].map(function (_ref21) {
+    var _ref22 = _slicedToArray(_ref21, 2),
+      p = _ref22[0],
+      lbl = _ref22[1];
+    return /*#__PURE__*/React.createElement("button", {
+      key: p,
+      style: Object.assign({}, S.tab, {
+        flex: 1,
+        fontSize: 9,
+        padding: "10px 0"
+      }, page === p ? S.tabOn : {}),
+      onClick: function onClick() {
+        return setPage(p);
+      }
+    }, lbl);
+  }), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.playBtn, {
+      width: 46,
+      height: 46,
+      fontSize: 20,
+      flexShrink: 0
+    }, playing ? S.playOn : {}),
+    onClick: startStop
+  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "0 10px",
+      height: 46,
+      border: "1px solid rgba(255,255,255,0.14)",
+      background: bottomTrayOpen ? "rgba(255,255,255,0.08)" : "transparent",
+      color: "rgba(255,255,255,0.5)",
+      fontSize: 20,
+      cursor: "pointer",
+      borderRadius: 8,
+      flexShrink: 0,
+      transition: "all .12s"
+    },
+    onClick: function onClick() {
+      setBottomTrayOpen(function (b) {
+        return !b;
+      });
+      setTopTrayOpen(false);
+    }
+  }, "\u22EF"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: 52,
+      left: 0,
+      right: 0,
+      zIndex: 200,
+      background: "rgba(8,8,8,0.97)",
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+      borderBottom: "1px solid rgba(255,255,255,0.1)",
+      transform: topTrayOpen ? "translateY(0)" : "translateY(-110%)",
+      transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+      padding: "14px 16px 18px"
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    style: _objectSpread(_objectSpread({}, S.sel), {}, {
+      width: "100%",
+      marginBottom: 12,
+      fontSize: 13
+    }),
+    value: scale,
+    onChange: function onChange(e) {
+      return setScale(e.target.value);
+    }
+  }, Object.entries(SCALES).map(function (_ref23) {
+    var _ref24 = _slicedToArray(_ref23, 2),
+      k = _ref24[0],
+      v = _ref24[1];
+    return /*#__PURE__*/React.createElement("option", {
+      key: k,
+      value: k
+    }, v.label);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    ref: bpmDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleBpmDown,
+    onPointerMove: handleBpmMove,
+    onPointerUp: handleBpmUp,
+    onPointerCancel: handleBpmUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, bpm), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "BPM \u2195")), /*#__PURE__*/React.createElement("div", {
+    ref: stDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleStDown,
+    onPointerMove: handleStMove,
+    onPointerUp: handleStUp,
+    onPointerCancel: handleStUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, stLabel), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "ST \u2195")), /*#__PURE__*/React.createElement("div", {
+    ref: swingDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1
+    }),
+    onPointerDown: handleSwingDown,
+    onPointerMove: handleSwingMove,
+    onPointerUp: handleSwingUp,
+    onPointerCancel: handleSwingUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.widgetN
+  }, swing), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "SWG \u2195")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      bottom: 112,
+      left: 0,
+      right: 0,
+      zIndex: 200,
+      background: "rgba(8,8,8,0.97)",
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+      borderTop: "1px solid rgba(255,255,255,0.1)",
+      transform: bottomTrayOpen ? "translateY(0)" : "translateY(110%)",
+      transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+      padding: "14px 16px 20px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _objectSpread(_objectSpread({}, S.speedRow), {}, {
+      marginBottom: 14
+    })
+  }, SPEED_OPTS.map(function (_ref25) {
+    var label = _ref25.label,
+      mult = _ref25.mult;
+    return /*#__PURE__*/React.createElement("button", {
+      key: label,
+      style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
+      onClick: function onClick() {
+        return setSpeedMult(mult);
+      }
+    }, label);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr auto 1fr",
+      gridTemplateRows: "1fr 1fr 1fr",
+      gap: 8,
+      marginBottom: 14,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, varyMode ? {
+      border: "1px solid #ffe500",
+      color: "#ffe500",
+      background: "rgba(255,229,0,0.08)"
+    } : {}),
+    onClick: function onClick() {
+      return setVaryMode(function (v) {
+        return !v;
+      });
+    }
+  }, "VARY"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}, {
+      gridColumn: 2,
+      gridRow: "1/4",
+      alignSelf: "center"
+    }),
+    onClick: startStop
+  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, monoMode ? {
+      border: "1px solid #00e5ff",
+      color: "#00e5ff",
+      background: "rgba(0,229,255,0.08)"
+    } : {}),
+    onClick: toggleMono
+  }, "MONO"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, recMode ? {
+      border: "1px solid #ff4d4d",
+      color: "#ff4d4d",
+      background: "rgba(255,77,77,0.15)",
+      fontWeight: 900
+    } : {
+      border: "1px solid rgba(255,77,77,0.4)",
+      color: "rgba(255,77,77,0.6)"
+    }),
+    onClick: function onClick() {
+      return setRecMode(function (r) {
+        return !r;
+      });
+    }
+  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }, loopMode ? S.loopOn : {}),
+    onClick: function onClick() {
+      return setLoopMode(function (l) {
+        return !l;
+      });
+    }
+  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      width: "100%"
+    }),
+    onClick: mutatePat1
+  }, "MUT8"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      letterSpacing: 3,
+      color: "rgba(255,255,255,0.25)",
+      fontWeight: 700
+    }
+  }, "SEQ"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, {
+      height: 24,
+      padding: "0 10px",
+      fontSize: 9
+    }, followSeq ? {
+      border: "1px solid #69f0ae",
+      color: "#69f0ae",
+      background: "rgba(105,240,174,0.08)"
+    } : {}),
+    onClick: function onClick() {
+      return setFollowSeq(function (f) {
+        return !f;
+      });
+    }
+  }, "FOLLOW")), function () {
+    var overStrip = chainDrag && isOverStrip(chainDrag.y);
+    var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
+    return /*#__PURE__*/React.createElement("div", {
+      ref: chainStripRef,
+      style: Object.assign({}, S.chainStrip, {
+        marginTop: 0
+      }, overStrip ? S.chainStripHot : {})
+    }, chain.length === 0 && !chainDrag && /*#__PURE__*/React.createElement("span", {
+      style: S.chainStripEmpty
+    }, "drag patterns here to build a sequence"), chain.map(function (pid, i) {
+      var pi = Math.max(0, pats.findIndex(function (p) {
+        return p.id === pid;
+      }));
+      var p = pats.find(function (p) {
+        return p.id === pid;
+      });
+      var col = patCol(pi);
+      var here = playing && !loopMode && i === cpos;
+      var isDragging = chainDrag && chainDrag.type === 'chain' && chainDrag.fromIdx === i;
+      var showInsert = overStrip && insertIdx === i;
+      return /*#__PURE__*/React.createElement(React.Fragment, {
+        key: i
+      }, showInsert && /*#__PURE__*/React.createElement("div", {
+        style: S.chainInsertLine
+      }), /*#__PURE__*/React.createElement("div", {
+        "data-chainslot": i,
+        style: Object.assign({}, S.chainChip, {
+          borderColor: col,
+          background: here ? col : col + "18",
+          color: here ? "#000" : col,
+          opacity: isDragging ? 0.3 : 1,
+          touchAction: "none"
+        }),
+        onPointerDown: function onPointerDown(e) {
+          return startChainDrag(e, i);
+        },
+        onPointerMove: onDragMove,
+        onPointerUp: onDragUp,
+        onPointerCancel: onDragUp
+      }, p ? p.name : "?"));
+    }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
+      style: S.chainInsertLine
+    }));
+  }()), /*#__PURE__*/React.createElement("div", {
     style: S.menuSaveLabel
-  }, "SAVE / LOAD"), flash ? /*#__PURE__*/React.createElement("div", {
+  }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
-  }, flash) : null, /*#__PURE__*/React.createElement("div", {
-    style: S.menuSlots
+  }, flash), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 6,
+      marginBottom: 14
+    }
   }, SLOTS.map(function (slot) {
     var has = !!slotData[slot];
     return /*#__PURE__*/React.createElement("div", {
       key: slot,
-      style: S.menuSlot
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        alignItems: "center"
+      }
     }, /*#__PURE__*/React.createElement("span", {
       style: S.menuSlotName
     }, slot, has && /*#__PURE__*/React.createElement("span", {
@@ -4851,25 +5426,20 @@ function Tabula() {
     }, "SAVE"), /*#__PURE__*/React.createElement("button", {
       style: Object.assign({}, S.menuSlotBtn, has ? S.menuSlotBtnLit : {}),
       onClick: function onClick() {
-        loadSlot(slot);
-        setShowMenu(false);
+        return loadSlot(slot);
       },
       disabled: !has
     }, "LOAD"));
   })), /*#__PURE__*/React.createElement("div", {
-    style: _objectSpread(_objectSpread({}, S.menuDivider), {}, {
-      margin: "12px 0"
-    })
-  }), /*#__PURE__*/React.createElement("div", {
     style: S.menuSaveLabel
-  }, "SHARE"), shareFlash ? /*#__PURE__*/React.createElement("div", {
+  }, "SHARE"), shareFlash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
-  }, shareFlash) : null, /*#__PURE__*/React.createElement("div", {
+  }, shareFlash), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr 1fr",
       gap: 6,
-      marginTop: 6
+      marginBottom: 6
     }
   }, /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.menuSlotBtn, {
@@ -4897,59 +5467,125 @@ function Tabula() {
       display: "none"
     },
     onChange: handleImport
-  }))), IS_MOBILE && /*#__PURE__*/React.createElement("div", {
-    style: S.playBar
-  }, /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, varyMode ? {
-      border: "1px solid #ffe500",
-      color: "#ffe500",
-      background: "rgba(255,229,0,0.08)"
-    } : {}),
+  })), (topTrayOpen || bottomTrayOpen) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      zIndex: 190
+    },
     onClick: function onClick() {
-      return setVaryMode(function (v) {
-        return !v;
-      });
+      setTopTrayOpen(false);
+      setBottomTrayOpen(false);
     }
-  }, "VARY"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, recMode ? {
-      border: "1px solid #ff4d4d",
-      color: "#ff4d4d",
-      background: "rgba(255,77,77,0.15)",
-      fontWeight: 900
-    } : {
-      border: "1px solid rgba(255,77,77,0.4)",
-      color: "rgba(255,77,77,0.6)"
-    }),
-    onClick: function onClick() {
-      return setRecMode(function (r) {
-        return !r;
+  }), patMenu && function () {
+    var pm = patMenu;
+    var vw = window.innerWidth,
+      vh = window.innerHeight;
+    var W = 200,
+      H = 160;
+    var px = Math.max(8, Math.min(vw - W - 8, pm.x - W / 2));
+    var py = Math.max(8, Math.min(vh - H - 8, pm.y + 12));
+    var close = function close() {
+      return setPatMenu(null);
+    };
+    var act = function act(fn) {
+      fn();
+      close();
+    };
+    var targetId = pm.id;
+    var isOnlyPat = pats.length <= 1;
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 500
+      },
+      onPointerDown: close,
+      onClick: close
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        left: px,
+        top: py,
+        width: W,
+        background: "rgba(12,12,12,0.92)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.1)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.7)",
+        overflow: "hidden",
+        pointerEvents: "all"
+      },
+      onPointerDown: function onPointerDown(e) {
+        return e.stopPropagation();
+      },
+      onClick: function onClick(e) {
+        return e.stopPropagation();
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr 1fr",
+        gap: 1,
+        background: "rgba(255,255,255,0.06)"
+      }
+    }, [["RAND", function () {
+      return act(function () {
+        return randPatId(targetId);
       });
-    }
-  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}),
-    onClick: startStop
-  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
-    style: S.loopBtnBottom,
-    onClick: mutatePat1
-  }, "MUT8"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, loopMode ? S.loopOn : {}),
-    onClick: function onClick() {
-      return setLoopMode(function (l) {
-        return !l;
+    }], ["CLR", function () {
+      return act(function () {
+        return clearPatId(targetId);
       });
-    }
-  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, followSeq ? {
-      border: "1px solid #69f0ae",
-      color: "#69f0ae",
-      background: "rgba(105,240,174,0.08)"
-    } : {}),
-    onClick: function onClick() {
-      return setFollowSeq(function (f) {
-        return !f;
+    }], ["CPY", function () {
+      return act(function () {
+        return copyPatId(targetId);
       });
-    }
-  }, "FOLLOW")));
+    }], ["PST", function () {
+      return act(function () {
+        return pastePatId(targetId);
+      });
+    }, !clipboard], ["DUP", function () {
+      return act(function () {
+        return dupPatId(targetId);
+      });
+    }, pats.length >= 8], ["DEL", function () {
+      return act(function () {
+        return delPatId(targetId);
+      });
+    }, isOnlyPat, true]].map(function (_ref26) {
+      var _ref27 = _slicedToArray(_ref26, 4),
+        label = _ref27[0],
+        fn = _ref27[1],
+        disabled = _ref27[2],
+        danger = _ref27[3];
+      return /*#__PURE__*/React.createElement("button", {
+        key: label,
+        disabled: !!disabled,
+        style: {
+          padding: "10px 0",
+          background: "rgba(10,10,10,0.9)",
+          border: "none",
+          color: disabled ? "rgba(255,255,255,0.2)" : danger ? "rgba(255,80,80,0.9)" : "rgba(255,255,255,0.8)",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 1.5,
+          cursor: disabled ? "default" : "pointer"
+        },
+        onMouseEnter: function onMouseEnter(e) {
+          if (!disabled) e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+        },
+        onMouseLeave: function onMouseLeave(e) {
+          return e.currentTarget.style.background = "rgba(10,10,10,0.9)";
+        },
+        onClick: disabled ? undefined : fn
+      }, label);
+    }))));
+  }()), " ");
 }
 var CSS = "\n  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=JetBrains+Mono:wght@400;700&display=swap');\n  html,body{overscroll-behavior:none;overflow:hidden;position:fixed;width:100%;height:100%;touch-action:pan-y;}\n  *,*::before,*::after{\n    box-sizing:border-box;\n    -webkit-tap-highlight-color:transparent;\n    -webkit-user-select:none!important;\n    -webkit-touch-callout:none!important;\n    -webkit-user-drag:none!important;\n    user-select:none!important;\n  }\n  .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}\n  @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}\n  select option{background:#111;color:#fff;}\n";
 var S = {
@@ -4958,11 +5594,11 @@ var S = {
     background: "#000",
     color: "#fff",
     height: "100dvh",
-    overflowY: IS_MOBILE ? "auto" : "hidden",
+    overflowY: IS_MOBILE ? "hidden" : "hidden",
     overscrollBehavior: "contain",
-    maxWidth: IS_MOBILE ? 430 : "none",
+    maxWidth: "none",
     margin: "0 auto",
-    padding: IS_MOBILE ? "16px 10px 100px" : "16px 20px 20px",
+    padding: IS_MOBILE ? 0 : "16px 20px 20px",
     userSelect: "none",
     WebkitUserSelect: "none",
     WebkitTouchCallout: "none"

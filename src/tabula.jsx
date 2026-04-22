@@ -27,8 +27,8 @@ const DLY_NOTES = [
   {label:"1/2",  mult:2},  {label:"½·",  mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
-// Device detection — maxTouchPoints is the most reliable signal
-const IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600;
+// Device detection — maxTouchPoints + UA string covers iframe contexts where touch events may not propagate
+const IS_MOBILE = navigator.maxTouchPoints > 0 || window.innerWidth < 600 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const PAT_COLORS=["#00e5ff","#ff4d6d","#ffe500","#69f0ae","#e040fb","#ff6d00","#40c4ff","#ff80ab"];
 const SLOTS=["S1","S2","S3","S4"];
 const SPEED_OPTS=[
@@ -436,6 +436,8 @@ export default function Tabula(){
   const [speedMult, setSpeedMult] = useState(1);
   const speedMultR = useRef(1);
   const [showMenu,  setShowMenu]  = useState(false);
+  const [topTrayOpen,   setTopTrayOpen]   = useState(false);
+  const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
@@ -1526,69 +1528,14 @@ export default function Tabula(){
         </div>
       )}
 
-      {/* Header — mobile only */}
-      {IS_MOBILE&&(
-        <div style={S.hdr}>
-          <div style={S.brand}>TABULA</div>
-          <div style={S.hdrR}>
-            <select style={S.sel} value={scale} onChange={e=>setScale(e.target.value)}>
-              {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-            </select>
-            <div ref={bpmDragRef} style={S.bpmDragTarget}
-              onPointerDown={handleBpmDown} onPointerMove={handleBpmMove}
-              onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-              <span style={S.widgetN}>{bpm}</span>
-              <span style={S.widgetU}>BPM ↕</span>
-            </div>
-            <div ref={stDragRef} style={S.bpmDragTarget}
-              onPointerDown={handleStDown} onPointerMove={handleStMove}
-              onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-              <span style={S.widgetN}>{stLabel}</span>
-              <span style={S.widgetU}>ST ↕</span>
-            </div>
-            <div ref={swingDragRef} style={S.bpmDragTarget}
-              onPointerDown={handleSwingDown} onPointerMove={handleSwingMove}
-              onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-              <span style={S.widgetN}>{swing}</span>
-              <span style={S.widgetU}>SWG ↕</span>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── Pattern pills (always visible) ── */}
-      {(()=>{
-        const pillRow=(
-          <div style={S.patRow}>
-            {pats.map((p,i)=>{
-              const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
-              const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
-              return(
-                <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
-                  onClick={()=>setActiveId(p.id)}
-                  onPointerDown={e=>startPillDrag(e,p.id)}
-                  onPointerMove={onDragMove}
-                  onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                  onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                  onContextMenu={e=>handlePillContextMenu(e,p.id)}>
-                  {isP&&<span className="pp">●</span>}{p.name}
-                </div>
-              );
-            })}
-            {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
-            <div style={{flex:1}}/>
-            <button style={S.menuBtn} onClick={()=>setShowMenu(m=>!m)}>⋯</button>
-          </div>
-        );
-        if(!IS_MOBILE) return null; // desktop renders pills inside left column
-        return pillRow;
-      })()}
+      {/* ── Layout ── */}
+      {/* ── Desktop layout ── */}
+      {!IS_MOBILE&&(
+      <div style={{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
 
-      {/* ── Two-column layout on desktop, single column on mobile ── */}
-      <div style={IS_MOBILE?{}:{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
-
-        {/* ── LEFT COLUMN (desktop) / above-grid controls (mobile) ── */}
-        <div style={IS_MOBILE?{}:{width:280,flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
+        {/* ── LEFT COLUMN ── */}
+        <div style={{width:280,flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
           {/* Brand + widgets — desktop only */}
           {!IS_MOBILE&&(
             <>
@@ -1655,110 +1602,7 @@ export default function Tabula(){
             ))}
           </div>
 
-          {/* Tabs — mobile only; desktop tabs live below the grid in the right column */}
-          {IS_MOBILE&&(
-            <div style={S.tabs}>
-              {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
-                <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-              ))}
-            </div>
-          )}
 
-          {/* STEP and SOUND page content */}
-          {/* Mobile: driven by tab selection. Desktop: always show in left column scroll area */}
-          {(IS_MOBILE ? page==="step" : false)&&(
-            <div style={S.stepPage}>
-              <div style={S.stepPageHdr}>
-                <div style={S.stepPagePat}>{activePat?.name||""}</div>
-                <div style={{flex:1}}/>
-              </div>
-              {LANES.map(lane=>{
-                const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
-                const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
-                const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?(curVal===0?"TIE":curVal===1?"—":"×"+curVal):String(curVal);
-                return(
-                  <div key={lane.key} style={S.stepLaneSection}>
-                    <div style={S.stepLaneHdr}>
-                      <div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>
-                      {liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}
-                      <div style={{flex:1}}/>
-                      <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button>
-                      <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button>
-                    </div>
-                    <StepLane lane={lane} values={vals} colHasNote={colHasNote}
-                      activeStep={playing&&playId===activeId?step:-1}
-                      onChange={(col,val)=>setStepParam(col,lane.key,val)}
-                      tall/>
-                  </div>
-                );
-              })}
-              <div style={S.stepVaryDivider}/>
-              <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800">
-                <div style={S.threeGrid}>
-                  <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#ff9800"/>
-                  <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#ff9800"/>
-                  <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#ff9800"/>
-                </div>
-              </SynthSection>
-              <SynthSection title="MELODY VARY / MUT8" accent="#e040fb">
-                <div style={S.threeGrid}>
-                  <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#e040fb"/>
-                  <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#e040fb"/>
-                  <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#e040fb"/>
-                </div>
-              </SynthSection>
-              <SynthSection title="STEP VARY / MUT8" accent="#00e5ff">
-                <div style={S.threeGrid}>
-                  <KnobSlider label="VEL"   value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#00e5ff"/>
-                  <KnobSlider label="CUT"   value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#00e5ff"/>
-                  <KnobSlider label="DLY"   value={vDlyJitter}  min={0} max={100} onChange={setVDlyJitter}  display={vDlyJitter+"%"}  accent="#00e5ff"/>
-                  <KnobSlider label="RHY"   value={vRhyJitter}  min={0} max={100} onChange={setVRhyJitter}  display={vRhyJitter+"%"}  accent="#00e5ff"/>
-                  <KnobSlider label="OCT"   value={vOctJitter}  min={0} max={100} onChange={setVOctJitter}  display={vOctJitter+"%"}  accent="#00e5ff"/>
-                </div>
-              </SynthSection>
-            </div>
-          )}
-
-          {(IS_MOBILE ? page==="sound" : false)&&(
-            <div style={S.soundPage}>
-              <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                <div style={S.wfRow}>
-                  {WAVEFORMS.map((w,i)=>(
-                    <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(255,255,255,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
-                      {WF_LABELS[i]}
-                    </button>
-                  ))}
-                </div>
-                <div style={S.threeGrid}>
-                  <KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
-                </div>
-              </SynthSection>
-              <SynthSection title="ENV" accent={C_ENV}>
-                <div style={S.threeGrid}>
-                  <KnobSlider label="ATK" value={attack}  min={0} max={100} onChange={setAttack}  display={(attack/10).toFixed(1)+"s"} accent={C_ENV}/>
-                  <KnobSlider label="DEC" value={decay}   min={0} max={100} onChange={setDecay}   display={(decay/10).toFixed(1)+"s"}  accent={C_ENV}/>
-                  <KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"}                accent={C_ENV}/>
-                </div>
-              </SynthSection>
-              <SynthSection title="FILTER" accent={C_FILT}>
-                <div style={S.threeGrid}>
-                  <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfCutoff+"%"}    accent={C_FILT}/>
-                  <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}       accent={C_FILT}/>
-                  <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/>
-                </div>
-              </SynthSection>
-              <SynthSection title="DELAY" accent={C_DLY}>
-                <div style={S.threeGrid}>
-                  <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/>
-                  <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
-                  <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                  <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={dlyHpVal+"%"}             accent={C_DLY}/>
-                  <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={dlyLpVal+"%"}             accent={C_DLY}/>
-                </div>
-              </SynthSection>
-            </div>
-          )}
           {/* Transport — desktop only: pills + chain + buttons pinned to bottom */}
           {!IS_MOBILE&&(
             <>
@@ -1838,19 +1682,12 @@ export default function Tabula(){
           )}
         </div>
 
-        {/* ── RIGHT COLUMN (desktop) / main area (mobile) ── */}
-        <div style={IS_MOBILE?{}:{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto",overflow:"hidden"}}>
-          {/* Grid — wrapped in flex:1 centered container on desktop */}
+        {/* ── RIGHT COLUMN ── */}
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto",overflow:"hidden"}}>
           {page==="edit"&&(
-            <div style={IS_MOBILE?{}:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-              <div style={IS_MOBILE?{}:{
-                width:"min(100%, calc(100dvh - 120px))",
-                aspectRatio:"1",
-                display:"flex",
-                flexDirection:"column",
-                flexShrink:0,
-              }}>
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},IS_MOBILE?{}:{flex:1,display:"flex",flexDirection:"column"})}
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              <div style={{width:"min(100%, calc(100dvh - 120px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {Array.from({length:ROWS},(_,r)=>{
@@ -2040,48 +1877,227 @@ export default function Tabula(){
           )}
         </div>
       </div>
+      )} {/* end !IS_MOBILE desktop layout */}
 
-      {/* Save/load menu — mobile only (desktop has inline) */}
-      {IS_MOBILE&&showMenu&&(
-        <div style={S.menuOverlay} onPointerDown={()=>setShowMenu(false)}>
-          <div style={S.menuPanel} onPointerDown={e=>e.stopPropagation()}>
+      {/* ══ MOBILE LAYOUT ══ */}
+      {IS_MOBILE&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#000",overflow:"hidden"}}>
+
+          {/* ── TOP HANDLE ── */}
+          <div style={{height:52,flexShrink:0,display:"flex",alignItems:"center",padding:"0 14px",gap:10,borderBottom:"1px solid rgba(255,255,255,0.07)",zIndex:10,touchAction:"none"}}
+            onClick={()=>{setTopTrayOpen(t=>!t);setBottomTrayOpen(false);}}>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,fontWeight:900,letterSpacing:4,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>TABULA</div>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1}}>{SCALES[scale]?.label?.slice(0,5)}</span>
+            <span style={{fontSize:15,fontWeight:700,color:"rgba(255,255,255,0.85)"}}>{bpm}</span>
+            <span style={{fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1}}>BPM</span>
+            {transpose!==0&&<><span style={{fontSize:15,fontWeight:700,color:"rgba(255,255,255,0.85)"}}>{stLabel}</span><span style={{fontSize:9,color:"rgba(255,255,255,0.3)"}}>ST</span></>}
+            <span style={{fontSize:18,color:"rgba(255,255,255,0.3)",lineHeight:1,transition:"transform .2s",display:"inline-block",transform:topTrayOpen?"rotate(180deg)":"none"}}>⌄</span>
+          </div>
+
+          {/* ── CONTENT AREA ── */}
+          <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
+            {page==="edit"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:4}}>
+                <div style={{width:"min(100%,calc(100dvh - 174px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
+                    onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
+                    onContextMenu={handleGridContextMenu}>
+                    {Array.from({length:ROWS},(_,r)=>{
+                      const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
+                      const rowBorder=isOct?"1px solid rgba(255,255,255,0.2)":isFifth?"1px solid rgba(120,200,255,0.12)":"none";
+                      return(<div key={r} style={Object.assign({},S.gridRow,{borderTop:rowBorder,position:"relative"})}>
+                        {Array.from({length:COLS},(_,c)=>{
+                          const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
+                          const on=activePat?activePat.grid[r][c]:false;const inactive=c>=gridLen;
+                          return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
+                            background:inactive?"rgba(255,255,255,0.008)":isCol?"rgba(255,255,255,0.10)":isQ?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.015)",
+                            outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
+                        })}
+                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(255,255,255,0.12)`:`rgba(255,255,255,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,255,255,${b*0.5}),0 0 10px rgba(255,255,255,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(255,255,255,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                      </div>);
+                    })}
+                  </div>
+                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const isA=playing&&c===step,isQ=c%4===0,inactive=c>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(255,255,255,0.06)":isA?"rgba(255,255,255,0.9)":isQ?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div ref={lenSliderRef} style={S.lenSlider} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(255,255,255,0.18)",borderRadius:"3px 0 0 3px"}}/>
+                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(255,255,255,0.04)",borderRadius:"0 3px 3px 0"}}/>
+                    <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(gridLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(255,255,255,0.3)",pointerEvents:"none"}}>{gridLen}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {page==="step"&&(
+              <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
+                <div style={S.stepPageHdr}><div style={S.stepPagePat}>{activePat?.name||""}</div></div>
+                {LANES.map(lane=>{
+                  const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
+                  const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
+                  const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
+                  const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?(curVal===0?"TIE":curVal===1?"—":"×"+curVal):String(curVal);
+                  return(<div key={lane.key} style={S.stepLaneSection}><div style={S.stepLaneHdr}><div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>{liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}<div style={{flex:1}}/><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button></div><StepLane lane={lane} values={vals} colHasNote={colHasNote} activeStep={playing&&playId===activeId?step:-1} onChange={(col,val)=>setStepParam(col,lane.key,val)} tall/></div>);
+                })}
+                <div style={S.stepVaryDivider}/>
+                <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800"><div style={S.threeGrid}><KnobSlider label="DROP" value={vDropRate} min={0} max={60} onChange={setVDropRate} display={vDropRate+"%"} accent="#ff9800"/><KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"} accent="#ff9800"/><KnobSlider label="RANGE" value={vShiftRange} min={1} max={8} onChange={setVShiftRange} display={vShiftRange+"st"} accent="#ff9800"/></div></SynthSection>
+                <SynthSection title="MELODY VARY / MUT8" accent="#e040fb"><div style={S.threeGrid}><KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"} accent="#e040fb"/><KnobSlider label="RANGE" value={vPitchRange} min={1} max={12} onChange={setVPitchRange} display={vPitchRange+"st"} accent="#e040fb"/><KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"} accent="#e040fb"/></div></SynthSection>
+                <SynthSection title="STEP VARY / MUT8" accent="#00e5ff"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#00e5ff"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#00e5ff"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#00e5ff"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#00e5ff"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#00e5ff"/></div></SynthSection>
+              </div>
+            )}
+            {page==="sound"&&(
+              <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
+                <SynthSection title="OSCILLATOR" accent={C_OSC}><div style={S.wfRow}>{WAVEFORMS.map((w,i)=>(<button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(255,255,255,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>))}</div><div style={S.threeGrid}><KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/></div></SynthSection>
+                <SynthSection title="ENV" accent={C_ENV}><div style={S.threeGrid}><KnobSlider label="ATK" value={attack} min={0} max={100} onChange={setAttack} display={(attack/10).toFixed(1)+"s"} accent={C_ENV}/><KnobSlider label="DEC" value={decay} min={0} max={100} onChange={setDecay} display={(decay/10).toFixed(1)+"s"} accent={C_ENV}/><KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"} accent={C_ENV}/></div></SynthSection>
+                <SynthSection title="FILTER" accent={C_FILT}><div style={S.threeGrid}><KnobSlider label="CUT" value={vcfCutoff} min={0} max={100} onChange={setVcfCutoff} display={vcfCutoff+"%"} accent={C_FILT}/><KnobSlider label="RES" value={vcfRes} min={0} max={100} onChange={setVcfRes} display={vcfRes+"%"} accent={C_FILT}/><KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/></div></SynthSection>
+                <SynthSection title="DELAY" accent={C_DLY}><div style={S.threeGrid}><KnobSlider label="TIME" value={dlyIdx} min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx} display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/><KnobSlider label="SEND" value={dlyWetPct} min={0} max={100} onChange={setDlyWetPct} display={dlyWetPct+"%"} accent={C_DLY}/><KnobSlider label="FDBK" value={dlyFbPct} min={0} max={95} onChange={setDlyFbPct} display={dlyFbPct+"%"} accent={C_DLY}/><KnobSlider label="HP" value={dlyHpVal} min={0} max={100} onChange={setDlyHpVal} display={dlyHpVal+"%"} accent={C_DLY}/><KnobSlider label="LP" value={dlyLpVal} min={0} max={100} onChange={setDlyLpVal} display={dlyLpVal+"%"} accent={C_DLY}/></div></SynthSection>
+              </div>
+            )}
+          </div>
+
+          {/* ── BOTTOM HANDLE ── */}
+          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(0,0,0,0.98)"}}>
+            {/* Pills row */}
+            <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"7px 12px 3px",alignItems:"center",touchAction:"none"}}>
+              {pats.map((p,i)=>{
+                const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
+                const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
+                return(<div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
+                  onClick={()=>setActiveId(p.id)}
+                  onPointerDown={e=>startPillDrag(e,p.id)} onPointerMove={onDragMove}
+                  onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                  onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                  onContextMenu={e=>handlePillContextMenu(e,p.id)}>
+                  {isP&&<span className="pp">●</span>}{p.name}
+                </div>);
+              })}
+              {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
+            </div>
+            {/* Tabs + play + tray toggle */}
+            <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 12px 10px"}}>
+              {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+                <button key={p} style={Object.assign({},S.tab,{flex:1,fontSize:9,padding:"10px 0"},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+              ))}
+              <button style={Object.assign({},S.playBtn,{width:46,height:46,fontSize:20,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>{playing?"■":"▶"}</button>
+              <button style={{padding:"0 10px",height:46,border:"1px solid rgba(255,255,255,0.14)",background:bottomTrayOpen?"rgba(255,255,255,0.08)":"transparent",color:"rgba(255,255,255,0.5)",fontSize:20,cursor:"pointer",borderRadius:8,flexShrink:0,transition:"all .12s"}}
+                onClick={()=>{setBottomTrayOpen(b=>!b);setTopTrayOpen(false);}}>⋯</button>
+            </div>
+          </div>
+
+          {/* ── TOP TRAY ── slides down */}
+          <div style={{position:"fixed",top:52,left:0,right:0,zIndex:200,
+            background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
+            borderBottom:"1px solid rgba(255,255,255,0.1)",
+            transform:topTrayOpen?"translateY(0)":"translateY(-110%)",
+            transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+            padding:"14px 16px 18px"}}>
+            <select style={{...S.sel,width:"100%",marginBottom:12,fontSize:13}} value={scale} onChange={e=>setScale(e.target.value)}>
+              {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <div style={{display:"flex",gap:8}}>
+              <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM ↕</span>
+              </div>
+              <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST ↕</span>
+              </div>
+              <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG ↕</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ── BOTTOM TRAY ── slides up */}
+          <div style={{position:"fixed",bottom:112,left:0,right:0,zIndex:200,
+            background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
+            borderTop:"1px solid rgba(255,255,255,0.1)",
+            transform:bottomTrayOpen?"translateY(0)":"translateY(110%)",
+            transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+            padding:"14px 16px 20px"}}>
+            {/* Speed */}
+            <div style={{...S.speedRow,marginBottom:14}}>
+              {SPEED_OPTS.map(({label,mult})=>(
+                <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
+              ))}
+            </div>
+            {/* Transport */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginBottom:14,alignItems:"center"}}>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+              <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
+              <div/>
+            </div>
+            {/* SEQ + chain + FOLLOW */}
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                <span style={{fontSize:9,letterSpacing:3,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
+                <div style={{flex:1}}/>
+                <button style={Object.assign({},S.loopBtnBottom,{height:24,padding:"0 10px",fontSize:9},followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              </div>
+              {(()=>{
+                const overStrip=chainDrag&&isOverStrip(chainDrag.y);
+                const insertIdx=chainDrag?getChainInsertIdx(chainDrag.x):-1;
+                return(<div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
+                  {chain.length===0&&!chainDrag&&<span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>}
+                  {chain.map((pid,i)=>{
+                    const pi=Math.max(0,pats.findIndex(p=>p.id===pid));const p=pats.find(p=>p.id===pid);const col=patCol(pi);
+                    const here=playing&&!loopMode&&i===cpos;const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;const showInsert=overStrip&&insertIdx===i;
+                    return(<React.Fragment key={i}>{showInsert&&<div style={S.chainInsertLine}/>}<div data-chainslot={i} style={Object.assign({},S.chainChip,{borderColor:col,background:here?col:col+"18",color:here?"#000":col,opacity:isDragging?0.3:1,touchAction:"none"})} onPointerDown={e=>startChainDrag(e,i)} onPointerMove={onDragMove} onPointerUp={onDragUp} onPointerCancel={onDragUp}>{p?p.name:"?"}</div></React.Fragment>);
+                  })}
+                  {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
+                </div>);
+              })()}
+            </div>
+            {/* Save/load */}
             <div style={S.menuSaveLabel}>SAVE / LOAD</div>
-            {flash?<div style={S.menuFlash}>{flash}</div>:null}
-            <div style={S.menuSlots}>
+            {flash&&<div style={S.menuFlash}>{flash}</div>}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
               {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                <div key={slot} style={S.menuSlot}>
+                <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
                   <span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
                   <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                  <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>{loadSlot(slot);setShowMenu(false);}} disabled={!has}>LOAD</button>
+                  <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
                 </div>
               );})}
             </div>
-            <div style={{...S.menuDivider,margin:"12px 0"}}/>
+            {/* Share */}
             <div style={S.menuSaveLabel}>SHARE</div>
-            {shareFlash?<div style={S.menuFlash}>{shareFlash}</div>:null}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6}}>
+            {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
               <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
               <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
               <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
             </div>
             <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
           </div>
-        </div>
-      )}
 
-      {/* Fixed play bar — mobile only */}
-      {IS_MOBILE&&(
-      <div style={S.playBar}>
-        <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-        <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
-        <button style={Object.assign({},S.playBtn,playing?S.playOn:{})} onClick={startStop}>
-          {playing?"■":"▶"}
-        </button>
-        <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
-        <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
-        <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
-      </div>
-      )}
+          {/* Backdrop — dismiss trays on outside tap */}
+          {(topTrayOpen||bottomTrayOpen)&&(
+            <div style={{position:"fixed",inset:0,zIndex:190}} onClick={()=>{setTopTrayOpen(false);setBottomTrayOpen(false);}}/>
+          )}
+
+          {/* Pat context menu (mobile) */}
+          {patMenu&&(()=>{
+            const pm=patMenu;const vw=window.innerWidth,vh=window.innerHeight;const W=200,H=160;
+            const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
+            const close=()=>setPatMenu(null);const act=(fn)=>{fn();close();};const targetId=pm.id;const isOnlyPat=pats.length<=1;
+            return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
+              <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(255,255,255,0.06)"}}>
+                  {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=8],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
+                    <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(255,80,80,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
+                      onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}} onMouseLeave={e=>e.currentTarget.style.background="rgba(10,10,10,0.9)"}
+                      onClick={disabled?undefined:fn}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>);
+          })()}
+
+        </div>
+      )} {/* end IS_MOBILE */}
     </div>
   );
 }
@@ -2103,7 +2119,7 @@ const CSS=`
 `;
 
 const S={
-  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:IS_MOBILE?"auto":"hidden",overscrollBehavior:"contain",maxWidth:IS_MOBILE?430:"none",margin:"0 auto",padding:IS_MOBILE?"16px 10px 100px":"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
+  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:IS_MOBILE?"hidden":"hidden",overscrollBehavior:"contain",maxWidth:"none",margin:"0 auto",padding:IS_MOBILE?0:"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
   brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
