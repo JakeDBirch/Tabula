@@ -57,7 +57,7 @@ const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false,drums:defaultDrums()});
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
   {key:"BD",label:"BD",color:"#e07060"},
@@ -70,6 +70,7 @@ const DRUM_VOICES=[
   {key:"CP",label:"CP",color:"#c070c0"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16});
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
   vel:Array.from({length:COLS},()=>100),
@@ -645,6 +646,14 @@ export default function Tabula(){
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
+  // Drum layer — independent pattern list, completely separate from synth patterns
+  const initDrum=mkDrumPat("A");
+  const [drumPats,    setDrumPats]    = useState([initDrum]);
+  const [activeDrumId,setActiveDrumId]= useState(initDrum.id);
+  const drumPatsR   =useRef([initDrum]);
+  const activeDrumIdR=useRef(initDrum.id);
+  useEffect(()=>{drumPatsR.current=drumPats;},[drumPats]);
+  useEffect(()=>{activeDrumIdR.current=activeDrumId;},[activeDrumId]);
   const stepR=useRef(0),cposR=useRef(0),tmrR=useRef(null),nextNoteR=useRef(0);
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
@@ -702,7 +711,7 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const saveSlot=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -721,6 +730,8 @@ export default function Tabula(){
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
     if(s.loopMode!=null)setLoopMode(s.loopMode);
     if(s.varyMode!=null)setVaryMode(s.varyMode);
+    if(s.drumPats)setDrumPats(s.drumPats);
+    if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     showFlash("LOADED "+slot);
   };
 
@@ -749,7 +760,7 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,varyMode
+    loopMode,varyMode,drumPats,activeDrumId
   });
 
   const applyShareState=s=>{
@@ -767,6 +778,8 @@ export default function Tabula(){
     if(s.waveform)setWaveform(s.waveform);
     if(s.loopMode!=null)setLoopMode(s.loopMode);
     if(s.varyMode!=null)setVaryMode(s.varyMode);
+    if(s.drumPats)setDrumPats(s.drumPats);
+    if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
@@ -883,18 +896,20 @@ export default function Tabula(){
             bell.current.play(f,at,sp,noteDur,dlyWetPctR.current,prevF,glideTime);
           }
         }
-        // Drum layer
-        if(p&&p.drums&&drumEngine.current.ready){
-          const drums=p.drums;
-          const dLen=drums.gridLen??16;
-          const ds=s%dLen;
-          for(let r=0;r<DRUM_ROWS;r++){
-            if(drums.grid[r]&&drums.grid[r][ds]){
-              const dVel=drums.vel?.[ds]??100;
-              drumEngine.current.play(DRUM_VOICES[r].key,at,dVel);
+        // Drum layer — independent pattern, plays alongside synth
+        if(drumEngine.current.ready){
+          const dPat=drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
+          if(dPat){
+            const dLen=dPat.gridLen??16;
+            const ds=s%dLen;
+            for(let r=0;r<DRUM_ROWS;r++){
+              if(dPat.grid[r]&&dPat.grid[r][ds]){
+                const dVel=dPat.vel?.[ds]??100;
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel);
+              }
             }
+            setDrumStep(ds);
           }
-          setDrumStep(ds);
         }
         setStep(s);setCpos(cp);setPlayId(pid);
         const ns=(s+1)%activeLen;stepR.current=ns;
@@ -1388,27 +1403,30 @@ export default function Tabula(){
     }
     return Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));
   });
-  const setDrumCell=(row,col,val)=>setPats(ps=>ps.map(p=>{
-    if(p.id!==activeId)return p;
-    const drums=p.drums||defaultDrums();
-    const grid=drums.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
-    return Object.assign({},p,{drums:{...drums,grid}});
+  const setDrumCell=(row,col,val)=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    const grid=p.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
+    return Object.assign({},p,{grid});
   }));
-  const setDrumVel=(col,val)=>setPats(ps=>ps.map(p=>{
-    if(p.id!==activeId)return p;
-    const drums=p.drums||defaultDrums();
-    const vel=drums.vel.map((v,i)=>i===col?val:v);
-    return Object.assign({},p,{drums:{...drums,vel}});
+  const setDrumVel=(col,val)=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    const vel=p.vel.map((v,i)=>i===col?val:v);
+    return Object.assign({},p,{vel});
   }));
-  const setDrumLen=(len)=>setPats(ps=>ps.map(p=>{
-    if(p.id!==activeId)return p;
-    const drums=p.drums||defaultDrums();
-    return Object.assign({},p,{drums:{...drums,gridLen:len}});
+  const setDrumLen=(len)=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    return Object.assign({},p,{gridLen:len});
   }));
-  const clearDrums=()=>setPats(ps=>ps.map(p=>{
-    if(p.id!==activeId)return p;
-    return Object.assign({},p,{drums:defaultDrums()});
+  const clearDrums=()=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
   }));
+  const addDrumPat=()=>{
+    if(drumPats.length>=8)return;
+    const d=mkDrumPat("ABCDEFGH"[drumPats.length]);
+    setDrumPats(ps=>[...ps,d]);
+    setActiveDrumId(d.id);
+  };
     const setStepParam=(col,key,val)=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
@@ -1949,9 +1967,9 @@ export default function Tabula(){
         {/* ── RIGHT COLUMN ── */}
         <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
-          <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
+          <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             {activeLayer==="synth"&&page==="edit"&&(
-              <div ref={editOuterRef} style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -2034,102 +2052,78 @@ export default function Tabula(){
               </div>
               </div>
             )}
-            {activeLayer==="drums"&&page==="edit"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden",padding:"8px 8px 0",boxSizing:"border-box"}}>
-                {/* Drum grid header row */}
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexShrink:0}}>
-                  <span style={{fontSize:10,letterSpacing:2,color:"rgba(210,195,175,0.4)",fontWeight:500}}>DRUMS</span>
+            {activeLayer==="drums"&&page==="edit"&&(()=>{
+              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+              const dLen=(dPat?.gridLen)??16;
+              const dw=gridPx||null;
+              const dh=dw?Math.floor(dw/2):null;
+              return(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:4}}>
+                {/* Pattern pills */}
+                <div style={{width:dw||"80%",display:"flex",alignItems:"center",gap:5,flexShrink:0,flexWrap:"wrap"}}>
+                  {drumPats.map((dp)=>{
+                    const isA=dp.id===activeDrumId;
+                    const col="#9fb4c7";
+                    return(<div key={dp.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,fontSize:11,fontWeight:700,letterSpacing:2,cursor:"pointer",userSelect:"none"}} onClick={()=>setActiveDrumId(dp.id)}>{dp.name}</div>);
+                  })}
+                  {drumPats.length<8&&<button style={{padding:"4px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(210,195,175,0.3)",fontSize:14,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={addDrumPat}>＋</button>}
                   <div style={{flex:1}}/>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
                 </div>
-                {/* Drum grid — 8 rows × gridLen cols */}
-                {(()=>{
-                  const drums=activePat?.drums||defaultDrums();
-                  const dLen=drums.gridLen??16;
-                  return(
-                    <>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:0,marginBottom:4}}>
-                    <div style={{width:"100%",aspectRatio:"16/8",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
-                      {DRUM_VOICES.map((voice,r)=>(
-                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
-                          {/* Voice label */}
-                          <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
-                          {/* Step cells */}
-                          <div style={{flex:1,display:"flex",gap:2}}>
-                            {Array.from({length:COLS},(_,c)=>{
-                              const on=drums.grid[r]?.[c]||false;
-                              const isActive=playing&&c===drumStep;
-                              const inactive=c>=dLen;
-                              const isQ=c%4===0;
-                              return(
-                                <div key={c} style={{
-                                  flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
-                                  background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",
-                                  border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),
-                                  boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",
-                                  transition:"background .06s"
-                                }}
-                                  onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}
-                                />
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    </div>
-                      <div style={{height:32,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",marginTop:4}}>
-                        <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
-                        <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
-                          {Array.from({length:COLS},(_,c)=>{
-                            const vel=drums.vel?.[c]??100;
-                            const pct=vel/127;
-                            const inactive=c>=dLen;
-                            return(
-                              <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
-                                onPointerDown={e=>{
-                                  if(inactive)return;
-                                  e.stopPropagation();
-                                  const startY=e.clientY,startV=vel;
-                                  const onMove=ev=>{
-                                    if(!ev.buttons)return;
-                                    const delta=startY-ev.clientY;
-                                    setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+delta*1.5))));
-                                  };
-                                  const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
-                                  document.addEventListener("pointermove",onMove);
-                                  document.addEventListener("pointerup",onUp);
-                                }}>
-                                <div style={{width:"100%",height:(pct*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
-                              </div>
-                            );
-                          })}
-                        </div>
+                {/* Grid — width=gridPx, height=gridPx/2 so cells match synth exactly */}
+                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
+                  {DRUM_VOICES.map((voice,r)=>(
+                    <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
+                      <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
+                      <div style={{flex:1,display:"flex",gap:2}}>
+                        {Array.from({length:COLS},(_,c)=>{
+                          const on=dPat?.grid[r]?.[c]||false;
+                          const isActive=playing&&c===drumStep;
+                          const inactive=c>=dLen;
+                          const isQ=c%4===0;
+                          return(
+                            <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
+                              onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}/>
+                          );
+                        })}
                       </div>
-                      <div style={{...S.lenSlider,flexShrink:0,marginTop:6}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
-                        }}
-                        onPointerMove={e=>{
-                          if(!e.buttons)return;
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
-                        }}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                        <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
-                        <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
-                      </div>
-                    </>
-                  );
-                })()}
+                    </div>
+                  ))}
+                </div>
+                {/* Velocity lane */}
+                <div style={{width:dw||"80%",height:28,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end"}}>
+                  <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
+                  <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
+                    {Array.from({length:COLS},(_,c)=>{
+                      const vel=dPat?.vel?.[c]??100;
+                      const inactive=c>=dLen;
+                      return(
+                        <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
+                          onPointerDown={e=>{
+                            if(inactive)return; e.stopPropagation();
+                            const startY=e.clientY,startV=vel;
+                            const onMove=ev=>{if(!ev.buttons)return;setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+(startY-ev.clientY)*1.5))));};
+                            const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
+                            document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
+                          }}>
+                          <div style={{width:"100%",height:((vel/127)*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Length slider */}
+                <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
+                  onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
+                  onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                  <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                  <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
+                </div>
               </div>
-            )}
+              );
+            })()}
             {activeLayer==="drums"&&page==="step"&&(
               <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
@@ -2331,7 +2325,8 @@ export default function Tabula(){
                 </div>
                 {/* Drum grid — 8 rows × gridLen cols */}
                 {(()=>{
-                  const drums=activePat?.drums||defaultDrums();
+                  const activeDrumPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                  const drums=activeDrumPat;
                   const dLen=drums.gridLen??16;
                   return(
                     <>
