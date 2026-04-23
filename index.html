@@ -2065,7 +2065,7 @@ function Tabula() {
       return setFlash("");
     }, 1800);
   };
-  var saveSlot = /*#__PURE__*/function () {
+  var doSave = /*#__PURE__*/function () {
     var _ref8 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee8(slot) {
       var snap, next;
       return _regenerator().w(function (_context8) {
@@ -2123,11 +2123,11 @@ function Tabula() {
         }
       }, _callee8);
     }));
-    return function saveSlot(_x0) {
+    return function doSave(_x0) {
       return _ref8.apply(this, arguments);
     };
   }();
-  var loadSlot = function loadSlot(slot) {
+  var doLoad = function doLoad(slot) {
     var s = slotData[slot];
     if (!s) return;
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(s.pats.map(function (p) {
@@ -2155,6 +2155,50 @@ function Tabula() {
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
     if (s.drumChain) setDrumChain(s.drumChain);
     showFlash("LOADED " + slot);
+  };
+  var saveSlot = function saveSlot(slot) {
+    if (slotData[slot]) {
+      setConfirmAction({
+        type: "save",
+        slot: slot,
+        label: "OVERWRITE " + slot + "?"
+      });
+      return;
+    }
+    doSave(slot);
+  };
+  var loadSlot = function loadSlot(slot) {
+    if (!slotData[slot]) return;
+    var hasContent = pats.some(function (p) {
+      return p.grid.some(function (r) {
+        return r.some(function (c) {
+          return c;
+        });
+      });
+    }) || drumPats.some(function (p) {
+      return p.grid.some(function (r) {
+        return r.some(function (c) {
+          return c;
+        });
+      });
+    });
+    if (hasContent) {
+      setConfirmAction({
+        type: "load",
+        slot: slot,
+        label: "LOAD " + slot + "? UNSAVED WORK LOST"
+      });
+      return;
+    }
+    doLoad(slot);
+  };
+  var confirmYes = function confirmYes() {
+    if (!confirmAction) return;
+    if (confirmAction.type === "save") doSave(confirmAction.slot);else doLoad(confirmAction.slot);
+    setConfirmAction(null);
+  };
+  var confirmNo = function confirmNo() {
+    return setConfirmAction(null);
   };
   var activePat = pats.find(function (p) {
     return p.id === activeId;
@@ -4886,7 +4930,53 @@ function Tabula() {
     })
   }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
-  }, flash), /*#__PURE__*/React.createElement("div", {
+  }, flash), confirmAction && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+      padding: "5px 6px",
+      background: "rgba(196,150,80,0.1)",
+      border: "1px solid rgba(196,150,80,0.3)",
+      borderRadius: 6,
+      marginBottom: 5
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 8,
+      letterSpacing: 1,
+      color: "rgba(210,190,140,0.9)",
+      fontWeight: 500
+    }
+  }, confirmAction.label), /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "3px 8px",
+      border: "1px solid rgba(210,190,140,0.5)",
+      borderRadius: 4,
+      background: "rgba(196,150,80,0.2)",
+      color: "rgba(220,200,150,0.95)",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
+    },
+    onClick: confirmYes
+  }, "YES"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "3px 8px",
+      border: "1px solid rgba(200,185,165,0.2)",
+      borderRadius: 4,
+      background: "transparent",
+      color: "rgba(200,185,165,0.5)",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    },
+    onClick: confirmNo
+  }, "NO")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(22px,1fr))",
@@ -7695,7 +7785,53 @@ function Tabula() {
     style: S.menuSaveLabel
   }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
-  }, flash), /*#__PURE__*/React.createElement("div", {
+  }, flash), confirmAction && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+      padding: "5px 6px",
+      background: "rgba(196,150,80,0.1)",
+      border: "1px solid rgba(196,150,80,0.3)",
+      borderRadius: 6,
+      marginBottom: 5
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 8,
+      letterSpacing: 1,
+      color: "rgba(210,190,140,0.9)",
+      fontWeight: 500
+    }
+  }, confirmAction.label), /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "3px 8px",
+      border: "1px solid rgba(210,190,140,0.5)",
+      borderRadius: 4,
+      background: "rgba(196,150,80,0.2)",
+      color: "rgba(220,200,150,0.95)",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
+    },
+    onClick: confirmYes
+  }, "YES"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "3px 8px",
+      border: "1px solid rgba(200,185,165,0.2)",
+      borderRadius: 4,
+      background: "transparent",
+      color: "rgba(200,185,165,0.5)",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    },
+    onClick: confirmNo
+  }, "NO")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(4,1fr)",

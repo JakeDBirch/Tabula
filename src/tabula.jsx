@@ -819,12 +819,12 @@ export default function Tabula(){
 
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
-  const saveSlot=async slot=>{
+  const doSave=async slot=>{
     const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
-  const loadSlot=slot=>{
+  const doLoad=slot=>{
     const s=slotData[slot];if(!s)return;
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     setPats(s.pats);setChain(s.chain);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
@@ -844,6 +844,23 @@ export default function Tabula(){
     if(s.drumChain)setDrumChain(s.drumChain);
     showFlash("LOADED "+slot);
   };
+  const saveSlot=slot=>{
+    if(slotData[slot]){setConfirmAction({type:"save",slot,label:"OVERWRITE "+slot+"?"});return;}
+    doSave(slot);
+  };
+  const loadSlot=slot=>{
+    if(!slotData[slot])return;
+    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
+    if(hasContent){setConfirmAction({type:"load",slot,label:"LOAD "+slot+"? UNSAVED WORK LOST"});return;}
+    doLoad(slot);
+  };
+  const confirmYes=()=>{
+    if(!confirmAction)return;
+    if(confirmAction.type==="save")doSave(confirmAction.slot);
+    else doLoad(confirmAction.slot);
+    setConfirmAction(null);
+  };
+  const confirmNo=()=>setConfirmAction(null);
 
   const activePat=pats.find(p=>p.id===activeId);
   const gridLen=activePat?.gridLen??16;
@@ -2135,6 +2152,14 @@ export default function Tabula(){
               <div style={{marginBottom:6}}>
                 <div style={{...S.menuSaveLabel,marginBottom:4}}>SAVE / LOAD</div>
                 {flash&&<div style={S.menuFlash}>{flash}</div>}
+              {confirmAction&&(
+                <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:5}}>
+                  <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
+                  <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
+                  <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
+                </div>
+              )}
+
                 <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3,marginBottom:3}}>
                   {SLOTS.map(slot=>{const has=!!slotData[slot];return(
                     <button key={slot+"sv"} style={{...S.menuSlotBtn,padding:"4px 0",fontSize:8,position:"relative"}}
@@ -2827,6 +2852,13 @@ export default function Tabula(){
             {/* Save/load */}
             {winW>550&&<div style={S.menuSaveLabel}>SAVE / LOAD</div>}
             {flash&&<div style={S.menuFlash}>{flash}</div>}
+            {confirmAction&&(
+              <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:5}}>
+                <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
+                <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
+                <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
+              </div>
+            )}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
               {SLOTS.map(slot=>{const has=!!slotData[slot];return(
                 <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
