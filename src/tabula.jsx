@@ -58,7 +58,7 @@ const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16});
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false});
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
 const vcfLbl=v=>{const f=vcfHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
@@ -213,7 +213,7 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
   // Bool lanes (GLIDE): tap-to-toggle, no drag
   if(lane.bool){
     return(
-      <div style={Object.assign({},S.laneRow,tall?{height:36}:{})}>
+      <div style={Object.assign({},S.laneRow,tall?{height:44}:{})}>
         {!tall&&<div style={Object.assign({},S.laneLabel,{color:lane.color+"99"})}>{lane.label}</div>}
         <div style={{...S.laneBars,alignItems:"center",gap:2}}>
           {Array.from({length:COLS},(_,c)=>{
@@ -245,17 +245,9 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
   },[lane]);
   const onDown=useCallback(e=>{
     e.stopPropagation();ref.current.setPointerCapture(e.pointerId);
-    if(lane.key==='rhy'){
-      const rect=ref.current.getBoundingClientRect();
-      const col=Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/rect.width*COLS)));
-      if(colHasNote&&!colHasNote[col])return;
-      const cur=Math.round(values[col]??lane.def);
-      const next=cur>=4?1:cur+1; // cycle ×1→×2→×3→×4→×1
-      onChange(col,next);
-      return;
-    }
-    drag.current.active=true;const{col,val}=getCV(e);
-    if(colHasNote&&!colHasNote[col])return; // locked
+    drag.current.active=true;
+    const{col,val}=getCV(e);
+    if(colHasNote&&!colHasNote[col])return;
     onChange(col,val);
   },[getCV,onChange,lane,values,colHasNote]);
   const onMove=useCallback(e=>{
@@ -456,7 +448,8 @@ export default function Tabula(){
   const [shifting,  setShifting]  = useState(false);
   const [varyMode,  setVaryMode]  = useState(false);
   const [recMode,   setRecMode]   = useState(false);
-  const [monoMode,  setMonoMode]  = useState(false);
+  // mono is per-pattern — derived from active pattern
+  const monoMode = !!(pats.find(p=>p.id===activeId)?.mono);
   const monoModeR = useRef(false);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
   const swingR = useRef(0);
@@ -591,7 +584,7 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    monoMode,loopMode
+    loopMode
   });
 
   const applyShareState=s=>{
@@ -607,7 +600,6 @@ export default function Tabula(){
     if(s.speedMult!=null)setSpeedMult(s.speedMult);
     if(s.activeId)setActiveId(s.activeId);
     if(s.waveform)setWaveform(s.waveform);
-    if(s.monoMode!=null)setMonoMode(s.monoMode);
     if(s.loopMode!=null)setLoopMode(s.loopMode);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
@@ -669,14 +661,14 @@ export default function Tabula(){
         const activeLen=p?(p.gridLen??16):16;
         if(s===0&&varyModeR.current&&p){
           let vg=genVariation(p.grid,varyParamsR.current);
-          if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(vg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}vg=out;}
+          if(p?.mono){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(vg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}vg=out;}
           variedGrids.current.set(pid,vg);
           // Self-record: always vary the original source pattern, not the current playing one
           if(recModeR.current&&patsR.current.length<8){
             const vp=varyParamsR.current;
             const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
             let rvg=genVariation(src.grid,vp);
-            if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(rvg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}rvg=out;}
+            if(src?.mono){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(rvg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}rvg=out;}
             const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
             const newPat={id:++_id,name:"ABCDEFGH"[patsR.current.length],grid:rvg,params:newParams,gridLen:src.gridLen??16};
             setPats(ps=>{
@@ -816,15 +808,18 @@ export default function Tabula(){
     return out;
   };
 
-  const toggleMono=()=>setMonoMode(m=>{
-    const next=!m;
-    if(next) setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:collapseToMono(p.grid)})));
-    return next;
-  });
+  const toggleMono=()=>{
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeId)return p;
+      const next=!p.mono;
+      const grid=next?collapseToMono(p.grid):p.grid;
+      return Object.assign({},p,{mono:next,grid});
+    }));
+  };
 
   const mutatePat1=()=>mutatePat(g=>{
     const varied=genVariation(g,varyParamsR.current);
-    return monoModeR.current?collapseToMono(varied):varied;
+    return p?.mono?collapseToMono(varied):varied;
   });
 
   const handleGridDown=useCallback(e=>{
@@ -1199,7 +1194,7 @@ export default function Tabula(){
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePatId=(id)=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPatId=(id)=>{setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
-  const randPatId=(id)=>{setPats(ps=>ps.map(p=>{if(p.id!==id)return p;const grid=monoMode?mkGrid():Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));if(monoMode){for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(Math.random()<.12)hits.push(r);if(hits.length)grid[hits[Math.floor(Math.random()*hits.length)]][c]=true;}}return Object.assign({},p,{grid});}));};
+  const randPatId=(id)=>{setPats(ps=>ps.map(p=>{if(p.id!==id)return p;const isMono=!!p.mono;const grid=isMono?mkGrid():Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));if(isMono){for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(Math.random()<.12)hits.push(r);if(hits.length)grid[hits[Math.floor(Math.random()*hits.length)]][c]=true;}}return Object.assign({},p,{grid});}));};
   const randPat=()=>mutatePat(()=>{
     if(monoMode){
       // Generate poly-density grid then collapse each column to at most one note
@@ -1610,10 +1605,29 @@ export default function Tabula(){
                 const targetId=activeId;
                 const isOnlyPat=pats.length<=1;
                 return(
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:6}}>
+                  <>
+                  {/* Row 1: RAND, CLR, MONO */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,marginBottom:4}}>
                     {[
                       ["RAND", ()=>randPatId(targetId),  false, false],
                       ["CLR",  ()=>clearPatId(targetId), false, false],
+                    ].map(([label,fn,disabled,danger])=>(
+                      <button key={label} disabled={!!disabled}
+                        style={{padding:"5px 0",border:"1px solid rgba(200,185,165,"+(disabled?"0.06":"0.15")+")",borderRadius:6,background:"transparent",
+                          color:disabled?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.6)",
+                          fontSize:9,letterSpacing:1,cursor:disabled?"default":"pointer",fontFamily:"inherit"}}
+                        onClick={disabled?undefined:fn}>{label}</button>
+                    ))}
+                    <button
+                      style={{padding:"5px 0",border:"1px solid rgba(200,185,165,"+(monoMode?"0.6":"0.15")+")",borderRadius:6,
+                        background:monoMode?"rgba(159,180,199,0.12)":"transparent",
+                        color:monoMode?"#9fb4c7":"rgba(200,185,165,0.5)",
+                        fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}
+                      onClick={toggleMono}>MONO</button>
+                  </div>
+                  {/* Row 2: CPY, PST, DUP, DEL */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginBottom:6}}>
+                    {[
                       ["CPY",  ()=>copyPatId(targetId),  false, false],
                       ["PST",  ()=>pastePatId(targetId), !clipboard, false],
                       ["DUP",  ()=>dupPatId(targetId),   pats.length>=8, false],
@@ -1626,6 +1640,7 @@ export default function Tabula(){
                         onClick={disabled?undefined:fn}>{label}</button>
                     ))}
                   </div>
+                  </>
                 );
               })()}
             </div>
@@ -1713,7 +1728,7 @@ export default function Tabula(){
           <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             {page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-              <div style={{width:"min(100%, calc(100dvh - 120px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div style={{width:"min(100%, calc(100dvh - 180px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
@@ -1910,7 +1925,6 @@ export default function Tabula(){
             <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
             <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(196,122,122,0.3)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-            <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
             <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
             <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
           </div>
@@ -2012,6 +2026,8 @@ export default function Tabula(){
                 </div>);
               })}
               {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
+              <div style={{flex:1}}/>
+              <button style={{flexShrink:0,padding:"4px 10px",border:"1px solid rgba(200,185,165,"+(monoMode?"0.6":"0.2")+")",borderRadius:20,background:monoMode?"rgba(159,180,199,0.12)":"transparent",color:monoMode?"#9fb4c7":"rgba(200,185,165,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={toggleMono}>MONO</button>
             </div>
             {/* Tabs + play + tray toggle */}
             <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 12px 10px"}}>
@@ -2064,9 +2080,9 @@ export default function Tabula(){
             <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginBottom:14,alignItems:"center"}}>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
               <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+              <div/>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
               <div/>
             </div>
