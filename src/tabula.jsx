@@ -324,7 +324,8 @@ class Bell{
     const durMod   = (sp && sp.dur!=null) ? sp.dur/100 : 0;
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
-    const dur=Math.max(atk+0.01, rawDur*(1+durMod));
+    // dur must be >= atk+dec so envelope setValueAtTime calls stay in order (prevents clicks)
+    const dur=Math.max(atk+dec+0.01, rawDur*(1+durMod));
     const end=dur+rel;
 
     const vcf=this.ctx.createBiquadFilter();

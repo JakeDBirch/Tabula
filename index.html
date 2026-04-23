@@ -873,7 +873,8 @@ var Bell = /*#__PURE__*/function () {
         sus = Math.max(0.001, p.sustain / 100),
         rel = ms(p.decay);
       var rawDur = noteDur != null ? noteDur : this.stepDur;
-      var dur = Math.max(atk + 0.01, rawDur * (1 + durMod));
+      // dur must be >= atk+dec so envelope setValueAtTime calls stay in order (prevents clicks)
+      var dur = Math.max(atk + dec + 0.01, rawDur * (1 + durMod));
       var end = dur + rel;
       var vcf = this.ctx.createBiquadFilter();
       vcf.type = "lowpass";
