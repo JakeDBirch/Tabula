@@ -37,7 +37,7 @@ const IS_MOBILE = (()=>{
       || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch(e) { return false; }
 })();
-const PAT_COLORS=["#00e5ff","#ff4d6d","#ffe500","#69f0ae","#e040fb","#ff6d00","#40c4ff","#ff80ab"];
+const PAT_COLORS=["#a8c5a0","#c4967a","#9fb4c7","#c9a96e","#b5a0c4","#7aaa96","#c4b07a","#a09ec4"];
 const SLOTS=["S1","S2","S3","S4"];
 const SPEED_OPTS=[
   {label:"2×",  mult:0.5},
@@ -50,7 +50,7 @@ const SHIFT_THRESHOLD=10;
 const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
-const C_OSC="#00e5ff", C_ENV="#ff9800", C_FILT="#ff4d6d", C_DLY="#69f0ae";
+const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f";
 
 const rowHue=r=>Math.round(195-(r/(ROWS-1))*135);
 const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
@@ -116,6 +116,7 @@ const jitterStepParam=(sp,vp)=>{
     dly: vp.dlyJitter>0   ? jit(sp.dly, vp.dlyJitter*0.4, 0,100) : sp.dly,
     rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [0,1,1,2,3,4][Math.floor(Math.random()*6)] : sp.rhy,
     oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
+    glide: vp.glideJitter>0 ? (Math.random()<vp.glideJitter/100?1:sp.glide) : sp.glide,
   };
 };
 
@@ -160,10 +161,10 @@ function StepPicker({label,display,sub,onDec,onInc,accent}){
 // ─── Step param lane definitions ─────────────────────────────────────────────
 const LANES=[
   {key:"vel", label:"VEL", color:"#ffffff",min:0,  max:127,def:100,center:null, bool:false},
-  {key:"cut", label:"CUT", color:"#ff4d6d",min:0,  max:100,def:50, center:50,  bool:false},
-  {key:"dly", label:"DLY", color:"#69f0ae",min:0,  max:100,def:0,  center:null, bool:false},
-  {key:"rhy", label:"RHY", color:"#ffe500",min:0,  max:4,  def:1,  center:null, bool:false},
-  {key:"oct", label:"OCT", color:"#e040fb",min:0,  max:4,  def:2,  center:2,   bool:false},
+  {key:"cut", label:"CUT", color:"#c97b8a",min:0,  max:100,def:50, center:50,  bool:false},
+  {key:"dly", label:"DLY", color:"#7aaa96",min:0,  max:100,def:0,  center:null, bool:false},
+  {key:"rhy", label:"RHY", color:"#c9a96e",min:0,  max:4,  def:1,  center:null, bool:false},
+  {key:"oct", label:"OCT", color:"#b5a0c4",min:0,  max:4,  def:2,  center:2,   bool:false},
   {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,max:1,  def:0,  center:null, bool:true},
 ];
 // rhy: 0=tie (extend into next step), 1=normal, 2/3/4=ratchet (N notes per step)
@@ -172,11 +173,11 @@ const LANES=[
 // Radial param popup arms — angle in degrees (0=right, 90=up, screen-Y inverted)
 // All arms fan above the note (30°–150°)
 const PARAM_ARMS=[
-  {key:"rhy", label:"RHY", color:"#ffe500", angle:150, min:0, max:4,   discrete:true},
-  {key:"dly", label:"DLY", color:"#69f0ae", angle:120, min:0, max:100, discrete:false},
+  {key:"rhy", label:"RHY", color:"#c9a96e", angle:150, min:0, max:4,   discrete:true},
+  {key:"dly", label:"DLY", color:"#7aaa96", angle:120, min:0, max:100, discrete:false},
   {key:"vel", label:"VEL", color:"#ffffff", angle:90,  min:0, max:127, discrete:false},
-  {key:"cut", label:"CUT", color:"#ff4d6d", angle:60,  min:0, max:100, discrete:false},
-  {key:"oct", label:"OCT", color:"#e040fb", angle:30,  min:0, max:4,   discrete:true},
+  {key:"cut", label:"CUT", color:"#c97b8a", angle:60,  min:0, max:100, discrete:false},
+  {key:"oct", label:"OCT", color:"#b5a0c4", angle:30,  min:0, max:4,   discrete:true},
 ];
 
 function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
@@ -197,7 +198,7 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
               <div key={c} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
                 height:"100%",opacity:locked?0.15:1,cursor:locked?"default":"pointer"}}
                 onPointerDown={e=>{e.stopPropagation();if(locked)return;onChange(c,on?0:1);}}>
-                <div style={{width:"70%",aspectRatio:"1",borderRadius:"50%",
+                <div style={{width:"70%",aspectRatio:"1",borderRadius:"3px",
                   background:on?(isAct?"#fff":lane.color):lane.color+"22",
                   border:"1px solid "+(on?lane.color:lane.color+"44"),
                   boxShadow:on&&isAct?"0 0 6px "+lane.color:"none",
@@ -249,10 +250,11 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
           const locked=colHasNote&&!colHasNote[c];
           const isRhy=lane.key==='rhy';
           const rhyVal=isRhy?Math.round(v):null;
+          const isQ=c%4===0;
           // rhy=0 is tie: render as horizontal dash, not a vertical bar
           if(isRhy && rhyVal===0){
             return(
-              <div key={c} style={Object.assign({},S.laneBarWrap,{alignItems:"center",justifyContent:"center",opacity:locked?0.15:1})}>
+              <div key={c} style={Object.assign({},S.laneBarWrap,{alignItems:"center",justifyContent:"center",opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(255,255,255,0.15)":"none"})}>
                 <div style={{width:"80%",height:tall?3:2,borderRadius:1,
                   background:isAct?lane.color:lane.color+"88",
                   boxShadow:isAct?"0 0 5px "+lane.color:"none"}}/>
@@ -262,7 +264,7 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
           const pct=isRhy ? (rhyVal/4) : (v-lane.min)/(lane.max-lane.min);
           const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
           return(
-            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1})}>
+            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(255,255,255,0.15)":"none"})}>
               {lane.center!=null&&<div style={Object.assign({},S.laneCenterLine,{bottom:(cp*100)+"%",borderColor:lane.color+"22"})}/>}
               <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none",position:"relative",display:"flex",alignItems:"flex-start",justifyContent:"center"})}>
                 {tall&&isRhy&&rhyVal>1&&<span style={{fontSize:7,fontWeight:700,color:isAct?"#000":"rgba(0,0,0,0.8)",lineHeight:1,paddingTop:1,pointerEvents:"none"}}>{rhyVal}</span>}
@@ -280,7 +282,7 @@ class Bell{
   constructor(){
     this.ctx=null;this.master=null;this.rev=null;
     this.dly=null;this.dlyFb=null;this.dlyReturn=null;this.dlySend=null;this.dlyHp=null;this.dlyLp=null;
-    this.p={waveform:"sawtooth",detune:8,attack:5,decay:300,sustain:40,
+    this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;
   }
@@ -328,7 +330,6 @@ class Bell{
     const octShift = sp ? (sp.oct-2) : 0;
     const playFreq = freq * Math.pow(2, octShift);
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
-    // noteDur passed in from scheduler (handles ties); fallback to stepDur
     const dur=Math.max(atk+dec+0.02, noteDur!=null ? noteDur : this.stepDur);
     const end=dur+rel;
 
@@ -336,7 +337,7 @@ class Bell{
     vcf.type="lowpass";
     const rawCut=Math.max(0,Math.min(100,p.vcfCutoff+cutOff));
     const baseHz=vcfHz(rawCut);
-    vcf.Q.value=p.vcfRes*0.28;
+    vcf.Q.value=Math.max(0.01, p.vcfRes*0.28); // floor prevents instability at Q=0
     const envAmt=p.filterEnvAmt/100;
     const peakHz=envAmt>0.001?baseHz*Math.pow(20000/Math.max(20,baseHz),envAmt):baseHz;
     const susHz=Math.max(20,baseHz+(peakHz-baseHz)*sus);
@@ -361,8 +362,8 @@ class Bell{
     const o1=this.ctx.createOscillator();
     o1.type=p.waveform;
     if(prevFreq&&glideTime>0){
-      const startF=prevFreq*Math.pow(2,octShift);
-      o1.frequency.setValueAtTime(Math.max(1,startF),t);
+      // prevFreq is the actual played frequency from previous step (oct already applied)
+      o1.frequency.setValueAtTime(Math.max(1,prevFreq),t);
       o1.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
     } else {
       o1.frequency.value=playFreq;
@@ -372,8 +373,7 @@ class Bell{
       const o2=this.ctx.createOscillator();
       o2.type=p.waveform;
       if(prevFreq&&glideTime>0){
-        const startF=prevFreq*Math.pow(2,octShift);
-        o2.frequency.setValueAtTime(Math.max(1,startF),t);
+        o2.frequency.setValueAtTime(Math.max(1,prevFreq),t);
         o2.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
       } else {
         o2.frequency.value=playFreq;
@@ -466,12 +466,13 @@ export default function Tabula(){
   const [vDlyJitter, setVDlyJitter] = useState(0);
   const [vRhyJitter, setVRhyJitter] = useState(0);
   const [vOctJitter, setVOctJitter] = useState(0);
+  const [vGlideJitter,setVGlideJitter]=useState(0);
 
   // Synth
   const [waveform,     setWaveform]     = useState("sawtooth");
   const [detune,       setDetune]       = useState(8);
-  const [attack,       setAttack]       = useState(5);
-  const [decay,        setDecay]        = useState(300);
+  const [attack,       setAttack]       = useState(8);
+  const [decay,        setDecay]        = useState(400);
   const [sustain,      setSustain]      = useState(40);
   const [vcfCutoff,    setVcfCutoff]    = useState(80);
   const [vcfRes,       setVcfRes]       = useState(15);
@@ -489,10 +490,12 @@ export default function Tabula(){
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
-  const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false);
+  const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false),recSourceIdR=useRef(null);
   const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,cutJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
   const variedGrids=useRef(new Map());
   const prevFreqByRowR=useRef({});
+  const lastPlayedFreqR=useRef(null);
+  const lastGlideEnabledR=useRef(false); // glide is a departure attr — enabled note slides INTO next note
   const flashTmr=useRef(null),gridRef=useRef(null);
   const gesture=useRef({state:"idle",startX:0,startY:0,baseGrid:null,cellPx:24,appliedDX:0,appliedDY:0});
 
@@ -506,13 +509,17 @@ export default function Tabula(){
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
-  useEffect(()=>{recModeR.current=recMode;},[recMode]);
+  useEffect(()=>{
+    recModeR.current=recMode;
+    if(recMode) recSourceIdR.current=activeId; // lock source to active pattern at record start
+    else recSourceIdR.current=null;
+  },[recMode]);
   useEffect(()=>{monoModeR.current=monoMode;},[monoMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
   useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
   useEffect(()=>{
-    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter};
-  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter]);
+    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter};
+  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vGlideJitter]);
   useEffect(()=>{bell.current.p.waveform=waveform;},[waveform]);
   useEffect(()=>{bell.current.p.detune=detune;},[detune]);
   useEffect(()=>{bell.current.p.attack=attack;},[attack]);
@@ -562,7 +569,7 @@ export default function Tabula(){
     waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
-    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,
+    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,
     monoMode,loopMode
   });
 
@@ -587,7 +594,7 @@ export default function Tabula(){
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
-     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],
+     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
   };
 
@@ -643,11 +650,14 @@ export default function Tabula(){
           let vg=genVariation(p.grid,varyParamsR.current);
           if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(vg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}vg=out;}
           variedGrids.current.set(pid,vg);
-          // Self-record: capture this variation as a new pattern and append to sequence
+          // Self-record: always vary the original source pattern, not the current playing one
           if(recModeR.current&&patsR.current.length<8){
             const vp=varyParamsR.current;
-            const newParams=(p.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
-            const newPat={id:++_id,name:"ABCDEFGH"[patsR.current.length],grid:vg.map(r=>[...r]),params:newParams,gridLen:p.gridLen??16};
+            const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
+            let rvg=genVariation(src.grid,vp);
+            if(monoModeR.current){const out=Array.from({length:ROWS},()=>new Array(COLS).fill(false));for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(rvg[r][c])hits.push(r);if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;}rvg=out;}
+            const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
+            const newPat={id:++_id,name:"ABCDEFGH"[patsR.current.length],grid:rvg,params:newParams,gridLen:src.gridLen??16};
             setPats(ps=>{
               if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
               return [...ps,newPat];
@@ -677,16 +687,19 @@ export default function Tabula(){
 
         if(grid)for(let r=0;r<ROWS;r++){
           if(!grid[r][s])continue;
-          if(isTie)continue; // tied step: previous note already extended, skip
+          if(isTie)continue;
           const f=freqs[r]*ratio;
-          // Glide: if this step has glide on, slide from previous freq on this row
-          const hasGlide=sp&&sp.glide;
-          const prevF=hasGlide?prevFreqByRowR.current[r]:null;
-          const glideTime=prevF?stepDur*0.4:0;
-          prevFreqByRowR.current[r]=f; // track for next step
+          const octShift=sp?(sp.oct-2):0;
+          const actualF=f*Math.pow(2,octShift);
+          const hasGlide=!!(sp&&sp.glide);
+          // Departure glide: glide on step N means slide FROM step N INTO step N+1
+          // So we glide if the PREVIOUS step had glide enabled
+          const prevF=lastGlideEnabledR.current?(lastPlayedFreqR.current??null):null;
+          const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*speedMultR.current:0;
+          lastPlayedFreqR.current=actualF;
+          lastGlideEnabledR.current=hasGlide; // store for next step to read
           if(ratch>1){
             for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,dlyWetPctR.current,ri===0?prevF:null,ri===0?glideTime:0);
-
           } else {
             bell.current.play(f,at,sp,noteDur,dlyWetPctR.current,prevF,glideTime);
           }
@@ -700,7 +713,7 @@ export default function Tabula(){
   },[]);
 
   const startStop=async()=>{
-    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};setRecMode(false);recModeR.current=false;return;}
+    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;setRecMode(false);recModeR.current=false;return;}
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
@@ -1419,11 +1432,11 @@ export default function Tabula(){
             <div onClick={commitAndClose} style={{position:"absolute",
               left:panX+panW-40,top:panY+6,width:34,height:34,
               display:"flex",alignItems:"center",justifyContent:"center",
-              color:"rgba(255,255,255,0.5)",fontSize:22,fontWeight:300,cursor:"pointer",
+              color:"rgba(210,195,175,0.5)",fontSize:22,fontWeight:300,cursor:"pointer",
               pointerEvents:"all",borderRadius:17,
               transition:"color .1s, background .1s"}}
               onMouseEnter={e=>{e.currentTarget.style.color="#fff";e.currentTarget.style.background="rgba(255,255,255,0.1)";}}
-              onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.5)";e.currentTarget.style.background="transparent";}}>×</div>
+              onMouseLeave={e=>{e.currentTarget.style.color="rgba(210,195,175,0.5)";e.currentTarget.style.background="transparent";}}>×</div>
             <svg style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none"}}>
               {arms.map(arm=>{
                 const rad=arm.angle*Math.PI/180;
@@ -1480,7 +1493,7 @@ export default function Tabula(){
               borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
               boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",
               pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(255,255,255,0.06)"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
                 {[
                   ["RAND",  ()=>act(()=>randPatId(targetId))],
                   ["CLR",   ()=>act(()=>clearPatId(targetId))],
@@ -1491,7 +1504,7 @@ export default function Tabula(){
                 ].map(([label,fn,disabled,danger])=>(
                   <button key={label} disabled={!!disabled}
                     style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",
-                      color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(255,80,80,0.9)":"rgba(255,255,255,0.8)",
+                      color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",
                       fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer",
                       transition:"background .1s"}}
                     onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}}
@@ -1640,9 +1653,9 @@ export default function Tabula(){
                 return (
                   <div style={{flexShrink:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-                      <span style={{fontSize:IS_MOBILE?7:10,letterSpacing:3,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
+                      <span style={{fontSize:IS_MOBILE?7:10,letterSpacing:1,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
                       <div style={{flex:1}}/>
-                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:IS_MOBILE?7:9},followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:IS_MOBILE?7:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
                     </div>
                     <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0}, overStrip?S.chainStripHot:{})}>
                       {chain.length===0&&!chainDrag&&(
@@ -1676,10 +1689,10 @@ export default function Tabula(){
               })()}
               {/* Transport: 3-row grid — VARY/REC/MUT8 left, ▶ center, MONO/LOOP right */}
               <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
                 <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
+                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>
                   {recMode?"■ REC":"● REC"}
                 </button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
@@ -1702,7 +1715,7 @@ export default function Tabula(){
                   const fromBot=ROWS-1-r;
                   const isOct=fromBot%SCALE_SPAN===0;
                   const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
-                  const rowBorder=isOct?"1px solid rgba(255,255,255,0.2)":isFifth?"1px solid rgba(120,200,255,0.12)":"none";
+                  const rowBorder=isOct?"1px solid rgba(200,185,165,0.2)":isFifth?"1px solid rgba(160,190,170,0.12)":"none";
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{borderTop:rowBorder,position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
@@ -1710,7 +1723,7 @@ export default function Tabula(){
                       const on=activePat?activePat.grid[r][c]:false;
                       const inactive=c>=gridLen;
                       return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{
-                        background:inactive?"rgba(255,255,255,0.008)":isCol?"rgba(255,255,255,0.10)":isQ?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.015)",
+                        background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                         outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px",
                       })}/>);
                     })}
@@ -1730,14 +1743,14 @@ export default function Tabula(){
                           const vel=p?(p.vel??100):100;
                           const b=0.35+(vel/127)*0.65;
                           const inactive=ci>=gridLen;
-                          const bright=inactive?`rgba(255,255,255,0.12)`:`rgba(255,255,255,${b})`;
-                          const glow=inactive?"none":`0 0 4px rgba(255,255,255,${b*0.5}),0 0 10px rgba(255,255,255,${b*0.22})`;
+                          const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;
+                          const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
                           const L=`calc(${ci/COLS}*(100% + 2px))`;
                           const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
-                              background:isActive?bright:inactive?bright:`rgba(255,255,255,${b*0.75})`,
+                              background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,
                               boxShadow:isActive?glow:"none",
                               pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>
                               {!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
@@ -1761,7 +1774,7 @@ export default function Tabula(){
                   return(
                   <div key={c} style={S.stepColWrap}>
                     <div style={Object.assign({},S.stepDot,{
-                      background:inactive?"rgba(255,255,255,0.06)":isA?"rgba(255,255,255,0.9)":isQ?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.1)",
+                      background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",
                       transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/>
                   </div>
                 );})}
@@ -1769,10 +1782,10 @@ export default function Tabula(){
               <div ref={lenSliderRef} style={S.lenSlider}
                 onPointerDown={handleLenDown} onPointerMove={handleLenMove}
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(255,255,255,0.18)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
-                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(255,255,255,0.04)",borderRadius:"0 3px 3px 0"}}/>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
+                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
                 <div style={{position:"absolute",top:IS_MOBILE?-3:-5,bottom:IS_MOBILE?-3:-5,width:IS_MOBILE?3:5,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:2}px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
-                <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(255,255,255,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
+                <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
             </div>
@@ -1810,27 +1823,28 @@ export default function Tabula(){
                     );
                   })}
                   <div style={S.stepVaryDivider}/>
-                  <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800">
+                  <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
                     <div style={S.threeGrid}>
-                      <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#ff9800"/>
-                      <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#ff9800"/>
-                      <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#ff9800"/>
+                      <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4967a"/>
+                      <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4967a"/>
+                      <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4967a"/>
                     </div>
                   </SynthSection>
-                  <SynthSection title="MELODY VARY / MUT8" accent="#e040fb">
+                  <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4">
                     <div style={S.threeGrid}>
-                      <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#e040fb"/>
-                      <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#e040fb"/>
-                      <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#e040fb"/>
+                      <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#b5a0c4"/>
+                      <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#b5a0c4"/>
+                      <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#b5a0c4"/>
                     </div>
                   </SynthSection>
-                  <SynthSection title="STEP VARY / MUT8" accent="#00e5ff">
+                  <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
                     <div style={S.threeGrid}>
-                      <KnobSlider label="VEL" value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#00e5ff"/>
-                      <KnobSlider label="CUT" value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#00e5ff"/>
-                      <KnobSlider label="DLY" value={vDlyJitter}  min={0} max={100} onChange={setVDlyJitter}  display={vDlyJitter+"%"}  accent="#00e5ff"/>
-                      <KnobSlider label="RHY" value={vRhyJitter}  min={0} max={100} onChange={setVRhyJitter}  display={vRhyJitter+"%"}  accent="#00e5ff"/>
-                      <KnobSlider label="OCT" value={vOctJitter}  min={0} max={100} onChange={setVOctJitter}  display={vOctJitter+"%"}  accent="#00e5ff"/>
+                      <KnobSlider label="VEL" value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#9fb4c7"/>
+                      <KnobSlider label="CUT" value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#9fb4c7"/>
+                      <KnobSlider label="DLY" value={vDlyJitter}  min={0} max={100} onChange={setVDlyJitter}  display={vDlyJitter+"%"}  accent="#9fb4c7"/>
+                      <KnobSlider label="RHY" value={vRhyJitter}  min={0} max={100} onChange={setVRhyJitter}  display={vRhyJitter+"%"}  accent="#9fb4c7"/>
+                      <KnobSlider label="OCT" value={vOctJitter}  min={0} max={100} onChange={setVOctJitter}  display={vOctJitter+"%"}  accent="#9fb4c7"/>
+                      <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/>
                     </div>
                   </SynthSection>
                 </div>
@@ -1841,7 +1855,7 @@ export default function Tabula(){
                   <SynthSection title="OSCILLATOR" accent={C_OSC}>
                     <div style={S.wfRow}>
                       {WAVEFORMS.map((w,i)=>(
-                        <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(255,255,255,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                        <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
                           {WF_LABELS[i]}
                         </button>
                       ))}
@@ -1852,15 +1866,15 @@ export default function Tabula(){
                   </SynthSection>
                   <SynthSection title="ENV" accent={C_ENV}>
                     <div style={S.threeGrid}>
-                      <KnobSlider label="ATK" value={attack}  min={0} max={100} onChange={setAttack}  display={(attack/10).toFixed(1)+"s"} accent={C_ENV}/>
-                      <KnobSlider label="DEC" value={decay}   min={0} max={100} onChange={setDecay}   display={(decay/10).toFixed(1)+"s"}  accent={C_ENV}/>
-                      <KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"}                accent={C_ENV}/>
+                      <KnobSlider label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
+                      <KnobSlider label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
+                      <KnobSlider label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                     </div>
                   </SynthSection>
                   <SynthSection title="FILTER" accent={C_FILT}>
                     <div style={S.threeGrid}>
-                      <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfCutoff+"%"}    accent={C_FILT}/>
-                      <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}       accent={C_FILT}/>
+                      <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
+                      <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                       <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/>
                     </div>
                   </SynthSection>
@@ -1869,8 +1883,8 @@ export default function Tabula(){
                       <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/>
                       <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
                       <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                      <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={dlyHpVal+"%"}             accent={C_DLY}/>
-                      <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={dlyLpVal+"%"}             accent={C_DLY}/>
+                      <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}             accent={C_DLY}/>
+                      <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}             accent={C_DLY}/>
                     </div>
                   </SynthSection>
                 </div>
@@ -1889,18 +1903,18 @@ export default function Tabula(){
 
       {/* ══ MOBILE LAYOUT ══ */}
       {IS_MOBILE&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#000",overflow:"hidden"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#1a1814",overflow:"hidden"}}>
 
           {/* ── TOP HANDLE ── */}
           <div style={{height:52,flexShrink:0,display:"flex",alignItems:"center",padding:"0 14px",gap:10,borderBottom:"1px solid rgba(255,255,255,0.07)",zIndex:10,touchAction:"none"}}
             onClick={()=>{setTopTrayOpen(t=>!t);setBottomTrayOpen(false);}}>
-            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,fontWeight:900,letterSpacing:4,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>TABULA</div>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:4,background:"linear-gradient(135deg,#c4a882,#9bbfaa)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>TABULA</div>
             <div style={{flex:1}}/>
-            <span style={{fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1}}>{SCALES[scale]?.label?.slice(0,5)}</span>
+            <span style={{fontSize:10,color:"rgba(210,195,175,0.35)",letterSpacing:1}}>{SCALES[scale]?.label?.slice(0,5)}</span>
             <span style={{fontSize:15,fontWeight:700,color:"rgba(255,255,255,0.85)"}}>{bpm}</span>
-            <span style={{fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1}}>BPM</span>
-            {transpose!==0&&<><span style={{fontSize:15,fontWeight:700,color:"rgba(255,255,255,0.85)"}}>{stLabel}</span><span style={{fontSize:9,color:"rgba(255,255,255,0.3)"}}>ST</span></>}
-            <span style={{fontSize:18,color:"rgba(255,255,255,0.3)",lineHeight:1,transition:"transform .2s",display:"inline-block",transform:topTrayOpen?"rotate(180deg)":"none"}}>⌄</span>
+            <span style={{fontSize:9,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>BPM</span>
+            {transpose!==0&&<><span style={{fontSize:15,fontWeight:700,color:"rgba(255,255,255,0.85)"}}>{stLabel}</span><span style={{fontSize:9,color:"rgba(210,195,175,0.3)"}}>ST</span></>}
+            <span style={{fontSize:18,color:"rgba(210,195,175,0.3)",lineHeight:1,transition:"transform .2s",display:"inline-block",transform:topTrayOpen?"rotate(180deg)":"none"}}>⌄</span>
           </div>
 
           {/* ── CONTENT AREA ── */}
@@ -1913,25 +1927,25 @@ export default function Tabula(){
                     onContextMenu={handleGridContextMenu}>
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
-                      const rowBorder=isOct?"1px solid rgba(255,255,255,0.2)":isFifth?"1px solid rgba(120,200,255,0.12)":"none";
+                      const rowBorder=isOct?"1px solid rgba(200,185,165,0.2)":isFifth?"1px solid rgba(160,190,170,0.12)":"none";
                       return(<div key={r} style={Object.assign({},S.gridRow,{borderTop:rowBorder,position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
                           const on=activePat?activePat.grid[r][c]:false;const inactive=c>=gridLen;
                           return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
-                            background:inactive?"rgba(255,255,255,0.008)":isCol?"rgba(255,255,255,0.10)":isQ?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.015)",
+                            background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(255,255,255,0.12)`:`rgba(255,255,255,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,255,255,${b*0.5}),0 0 10px rgba(255,255,255,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(255,255,255,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
-                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const isA=playing&&c===step,isQ=c%4===0,inactive=c>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(255,255,255,0.06)":isA?"rgba(255,255,255,0.9)":isQ?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const isA=playing&&c===step,isQ=c%4===0,inactive=c>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
                   <div ref={lenSliderRef} style={S.lenSlider} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(255,255,255,0.18)",borderRadius:"3px 0 0 3px"}}/>
-                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(255,255,255,0.04)",borderRadius:"0 3px 3px 0"}}/>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
                     <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(gridLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
-                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(255,255,255,0.3)",pointerEvents:"none"}}>{gridLen}</span>
+                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",pointerEvents:"none"}}>{gridLen}</span>
                   </div>
                 </div>
               </div>
@@ -1947,23 +1961,23 @@ export default function Tabula(){
                   return(<div key={lane.key} style={S.stepLaneSection}><div style={S.stepLaneHdr}><div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>{liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}<div style={{flex:1}}/><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button></div><StepLane lane={lane} values={vals} colHasNote={colHasNote} activeStep={playing&&playId===activeId?step:-1} onChange={(col,val)=>setStepParam(col,lane.key,val)} tall/></div>);
                 })}
                 <div style={S.stepVaryDivider}/>
-                <SynthSection title="RHYTHM VARY / MUT8" accent="#ff9800"><div style={S.threeGrid}><KnobSlider label="DROP" value={vDropRate} min={0} max={60} onChange={setVDropRate} display={vDropRate+"%"} accent="#ff9800"/><KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"} accent="#ff9800"/><KnobSlider label="RANGE" value={vShiftRange} min={1} max={8} onChange={setVShiftRange} display={vShiftRange+"st"} accent="#ff9800"/></div></SynthSection>
-                <SynthSection title="MELODY VARY / MUT8" accent="#e040fb"><div style={S.threeGrid}><KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"} accent="#e040fb"/><KnobSlider label="RANGE" value={vPitchRange} min={1} max={12} onChange={setVPitchRange} display={vPitchRange+"st"} accent="#e040fb"/><KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"} accent="#e040fb"/></div></SynthSection>
-                <SynthSection title="STEP VARY / MUT8" accent="#00e5ff"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#00e5ff"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#00e5ff"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#00e5ff"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#00e5ff"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#00e5ff"/></div></SynthSection>
+                <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a"><div style={S.threeGrid}><KnobSlider label="DROP" value={vDropRate} min={0} max={60} onChange={setVDropRate} display={vDropRate+"%"} accent="#c4967a"/><KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"} accent="#c4967a"/><KnobSlider label="RANGE" value={vShiftRange} min={1} max={8} onChange={setVShiftRange} display={vShiftRange+"st"} accent="#c4967a"/></div></SynthSection>
+                <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4"><div style={S.threeGrid}><KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"} accent="#b5a0c4"/><KnobSlider label="RANGE" value={vPitchRange} min={1} max={12} onChange={setVPitchRange} display={vPitchRange+"st"} accent="#b5a0c4"/><KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"} accent="#b5a0c4"/></div></SynthSection>
+                <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#9fb4c7"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#9fb4c7"/><KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/></div></SynthSection>
               </div>
             )}
             {page==="sound"&&(
               <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
-                <SynthSection title="OSCILLATOR" accent={C_OSC}><div style={S.wfRow}>{WAVEFORMS.map((w,i)=>(<button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(255,255,255,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>))}</div><div style={S.threeGrid}><KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/></div></SynthSection>
-                <SynthSection title="ENV" accent={C_ENV}><div style={S.threeGrid}><KnobSlider label="ATK" value={attack} min={0} max={100} onChange={setAttack} display={(attack/10).toFixed(1)+"s"} accent={C_ENV}/><KnobSlider label="DEC" value={decay} min={0} max={100} onChange={setDecay} display={(decay/10).toFixed(1)+"s"} accent={C_ENV}/><KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"} accent={C_ENV}/></div></SynthSection>
-                <SynthSection title="FILTER" accent={C_FILT}><div style={S.threeGrid}><KnobSlider label="CUT" value={vcfCutoff} min={0} max={100} onChange={setVcfCutoff} display={vcfCutoff+"%"} accent={C_FILT}/><KnobSlider label="RES" value={vcfRes} min={0} max={100} onChange={setVcfRes} display={vcfRes+"%"} accent={C_FILT}/><KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/></div></SynthSection>
-                <SynthSection title="DELAY" accent={C_DLY}><div style={S.threeGrid}><KnobSlider label="TIME" value={dlyIdx} min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx} display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/><KnobSlider label="SEND" value={dlyWetPct} min={0} max={100} onChange={setDlyWetPct} display={dlyWetPct+"%"} accent={C_DLY}/><KnobSlider label="FDBK" value={dlyFbPct} min={0} max={95} onChange={setDlyFbPct} display={dlyFbPct+"%"} accent={C_DLY}/><KnobSlider label="HP" value={dlyHpVal} min={0} max={100} onChange={setDlyHpVal} display={dlyHpVal+"%"} accent={C_DLY}/><KnobSlider label="LP" value={dlyLpVal} min={0} max={100} onChange={setDlyLpVal} display={dlyLpVal+"%"} accent={C_DLY}/></div></SynthSection>
+                <SynthSection title="OSCILLATOR" accent={C_OSC}><div style={S.wfRow}>{WAVEFORMS.map((w,i)=>(<button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>))}</div><div style={S.threeGrid}><KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/></div></SynthSection>
+                <SynthSection title="ENV" accent={C_ENV}><div style={S.threeGrid}><KnobSlider label="ATK" value={attack} min={1} max={2000} onChange={setAttack} display={attack+"ms"} accent={C_ENV}/><KnobSlider label="DEC" value={decay} min={10} max={4000} onChange={setDecay} display={decay+"ms"} accent={C_ENV}/><KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"} accent={C_ENV}/></div></SynthSection>
+                <SynthSection title="FILTER" accent={C_FILT}><div style={S.threeGrid}><KnobSlider label="CUT" value={vcfCutoff} min={0} max={100} onChange={setVcfCutoff} display={vcfLbl(vcfCutoff)} accent={C_FILT}/><KnobSlider label="RES" value={vcfRes} min={0} max={100} onChange={setVcfRes} display={vcfRes+"%"} accent={C_FILT}/><KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/></div></SynthSection>
+                <SynthSection title="DELAY" accent={C_DLY}><div style={S.threeGrid}><KnobSlider label="TIME" value={dlyIdx} min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx} display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/><KnobSlider label="SEND" value={dlyWetPct} min={0} max={100} onChange={setDlyWetPct} display={dlyWetPct+"%"} accent={C_DLY}/><KnobSlider label="FDBK" value={dlyFbPct} min={0} max={95} onChange={setDlyFbPct} display={dlyFbPct+"%"} accent={C_DLY}/><KnobSlider label="HP" value={dlyHpVal} min={0} max={100} onChange={setDlyHpVal} display={hpLbl(dlyHpVal)} accent={C_DLY}/><KnobSlider label="LP" value={dlyLpVal} min={0} max={100} onChange={setDlyLpVal} display={lpLbl(dlyLpVal)} accent={C_DLY}/></div></SynthSection>
               </div>
             )}
           </div>
 
           {/* ── BOTTOM HANDLE ── */}
-          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(0,0,0,0.98)"}}>
+          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(26,24,20,0.98)"}}>
             {/* Pills row */}
             <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"7px 12px 3px",alignItems:"center",touchAction:"none"}}>
               {pats.map((p,i)=>{
@@ -1986,14 +2000,14 @@ export default function Tabula(){
                 <button key={p} style={Object.assign({},S.tab,{flex:1,fontSize:9,padding:"10px 0"},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
               ))}
               <button style={Object.assign({},S.playBtn,{width:46,height:46,fontSize:20,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>{playing?"■":"▶"}</button>
-              <button style={{padding:"0 10px",height:46,border:"1px solid rgba(255,255,255,0.14)",background:bottomTrayOpen?"rgba(255,255,255,0.08)":"transparent",color:"rgba(255,255,255,0.5)",fontSize:20,cursor:"pointer",borderRadius:8,flexShrink:0,transition:"all .12s"}}
+              <button style={{padding:"0 10px",height:46,border:"1px solid rgba(255,255,255,0.14)",background:bottomTrayOpen?"rgba(255,255,255,0.08)":"transparent",color:"rgba(210,195,175,0.5)",fontSize:20,cursor:"pointer",borderRadius:8,flexShrink:0,transition:"all .12s"}}
                 onClick={()=>{setBottomTrayOpen(b=>!b);setTopTrayOpen(false);}}>⋯</button>
             </div>
           </div>
 
           {/* ── TOP TRAY ── slides down */}
           <div style={{position:"fixed",top:52,left:0,right:0,zIndex:200,
-            background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
+            background:"rgba(26,24,20,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
             borderBottom:"1px solid rgba(255,255,255,0.1)",
             display:topTrayOpen?"block":"none",
             
@@ -2016,7 +2030,7 @@ export default function Tabula(){
 
           {/* ── BOTTOM TRAY ── slides up */}
           <div style={{position:"fixed",bottom:112,left:0,right:0,zIndex:200,
-            background:"rgba(8,8,8,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
+            background:"rgba(26,24,20,0.97)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
             borderTop:"1px solid rgba(255,255,255,0.1)",
             display:bottomTrayOpen?"block":"none",
             
@@ -2029,10 +2043,10 @@ export default function Tabula(){
             </div>
             {/* Transport */}
             <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginBottom:14,alignItems:"center"}}>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #ffe500",color:"#ffe500",background:"rgba(255,229,0,0.08)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
               <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"}:{})} onClick={toggleMono}>MONO</button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #ff4d4d",color:"#ff4d4d",background:"rgba(255,77,77,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(255,77,77,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
               <div/>
@@ -2040,9 +2054,9 @@ export default function Tabula(){
             {/* SEQ + chain + FOLLOW */}
             <div style={{marginBottom:14}}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                <span style={{fontSize:9,letterSpacing:3,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
+                <span style={{fontSize:9,letterSpacing:1,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
                 <div style={{flex:1}}/>
-                <button style={Object.assign({},S.loopBtnBottom,{height:24,padding:"0 10px",fontSize:9},followSeq?{border:"1px solid #69f0ae",color:"#69f0ae",background:"rgba(105,240,174,0.08)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+                <button style={Object.assign({},S.loopBtnBottom,{height:24,padding:"0 10px",fontSize:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
               </div>
               {(()=>{
                 const overStrip=chainDrag&&isOverStrip(chainDrag.y);
@@ -2093,9 +2107,9 @@ export default function Tabula(){
             const close=()=>setPatMenu(null);const act=(fn)=>{fn();close();};const targetId=pm.id;const isOnlyPat=pats.length<=1;
             return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
               <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(255,255,255,0.06)"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
                   {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=8],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
-                    <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(255,80,80,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
+                    <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}} onMouseLeave={e=>e.currentTarget.style.background="rgba(10,10,10,0.9)"}
                       onClick={disabled?undefined:fn}>{label}</button>
                   ))}
@@ -2111,7 +2125,7 @@ export default function Tabula(){
 }
 
 const CSS=`
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
   html,body{overscroll-behavior:none;overflow:hidden;position:fixed;width:100%;height:100%;touch-action:pan-y;}
   *,*::before,*::after{
     box-sizing:border-box;
@@ -2127,38 +2141,38 @@ const CSS=`
 `;
 
 const S={
-  root:      {fontFamily:"'JetBrains Mono',monospace",background:"#000",color:"#fff",height:"100dvh",overflowY:IS_MOBILE?"hidden":"hidden",overscrollBehavior:"contain",maxWidth:"none",margin:"0 auto",padding:IS_MOBILE?0:"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
+  root:      {fontFamily:"'DM Sans',sans-serif",background:"#1a1814",color:"#e8e0d5",height:"100dvh",overflowY:IS_MOBILE?"hidden":"hidden",overscrollBehavior:"contain",maxWidth:"none",margin:"0 auto",padding:IS_MOBILE?0:"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
-  brand:     {fontFamily:"'Orbitron',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:900,letterSpacing:6,background:"linear-gradient(135deg,#00e5ff,#e040fb)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
+  brand:     {fontFamily:"'DM Sans',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:300,letterSpacing:6,background:"linear-gradient(135deg,#c4a882,#9bbfaa)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
-  sel:       {background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
+  sel:       {background:"rgba(200,185,165,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
   hdrWidget: {display:"flex",alignItems:"center",gap:2,flexShrink:0},
   widgetBox: {textAlign:"center",minWidth:26},
   widgetN:   {fontSize:IS_MOBILE?20:22,fontWeight:700,display:"block",lineHeight:1.1},
-  widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(255,255,255,0.3)",letterSpacing:1,display:"block"},
-  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"10px 18px",borderRadius:8,border:"1px solid rgba(255,255,255,0.18)",background:"rgba(255,255,255,0.05)",minWidth:IS_MOBILE?52:64,touchAction:"none",userSelect:"none",flexShrink:0},
+  widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(210,195,175,0.3)",letterSpacing:1,display:"block"},
+  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"10px 18px",borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"rgba(200,185,165,0.04)",minWidth:IS_MOBILE?52:64,touchAction:"none",userSelect:"none",flexShrink:0},
   bpmOverlay:    {position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.88)",zIndex:999,pointerEvents:"none"},
-  bpmOverlayNum: {fontFamily:"'Orbitron',sans-serif",fontSize:88,fontWeight:900,color:"#fff",lineHeight:1,letterSpacing:-2},
-  bpmOverlayLbl: {fontSize:11,letterSpacing:8,color:"rgba(255,255,255,0.4)",marginTop:6},
-  bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:3},
-  loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
-  loopOn:    {border:"1px solid #00e5ff",color:"#00e5ff",background:"rgba(0,229,255,0.08)"},
+  bpmOverlayNum: {fontFamily:"'DM Sans',sans-serif",fontSize:88,fontWeight:300,color:"#e8e0d5",lineHeight:1,letterSpacing:-2},
+  bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(210,195,175,0.4)",marginTop:6},
+  bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:1},
+  loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(210,195,175,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
+  loopOn:    {border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"},
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
-  playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
-  playOn:    {border:"2px solid #fff",background:"rgba(255,255,255,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
-  loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?9:10,letterSpacing:2,cursor:"pointer",transition:"all .12s"},
+  playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(210,195,175,0.25)",background:"rgba(200,185,165,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
+  playOn:    {border:"2px solid #fff",background:"rgba(220,200,180,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
+  loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"transparent",color:"rgba(200,185,165,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
-  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:IS_MOBILE?7:12,letterSpacing:2,cursor:"pointer",borderRadius:6,transition:"all .12s"},
+  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
-  stepVaryDivider:{height:1,background:"rgba(255,255,255,0.06)",margin:"16px 0 8px"},
+  stepVaryDivider:{height:1,background:"rgba(220,200,180,0.06)",margin:"16px 0 8px"},
   speedRow:  {display:"flex",gap:4,marginBottom:IS_MOBILE?10:14},
-  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:"rgba(255,255,255,0.35)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:6,transition:"all .12s"},
+  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.4)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   speedBtnOn:{border:"1px solid rgba(255,255,255,0.5)",color:"#fff",background:"rgba(255,255,255,0.08)"},
 
   patRow:    {display:"flex",gap:IS_MOBILE?6:8,overflowX:"auto",padding:"0 0 10px",scrollbarWidth:"none"},
   pill:      {padding:IS_MOBILE?"5px 13px":"7px 16px",borderRadius:20,fontSize:IS_MOBILE?11:12,fontWeight:700,letterSpacing:2,cursor:"pointer",flexShrink:0,transition:"all .12s",display:"flex",alignItems:"center",gap:2},
-  newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(255,255,255,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
+  newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(210,195,175,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
   laneRow:   {display:"flex",alignItems:"stretch",gap:4,height:22},
   laneLabel: {width:20,flexShrink:0,fontSize:6,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",justifyContent:"flex-end"},
   laneBars:  {flex:1,display:"flex",gap:1,alignItems:"flex-end",cursor:"pointer",touchAction:"none",position:"relative"},
@@ -2170,25 +2184,25 @@ const S={
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(255,255,255,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
+  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(220,200,180,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
   stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
   chainStrip:     {display:"flex",flexDirection:"row",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"8px 4px",marginTop:6,borderTop:"1px solid rgba(255,255,255,0.06)",minHeight:46,alignItems:"center",transition:"background .12s",borderRadius:6},
-  chainStripHot:  {background:"rgba(255,255,255,0.04)",borderTop:"1px solid rgba(255,255,255,0.18)"},
-  chainStripEmpty:{fontSize:IS_MOBILE?7:11,color:"rgba(255,255,255,0.18)",letterSpacing:2,whiteSpace:"nowrap"},
+  chainStripHot:  {background:"rgba(220,200,180,0.035)",borderTop:"1px solid rgba(255,255,255,0.18)"},
+  chainStripEmpty:{fontSize:IS_MOBILE?7:11,color:"rgba(210,195,175,0.15)",letterSpacing:2,whiteSpace:"nowrap"},
   chainChip:      {flexShrink:0,minWidth:30,height:30,borderRadius:8,border:"1px solid",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,letterSpacing:1,touchAction:"none",cursor:"grab",transition:"opacity .1s"},
   chainInsertLine:{width:2,height:30,background:"rgba(255,255,255,0.6)",borderRadius:1,flexShrink:0},
   chainGhost:     {position:"fixed",zIndex:500,pointerEvents:"none",width:36,height:36,borderRadius:10,background:"rgba(30,30,30,0.95)",border:"1px solid rgba(255,255,255,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,boxShadow:"0 4px 20px rgba(0,0,0,0.6)"},
 
   // SOUND — classic synth panel look
   soundPage:      {paddingTop:4,display:"flex",flexDirection:"column",gap:6},
-  synthSection:   {background:"#0c0c0c",borderRadius:8,border:"1px solid",padding:"0 0 12px",overflow:"hidden"},
-  synthSectionHdr:{fontSize:IS_MOBILE?7:11,fontWeight:700,letterSpacing:5,padding:"7px 12px",borderBottom:"1px solid",marginBottom:10},
+  synthSection:   {background:"#201e1a",borderRadius:12,border:"1px solid rgba(200,185,165,0.1)",padding:"0 0 12px",overflow:"hidden"},
+  synthSectionHdr:{fontSize:IS_MOBILE?7:11,fontWeight:500,letterSpacing:1,padding:"7px 12px",borderBottom:"1px solid rgba(200,185,165,0.1)",marginBottom:10},
   wfRow:          {display:"flex",gap:4,padding:"0 12px",marginBottom:6},
   wfBtn:          {flex:1,padding:"7px 0",border:"1px solid",background:"transparent",fontSize:8,letterSpacing:1,cursor:"pointer",borderRadius:5,textAlign:"center",fontWeight:700,transition:"all .12s"},
   synthRow:       {padding:"0 12px"},
-  synthSecSublbl: {fontSize:7,fontWeight:700,letterSpacing:3},
+  synthSecSublbl: {fontSize:7,fontWeight:700,letterSpacing:1},
   threeGrid:      {display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"0 12px"},
   envGrid:        {display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"4px 12px 0"},
   filterEnvNote:  {display:"none"},
@@ -2208,35 +2222,35 @@ const S={
 
   spRow:          {display:"flex",alignItems:"center",justifyContent:"space-between",height:44},
   spValLg:        {fontSize:28,fontWeight:700,letterSpacing:2},
-  spBtnLg:        {width:44,height:44,background:"rgba(255,255,255,0.04)",border:"1px solid",color:"rgba(255,255,255,0.7)",fontSize:16,cursor:"pointer",borderRadius:10,padding:0,display:"flex",alignItems:"center",justifyContent:"center"},
+  spBtnLg:        {width:44,height:44,background:"rgba(220,200,180,0.035)",border:"1px solid",color:"rgba(255,255,255,0.7)",fontSize:16,cursor:"pointer",borderRadius:10,padding:0,display:"flex",alignItems:"center",justifyContent:"center"},
 
   // Dropdown menu
-  menuBtn:      {padding:"5px 12px",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.45)",fontSize:18,cursor:"pointer",borderRadius:6,lineHeight:1,flexShrink:0},
+  menuBtn:      {padding:"5px 12px",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:18,cursor:"pointer",borderRadius:6,lineHeight:1,flexShrink:0},
   menuOverlay:  {position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,background:"rgba(0,0,0,0.5)"},
-  menuPanel:    {position:"absolute",bottom:110,left:10,right:10,maxWidth:410,margin:"0 auto",background:"#111",borderRadius:14,border:"1px solid rgba(255,255,255,0.12)",padding:"16px",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"},
+  menuPanel:    {position:"absolute",bottom:110,left:10,right:10,maxWidth:410,margin:"0 auto",background:"#111",borderRadius:14,border:"1px solid rgba(220,200,180,0.12)",padding:"16px",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"},
   menuGrid:     {display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14},
   mBtn:         {padding:"12px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.55)",fontSize:10,letterSpacing:1,cursor:"pointer",borderRadius:7,textAlign:"center"},
   mBtnLit:      {border:"1px solid rgba(255,255,255,0.45)",color:"#fff"},
   mBtnDanger:   {border:"1px solid rgba(255,80,80,0.35)",color:"rgba(255,100,100,0.8)"},
   menuDivider:  {height:1,background:"rgba(255,255,255,0.08)",marginBottom:14},
-  menuSaveLabel:{fontSize:IS_MOBILE?7:11,letterSpacing:4,color:"rgba(255,255,255,0.3)",marginBottom:10},
-  menuFlash:    {padding:"6px 10px",background:"rgba(105,240,174,0.08)",border:"1px solid rgba(105,240,174,0.25)",borderRadius:5,fontSize:9,color:"#69f0ae",letterSpacing:3,textAlign:"center",marginBottom:10},
+  menuSaveLabel:{fontSize:IS_MOBILE?7:11,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:10},
+  menuFlash:    {padding:"6px 10px",background:"rgba(122,170,150,0.12)",border:"1px solid rgba(105,240,174,0.25)",borderRadius:5,fontSize:9,color:"#7aaa96",letterSpacing:1,textAlign:"center",marginBottom:10},
   menuSlots:    {display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8},
   menuSlot:     {display:"flex",flexDirection:"column",gap:5,alignItems:"center"},
-  menuSlotName: {fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.5)",letterSpacing:2,position:"relative"},
-  menuSlotDot:  {color:"#69f0ae",fontSize:IS_MOBILE?8:10,marginLeft:2},
-  menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.45)",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
-  menuSlotBtnLit:{border:"1px solid rgba(105,240,174,0.45)",color:"#69f0ae",background:"rgba(105,240,174,0.04)"},
+  menuSlotName: {fontSize:11,fontWeight:700,color:"rgba(210,195,175,0.5)",letterSpacing:2,position:"relative"},
+  menuSlotDot:  {color:"#7aaa96",fontSize:IS_MOBILE?8:10,marginLeft:2},
+  menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
+  menuSlotBtnLit:{border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"},
   // STEP page
   stepPage:     {paddingTop:4,display:"flex",flexDirection:"column",gap:14},
   stepPageHdr:  {display:"flex",alignItems:"center",gap:10},
-  stepPagePat:  {fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.4)",letterSpacing:3,flex:1},
+  stepPagePat:  {fontSize:14,fontWeight:700,color:"rgba(210,195,175,0.4)",letterSpacing:1,flex:1},
   stepPageBtns: {display:"flex",gap:8},
-  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.5)",fontSize:IS_MOBILE?9:12,letterSpacing:2,cursor:"pointer",borderRadius:6},
-  stepPageBtnRand:{border:"1px solid rgba(255,229,0,0.4)",color:"#ffe500",background:"rgba(255,229,0,0.05)"},
+  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(210,195,175,0.5)",fontSize:IS_MOBILE?9:12,letterSpacing:2,cursor:"pointer",borderRadius:6},
+  stepPageBtnRand:{border:"1px solid rgba(255,229,0,0.4)",color:"#c9a96e",background:"rgba(255,229,0,0.05)"},
   stepLaneSection:{display:"flex",flexDirection:"column",gap:6},
   stepLaneHdr:  {display:"flex",alignItems:"center",gap:8},
-  stepLaneName: {fontSize:IS_MOBILE?9:12,fontWeight:700,letterSpacing:3,minWidth:32},
+  stepLaneName: {fontSize:IS_MOBILE?9:12,fontWeight:700,letterSpacing:1,minWidth:32},
   stepLiveVal:  {fontSize:13,fontWeight:700,letterSpacing:1,minWidth:36,textAlign:"right"},
   stepLaneBtn:  {padding:"5px 10px",border:"1px solid",background:"transparent",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
 };
