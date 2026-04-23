@@ -129,7 +129,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
   const compute=useCallback(e=>{
     const rect=ref.current.getBoundingClientRect();
     if(vertical){
-      // Bottom=min, top=max
+      const rect=ref.current.getBoundingClientRect();
       const v=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));
       onChange(Math.round(min+v*(max-min)));
     } else {
@@ -138,19 +138,21 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
   },[min,max,onChange,vertical]);
   if(vertical){
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none"}}>
-        <div style={{fontSize:9,letterSpacing:2,fontWeight:500,color:col+"bb",textAlign:"center"}}>{label}</div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
+        <div style={{fontSize:10,letterSpacing:1,fontWeight:500,color:col+"bb",textAlign:"center",lineHeight:1.4}}>
+          <div>{label}</div>
+          <div style={{color:col,letterSpacing:0}}>{display}</div>
+        </div>
         <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
           onPointerDown={e=>{e.stopPropagation();ref.current.setPointerCapture(e.pointerId);compute(e);}}
           onPointerMove={e=>{if(e.buttons){e.stopPropagation();compute(e);}}}>
-          {/* Track bg */}
-          <div style={{position:"absolute",top:0,bottom:0,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
-          {/* Fill — from bottom up */}
-          <div style={{position:"absolute",bottom:0,width:4,borderRadius:3,height:pct+"%",background:col+"77",left:"50%",transform:"translateX(-50%)"}}/>
-          {/* Thumb */}
-          <div style={{position:"absolute",bottom:pct+"%",left:"50%",transform:"translate(-50%,50%)",width:16,height:16,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"88",pointerEvents:"none"}}/>
+          {/* Track bg — inset 8px top/bottom for visual padding */}
+          <div style={{position:"absolute",top:8,bottom:8,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
+          {/* Fill — from bottom up within inset track */}
+          <div style={{position:"absolute",bottom:8,width:4,borderRadius:3,height:`calc((100% - 16px) * ${pct/100})`,background:col+"77",left:"50%",transform:"translateX(-50%)"}}/>
+          {/* Thumb — positioned within inset track */}
+          <div style={{position:"absolute",bottom:`calc(8px + (100% - 16px) * ${pct/100})`,left:"50%",transform:"translate(-50%,50%)",width:16,height:16,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"88",pointerEvents:"none"}}/>
         </div>
-        <div style={{fontSize:11,fontWeight:500,color:col,textAlign:"center",letterSpacing:0}}>{display}</div>
       </div>
     );
   }
@@ -1725,13 +1727,13 @@ export default function Tabula(){
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"clip"}}>
           {/* Page content — always present, fills 1fr */}
-          <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
+          <div style={{minHeight:0,overflow:"clip",position:"relative"}}>
             {page==="edit"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"8px",boxSizing:"border-box"}}>
               {/* Square grid: constrain by whichever is smaller — available width or available height */}
-              <div style={{aspectRatio:"1",height:"min(100%,calc(100vw - 320px))",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div style={{aspectRatio:"1",maxWidth:"100%",maxHeight:"100%",display:"flex",flexDirection:"column",flexShrink:0,overflow:"visible"}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
@@ -1807,7 +1809,7 @@ export default function Tabula(){
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                 <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
                 <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                <div style={{position:"absolute",top:IS_MOBILE?-3:-5,bottom:IS_MOBILE?-3:-5,width:IS_MOBILE?3:5,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:2}px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                <div style={{position:"absolute",top:IS_MOBILE?-3:-6,bottom:IS_MOBILE?-3:-6,width:IS_MOBILE?3:12,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
@@ -1879,15 +1881,16 @@ export default function Tabula(){
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                      <div style={S.wfRow}>
-                        {WAVEFORMS.map((w,i)=>(
-                          <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
-                            {WF_LABELS[i]}
-                          </button>
-                        ))}
-                      </div>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:130,alignItems:"stretch"}}>
+                      <div style={{display:"flex",gap:16,padding:"8px 16px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                        {/* Waveform buttons stacked vertically — centered, scale with card */}
+                        <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
+                          {WAVEFORMS.map((w,i)=>(
+                            <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                              {WF_LABELS[i]}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </SynthSection>
                     <SynthSection title="ENV" accent={C_ENV}>
@@ -2222,7 +2225,7 @@ const S={
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(220,200,180,0.06)",touchAction:"none",cursor:"col-resize",overflow:"visible"},
+  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(220,200,180,0.06)",touchAction:"none",cursor:"ew-resize",overflow:"visible"},
   stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
@@ -2251,12 +2254,12 @@ const S={
 
   // Knob slider — synth style
   knobWrap:       {display:"flex",flexDirection:"column",gap:3},
-  knobLabel:      {fontSize:IS_MOBILE?6:10,letterSpacing:2,fontWeight:700},
-  knobTrackWrap:  {position:"relative",height:26,display:"flex",alignItems:"center",cursor:"pointer",touchAction:"none"},
+  knobLabel:      {fontSize:IS_MOBILE?8:10,letterSpacing:1,fontWeight:500},
+  knobTrackWrap:  {position:"relative",height:26,display:"flex",alignItems:"center",cursor:"ew-resize",touchAction:"none",marginBottom:2},
   knobTrackBg:    {position:"absolute",left:0,right:0,height:4,borderRadius:3,background:"rgba(255,255,255,0.08)"},
   knobTrackFill:  {position:"absolute",left:0,height:4,borderRadius:3,pointerEvents:"none"},
   knobThumb:      {position:"absolute",top:"50%",transform:"translate(-50%,-50%)",width:18,height:18,borderRadius:"50%",pointerEvents:"none"},
-  knobValue:      {fontSize:IS_MOBILE?10:13,fontWeight:700,letterSpacing:1},
+  knobValue:      {fontSize:IS_MOBILE?10:11,fontWeight:500,letterSpacing:0},
 
   spRow:          {display:"flex",alignItems:"center",justifyContent:"space-between",height:44},
   spValLg:        {fontSize:28,fontWeight:700,letterSpacing:2},
