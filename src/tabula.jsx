@@ -122,14 +122,38 @@ const jitterStepParam=(sp,vp)=>{
 };
 
 // ─── KnobSlider with accent color ─────────────────────────────────────────────
-function KnobSlider({label,value,min,max,onChange,display,accent}){
+function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
   const ref=useRef(null);
   const col=accent||"rgba(255,255,255,0.6)";
+  const pct=((value-min)/(max-min))*100;
   const compute=useCallback(e=>{
     const rect=ref.current.getBoundingClientRect();
-    onChange(Math.round(min+Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*(max-min)));
-  },[min,max,onChange]);
-  const pct=((value-min)/(max-min))*100;
+    if(vertical){
+      // Bottom=min, top=max
+      const v=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));
+      onChange(Math.round(min+v*(max-min)));
+    } else {
+      onChange(Math.round(min+Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*(max-min)));
+    }
+  },[min,max,onChange,vertical]);
+  if(vertical){
+    return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none"}}>
+        <div style={{fontSize:9,letterSpacing:2,fontWeight:500,color:col+"bb",textAlign:"center"}}>{label}</div>
+        <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
+          onPointerDown={e=>{e.stopPropagation();ref.current.setPointerCapture(e.pointerId);compute(e);}}
+          onPointerMove={e=>{if(e.buttons){e.stopPropagation();compute(e);}}}>
+          {/* Track bg */}
+          <div style={{position:"absolute",top:0,bottom:0,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
+          {/* Fill — from bottom up */}
+          <div style={{position:"absolute",bottom:0,width:4,borderRadius:3,height:pct+"%",background:col+"77",left:"50%",transform:"translateX(-50%)"}}/>
+          {/* Thumb */}
+          <div style={{position:"absolute",bottom:pct+"%",left:"50%",transform:"translate(-50%,50%)",width:16,height:16,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"88",pointerEvents:"none"}}/>
+        </div>
+        <div style={{fontSize:11,fontWeight:500,color:col,textAlign:"center",letterSpacing:0}}>{display}</div>
+      </div>
+    );
+  }
   return(
     <div style={S.knobWrap}>
       <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
@@ -253,7 +277,7 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
           const isRhy=lane.key==='rhy';
           const rhyVal=isRhy?Math.round(v):null;
           const isQ=c%4===0;
-          const pct=isRhy ? ((rhyVal-1)/3) : (v-lane.min)/(lane.max-lane.min);
+          const pct=isRhy ? Math.max(0.12, (rhyVal-1)/3) : (v-lane.min)/(lane.max-lane.min);
           const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
           return(
             <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}>
@@ -324,8 +348,9 @@ class Bell{
     const durMod   = (sp && sp.dur!=null) ? sp.dur/100 : 0;
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
-    // dur must be >= atk+dec so envelope setValueAtTime calls stay in order (prevents clicks)
-    const dur=Math.max(atk+dec+0.01, rawDur*(1+durMod));
+    const modDur=rawDur*(1+durMod);
+    // Floor at atk+dec only to keep envelope automation in order (prevents clicks)
+    const dur=Math.max(atk+dec+0.01, modDur);
     const end=dur+rel;
 
     const vcf=this.ctx.createBiquadFilter();
@@ -824,7 +849,7 @@ export default function Tabula(){
       g.state="shift";setShifting(true);
       g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
       g.shiftPointerID=e.pointerId;
-      gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+      if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
       const pat=patsR.current.find(p=>p.id===activeIdR.current);
       g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
       g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
@@ -849,7 +874,7 @@ export default function Tabula(){
         // Anchor shift to this (second) pointer's position and capture it
         g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
         g.shiftPointerID=e.pointerId;
-        gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+        if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
         const pat=patsR.current.find(p=>p.id===activeIdR.current);
         g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
         g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
@@ -878,11 +903,11 @@ export default function Tabula(){
       const distFromOrigin=Math.sqrt((e.clientX-pr.originX)**2+(e.clientY-pr.originY)**2);
       if(!isOnNote&&distFromOrigin>160){
         g.state="pending-dismiss";g.startX=e.clientX;g.startY=e.clientY;
-        gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+        if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
         return;
       }
       g.state="popup";
-      gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+      if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
       return;
     }
 
@@ -894,7 +919,7 @@ export default function Tabula(){
       const c0=gridRef.current.querySelector('[data-col="0"]'),c1=gridRef.current.querySelector('[data-col="1"]');
       if(c0&&c1){const px=c1.getBoundingClientRect().left-c0.getBoundingClientRect().left;if(px>2)g.cellPx=px;}
     }
-    gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
+    if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
 
     // Start long press timer on an ON note
     if(isOnNote){
@@ -924,6 +949,9 @@ export default function Tabula(){
     }));
     setParamPopup(null);popupR.current=null;
     gesture.current.state="idle";
+    clearTimeout(longPressR.current);longPressR.current=null;
+    // Release pointer capture so grid accepts new touches immediately
+    try{if(gridRef.current)gridRef.current.releasePointerCapture(gesture.current.capturedId);}catch(e){}
   },[]);
 
   const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
@@ -1412,21 +1440,20 @@ export default function Tabula(){
                   <div key={arm.key} style={{marginBottom:8}}
                     onPointerDown={e=>{
                       e.stopPropagation();
-                      const rect=e.currentTarget.getBoundingClientRect();
-                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
-                      const newVal=arm.discrete
-                        ?Math.round(newPct*(arm.max-arm.min)+arm.min)
-                        :Math.round(newPct*(arm.max-arm.min)+arm.min);
-                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
                       e.currentTarget.setPointerCapture(e.pointerId);
-                    }}
-                    onPointerMove={e=>{
-                      if(e.buttons===0)return;
                       const rect=e.currentTarget.getBoundingClientRect();
                       const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
                       const newVal=Math.round(newPct*(arm.max-arm.min)+arm.min);
                       setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
-                    }}>
+                    }}
+                    onPointerMove={e=>{
+                      if(!(e.buttons&1))return;
+                      const rect=e.currentTarget.getBoundingClientRect();
+                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
+                      const newVal=Math.round(newPct*(arm.max-arm.min)+arm.min);
+                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
+                    }}
+                    onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
                       <span style={{fontSize:9,fontWeight:500,color:active?arm.color:arm.color+"88",letterSpacing:1}}>{arm.label}</span>
                       <span style={{fontSize:12,fontWeight:500,color:active?arm.color:arm.color+"99"}}>{displayVal}</span>
@@ -1821,42 +1848,49 @@ export default function Tabula(){
               )}
               {/* SOUND content in right column */}
               {page==="sound"&&(
-                <div style={{...S.soundPage, height:"calc(100dvh - 110px)", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
-                  <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                    <div style={S.wfRow}>
-                      {WAVEFORMS.map((w,i)=>(
-                        <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
-                          {WF_LABELS[i]}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
-                    </div>
-                  </SynthSection>
-                  <SynthSection title="ENV" accent={C_ENV}>
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
-                      <KnobSlider label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
-                      <KnobSlider label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
-                    </div>
-                  </SynthSection>
-                  <SynthSection title="FILTER" accent={C_FILT}>
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
-                      <KnobSlider label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
-                      <KnobSlider label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/>
-                    </div>
-                  </SynthSection>
-                  <SynthSection title="DELAY" accent={C_DLY}>
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY} steps={DLY_NOTES.length}/>
-                      <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
-                      <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                      <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}             accent={C_DLY}/>
-                      <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}             accent={C_DLY}/>
-                    </div>
-                  </SynthSection>
+                <div style={{height:"calc(100dvh - 110px)",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                  {/* Responsive tile grid — 1→2→3 columns as width allows */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
+                    {/* OSC */}
+                    <SynthSection title="OSCILLATOR" accent={C_OSC}>
+                      <div style={S.wfRow}>
+                        {WAVEFORMS.map((w,i)=>(
+                          <button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                            {WF_LABELS[i]}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:130,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                      </div>
+                    </SynthSection>
+                    {/* ENV */}
+                    <SynthSection title="ENV" accent={C_ENV}>
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
+                        <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                      </div>
+                    </SynthSection>
+                    {/* FILTER */}
+                    <SynthSection title="FILTER" accent={C_FILT}>
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
+                        <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
+                        <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
+                      </div>
+                    </SynthSection>
+                    {/* DELAY */}
+                    <SynthSection title="DELAY" accent={C_DLY}>
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+                        <KnobSlider vertical label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
+                        <KnobSlider vertical label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                        <KnobSlider vertical label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
+                        <KnobSlider vertical label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                      </div>
+                    </SynthSection>
+                  </div>
                 </div>
               )}
               {/* Tabs — always at bottom, marginTop:auto pushes them down */}
