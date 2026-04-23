@@ -4777,7 +4777,6 @@ function Tabula() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        overflow: "hidden",
         gap: 4
       }
     }, /*#__PURE__*/React.createElement("div", {
@@ -4842,9 +4841,42 @@ function Tabula() {
       onClick: clearDrums
     }, "CLR")), /*#__PURE__*/React.createElement("div", {
       style: {
+        position: "relative",
         width: dw || "80%",
         height: dh || "auto",
-        flexShrink: 0,
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        right: "100%",
+        top: 0,
+        bottom: 0,
+        width: 26,
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        paddingRight: 4,
+        boxSizing: "border-box"
+      }
+    }, DRUM_VOICES.map(function (v) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: v.key,
+        style: {
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontSize: 8,
+          fontWeight: 700,
+          letterSpacing: 1,
+          color: v.color + "99"
+        }
+      }, v.label);
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         gap: 2
@@ -4859,19 +4891,6 @@ function Tabula() {
           gap: 2
         }
       }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          width: 26,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          paddingRight: 4,
-          fontSize: 8,
-          fontWeight: 700,
-          letterSpacing: 1,
-          color: voice.color + "99"
-        }
-      }, voice.label), /*#__PURE__*/React.createElement("div", {
         style: {
           flex: 1,
           display: "flex",
@@ -4902,19 +4921,23 @@ function Tabula() {
           }
         });
       })));
-    })), /*#__PURE__*/React.createElement("div", {
+    }))), /*#__PURE__*/React.createElement("div", {
       style: {
         width: dw || "80%",
         height: 28,
         flexShrink: 0,
         display: "flex",
         gap: 2,
-        alignItems: "flex-end"
+        alignItems: "flex-end",
+        position: "relative"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
+        position: "absolute",
+        right: "100%",
+        bottom: 0,
+        height: "100%",
         width: 26,
-        flexShrink: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "flex-end",
@@ -5995,12 +6018,16 @@ function Tabula() {
           flex: 1,
           display: "flex",
           alignItems: "stretch",
-          gap: 2
+          gap: 2,
+          position: "relative"
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
+          position: "absolute",
+          right: "100%",
+          top: 0,
+          bottom: 0,
           width: 26,
-          flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "flex-end",

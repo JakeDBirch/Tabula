@@ -2058,7 +2058,7 @@ export default function Tabula(){
               const dw=gridPx||null;
               const dh=dw?Math.floor(dw/2):null;
               return(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:4}}>
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
                 {/* Pattern pills */}
                 <div style={{width:dw||"80%",display:"flex",alignItems:"center",gap:5,flexShrink:0,flexWrap:"wrap"}}>
                   {drumPats.map((dp)=>{
@@ -2070,11 +2070,16 @@ export default function Tabula(){
                   <div style={{flex:1}}/>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
                 </div>
-                {/* Grid — width=gridPx, height=gridPx/2 so cells match synth exactly */}
-                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
+                {/* Grid — labels sit outside dw via position:absolute on wrapper */}
+                <div style={{position:"relative",width:dw||"80%",height:dh||"auto",flexShrink:0}}>
+                  {/* Label column — positioned left of grid, zero impact on dw */}
+                  <div style={{position:"absolute",right:"100%",top:0,bottom:0,width:26,display:"flex",flexDirection:"column",gap:2,paddingRight:4,boxSizing:"border-box"}}>
+                    {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"flex-end",fontSize:8,fontWeight:700,letterSpacing:1,color:v.color+"99"}}>{v.label}</div>))}
+                  </div>
+                  {/* Step cells — fill full dw, no label children */}
+                  <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",gap:2}}>
                   {DRUM_VOICES.map((voice,r)=>(
                     <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
-                      <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
                       <div style={{flex:1,display:"flex",gap:2}}>
                         {Array.from({length:COLS},(_,c)=>{
                           const on=dPat?.grid[r]?.[c]||false;
@@ -2089,10 +2094,11 @@ export default function Tabula(){
                       </div>
                     </div>
                   ))}
+                  </div>
                 </div>
                 {/* Velocity lane */}
-                <div style={{width:dw||"80%",height:28,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end"}}>
-                  <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
+                <div style={{width:dw||"80%",height:28,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",position:"relative"}}>
+                  <div style={{position:"absolute",right:"100%",bottom:0,height:"100%",width:26,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
                   <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
                     {Array.from({length:COLS},(_,c)=>{
                       const vel=dPat?.vel?.[c]??100;
@@ -2333,10 +2339,10 @@ export default function Tabula(){
                     <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:0,marginBottom:4}}>
                     <div style={{width:"100%",aspectRatio:"16/8",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
                       {DRUM_VOICES.map((voice,r)=>(
-                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
-                          {/* Voice label */}
-                          <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
-                          {/* Step cells */}
+                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2,position:"relative"}}>
+                          {/* Voice label — outside grid width via absolute positioning */}
+                          <div style={{position:"absolute",right:"100%",top:0,bottom:0,width:26,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
+                          {/* Step cells fill full dw */}
                           <div style={{flex:1,display:"flex",gap:2}}>
                             {Array.from({length:COLS},(_,c)=>{
                               const on=drums.grid[r]?.[c]||false;
