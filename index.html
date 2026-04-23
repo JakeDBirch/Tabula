@@ -127,7 +127,7 @@ var ROWS = 16,
 // Device detection — multiple signals for reliability across browsers and iframe contexts
 var IS_MOBILE = function () {
   try {
-    return navigator.maxTouchPoints > 0 || window.innerWidth < 768 || window.screen.width < 768 || window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
+    return navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches || window.screen.width < 768 || window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch (e) {
     return false;
   }
@@ -1127,226 +1127,244 @@ function Tabula() {
     _useState0 = _slicedToArray(_useState9, 2),
     bpm = _useState0[0],
     setBpm = _useState0[1];
-  var _useState1 = useState("major"),
+
+  // Track window width to drive responsive left column layout
+  // Use ResizeObserver on the layout container — works inside iframes too
+  var layoutRef = useRef(null);
+  var _useState1 = useState(1200),
     _useState10 = _slicedToArray(_useState1, 2),
-    scale = _useState10[0],
-    setScale = _useState10[1];
-  var _useState11 = useState(false),
+    winW = _useState10[0],
+    setWinW = _useState10[1];
+  useEffect(function () {
+    if (!layoutRef.current) return;
+    var ro = new ResizeObserver(function (entries) {
+      return setWinW(entries[0].contentRect.width);
+    });
+    ro.observe(layoutRef.current);
+    return function () {
+      return ro.disconnect();
+    };
+  }, []);
+  var _useState11 = useState("major"),
     _useState12 = _slicedToArray(_useState11, 2),
-    playing = _useState12[0],
-    setPlaying = _useState12[1];
-  var _useState13 = useState(-1),
+    scale = _useState12[0],
+    setScale = _useState12[1];
+  var _useState13 = useState(false),
     _useState14 = _slicedToArray(_useState13, 2),
-    step = _useState14[0],
-    setStep = _useState14[1];
-  var _useState15 = useState(0),
+    playing = _useState14[0],
+    setPlaying = _useState14[1];
+  var _useState15 = useState(-1),
     _useState16 = _slicedToArray(_useState15, 2),
-    cpos = _useState16[0],
-    setCpos = _useState16[1];
-  var _useState17 = useState(null),
+    step = _useState16[0],
+    setStep = _useState16[1];
+  var _useState17 = useState(0),
     _useState18 = _slicedToArray(_useState17, 2),
-    playId = _useState18[0],
-    setPlayId = _useState18[1];
-  var _useState19 = useState(false),
+    cpos = _useState18[0],
+    setCpos = _useState18[1];
+  var _useState19 = useState(null),
     _useState20 = _slicedToArray(_useState19, 2),
-    loopMode = _useState20[0],
-    setLoopMode = _useState20[1];
+    playId = _useState20[0],
+    setPlayId = _useState20[1];
   var _useState21 = useState(false),
     _useState22 = _slicedToArray(_useState21, 2),
-    followSeq = _useState22[0],
-    setFollowSeq = _useState22[1];
-  var _useState23 = useState(0),
+    loopMode = _useState22[0],
+    setLoopMode = _useState22[1];
+  var _useState23 = useState(false),
     _useState24 = _slicedToArray(_useState23, 2),
-    transpose = _useState24[0],
-    setTranspose = _useState24[1];
-  var _useState25 = useState(null),
+    followSeq = _useState24[0],
+    setFollowSeq = _useState24[1];
+  var _useState25 = useState(0),
     _useState26 = _slicedToArray(_useState25, 2),
-    clipboard = _useState26[0],
-    setClipboard = _useState26[1];
-  var _useState27 = useState({
+    transpose = _useState26[0],
+    setTranspose = _useState26[1];
+  var _useState27 = useState(null),
+    _useState28 = _slicedToArray(_useState27, 2),
+    clipboard = _useState28[0],
+    setClipboard = _useState28[1];
+  var _useState29 = useState({
       S1: null,
       S2: null,
       S3: null,
       S4: null
     }),
-    _useState28 = _slicedToArray(_useState27, 2),
-    slotData = _useState28[0],
-    setSlotData = _useState28[1];
-  var _useState29 = useState(""),
     _useState30 = _slicedToArray(_useState29, 2),
-    flash = _useState30[0],
-    setFlash = _useState30[1];
+    slotData = _useState30[0],
+    setSlotData = _useState30[1];
   var _useState31 = useState(""),
     _useState32 = _slicedToArray(_useState31, 2),
-    shareFlash = _useState32[0],
-    setShareFlash = _useState32[1];
-  var importRef = useRef(null);
-  var _useState33 = useState(false),
+    flash = _useState32[0],
+    setFlash = _useState32[1];
+  var _useState33 = useState(""),
     _useState34 = _slicedToArray(_useState33, 2),
-    shifting = _useState34[0],
-    setShifting = _useState34[1];
+    shareFlash = _useState34[0],
+    setShareFlash = _useState34[1];
+  var importRef = useRef(null);
   var _useState35 = useState(false),
     _useState36 = _slicedToArray(_useState35, 2),
-    varyMode = _useState36[0],
-    setVaryMode = _useState36[1];
+    shifting = _useState36[0],
+    setShifting = _useState36[1];
   var _useState37 = useState(false),
     _useState38 = _slicedToArray(_useState37, 2),
-    recMode = _useState38[0],
-    setRecMode = _useState38[1];
+    varyMode = _useState38[0],
+    setVaryMode = _useState38[1];
+  var _useState39 = useState(false),
+    _useState40 = _slicedToArray(_useState39, 2),
+    recMode = _useState40[0],
+    setRecMode = _useState40[1];
   // mono is per-pattern — derived from active pattern
   var monoMode = !!((_pats$find = pats.find(function (p) {
     return p.id === activeId;
   })) !== null && _pats$find !== void 0 && _pats$find.mono);
   var monoModeR = useRef(false);
-  var _useState39 = useState(0),
-    _useState40 = _slicedToArray(_useState39, 2),
-    swing = _useState40[0],
-    setSwing = _useState40[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState41 = useState(0),
+    _useState42 = _slicedToArray(_useState41, 2),
+    swing = _useState42[0],
+    setSwing = _useState42[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState41 = useState(1),
-    _useState42 = _slicedToArray(_useState41, 2),
-    speedMult = _useState42[0],
-    setSpeedMult = _useState42[1];
-  var speedMultR = useRef(1);
-  var _useState43 = useState(false),
+  var _useState43 = useState(1),
     _useState44 = _slicedToArray(_useState43, 2),
-    showMenu = _useState44[0],
-    setShowMenu = _useState44[1];
+    speedMult = _useState44[0],
+    setSpeedMult = _useState44[1];
+  var speedMultR = useRef(1);
   var _useState45 = useState(false),
     _useState46 = _slicedToArray(_useState45, 2),
-    topTrayOpen = _useState46[0],
-    setTopTrayOpen = _useState46[1];
+    showMenu = _useState46[0],
+    setShowMenu = _useState46[1];
   var _useState47 = useState(false),
     _useState48 = _slicedToArray(_useState47, 2),
-    bottomTrayOpen = _useState48[0],
-    setBottomTrayOpen = _useState48[1];
-  var _useState49 = useState(null),
+    topTrayOpen = _useState48[0],
+    setTopTrayOpen = _useState48[1];
+  var _useState49 = useState(false),
     _useState50 = _slicedToArray(_useState49, 2),
-    patMenu = _useState50[0],
-    setPatMenu = _useState50[1]; // {id, x, y}
+    bottomTrayOpen = _useState50[0],
+    setBottomTrayOpen = _useState50[1];
   var _useState51 = useState(null),
     _useState52 = _slicedToArray(_useState51, 2),
-    paramPopup = _useState52[0],
-    setParamPopup = _useState52[1]; // {col,x,y,activeArm,values}
+    patMenu = _useState52[0],
+    setPatMenu = _useState52[1]; // {id, x, y}
+  var _useState53 = useState(null),
+    _useState54 = _slicedToArray(_useState53, 2),
+    paramPopup = _useState54[0],
+    setParamPopup = _useState54[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState53 = useState(null),
-    _useState54 = _slicedToArray(_useState53, 2),
-    chainDrag = _useState54[0],
-    setChainDrag = _useState54[1]; // {type,id,fromIdx,x,y}
+  var _useState55 = useState(null),
+    _useState56 = _slicedToArray(_useState55, 2),
+    chainDrag = _useState56[0],
+    setChainDrag = _useState56[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
   // Vary params
-  var _useState55 = useState(13),
-    _useState56 = _slicedToArray(_useState55, 2),
-    vDropRate = _useState56[0],
-    setVDropRate = _useState56[1];
-  var _useState57 = useState(17),
+  var _useState57 = useState(13),
     _useState58 = _slicedToArray(_useState57, 2),
-    vShiftRate = _useState58[0],
-    setVShiftRate = _useState58[1];
-  var _useState59 = useState(1),
+    vDropRate = _useState58[0],
+    setVDropRate = _useState58[1];
+  var _useState59 = useState(17),
     _useState60 = _slicedToArray(_useState59, 2),
-    vShiftRange = _useState60[0],
-    setVShiftRange = _useState60[1];
-  var _useState61 = useState(0),
+    vShiftRate = _useState60[0],
+    setVShiftRate = _useState60[1];
+  var _useState61 = useState(1),
     _useState62 = _slicedToArray(_useState61, 2),
-    vPitchRate = _useState62[0],
-    setVPitchRate = _useState62[1];
-  var _useState63 = useState(1),
+    vShiftRange = _useState62[0],
+    setVShiftRange = _useState62[1];
+  var _useState63 = useState(0),
     _useState64 = _slicedToArray(_useState63, 2),
-    vPitchRange = _useState64[0],
-    setVPitchRange = _useState64[1];
-  var _useState65 = useState(0),
+    vPitchRate = _useState64[0],
+    setVPitchRate = _useState64[1];
+  var _useState65 = useState(1),
     _useState66 = _slicedToArray(_useState65, 2),
-    vGhostRate = _useState66[0],
-    setVGhostRate = _useState66[1];
+    vPitchRange = _useState66[0],
+    setVPitchRange = _useState66[1];
   var _useState67 = useState(0),
     _useState68 = _slicedToArray(_useState67, 2),
-    vVelJitter = _useState68[0],
-    setVVelJitter = _useState68[1];
+    vGhostRate = _useState68[0],
+    setVGhostRate = _useState68[1];
   var _useState69 = useState(0),
     _useState70 = _slicedToArray(_useState69, 2),
-    vCutJitter = _useState70[0],
-    setVCutJitter = _useState70[1];
+    vVelJitter = _useState70[0],
+    setVVelJitter = _useState70[1];
   var _useState71 = useState(0),
     _useState72 = _slicedToArray(_useState71, 2),
-    vDlyJitter = _useState72[0],
-    setVDlyJitter = _useState72[1];
+    vCutJitter = _useState72[0],
+    setVCutJitter = _useState72[1];
   var _useState73 = useState(0),
     _useState74 = _slicedToArray(_useState73, 2),
-    vRhyJitter = _useState74[0],
-    setVRhyJitter = _useState74[1];
+    vDlyJitter = _useState74[0],
+    setVDlyJitter = _useState74[1];
   var _useState75 = useState(0),
     _useState76 = _slicedToArray(_useState75, 2),
-    vOctJitter = _useState76[0],
-    setVOctJitter = _useState76[1];
+    vRhyJitter = _useState76[0],
+    setVRhyJitter = _useState76[1];
   var _useState77 = useState(0),
     _useState78 = _slicedToArray(_useState77, 2),
-    vGlideJitter = _useState78[0],
-    setVGlideJitter = _useState78[1];
+    vOctJitter = _useState78[0],
+    setVOctJitter = _useState78[1];
   var _useState79 = useState(0),
     _useState80 = _slicedToArray(_useState79, 2),
-    vDurJitter = _useState80[0],
-    setVDurJitter = _useState80[1];
+    vGlideJitter = _useState80[0],
+    setVGlideJitter = _useState80[1];
+  var _useState81 = useState(0),
+    _useState82 = _slicedToArray(_useState81, 2),
+    vDurJitter = _useState82[0],
+    setVDurJitter = _useState82[1];
 
   // Synth
-  var _useState81 = useState("sawtooth"),
-    _useState82 = _slicedToArray(_useState81, 2),
-    waveform = _useState82[0],
-    setWaveform = _useState82[1];
-  var _useState83 = useState(8),
+  var _useState83 = useState("sawtooth"),
     _useState84 = _slicedToArray(_useState83, 2),
-    detune = _useState84[0],
-    setDetune = _useState84[1];
+    waveform = _useState84[0],
+    setWaveform = _useState84[1];
   var _useState85 = useState(8),
     _useState86 = _slicedToArray(_useState85, 2),
-    attack = _useState86[0],
-    setAttack = _useState86[1];
-  var _useState87 = useState(400),
+    detune = _useState86[0],
+    setDetune = _useState86[1];
+  var _useState87 = useState(8),
     _useState88 = _slicedToArray(_useState87, 2),
-    decay = _useState88[0],
-    setDecay = _useState88[1];
-  var _useState89 = useState(40),
+    attack = _useState88[0],
+    setAttack = _useState88[1];
+  var _useState89 = useState(400),
     _useState90 = _slicedToArray(_useState89, 2),
-    sustain = _useState90[0],
-    setSustain = _useState90[1];
-  var _useState91 = useState(80),
+    decay = _useState90[0],
+    setDecay = _useState90[1];
+  var _useState91 = useState(40),
     _useState92 = _slicedToArray(_useState91, 2),
-    vcfCutoff = _useState92[0],
-    setVcfCutoff = _useState92[1];
-  var _useState93 = useState(15),
+    sustain = _useState92[0],
+    setSustain = _useState92[1];
+  var _useState93 = useState(80),
     _useState94 = _slicedToArray(_useState93, 2),
-    vcfRes = _useState94[0],
-    setVcfRes = _useState94[1];
-  var _useState95 = useState(0),
+    vcfCutoff = _useState94[0],
+    setVcfCutoff = _useState94[1];
+  var _useState95 = useState(15),
     _useState96 = _slicedToArray(_useState95, 2),
-    filterEnvAmt = _useState96[0],
-    setFilterEnvAmt = _useState96[1];
+    vcfRes = _useState96[0],
+    setVcfRes = _useState96[1];
+  var _useState97 = useState(0),
+    _useState98 = _slicedToArray(_useState97, 2),
+    filterEnvAmt = _useState98[0],
+    setFilterEnvAmt = _useState98[1];
 
   // Delay
-  var _useState97 = useState(3),
-    _useState98 = _slicedToArray(_useState97, 2),
-    dlyIdx = _useState98[0],
-    setDlyIdx = _useState98[1];
-  var _useState99 = useState(45),
+  var _useState99 = useState(3),
     _useState100 = _slicedToArray(_useState99, 2),
-    dlyFbPct = _useState100[0],
-    setDlyFbPct = _useState100[1];
-  var _useState101 = useState(50),
+    dlyIdx = _useState100[0],
+    setDlyIdx = _useState100[1];
+  var _useState101 = useState(45),
     _useState102 = _slicedToArray(_useState101, 2),
-    dlyWetPct = _useState102[0],
-    setDlyWetPct = _useState102[1];
-  var _useState103 = useState(8),
+    dlyFbPct = _useState102[0],
+    setDlyFbPct = _useState102[1];
+  var _useState103 = useState(50),
     _useState104 = _slicedToArray(_useState103, 2),
-    dlyHpVal = _useState104[0],
-    setDlyHpVal = _useState104[1];
-  var _useState105 = useState(78),
+    dlyWetPct = _useState104[0],
+    setDlyWetPct = _useState104[1];
+  var _useState105 = useState(8),
     _useState106 = _slicedToArray(_useState105, 2),
-    dlyLpVal = _useState106[0],
-    setDlyLpVal = _useState106[1];
+    dlyHpVal = _useState106[0],
+    setDlyHpVal = _useState106[1];
+  var _useState107 = useState(78),
+    _useState108 = _slicedToArray(_useState107, 2),
+    dlyLpVal = _useState108[0],
+    setDlyLpVal = _useState108[1];
   var bell = useRef(new Bell());
   var stepR = useRef(0),
     cposR = useRef(0),
@@ -1595,6 +1613,26 @@ function Tabula() {
   useEffect(function () {
     gridLenR.current = gridLen;
   }, [gridLen]);
+
+  // Measure available edit area to keep grid perfectly square
+  var editOuterRef = useRef(null);
+  var _useState109 = useState(null),
+    _useState110 = _slicedToArray(_useState109, 2),
+    gridPx = _useState110[0],
+    setGridPx = _useState110[1];
+  useEffect(function () {
+    if (!editOuterRef.current) return;
+    var ro = new ResizeObserver(function (entries) {
+      var _entries$0$contentRec = entries[0].contentRect,
+        width = _entries$0$contentRec.width,
+        height = _entries$0$contentRec.height;
+      setGridPx(Math.floor(Math.min(width, height)) - 16);
+    });
+    ro.observe(editOuterRef.current);
+    return function () {
+      return ro.disconnect();
+    };
+  }, []);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
   var getShareState = function getShareState() {
@@ -2961,10 +2999,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState107 = useState(false),
-    _useState108 = _slicedToArray(_useState107, 2),
-    bpmDragging = _useState108[0],
-    setBpmDragging = _useState108[1];
+  var _useState111 = useState(false),
+    _useState112 = _slicedToArray(_useState111, 2),
+    bpmDragging = _useState112[0],
+    setBpmDragging = _useState112[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -2993,10 +3031,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState109 = useState(false),
-    _useState110 = _slicedToArray(_useState109, 2),
-    stDragging = _useState110[0],
-    setStDragging = _useState110[1];
+  var _useState113 = useState(false),
+    _useState114 = _slicedToArray(_useState113, 2),
+    stDragging = _useState114[0],
+    setStDragging = _useState114[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -3025,10 +3063,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState111 = useState(false),
-    _useState112 = _slicedToArray(_useState111, 2),
-    swingDragging = _useState112[0],
-    setSwingDragging = _useState112[1];
+  var _useState115 = useState(false),
+    _useState116 = _slicedToArray(_useState115, 2),
+    swingDragging = _useState116[0],
+    setSwingDragging = _useState116[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -3523,6 +3561,7 @@ function Tabula() {
   }, "SEMITONES"), /*#__PURE__*/React.createElement("div", {
     style: S.bpmOverlayHint
   }, "\u2191 drag \u2193")), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    ref: layoutRef,
     style: {
       display: "flex",
       gap: 20,
@@ -3530,8 +3569,9 @@ function Tabula() {
       alignItems: "stretch"
     }
   }, /*#__PURE__*/React.createElement("div", {
+    className: "left-col",
     style: {
-      width: 280,
+      width: Math.max(65, winW > 900 ? 220 : winW > 650 ? 120 : winW > 450 ? 85 : 60),
       flexShrink: 0,
       minHeight: 0,
       display: "flex",
@@ -3541,18 +3581,21 @@ function Tabula() {
     }
   }, !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.brand), {}, {
-      marginBottom: 16
+      marginBottom: 6,
+      fontSize: winW > 900 ? undefined : winW > 650 ? 11 : 9,
+      letterSpacing: winW > 650 ? 4 : 2
     })
   }, "TABULA"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      marginBottom: 14
+      flexDirection: "column",
+      gap: winW > 750 ? 4 : 3,
+      marginBottom: winW > 750 ? 8 : 4
     }
   }, /*#__PURE__*/React.createElement("select", {
     style: _objectSpread(_objectSpread({}, S.sel), {}, {
-      flex: "1 1 100%"
+      width: "100%",
+      fontSize: winW > 1000 ? 13 : winW > 550 ? 11 : 9
     }),
     value: scale,
     onChange: function onChange(e) {
@@ -3566,7 +3609,15 @@ function Tabula() {
       key: k,
       value: k
     }, v.label);
-  })), /*#__PURE__*/React.createElement("div", {
+  })), winW > 900 ?
+  /*#__PURE__*/
+  /* Wide: BPM / ST / SWG side by side */
+  React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     ref: bpmDragRef,
     style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
       flex: 1
@@ -3605,16 +3656,92 @@ function Tabula() {
     style: S.widgetN
   }, swing), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "SWG"))), /*#__PURE__*/React.createElement("div", {
-    style: _objectSpread(_objectSpread({}, S.speedRow), {}, {
-      marginBottom: 14
+  }, "SWG"))) :
+  /*#__PURE__*/
+  /* Narrow: BPM full width, ST+SWG below */
+  React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    ref: bpmDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flexDirection: "row",
+      justifyContent: "center",
+      gap: 6,
+      padding: "6px 8px"
+    }),
+    onPointerDown: handleBpmDown,
+    onPointerMove: handleBpmMove,
+    onPointerUp: handleBpmUp,
+    onPointerCancel: handleBpmUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _objectSpread(_objectSpread({}, S.widgetN), {}, {
+      fontSize: 20
     })
+  }, bpm), /*#__PURE__*/React.createElement("span", {
+    style: S.widgetU
+  }, "BPM")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: winW > 900 ? "row" : "column",
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    ref: stDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1,
+      flexDirection: "row",
+      justifyContent: "center",
+      gap: 4,
+      padding: "4px 6px"
+    }),
+    onPointerDown: handleStDown,
+    onPointerMove: handleStMove,
+    onPointerUp: handleStUp,
+    onPointerCancel: handleStUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _objectSpread(_objectSpread({}, S.widgetN), {}, {
+      fontSize: 14
+    })
+  }, stLabel), /*#__PURE__*/React.createElement("span", {
+    style: _objectSpread(_objectSpread({}, S.widgetU), {}, {
+      fontSize: 8
+    })
+  }, "ST")), /*#__PURE__*/React.createElement("div", {
+    ref: swingDragRef,
+    style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
+      flex: 1,
+      flexDirection: "row",
+      justifyContent: "center",
+      gap: 4,
+      padding: "4px 6px"
+    }),
+    onPointerDown: handleSwingDown,
+    onPointerMove: handleSwingMove,
+    onPointerUp: handleSwingUp,
+    onPointerCancel: handleSwingUp
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _objectSpread(_objectSpread({}, S.widgetN), {}, {
+      fontSize: 14
+    })
+  }, swing), /*#__PURE__*/React.createElement("span", {
+    style: _objectSpread(_objectSpread({}, S.widgetU), {}, {
+      fontSize: 8
+    })
+  }, "SWG"))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: winW > 900 ? "repeat(5,1fr)" : "repeat(auto-fill,minmax(30px,1fr))",
+      gap: 3,
+      marginBottom: winW > 900 ? 8 : 4
+    }
   }, SPEED_OPTS.map(function (_ref17) {
     var label = _ref17.label,
       mult = _ref17.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
-      style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
+      style: Object.assign({}, S.speedBtn, {
+        padding: winW > 900 ? "6px 2px" : "4px 1px",
+        fontSize: winW > 900 ? 10 : 8,
+        minWidth: 0
+      }, speedMult === mult ? S.speedBtnOn : {}),
       onClick: function onClick() {
         return setSpeedMult(mult);
       }
@@ -3623,12 +3750,15 @@ function Tabula() {
     style: {
       flexShrink: 0,
       borderTop: "1px solid rgba(200,185,165,0.08)",
-      paddingTop: 10,
-      marginBottom: 6
+      paddingTop: winW > 1000 ? 10 : winW > 550 ? 6 : 3,
+      marginBottom: winW > 1000 ? 6 : winW > 550 ? 4 : 2
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.patRow), {}, {
-      marginBottom: 6
+      marginBottom: 6,
+      flexDirection: winW > 900 ? "row" : "column",
+      flexWrap: winW > 900 ? "wrap" : "nowrap",
+      alignItems: winW > 900 ? "center" : "stretch"
     })
   }, pats.map(function (p, i) {
     var isA = p.id === activeId,
@@ -3643,7 +3773,10 @@ function Tabula() {
         color: isA ? "#000" : col,
         boxShadow: isDragging ? "0 0 20px " + col : isP ? "0 0 14px " + col + "88" : "none",
         opacity: isDragging ? 0.5 : 1,
-        touchAction: "none"
+        touchAction: "none",
+        justifyContent: "center",
+        width: winW > 900 ? "auto" : "100%",
+        boxSizing: "border-box"
       }),
       onClick: function onClick() {
         return setActiveId(p.id);
@@ -3681,9 +3814,9 @@ function Tabula() {
     return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
-        gap: 4,
-        marginBottom: 4
+        gridTemplateColumns: winW > 900 ? "1fr 1fr 1fr" : "repeat(auto-fill,minmax(38px,1fr))",
+        gap: winW > 650 ? 3 : 2,
+        marginBottom: winW > 650 ? 3 : 2
       }
     }, [["RAND", function () {
       return randPatId(targetId);
@@ -3699,27 +3832,28 @@ function Tabula() {
         key: label,
         disabled: !!disabled,
         style: {
-          padding: "5px 0",
+          padding: winW > 900 ? "5px 0" : "4px 0",
           border: "1px solid rgba(200,185,165," + (disabled ? "0.06" : "0.15") + ")",
           borderRadius: 6,
           background: "transparent",
           color: disabled ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : "rgba(200,185,165,0.6)",
-          fontSize: 9,
-          letterSpacing: 1,
+          fontSize: winW > 900 ? 9 : winW > 550 ? 8 : 7,
+          letterSpacing: winW > 550 ? 1 : 0,
           cursor: disabled ? "default" : "pointer",
-          fontFamily: "inherit"
+          fontFamily: "inherit",
+          minWidth: 0
         },
         onClick: disabled ? undefined : fn
       }, label);
     }), /*#__PURE__*/React.createElement("button", {
       style: {
-        padding: "5px 0",
+        padding: winW > 900 ? "5px 0" : "4px 0",
         border: "1px solid rgba(200,185,165," + (monoMode ? "0.6" : "0.15") + ")",
         borderRadius: 6,
         background: monoMode ? "rgba(159,180,199,0.12)" : "transparent",
         color: monoMode ? "#9fb4c7" : "rgba(200,185,165,0.5)",
-        fontSize: 9,
-        letterSpacing: 1,
+        fontSize: winW > 1000 ? 9 : winW > 550 ? 8 : 7,
+        letterSpacing: winW > 550 ? 1 : 0,
         cursor: "pointer",
         fontFamily: "inherit"
       },
@@ -3727,9 +3861,9 @@ function Tabula() {
     }, "MONO")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr 1fr",
-        gap: 4,
-        marginBottom: 6
+        gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(30px,1fr))",
+        gap: winW > 650 ? 3 : 2,
+        marginBottom: winW > 650 ? 4 : 2
       }
     }, [["CPY", function () {
       return copyPatId(targetId);
@@ -3775,8 +3909,9 @@ function Tabula() {
     return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
-        alignItems: "center",
-        gap: 6,
+        flexDirection: winW > 900 ? "row" : "column",
+        alignItems: winW > 900 ? "center" : "flex-start",
+        gap: winW > 650 ? 6 : 3,
         marginBottom: 4
       }
     }, /*#__PURE__*/React.createElement("span", {
@@ -3786,15 +3921,12 @@ function Tabula() {
         color: "rgba(200,185,165,0.25)",
         fontWeight: 500
       }
-    }, "SEQ"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1
-      }
-    }), /*#__PURE__*/React.createElement("button", {
+    }, "SEQ"), winW <= 650 && /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("button", {
       style: Object.assign({}, S.loopBtnBottom, {
         height: 22,
         padding: "0 8px",
-        fontSize: 9
+        fontSize: 9,
+        width: winW > 900 ? "auto" : "100%"
       }, followSeq ? {
         border: "1px solid #7aaa96",
         color: "#7aaa96",
@@ -3855,44 +3987,59 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      marginBottom: 8
+      marginBottom: 6
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: S.menuSaveLabel
+    style: _objectSpread(_objectSpread({}, S.menuSaveLabel), {}, {
+      marginBottom: 4
+    })
   }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
   }, flash), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(4,1fr)",
-      gap: 6
+      gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(22px,1fr))",
+      gap: 3,
+      marginBottom: 3
     }
   }, SLOTS.map(function (slot) {
     var has = !!slotData[slot];
-    return /*#__PURE__*/React.createElement("div", {
-      key: slot,
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: 3,
-        alignItems: "center"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: _objectSpread({}, S.menuSlotName)
-    }, slot, has && /*#__PURE__*/React.createElement("span", {
-      style: S.menuSlotDot
-    }, "\u25CF")), /*#__PURE__*/React.createElement("button", {
-      style: S.menuSlotBtn,
+    return /*#__PURE__*/React.createElement("button", {
+      key: slot + "sv",
+      style: _objectSpread(_objectSpread({}, S.menuSlotBtn), {}, {
+        padding: "4px 0",
+        fontSize: 8,
+        position: "relative"
+      }),
       onClick: function onClick() {
         return saveSlot(slot);
       }
-    }, "SAVE"), /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.menuSlotBtn, has ? S.menuSlotBtnLit : {}),
+    }, slot, has && /*#__PURE__*/React.createElement("span", {
+      style: _objectSpread(_objectSpread({}, S.menuSlotDot), {}, {
+        position: "absolute",
+        top: 2,
+        right: 3
+      })
+    }, "\u25CF"));
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(22px,1fr))",
+      gap: 3
+    }
+  }, SLOTS.map(function (slot) {
+    var has = !!slotData[slot];
+    return /*#__PURE__*/React.createElement("button", {
+      key: slot + "ld",
+      style: Object.assign({}, S.menuSlotBtn, {
+        padding: "4px 0",
+        fontSize: 8
+      }, has ? S.menuSlotBtnLit : {}),
       onClick: function onClick() {
         return loadSlot(slot);
       },
       disabled: !has
-    }, "LOAD"));
+    }, slot);
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 6
@@ -3904,28 +4051,34 @@ function Tabula() {
   }, shareFlash), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
-      gap: 6
+      gridTemplateColumns: winW > 900 ? "repeat(3,1fr)" : "repeat(auto-fill,minmax(36px,1fr))",
+      gap: 3
     }
   }, /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.menuSlotBtn, {
-      padding: "8px 0"
+      padding: winW > 900 ? "8px 0" : "4px 0",
+      fontSize: winW > 900 ? 9 : 7,
+      minWidth: 0
     }),
     onClick: copyShareLink
-  }, "LINK"), /*#__PURE__*/React.createElement("button", {
+  }, winW > 650 ? "LINK" : "LNK"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.menuSlotBtn, {
-      padding: "8px 0"
+      padding: winW > 900 ? "8px 0" : "4px 0",
+      fontSize: winW > 900 ? 9 : 7,
+      minWidth: 0
     }),
     onClick: exportJSON
-  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
+  }, winW > 650 ? "EXPORT" : "EXP"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.menuSlotBtn, {
-      padding: "8px 0"
+      padding: winW > 900 ? "8px 0" : "4px 0",
+      fontSize: winW > 900 ? 9 : 7,
+      minWidth: 0
     }),
     onClick: function onClick() {
       var _importRef$current;
       return (_importRef$current = importRef.current) === null || _importRef$current === void 0 ? void 0 : _importRef$current.click();
     }
-  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
+  }, winW > 650 ? "IMPORT" : "IMP")), /*#__PURE__*/React.createElement("input", {
     ref: importRef,
     type: "file",
     accept: ".json",
@@ -3940,34 +4093,30 @@ function Tabula() {
       minHeight: 0,
       display: "grid",
       gridTemplateRows: "1fr auto auto",
-      overflow: "clip"
+      overflow: "hidden"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: 0,
-      overflow: "clip",
+      overflow: "hidden",
       position: "relative"
     }
   }, page === "edit" && /*#__PURE__*/React.createElement("div", {
+    ref: editOuterRef,
     style: {
       width: "100%",
       height: "100%",
       display: "flex",
-      flexDirection: "column",
       alignItems: "center",
-      justifyContent: "center",
-      padding: "8px",
-      boxSizing: "border-box"
+      justifyContent: "center"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      aspectRatio: "1",
-      maxWidth: "100%",
-      maxHeight: "100%",
+      width: gridPx || "80%",
+      height: gridPx || "80%",
       display: "flex",
       flexDirection: "column",
-      flexShrink: 0,
-      overflow: "visible"
+      flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     ref: gridRef,
@@ -4168,8 +4317,8 @@ function Tabula() {
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
-      top: IS_MOBILE ? -3 : -6,
-      bottom: IS_MOBILE ? -3 : -6,
+      top: IS_MOBILE ? -3 : -3,
+      bottom: IS_MOBILE ? -3 : -3,
       width: IS_MOBILE ? 3 : 12,
       left: "calc(".concat(gridLen / COLS * 100, "% - ").concat(IS_MOBILE ? 1 : 6, "px)"),
       background: "rgba(255,255,255,0.8)",
@@ -5760,7 +5909,7 @@ function Tabula() {
     }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
       style: S.chainInsertLine
     }));
-  }()), /*#__PURE__*/React.createElement("div", {
+  }()), winW > 550 && /*#__PURE__*/React.createElement("div", {
     style: S.menuSaveLabel
   }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
     style: S.menuFlash
@@ -5954,7 +6103,7 @@ function Tabula() {
     }))));
   }()), " ");
 }
-var CSS = "\n  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');\n  html,body{overscroll-behavior:none;overflow:hidden;position:fixed;width:100%;height:100%;touch-action:pan-y;}\n  *,*::before,*::after{\n    box-sizing:border-box;\n    -webkit-tap-highlight-color:transparent;\n    -webkit-user-select:none!important;\n    -webkit-touch-callout:none!important;\n    -webkit-user-drag:none!important;\n    user-select:none!important;\n  }\n  .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}\n  @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}\n  select option{background:#111;color:#fff;}\n";
+var CSS = "\n  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');\n  html,body{overscroll-behavior:none;overflow:hidden;position:fixed;width:100%;height:100%;touch-action:pan-y;}\n  *,*::before,*::after{\n    box-sizing:border-box;\n    -webkit-tap-highlight-color:transparent;\n    -webkit-user-select:none!important;\n    -webkit-touch-callout:none!important;\n    -webkit-user-drag:none!important;\n    user-select:none!important;\n  }\n  .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}\n  @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}\n  select option{background:#111;color:#fff;}\n  .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}\n  .left-col select{min-width:0;}\n  .grid-outer{container-type:size;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}\n  .grid-square{width:min(100cqw,100cqh);height:min(100cqw,100cqh);display:flex;flex-direction:column;flex-shrink:0;padding:8px;box-sizing:border-box;}\n";
 var S = {
   root: {
     fontFamily: "'DM Sans',sans-serif",
@@ -6000,7 +6149,8 @@ var S = {
     padding: "7px 8px",
     borderRadius: 6,
     cursor: "pointer",
-    flexShrink: 0
+    flexShrink: 1,
+    minWidth: 0
   },
   hdrWidget: {
     display: "flex",
@@ -6029,14 +6179,14 @@ var S = {
     flexDirection: "column",
     alignItems: "center",
     cursor: "ns-resize",
-    padding: IS_MOBILE ? "8px 14px" : "10px 18px",
+    padding: IS_MOBILE ? "8px 14px" : "8px 10px",
     borderRadius: 10,
     border: "1px solid rgba(200,185,165,0.15)",
     background: "rgba(200,185,165,0.04)",
-    minWidth: IS_MOBILE ? 52 : 64,
+    minWidth: IS_MOBILE ? 52 : 40,
     touchAction: "none",
     userSelect: "none",
-    flexShrink: 0
+    flexShrink: 1
   },
   bpmOverlay: {
     position: "fixed",
@@ -6166,6 +6316,7 @@ var S = {
   },
   speedRow: {
     display: "flex",
+    flexWrap: "wrap",
     gap: 4,
     marginBottom: IS_MOBILE ? 10 : 14
   },

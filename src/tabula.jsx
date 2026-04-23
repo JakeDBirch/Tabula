@@ -31,8 +31,7 @@ const ROWS=16,COLS=16;
 const IS_MOBILE = (()=>{
   try {
     return navigator.maxTouchPoints > 0
-      || window.innerWidth < 768
-      || window.screen.width < 768
+      || window.matchMedia('(pointer: coarse)').matches      || window.screen.width < 768
       || window.matchMedia('(pointer: coarse)').matches
       || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch(e) { return false; }
@@ -436,6 +435,17 @@ export default function Tabula(){
   const [chain,     setChain]     = useState([1]);
   const [page,      setPage]      = useState("edit");
   const [bpm,       setBpm]       = useState(120);
+
+  // Track window width to drive responsive left column layout
+  // Use ResizeObserver on the layout container — works inside iframes too
+  const layoutRef = useRef(null);
+  const [winW, setWinW] = useState(1200);
+  useEffect(()=>{
+    if(!layoutRef.current) return;
+    const ro = new ResizeObserver(entries=>setWinW(entries[0].contentRect.width));
+    ro.observe(layoutRef.current);
+    return ()=>ro.disconnect();
+  },[]);
   const [scale,     setScale]     = useState("major");
   const [playing,   setPlaying]   = useState(false);
   const [step,      setStep]      = useState(-1);
@@ -580,6 +590,19 @@ export default function Tabula(){
   const activePat=pats.find(p=>p.id===activeId);
   const gridLen=activePat?.gridLen??16;
   useEffect(()=>{gridLenR.current=gridLen;},[gridLen]);
+
+  // Measure available edit area to keep grid perfectly square
+  const editOuterRef = useRef(null);
+  const [gridPx, setGridPx] = useState(null);
+  useEffect(()=>{
+    if(!editOuterRef.current) return;
+    const ro = new ResizeObserver(entries=>{
+      const {width,height} = entries[0].contentRect;
+      setGridPx(Math.floor(Math.min(width,height)) - 16);
+    });
+    ro.observe(editOuterRef.current);
+    return ()=>ro.disconnect();
+  },[]);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
   const getShareState=()=>({
@@ -1550,32 +1573,52 @@ export default function Tabula(){
       {/* ── Layout ── */}
       {/* ── Desktop layout ── */}
       {!IS_MOBILE&&(
-      <div style={{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
+      <div ref={layoutRef} style={{display:"flex",gap:20,height:"calc(100dvh - 52px)",alignItems:"stretch"}}>
 
         {/* ── LEFT COLUMN ── */}
-        <div style={{width:280,flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
+        <div className="left-col" style={{width:Math.max(65,winW>900?220:winW>650?120:winW>450?85:60),flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
           {/* Brand + widgets */}
           {!IS_MOBILE&&(
             <>
-              <div style={{...S.brand,marginBottom:16}}>TABULA</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
-                <select style={{...S.sel,flex:"1 1 100%"}} value={scale} onChange={e=>setScale(e.target.value)}>
+              <div style={{...S.brand,marginBottom:6,fontSize:winW>900?undefined:winW>650?11:9,letterSpacing:winW>650?4:2}}>TABULA</div>
+              <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
+                <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
-                <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-                  <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
-                </div>
-                <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-                  <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
-                </div>
-                <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-                  <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
-                </div>
+                {winW>900?(
+                  /* Wide: BPM / ST / SWG side by side */
+                  <div style={{display:"flex",gap:6}}>
+                    <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                      <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
+                    </div>
+                    <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                      <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
+                    </div>
+                    <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                      <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
+                    </div>
+                  </div>
+                ):(
+                  /* Narrow: BPM full width, ST+SWG below */
+                  <>
+                    <div ref={bpmDragRef} style={{...S.bpmDragTarget,flexDirection:"row",justifyContent:"center",gap:6,padding:"6px 8px"}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                      <span style={{...S.widgetN,fontSize:20}}>{bpm}</span><span style={S.widgetU}>BPM</span>
+                    </div>
+                    <div style={{display:"flex",flexDirection:winW>900?"row":"column",gap:4}}>
+                      <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1,flexDirection:"row",justifyContent:"center",gap:4,padding:"4px 6px"}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                        <span style={{...S.widgetN,fontSize:14}}>{stLabel}</span><span style={{...S.widgetU,fontSize:8}}>ST</span>
+                      </div>
+                      <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1,flexDirection:"row",justifyContent:"center",gap:4,padding:"4px 6px"}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                        <span style={{...S.widgetN,fontSize:14}}>{swing}</span><span style={{...S.widgetU,fontSize:8}}>SWG</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-              {/* Speed */}
-              <div style={{...S.speedRow,marginBottom:14}}>
+              {/* Speed — CSS grid forces equal cell width regardless of content */}
+              <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(5,1fr)":"repeat(auto-fill,minmax(30px,1fr))",gap:3,marginBottom:winW>900?8:4}}>
                 {SPEED_OPTS.map(({label,mult})=>(
-                  <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})}
+                  <button key={label} style={Object.assign({},S.speedBtn,{padding:winW>900?"6px 2px":"4px 1px",fontSize:winW>900?10:8,minWidth:0},speedMult===mult?S.speedBtnOn:{})}
                     onClick={()=>setSpeedMult(mult)}>{label}</button>
                 ))}
               </div>
@@ -1584,14 +1627,14 @@ export default function Tabula(){
 
           {/* Pattern pills + inline actions */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginBottom:6}}>
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:winW>1000?10:winW>550?6:3,marginBottom:winW>1000?6:winW>550?4:2}}>
               {/* Pills row */}
-              <div style={{...S.patRow,marginBottom:6}}>
+              <div style={{...S.patRow,marginBottom:6,flexDirection:winW>900?"row":"column",flexWrap:winW>900?"wrap":"nowrap",alignItems:winW>900?"center":"stretch"}}>
                 {pats.map((p,i)=>{
                   const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
                   const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
                   return(
-                    <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
+                    <div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none",justifyContent:"center",width:winW>900?"auto":"100%",boxSizing:"border-box"})}
                       onClick={()=>setActiveId(p.id)}
                       onPointerDown={e=>startPillDrag(e,p.id)}
                       onPointerMove={onDragMove}
@@ -1611,26 +1654,26 @@ export default function Tabula(){
                 return(
                   <>
                   {/* Row 1: RAND, CLR, MONO */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,marginBottom:4}}>
+                  <div style={{display:"grid",gridTemplateColumns:winW>900?"1fr 1fr 1fr":"repeat(auto-fill,minmax(38px,1fr))",gap:winW>650?3:2,marginBottom:winW>650?3:2}}>
                     {[
                       ["RAND", ()=>randPatId(targetId),  false, false],
                       ["CLR",  ()=>clearPatId(targetId), false, false],
                     ].map(([label,fn,disabled,danger])=>(
                       <button key={label} disabled={!!disabled}
-                        style={{padding:"5px 0",border:"1px solid rgba(200,185,165,"+(disabled?"0.06":"0.15")+")",borderRadius:6,background:"transparent",
+                        style={{padding:winW>900?"5px 0":"4px 0",border:"1px solid rgba(200,185,165,"+(disabled?"0.06":"0.15")+")",borderRadius:6,background:"transparent",
                           color:disabled?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.6)",
-                          fontSize:9,letterSpacing:1,cursor:disabled?"default":"pointer",fontFamily:"inherit"}}
+                          fontSize:winW>900?9:winW>550?8:7,letterSpacing:winW>550?1:0,cursor:disabled?"default":"pointer",fontFamily:"inherit",minWidth:0}}
                         onClick={disabled?undefined:fn}>{label}</button>
                     ))}
                     <button
-                      style={{padding:"5px 0",border:"1px solid rgba(200,185,165,"+(monoMode?"0.6":"0.15")+")",borderRadius:6,
+                      style={{padding:winW>900?"5px 0":"4px 0",border:"1px solid rgba(200,185,165,"+(monoMode?"0.6":"0.15")+")",borderRadius:6,
                         background:monoMode?"rgba(159,180,199,0.12)":"transparent",
                         color:monoMode?"#9fb4c7":"rgba(200,185,165,0.5)",
-                        fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}
+                        fontSize:winW>1000?9:winW>550?8:7,letterSpacing:winW>550?1:0,cursor:"pointer",fontFamily:"inherit"}}
                       onClick={toggleMono}>MONO</button>
                   </div>
                   {/* Row 2: CPY, PST, DUP, DEL */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginBottom:6}}>
+                  <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(30px,1fr))",gap:winW>650?3:2,marginBottom:winW>650?4:2}}>
                     {[
                       ["CPY",  ()=>copyPatId(targetId),  false, false],
                       ["PST",  ()=>pastePatId(targetId), !clipboard, false],
@@ -1658,10 +1701,10 @@ export default function Tabula(){
                 const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
                 return (
                   <div>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                    <div style={{display:"flex",flexDirection:winW>900?"row":"column",alignItems:winW>900?"center":"flex-start",gap:winW>650?6:3,marginBottom:4}}>
                       <span style={{fontSize:10,letterSpacing:1,color:"rgba(200,185,165,0.25)",fontWeight:500}}>SEQ</span>
-                      <div style={{flex:1}}/>
-                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+                      {winW<=650&&<div/>}
+                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:9,width:winW>900?"auto":"100%"},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
                     </div>
                     <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
                       {chain.length===0&&!chainDrag&&(
@@ -1699,26 +1742,29 @@ export default function Tabula(){
           {/* Save/load + share — pinned to bottom of left column */}
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginTop:4}}>
-              <div style={{marginBottom:8}}>
-                <div style={S.menuSaveLabel}>SAVE / LOAD</div>
+              <div style={{marginBottom:6}}>
+                <div style={{...S.menuSaveLabel,marginBottom:4}}>SAVE / LOAD</div>
                 {flash&&<div style={S.menuFlash}>{flash}</div>}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3,marginBottom:3}}>
                   {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                    <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                      <span style={{...S.menuSlotName}}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                      <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                      <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                    </div>
+                    <button key={slot+"sv"} style={{...S.menuSlotBtn,padding:"4px 0",fontSize:8,position:"relative"}}
+                      onClick={()=>saveSlot(slot)}>{slot}{has&&<span style={{...S.menuSlotDot,position:"absolute",top:2,right:3}}>●</span>}</button>
+                  );})}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3}}>
+                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
+                    <button key={slot+"ld"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8},has?S.menuSlotBtnLit:{})}
+                      onClick={()=>loadSlot(slot)} disabled={!has}>{slot}</button>
                   );})}
                 </div>
               </div>
               <div style={{marginBottom:6}}>
                 <div style={S.menuSaveLabel}>SHARE</div>
                 {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={copyShareLink}>LINK</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={exportJSON}>EXPORT</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(3,1fr)":"repeat(auto-fill,minmax(36px,1fr))",gap:3}}>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={copyShareLink}>{winW>650?"LINK":"LNK"}</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportJSON}>{winW>650?"EXPORT":"EXP"}</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={()=>importRef.current?.click()}>{winW>650?"IMPORT":"IMP"}</button>
                 </div>
                 <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
@@ -1727,13 +1773,12 @@ export default function Tabula(){
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"clip"}}>
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
-          <div style={{minHeight:0,overflow:"clip",position:"relative"}}>
+          <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             {page==="edit"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"8px",boxSizing:"border-box"}}>
-              {/* Square grid: constrain by whichever is smaller — available width or available height */}
-              <div style={{aspectRatio:"1",maxWidth:"100%",maxHeight:"100%",display:"flex",flexDirection:"column",flexShrink:0,overflow:"visible"}}>
+              <div ref={editOuterRef} style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
@@ -1809,7 +1854,7 @@ export default function Tabula(){
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                 <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
                 <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                <div style={{position:"absolute",top:IS_MOBILE?-3:-6,bottom:IS_MOBILE?-3:-6,width:IS_MOBILE?3:12,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                <div style={{position:"absolute",top:IS_MOBILE?-3:-3,bottom:IS_MOBILE?-3:-3,width:IS_MOBILE?3:12,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
@@ -2114,7 +2159,7 @@ export default function Tabula(){
               })()}
             </div>
             {/* Save/load */}
-            <div style={S.menuSaveLabel}>SAVE / LOAD</div>
+            {winW>550&&<div style={S.menuSaveLabel}>SAVE / LOAD</div>}
             {flash&&<div style={S.menuFlash}>{flash}</div>}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
               {SLOTS.map(slot=>{const has=!!slotData[slot];return(
@@ -2179,6 +2224,10 @@ const CSS=`
   .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}
   @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}
   select option{background:#111;color:#fff;}
+  .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .left-col select{min-width:0;}
+  .grid-outer{container-type:size;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+  .grid-square{width:min(100cqw,100cqh);height:min(100cqw,100cqh);display:flex;flex-direction:column;flex-shrink:0;padding:8px;box-sizing:border-box;}
 `;
 
 const S={
@@ -2186,12 +2235,12 @@ const S={
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
   brand:     {fontFamily:"'DM Sans',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:300,letterSpacing:6,background:"linear-gradient(135deg,#c4a882,#9bbfaa)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
-  sel:       {background:"rgba(200,185,165,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:0},
+  sel:       {background:"rgba(200,185,165,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:1,minWidth:0},
   hdrWidget: {display:"flex",alignItems:"center",gap:2,flexShrink:0},
   widgetBox: {textAlign:"center",minWidth:26},
   widgetN:   {fontSize:IS_MOBILE?20:22,fontWeight:700,display:"block",lineHeight:1.1},
   widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(210,195,175,0.3)",letterSpacing:1,display:"block"},
-  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"10px 18px",borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"rgba(200,185,165,0.04)",minWidth:IS_MOBILE?52:64,touchAction:"none",userSelect:"none",flexShrink:0},
+  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"8px 10px",borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"rgba(200,185,165,0.04)",minWidth:IS_MOBILE?52:40,touchAction:"none",userSelect:"none",flexShrink:1},
   bpmOverlay:    {position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.88)",zIndex:999,pointerEvents:"none"},
   bpmOverlayNum: {fontFamily:"'DM Sans',sans-serif",fontSize:88,fontWeight:300,color:"#e8e0d5",lineHeight:1,letterSpacing:-2},
   bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(210,195,175,0.4)",marginTop:6},
@@ -2207,7 +2256,7 @@ const S={
   tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
   stepVaryDivider:{height:1,background:"rgba(220,200,180,0.06)",margin:"16px 0 8px"},
-  speedRow:  {display:"flex",gap:4,marginBottom:IS_MOBILE?10:14},
+  speedRow:  {display:"flex",flexWrap:"wrap",gap:4,marginBottom:IS_MOBILE?10:14},
   speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.4)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   speedBtnOn:{border:"1px solid rgba(255,255,255,0.5)",color:"#fff",background:"rgba(255,255,255,0.08)"},
 
