@@ -144,13 +144,12 @@ var SPEED_OPTS = [{
   label: "½×",
   mult: 2
 }, {
-  label: "¼×",
-  mult: 4
-}, {
   label: "⅔×",
   mult: 1.5
-} // triplet: each step = 3/2 of a 16th = 16th note triplet
-];
+}, {
+  label: "¼×",
+  mult: 4
+}];
 var SHIFT_THRESHOLD = 10;
 var WAVEFORMS = ["sawtooth", "square", "triangle", "sine"];
 var WF_LABELS = ["SAW", "SQ", "TRI", "SIN"];
@@ -3610,14 +3609,10 @@ function Tabula() {
     style: S.widgetN
   }, swing), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "SWG")))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      overflowY: "auto",
-      scrollbarWidth: "none"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.speedRow
+  }, "SWG"))), /*#__PURE__*/React.createElement("div", {
+    style: _objectSpread(_objectSpread({}, S.speedRow), {}, {
+      marginBottom: 14
+    })
   }, SPEED_OPTS.map(function (_ref17) {
     var label = _ref17.label,
       mult = _ref17.mult;
@@ -3628,105 +3623,16 @@ function Tabula() {
         return setSpeedMult(mult);
       }
     }, label);
-  })), /*#__PURE__*/React.createElement("div", {
+  }))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: {
-      marginBottom: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.menuSaveLabel
-  }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
-    style: S.menuFlash
-  }, flash), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(4,1fr)",
-      gap: 6
-    }
-  }, SLOTS.map(function (slot) {
-    var has = !!slotData[slot];
-    return /*#__PURE__*/React.createElement("div", {
-      key: slot,
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: 3,
-        alignItems: "center"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: _objectSpread({}, S.menuSlotName)
-    }, slot, has && /*#__PURE__*/React.createElement("span", {
-      style: S.menuSlotDot
-    }, "\u25CF")), /*#__PURE__*/React.createElement("button", {
-      style: S.menuSlotBtn,
-      onClick: function onClick() {
-        return saveSlot(slot);
-      }
-    }, "SAVE"), /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.menuSlotBtn, has ? S.menuSlotBtnLit : {}),
-      onClick: function onClick() {
-        return loadSlot(slot);
-      },
-      disabled: !has
-    }, "LOAD"));
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.menuSaveLabel
-  }, "SHARE"), shareFlash && /*#__PURE__*/React.createElement("div", {
-    style: S.menuFlash
-  }, shareFlash), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.menuSlotBtn, {
-      padding: "10px 0"
-    }),
-    onClick: copyShareLink
-  }, "LINK"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.menuSlotBtn, {
-      padding: "10px 0"
-    }),
-    onClick: exportJSON
-  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.menuSlotBtn, {
-      padding: "10px 0"
-    }),
-    onClick: function onClick() {
-      var _importRef$current;
-      return (_importRef$current = importRef.current) === null || _importRef$current === void 0 ? void 0 : _importRef$current.click();
-    }
-  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
-    ref: importRef,
-    type: "file",
-    accept: ".json",
-    style: {
-      display: "none"
-    },
-    onChange: handleImport
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref18) {
-    var label = _ref18.label,
-      mult = _ref18.mult;
-    return /*#__PURE__*/React.createElement("button", {
-      key: label,
-      style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
-      onClick: function onClick() {
-        return setSpeedMult(mult);
-      }
-    }, label);
-  })), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    style: _objectSpread(_objectSpread({}, S.patRow), {}, {
       flexShrink: 0,
-      paddingBottom: 6,
-      borderTop: "1px solid rgba(255,255,255,0.06)",
-      paddingTop: 8,
-      marginTop: 4
+      borderTop: "1px solid rgba(200,185,165,0.08)",
+      paddingTop: 10,
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _objectSpread(_objectSpread({}, S.patRow), {}, {
+      marginBottom: 6
     })
   }, pats.map(function (p, i) {
     var isA = p.id === activeId,
@@ -3774,25 +3680,73 @@ function Tabula() {
     style: S.newPill,
     onClick: addPat
   }, "\uFF0B")), function () {
-    var overStrip = chainDrag && isOverStrip(chainDrag.y);
-    var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
+    var targetId = activeId;
+    var isOnlyPat = pats.length <= 1;
     return /*#__PURE__*/React.createElement("div", {
       style: {
-        flexShrink: 0
+        display: "grid",
+        gridTemplateColumns: "repeat(6,1fr)",
+        gap: 4,
+        marginBottom: 6
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, [["RAND", function () {
+      return randPatId(targetId);
+    }, false, false], ["CLR", function () {
+      return clearPatId(targetId);
+    }, false, false], ["CPY", function () {
+      return copyPatId(targetId);
+    }, false, false], ["PST", function () {
+      return pastePatId(targetId);
+    }, !clipboard, false], ["DUP", function () {
+      return dupPatId(targetId);
+    }, pats.length >= 8, false], ["DEL", function () {
+      return delPatId(targetId);
+    }, isOnlyPat, true]].map(function (_ref18) {
+      var _ref19 = _slicedToArray(_ref18, 4),
+        label = _ref19[0],
+        fn = _ref19[1],
+        disabled = _ref19[2],
+        danger = _ref19[3];
+      return /*#__PURE__*/React.createElement("button", {
+        key: label,
+        disabled: !!disabled,
+        style: {
+          padding: "5px 0",
+          border: "1px solid rgba(200,185,165," + (disabled ? "0.06" : "0.15") + ")",
+          borderRadius: 6,
+          background: "transparent",
+          color: disabled ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : "rgba(200,185,165,0.6)",
+          fontSize: 9,
+          letterSpacing: 1,
+          cursor: disabled ? "default" : "pointer",
+          fontFamily: "inherit"
+        },
+        onClick: disabled ? undefined : fn
+      }, label);
+    }));
+  }()), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: "auto",
+      scrollbarWidth: "none"
+    }
+  }, function () {
+    var overStrip = chainDrag && isOverStrip(chainDrag.y);
+    var insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "center",
         gap: 6,
-        marginBottom: 2
+        marginBottom: 4
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: IS_MOBILE ? 7 : 10,
+        fontSize: 10,
         letterSpacing: 1,
-        color: "rgba(255,255,255,0.25)",
-        fontWeight: 700
+        color: "rgba(200,185,165,0.25)",
+        fontWeight: 500
       }
     }, "SEQ"), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3802,7 +3756,7 @@ function Tabula() {
       style: Object.assign({}, S.loopBtnBottom, {
         height: 22,
         padding: "0 8px",
-        fontSize: IS_MOBILE ? 7 : 9
+        fontSize: 9
       }, followSeq ? {
         border: "1px solid #7aaa96",
         color: "#7aaa96",
@@ -3854,107 +3808,100 @@ function Tabula() {
     }), overStrip && insertIdx >= chain.length && /*#__PURE__*/React.createElement("div", {
       style: S.chainInsertLine
     })));
-  }(), /*#__PURE__*/React.createElement("div", {
+  }()), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+    style: {
+      flexShrink: 0,
+      borderTop: "1px solid rgba(200,185,165,0.08)",
+      paddingTop: 10,
+      marginTop: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.menuSaveLabel
+  }, "SAVE / LOAD"), flash && /*#__PURE__*/React.createElement("div", {
+    style: S.menuFlash
+  }, flash), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr auto 1fr",
-      gridTemplateRows: "1fr 1fr 1fr",
-      gap: 8,
-      marginTop: "auto",
-      paddingTop: 16,
-      alignItems: "center"
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 6
+    }
+  }, SLOTS.map(function (slot) {
+    var has = !!slotData[slot];
+    return /*#__PURE__*/React.createElement("div", {
+      key: slot,
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        alignItems: "center"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: _objectSpread({}, S.menuSlotName)
+    }, slot, has && /*#__PURE__*/React.createElement("span", {
+      style: S.menuSlotDot
+    }, "\u25CF")), /*#__PURE__*/React.createElement("button", {
+      style: S.menuSlotBtn,
+      onClick: function onClick() {
+        return saveSlot(slot);
+      }
+    }, "SAVE"), /*#__PURE__*/React.createElement("button", {
+      style: Object.assign({}, S.menuSlotBtn, has ? S.menuSlotBtnLit : {}),
+      onClick: function onClick() {
+        return loadSlot(slot);
+      },
+      disabled: !has
+    }, "LOAD"));
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: S.menuSaveLabel
+  }, "SHARE"), shareFlash && /*#__PURE__*/React.createElement("div", {
+    style: S.menuFlash
+  }, shareFlash), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: 6
     }
   }, /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, {
-      width: "100%"
-    }, varyMode ? {
-      border: "1px solid #c9a96e",
-      color: "#c9a96e",
-      background: "rgba(201,169,110,0.12)"
-    } : {}),
-    onClick: function onClick() {
-      return setVaryMode(function (v) {
-        return !v;
-      });
-    }
-  }, "VARY"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.playBtn, playing ? S.playOn : {}, {
-      gridColumn: 2,
-      gridRow: "1/4",
-      alignSelf: "center"
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "8px 0"
     }),
-    onClick: startStop
-  }, playing ? /*#__PURE__*/React.createElement("svg", {
-    width: "11",
-    height: "11",
-    viewBox: "0 0 11 11",
-    fill: "currentColor",
+    onClick: copyShareLink
+  }, "LINK"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "8px 0"
+    }),
+    onClick: exportJSON
+  }, "EXPORT"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "8px 0"
+    }),
+    onClick: function onClick() {
+      var _importRef$current;
+      return (_importRef$current = importRef.current) === null || _importRef$current === void 0 ? void 0 : _importRef$current.click();
+    }
+  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
+    ref: importRef,
+    type: "file",
+    accept: ".json",
     style: {
-      display: "block"
-    }
-  }, /*#__PURE__*/React.createElement("rect", {
-    x: "1",
-    y: "1",
-    width: "9",
-    height: "9",
-    rx: "1.5"
-  })) : /*#__PURE__*/React.createElement("svg", {
-    width: "11",
-    height: "11",
-    viewBox: "0 0 11 11",
-    fill: "currentColor",
-    style: {
-      display: "block"
-    }
-  }, /*#__PURE__*/React.createElement("polygon", {
-    points: "1.5,0.5 10.5,5.5 1.5,10.5"
-  }))), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, {
-      width: "100%"
-    }, monoMode ? {
-      border: "1px solid #9fb4c7",
-      color: "#9fb4c7",
-      background: "rgba(159,180,199,0.12)"
-    } : {}),
-    onClick: toggleMono
-  }, "MONO"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, {
-      width: "100%"
-    }, recMode ? {
-      border: "1px solid #c47a7a",
-      color: "#c47a7a",
-      background: "rgba(196,122,122,0.15)",
-      fontWeight: 900
-    } : {
-      border: "1px solid rgba(255,77,77,0.4)",
-      color: "rgba(196,122,122,0.6)"
-    }),
-    onClick: function onClick() {
-      return setRecMode(function (r) {
-        return !r;
-      });
-    }
-  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, {
-      width: "100%"
-    }, loopMode ? S.loopOn : {}),
-    onClick: function onClick() {
-      return setLoopMode(function (l) {
-        return !l;
-      });
-    }
-  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, {
-      width: "100%"
-    }),
-    onClick: mutatePat1
-  }, "MUT8"), /*#__PURE__*/React.createElement("div", null)))), /*#__PURE__*/React.createElement("div", {
+      display: "none"
+    },
+    onChange: handleImport
+  })))), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 0,
       minHeight: 0,
       display: "grid",
-      gridTemplateRows: "1fr auto",
+      gridTemplateRows: "1fr auto auto",
       overflow: "hidden"
     }
   }, page === "edit" && /*#__PURE__*/React.createElement("div", {
@@ -4608,10 +4555,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref19) {
-    var _ref20 = _slicedToArray(_ref19, 2),
-      p = _ref20[0],
-      lbl = _ref20[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref20) {
+    var _ref21 = _slicedToArray(_ref20, 2),
+      p = _ref21[0],
+      lbl = _ref21[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -4619,7 +4566,91 @@ function Tabula() {
         return setPage(p);
       }
     }, lbl);
-  }))))), " ", IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flexShrink: 0,
+      display: "flex",
+      gap: 6,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingTop: 8,
+      borderTop: "1px solid rgba(200,185,165,0.08)"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, varyMode ? {
+      border: "1px solid #c9a96e",
+      color: "#c9a96e",
+      background: "rgba(201,169,110,0.12)"
+    } : {}),
+    onClick: function onClick() {
+      return setVaryMode(function (v) {
+        return !v;
+      });
+    }
+  }, "VARY"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, recMode ? {
+      border: "1px solid #c47a7a",
+      color: "#c47a7a",
+      background: "rgba(196,122,122,0.15)",
+      fontWeight: 900
+    } : {
+      border: "1px solid rgba(196,122,122,0.3)",
+      color: "rgba(196,122,122,0.6)"
+    }),
+    onClick: function onClick() {
+      return setRecMode(function (r) {
+        return !r;
+      });
+    }
+  }, recMode ? "■ REC" : "● REC"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.playBtn, {
+      width: 44,
+      height: 44,
+      fontSize: 16
+    }, playing ? S.playOn : {}),
+    onClick: startStop
+  }, playing ? /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "1",
+    y: "1",
+    width: "9",
+    height: "9",
+    rx: "1.5"
+  })) : /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("polygon", {
+    points: "1.5,0.5 10.5,5.5 1.5,10.5"
+  }))), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, monoMode ? {
+      border: "1px solid #9fb4c7",
+      color: "#9fb4c7",
+      background: "rgba(159,180,199,0.12)"
+    } : {}),
+    onClick: toggleMono
+  }, "MONO"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, loopMode ? S.loopOn : {}),
+    onClick: function onClick() {
+      return setLoopMode(function (l) {
+        return !l;
+      });
+    }
+  }, "LOOP"), /*#__PURE__*/React.createElement("button", {
+    style: S.loopBtnBottom,
+    onClick: mutatePat1
+  }, "MUT8"))))), " ", IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       top: 0,
@@ -5330,10 +5361,10 @@ function Tabula() {
       gap: 4,
       padding: "3px 12px 10px"
     }
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref21) {
-    var _ref22 = _slicedToArray(_ref21, 2),
-      p = _ref22[0],
-      lbl = _ref22[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref22) {
+    var _ref23 = _slicedToArray(_ref22, 2),
+      p = _ref23[0],
+      lbl = _ref23[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, {
@@ -5420,10 +5451,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref23) {
-    var _ref24 = _slicedToArray(_ref23, 2),
-      k = _ref24[0],
-      v = _ref24[1];
+  }, Object.entries(SCALES).map(function (_ref24) {
+    var _ref25 = _slicedToArray(_ref24, 2),
+      k = _ref25[0],
+      v = _ref25[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -5490,9 +5521,9 @@ function Tabula() {
     style: _objectSpread(_objectSpread({}, S.speedRow), {}, {
       marginBottom: 14
     })
-  }, SPEED_OPTS.map(function (_ref25) {
-    var label = _ref25.label,
-      mult = _ref25.mult;
+  }, SPEED_OPTS.map(function (_ref26) {
+    var label = _ref26.label,
+      mult = _ref26.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -5838,12 +5869,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref26) {
-      var _ref27 = _slicedToArray(_ref26, 4),
-        label = _ref27[0],
-        fn = _ref27[1],
-        disabled = _ref27[2],
-        danger = _ref27[3];
+    }, isOnlyPat, true]].map(function (_ref27) {
+      var _ref28 = _slicedToArray(_ref27, 4),
+        label = _ref28[0],
+        fn = _ref28[1],
+        disabled = _ref28[2],
+        danger = _ref28[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,

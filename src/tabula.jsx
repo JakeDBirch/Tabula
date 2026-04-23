@@ -43,8 +43,8 @@ const SPEED_OPTS=[
   {label:"2×",  mult:0.5},
   {label:"1×",  mult:1},
   {label:"½×",  mult:2},
+  {label:"⅔×",  mult:1.5},
   {label:"¼×",  mult:4},
-  {label:"⅔×",  mult:1.5}, // triplet: each step = 3/2 of a 16th = 16th note triplet
 ];
 const SHIFT_THRESHOLD=10;
 const WAVEFORMS=["sawtooth","square","triangle","sine"];
@@ -1555,7 +1555,7 @@ export default function Tabula(){
 
         {/* ── LEFT COLUMN ── */}
         <div style={{width:280,flexShrink:0,minHeight:0,display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
-          {/* Brand + widgets — desktop only */}
+          {/* Brand + widgets */}
           {!IS_MOBILE&&(
             <>
               <div style={{...S.brand,marginBottom:16}}>TABULA</div>
@@ -1573,60 +1573,21 @@ export default function Tabula(){
                   <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
                 </div>
               </div>
-            </>
-          )}
-          {/* Scrollable middle section — actions, speed, save/load */}
-          {!IS_MOBILE&&(
-            <div style={{flex:1,overflowY:"auto",scrollbarWidth:"none"}}>
-              {/* Speed row */}
-              <div style={S.speedRow}>
+              {/* Speed */}
+              <div style={{...S.speedRow,marginBottom:14}}>
                 {SPEED_OPTS.map(({label,mult})=>(
                   <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})}
                     onClick={()=>setSpeedMult(mult)}>{label}</button>
                 ))}
               </div>
-              {/* Save/load inline */}
-              <div style={{marginBottom:10}}>
-                <div style={S.menuSaveLabel}>SAVE / LOAD</div>
-                {flash&&<div style={S.menuFlash}>{flash}</div>}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                    <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                      <span style={{...S.menuSlotName}}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                      <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                      <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                    </div>
-                  );})}
-                </div>
-              </div>
-              {/* Share / Export / Import */}
-              <div style={{marginBottom:10}}>
-                <div style={S.menuSaveLabel}>SHARE</div>
-                {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
-                </div>
-                <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
-              </div>
-            </div>
+            </>
           )}
 
-          {/* Speed row */}
-          <div style={S.speedRow}>
-            {SPEED_OPTS.map(({label,mult})=>(
-              <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})}
-                onClick={()=>setSpeedMult(mult)}>{label}</button>
-            ))}
-          </div>
-
-
-          {/* Transport — desktop only: pills + chain + buttons pinned to bottom */}
+          {/* Pattern pills + inline actions */}
           {!IS_MOBILE&&(
-            <>
-              {/* Pattern pills — pinned above transport */}
-              <div style={{...S.patRow, flexShrink:0, paddingBottom:6, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8, marginTop:4}}>
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginBottom:6}}>
+              {/* Pills row */}
+              <div style={{...S.patRow,marginBottom:6}}>
                 {pats.map((p,i)=>{
                   const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
                   const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
@@ -1644,18 +1605,46 @@ export default function Tabula(){
                 })}
                 {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
               </div>
-              {/* Chain strip with FOLLOW toggle */}
+              {/* Inline pattern actions for active pattern */}
+              {(()=>{
+                const targetId=activeId;
+                const isOnlyPat=pats.length<=1;
+                return(
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:6}}>
+                    {[
+                      ["RAND", ()=>randPatId(targetId),  false, false],
+                      ["CLR",  ()=>clearPatId(targetId), false, false],
+                      ["CPY",  ()=>copyPatId(targetId),  false, false],
+                      ["PST",  ()=>pastePatId(targetId), !clipboard, false],
+                      ["DUP",  ()=>dupPatId(targetId),   pats.length>=8, false],
+                      ["DEL",  ()=>delPatId(targetId),   isOnlyPat, true],
+                    ].map(([label,fn,disabled,danger])=>(
+                      <button key={label} disabled={!!disabled}
+                        style={{padding:"5px 0",border:"1px solid rgba(200,185,165,"+(disabled?"0.06":"0.15")+")",borderRadius:6,background:"transparent",
+                          color:disabled?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.6)",
+                          fontSize:9,letterSpacing:1,cursor:disabled?"default":"pointer",fontFamily:"inherit"}}
+                        onClick={disabled?undefined:fn}>{label}</button>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Chain strip + FOLLOW — scrollable middle */}
+          {!IS_MOBILE&&(
+            <div style={{flex:1,minHeight:0,overflowY:"auto",scrollbarWidth:"none"}}>
               {(()=>{
                 const overStrip = chainDrag && isOverStrip(chainDrag.y);
                 const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
                 return (
-                  <div style={{flexShrink:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-                      <span style={{fontSize:IS_MOBILE?7:10,letterSpacing:1,color:"rgba(255,255,255,0.25)",fontWeight:700}}>SEQ</span>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                      <span style={{fontSize:10,letterSpacing:1,color:"rgba(200,185,165,0.25)",fontWeight:500}}>SEQ</span>
                       <div style={{flex:1}}/>
-                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:IS_MOBILE?7:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
                     </div>
-                    <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0}, overStrip?S.chainStripHot:{})}>
+                    <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
                       {chain.length===0&&!chainDrag&&(
                         <span style={S.chainStripEmpty}>drag patterns here to build a sequence</span>
                       )}
@@ -1685,24 +1674,41 @@ export default function Tabula(){
                   </div>
                 );
               })()}
-              {/* Transport: 3-row grid — VARY/REC/MUT8 left, ▶ center, MONO/LOOP right */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>
-                  {recMode?"■ REC":"● REC"}
-                </button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
-                <button style={Object.assign({},S.loopBtnBottom,{width:"100%"})} onClick={mutatePat1}>MUT8</button>
-                <div/>
+            </div>
+          )}
+
+          {/* Save/load + share — pinned to bottom of left column */}
+          {!IS_MOBILE&&(
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginTop:4}}>
+              <div style={{marginBottom:8}}>
+                <div style={S.menuSaveLabel}>SAVE / LOAD</div>
+                {flash&&<div style={S.menuFlash}>{flash}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
+                    <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
+                      <span style={{...S.menuSlotName}}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
+                      <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
+                      <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                    </div>
+                  );})}
+                </div>
               </div>
-            </>
+              <div style={{marginBottom:6}}>
+                <div style={S.menuSaveLabel}>SHARE</div>
+                {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={copyShareLink}>LINK</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={exportJSON}>EXPORT</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:"8px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+                </div>
+                <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
+              </div>
+            </div>
           )}
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto",overflow:"hidden"}}>
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
           {page==="edit"&&(
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
               <div style={{width:"min(100%, calc(100dvh - 120px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
@@ -1900,11 +1906,20 @@ export default function Tabula(){
                   </div>
                 </div>
               )}
-              {/* Tabs — always at bottom, marginTop:auto pushes them down */}
+              {/* Tabs */}
               <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
                 {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
                   <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
                 ))}
+              </div>
+              {/* Transport — single row centered at bottom of right column */}
+              <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
+                <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+                <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(196,122,122,0.3)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+                <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+                <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
+                <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+                <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
               </div>
             </>
           )}
