@@ -57,7 +57,25 @@ const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false});
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false,drums:defaultDrums()});
+// ─── Drum layer ───────────────────────────────────────────────────────────────
+const DRUM_VOICES=[
+  {key:"BD",label:"BD",color:"#e07060"},
+  {key:"SD",label:"SD",color:"#e09050"},
+  {key:"LT",label:"LT",color:"#c8a840"},
+  {key:"HT",label:"HT",color:"#a0b840"},
+  {key:"CH",label:"CH",color:"#60b878"},
+  {key:"OH",label:"OH",color:"#50a8c0"},
+  {key:"CY",label:"CY",color:"#7888d0"},
+  {key:"CP",label:"CP",color:"#c070c0"},
+];
+const DRUM_ROWS=DRUM_VOICES.length;
+const defaultDrums=()=>({
+  grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
+  vel:Array.from({length:COLS},()=>100),
+  gridLen:16
+});
+
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
 const vcfLbl=v=>{const f=vcfHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
@@ -426,6 +444,102 @@ class Bell{
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
 }
 
+
+// ─── Drum Engine (808-style synthesis) ───────────────────────────────────────
+class DrumEngine{
+  constructor(){this.ctx=null;this.master=null;this.ready=false;}
+  async init(masterNode){
+    if(this.ready)return;
+    const AudioContext=window.AudioContext||window.webkitAudioContext;
+    this.ctx=masterNode.context||new AudioContext();
+    this.master=masterNode;
+    this.ready=true;
+  }
+  async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
+
+  _env(gain,t,peak,atk,dec,sus,rel){
+    gain.setValueAtTime(0,t);
+    gain.linearRampToValueAtTime(peak,t+atk);
+    gain.exponentialRampToValueAtTime(Math.max(0.001,peak*sus),t+atk+dec);
+    gain.exponentialRampToValueAtTime(0.0001,t+atk+dec+rel);
+  }
+
+  play(voice,t,vel){
+    if(!this.ready)return;
+    const ctx=this.ctx;
+    const v=vel/127;
+    const out=this.master;
+
+    if(voice==="BD"){
+      const osc=ctx.createOscillator();const g=ctx.createGain();
+      osc.frequency.setValueAtTime(160,t);
+      osc.frequency.exponentialRampToValueAtTime(40,t+0.08);
+      this._env(g.gain,t,0.9*v,0.002,0.08,0.0,0.15);
+      osc.connect(g);g.connect(out);osc.start(t);osc.stop(t+0.3);
+      // Sub click
+      const click=ctx.createOscillator();const cg=ctx.createGain();
+      click.frequency.value=200;
+      cg.gain.setValueAtTime(0.4*v,t);cg.gain.exponentialRampToValueAtTime(0.0001,t+0.008);
+      click.connect(cg);cg.connect(out);click.start(t);click.stop(t+0.01);
+    }
+    else if(voice==="SD"){
+      const osc=ctx.createOscillator();const og=ctx.createGain();
+      osc.frequency.value=180;
+      this._env(og.gain,t,0.4*v,0.001,0.05,0.0,0.08);
+      osc.connect(og);og.connect(out);osc.start(t);osc.stop(t+0.15);
+      const buf=ctx.createBuffer(1,ctx.sampleRate*0.2,ctx.sampleRate);
+      const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+      const src=ctx.createBufferSource();src.buffer=buf;
+      const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=3000;bp.Q.value=0.5;
+      const ng=ctx.createGain();this._env(ng.gain,t,0.5*v,0.001,0.04,0.0,0.08);
+      src.connect(bp);bp.connect(ng);ng.connect(out);src.start(t);
+    }
+    else if(voice==="LT"||voice==="HT"){
+      const freq=voice==="LT"?100:160;
+      const osc=ctx.createOscillator();const g=ctx.createGain();
+      osc.frequency.setValueAtTime(freq*1.5,t);
+      osc.frequency.exponentialRampToValueAtTime(freq,t+0.03);
+      this._env(g.gain,t,0.6*v,0.001,0.06,0.0,0.05);
+      osc.connect(g);g.connect(out);osc.start(t);osc.stop(t+0.15);
+    }
+    else if(voice==="CH"){
+      const buf=ctx.createBuffer(1,ctx.sampleRate*0.08,ctx.sampleRate);
+      const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+      const src=ctx.createBufferSource();src.buffer=buf;
+      const hp=ctx.createBiquadFilter();hp.type="highpass";hp.frequency.value=8000;
+      const g=ctx.createGain();this._env(g.gain,t,0.5*v,0.0005,0.015,0.0,0.01);
+      src.connect(hp);hp.connect(g);g.connect(out);src.start(t);
+    }
+    else if(voice==="OH"){
+      const buf=ctx.createBuffer(1,ctx.sampleRate*0.4,ctx.sampleRate);
+      const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+      const src=ctx.createBufferSource();src.buffer=buf;
+      const hp=ctx.createBiquadFilter();hp.type="highpass";hp.frequency.value=7000;
+      const g=ctx.createGain();this._env(g.gain,t,0.45*v,0.001,0.08,0.0,0.12);
+      src.connect(hp);hp.connect(g);g.connect(out);src.start(t);
+    }
+    else if(voice==="CY"){
+      const buf=ctx.createBuffer(1,ctx.sampleRate*0.8,ctx.sampleRate);
+      const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1);
+      const src=ctx.createBufferSource();src.buffer=buf;
+      const hp=ctx.createBiquadFilter();hp.type="bandpass";hp.frequency.value=10000;hp.Q.value=0.3;
+      const g=ctx.createGain();this._env(g.gain,t,0.4*v,0.001,0.2,0.1,0.3);
+      src.connect(hp);hp.connect(g);g.connect(out);src.start(t);
+    }
+    else if(voice==="CP"){
+      for(let i=0;i<3;i++){
+        const buf=ctx.createBuffer(1,ctx.sampleRate*0.04,ctx.sampleRate);
+        const d=buf.getChannelData(0);for(let j=0;j<d.length;j++)d[j]=(Math.random()*2-1);
+        const src=ctx.createBufferSource();src.buffer=buf;
+        const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=1200;bp.Q.value=1;
+        const g=ctx.createGain();const delay=i*0.008;
+        this._env(g.gain,t+delay,0.55*v*(1-i*0.15),0.0005,0.02,0.0,0.02);
+        src.connect(bp);bp.connect(g);g.connect(out);src.start(t+delay);
+      }
+    }
+  }
+}
+
 // ─── Synth Panel Section ──────────────────────────────────────────────────────
 function SynthSection({title,accent,children}){
   return(
@@ -445,7 +559,12 @@ export default function Tabula(){
   const [activeId,  setActiveId]  = useState(1);
   const [chain,     setChain]     = useState([1]);
   const [page,      setPage]      = useState("edit");
+  const [activeLayer, setActiveLayer] = useState("synth"); // "synth" | "drums"
   const [bpm,       setBpm]       = useState(120);
+
+  // Drum step editing state
+  const drumStepR=useRef(-1);
+  const [drumStep,setDrumStep]=useState(-1);
 
   // Track window width to drive responsive left column layout
   // Use ResizeObserver on the layout container — works inside iframes too
@@ -525,6 +644,7 @@ export default function Tabula(){
   const [dlyLpVal,  setDlyLpVal]  = useState(78);
 
   const bell=useRef(new Bell());
+  const drumEngine=useRef(new DrumEngine());
   const stepR=useRef(0),cposR=useRef(0),tmrR=useRef(null),nextNoteR=useRef(0);
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
@@ -763,6 +883,19 @@ export default function Tabula(){
             bell.current.play(f,at,sp,noteDur,dlyWetPctR.current,prevF,glideTime);
           }
         }
+        // Drum layer
+        if(p&&p.drums&&drumEngine.current.ready){
+          const drums=p.drums;
+          const dLen=drums.gridLen??16;
+          const ds=s%dLen;
+          for(let r=0;r<DRUM_ROWS;r++){
+            if(drums.grid[r]&&drums.grid[r][ds]){
+              const dVel=drums.vel?.[ds]??100;
+              drumEngine.current.play(DRUM_VOICES[r].key,at,dVel);
+            }
+          }
+          setDrumStep(ds);
+        }
         setStep(s);setCpos(cp);setPlayId(pid);
         const ns=(s+1)%activeLen;stepR.current=ns;
         if(ns===0)cposR.current=(cp+1)%ch.length;
@@ -772,11 +905,12 @@ export default function Tabula(){
   },[]);
 
   const startStop=async()=>{
-    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;setRecMode(false);recModeR.current=false;return;}
+    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;setRecMode(false);recModeR.current=false;return;}
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
     bell.current.stepDur=60/bpm/4*speedMult;
+    await drumEngine.current.init(bell.current.master);
     if(!loopR.current&&!chainR.current.length){chainR.current=[activeId];setChain([activeId]);}
     stepR.current=0;cposR.current=0;
     nextNoteR.current=bell.current.ctx.currentTime+0.05; // small initial offset
@@ -1254,7 +1388,28 @@ export default function Tabula(){
     }
     return Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));
   });
-  const setStepParam=(col,key,val)=>setPats(ps=>ps.map(p=>{
+  const setDrumCell=(row,col,val)=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    const drums=p.drums||defaultDrums();
+    const grid=drums.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
+    return Object.assign({},p,{drums:{...drums,grid}});
+  }));
+  const setDrumVel=(col,val)=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    const drums=p.drums||defaultDrums();
+    const vel=drums.vel.map((v,i)=>i===col?val:v);
+    return Object.assign({},p,{drums:{...drums,vel}});
+  }));
+  const setDrumLen=(len)=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    const drums=p.drums||defaultDrums();
+    return Object.assign({},p,{drums:{...drums,gridLen:len}});
+  }));
+  const clearDrums=()=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    return Object.assign({},p,{drums:defaultDrums()});
+  }));
+    const setStepParam=(col,key,val)=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
     return Object.assign({},p,{params});
@@ -1792,10 +1947,10 @@ export default function Tabula(){
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
           <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
-            {page==="edit"&&(
+            {activeLayer==="synth"&&page==="edit"&&(
               <div ref={editOuterRef} style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
@@ -1879,7 +2034,118 @@ export default function Tabula(){
               </div>
               </div>
             )}
-            {page==="step"&&(
+            {activeLayer==="drums"&&page==="edit"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden",padding:"8px 8px 0",boxSizing:"border-box"}}>
+                {/* Drum grid header row */}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexShrink:0}}>
+                  <span style={{fontSize:10,letterSpacing:2,color:"rgba(210,195,175,0.4)",fontWeight:500}}>DRUMS</span>
+                  <div style={{flex:1}}/>
+                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
+                </div>
+                {/* Drum grid — 8 rows × gridLen cols */}
+                {(()=>{
+                  const drums=activePat?.drums||defaultDrums();
+                  const dLen=drums.gridLen??16;
+                  return(
+                    <>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:0,marginBottom:4}}>
+                    <div style={{width:"100%",aspectRatio:"16/8",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
+                      {DRUM_VOICES.map((voice,r)=>(
+                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
+                          {/* Voice label */}
+                          <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
+                          {/* Step cells */}
+                          <div style={{flex:1,display:"flex",gap:2}}>
+                            {Array.from({length:COLS},(_,c)=>{
+                              const on=drums.grid[r]?.[c]||false;
+                              const isActive=playing&&c===drumStep;
+                              const inactive=c>=dLen;
+                              const isQ=c%4===0;
+                              return(
+                                <div key={c} style={{
+                                  flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
+                                  background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",
+                                  border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),
+                                  boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",
+                                  transition:"background .06s"
+                                }}
+                                  onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    </div>
+                      <div style={{height:32,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",marginTop:4}}>
+                        <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
+                        <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
+                          {Array.from({length:COLS},(_,c)=>{
+                            const vel=drums.vel?.[c]??100;
+                            const pct=vel/127;
+                            const inactive=c>=dLen;
+                            return(
+                              <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
+                                onPointerDown={e=>{
+                                  if(inactive)return;
+                                  e.stopPropagation();
+                                  const startY=e.clientY,startV=vel;
+                                  const onMove=ev=>{
+                                    if(!ev.buttons)return;
+                                    const delta=startY-ev.clientY;
+                                    setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+delta*1.5))));
+                                  };
+                                  const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
+                                  document.addEventListener("pointermove",onMove);
+                                  document.addEventListener("pointerup",onUp);
+                                }}>
+                                <div style={{width:"100%",height:(pct*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{...S.lenSlider,flexShrink:0,marginTop:6}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
+                        }}
+                        onPointerMove={e=>{
+                          if(!e.buttons)return;
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
+                        }}>
+                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                        <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                        <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                        <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+            {activeLayer==="drums"&&page==="step"&&(
+              <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
+              </div>
+            )}
+            {activeLayer==="drums"&&page==="sound"&&(
+              <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / SOUND</span>
+              </div>
+            )}
+            {activeLayer==="drums"&&page==="set"&&(
+              <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / SET</span>
+              </div>
+            )}
+            {activeLayer==="synth"&&page==="step"&&(
               <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                 <div style={S.stepPageHdr}>
                   <div style={S.stepPagePat}>{activePat?.name||""}</div>
@@ -1909,7 +2175,7 @@ export default function Tabula(){
                 </div>
               )}
             {/* SETTINGS page */}
-            {page==="set"&&(
+            {activeLayer==="synth"&&page==="set"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
@@ -1940,8 +2206,7 @@ export default function Tabula(){
                 </div>
               </div>
             )}
-            {/* SOUND content */}
-            {page==="sound"&&(
+            {activeLayer==="synth"&&page==="sound"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
@@ -1983,6 +2248,12 @@ export default function Tabula(){
                 </div>
               </div>
             )}
+          </div>
+          {/* Layer selector */}
+          <div style={{flexShrink:0,display:"flex",gap:6,padding:"8px 8px 0",borderTop:"1px solid rgba(200,185,165,0.08)"}}>
+            {[["synth","SYNTH"],["drums","DRUMS"]].map(([lyr,lbl])=>(
+              <button key={lyr} style={{flex:1,padding:"6px 0",border:"1px solid "+(activeLayer===lyr?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.12)"),borderRadius:8,background:activeLayer===lyr?"rgba(200,185,165,0.1)":"transparent",color:activeLayer===lyr?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.3)",fontSize:9,letterSpacing:2,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all .12s"}} onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
+            ))}
           </div>
           {/* Tabs — always visible */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
@@ -2048,6 +2319,102 @@ export default function Tabula(){
                     <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",pointerEvents:"none"}}>{gridLen}</span>
                   </div>
                 </div>
+              </div>
+            )}
+            {activeLayer==="drums"&&page==="edit"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden",padding:"8px 8px 0",boxSizing:"border-box"}}>
+                {/* Drum grid header row */}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexShrink:0}}>
+                  <span style={{fontSize:10,letterSpacing:2,color:"rgba(210,195,175,0.4)",fontWeight:500}}>DRUMS</span>
+                  <div style={{flex:1}}/>
+                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
+                </div>
+                {/* Drum grid — 8 rows × gridLen cols */}
+                {(()=>{
+                  const drums=activePat?.drums||defaultDrums();
+                  const dLen=drums.gridLen??16;
+                  return(
+                    <>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:0,marginBottom:4}}>
+                    <div style={{width:"100%",aspectRatio:"16/8",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
+                      {DRUM_VOICES.map((voice,r)=>(
+                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
+                          {/* Voice label */}
+                          <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
+                          {/* Step cells */}
+                          <div style={{flex:1,display:"flex",gap:2}}>
+                            {Array.from({length:COLS},(_,c)=>{
+                              const on=drums.grid[r]?.[c]||false;
+                              const isActive=playing&&c===drumStep;
+                              const inactive=c>=dLen;
+                              const isQ=c%4===0;
+                              return(
+                                <div key={c} style={{
+                                  flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
+                                  background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",
+                                  border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),
+                                  boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",
+                                  transition:"background .06s"
+                                }}
+                                  onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    </div>
+                      <div style={{height:32,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",marginTop:4}}>
+                        <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
+                        <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
+                          {Array.from({length:COLS},(_,c)=>{
+                            const vel=drums.vel?.[c]??100;
+                            const pct=vel/127;
+                            const inactive=c>=dLen;
+                            return(
+                              <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
+                                onPointerDown={e=>{
+                                  if(inactive)return;
+                                  e.stopPropagation();
+                                  const startY=e.clientY,startV=vel;
+                                  const onMove=ev=>{
+                                    if(!ev.buttons)return;
+                                    const delta=startY-ev.clientY;
+                                    setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+delta*1.5))));
+                                  };
+                                  const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
+                                  document.addEventListener("pointermove",onMove);
+                                  document.addEventListener("pointerup",onUp);
+                                }}>
+                                <div style={{width:"100%",height:(pct*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{...S.lenSlider,flexShrink:0,marginTop:6}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
+                        }}
+                        onPointerMove={e=>{
+                          if(!e.buttons)return;
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
+                        }}>
+                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                        <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                        <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                        <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
             {page==="step"&&(
