@@ -1819,31 +1819,38 @@ export default function Tabula(){
                       </div>
                     );
                   })}
-                  <div style={S.stepVaryDivider}/>
-                  <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4967a"/>
-                      <KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4967a"/>
-                      <KnobSlider label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4967a"/>
-                    </div>
-                  </SynthSection>
-                  <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4">
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#b5a0c4"/>
-                      <KnobSlider label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#b5a0c4"/>
-                      <KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#b5a0c4"/>
-                    </div>
-                  </SynthSection>
-                  <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
-                    <div style={S.threeGrid}>
-                      <KnobSlider label="VEL" value={vVelJitter}  min={0} max={100} onChange={setVVelJitter}  display={vVelJitter+"%"}  accent="#9fb4c7"/>
-                      <KnobSlider label="CUT" value={vCutJitter}  min={0} max={100} onChange={setVCutJitter}  display={vCutJitter+"%"}  accent="#9fb4c7"/>
-                      <KnobSlider label="DLY" value={vDlyJitter}  min={0} max={100} onChange={setVDlyJitter}  display={vDlyJitter+"%"}  accent="#9fb4c7"/>
-                      <KnobSlider label="RHY" value={vRhyJitter}  min={0} max={100} onChange={setVRhyJitter}  display={vRhyJitter+"%"}  accent="#9fb4c7"/>
-                      <KnobSlider label="OCT" value={vOctJitter}  min={0} max={100} onChange={setVOctJitter}  display={vOctJitter+"%"}  accent="#9fb4c7"/>
-                      <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/>
-                    </div>
-                  </SynthSection>
+                </div>
+              )}
+              {/* SETTINGS page */}
+              {page==="set"&&(
+                <div style={{height:"calc(100dvh - 110px)",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
+                    <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4967a"/>
+                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4967a"/>
+                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4967a"/>
+                      </div>
+                    </SynthSection>
+                    <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4">
+                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#b5a0c4"/>
+                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#b5a0c4"/>
+                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#b5a0c4"/>
+                      </div>
+                    </SynthSection>
+                    <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
+                      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+                        <KnobSlider label="VEL"   value={vVelJitter}   min={0} max={100} onChange={setVVelJitter}   display={vVelJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="CUT"   value={vCutJitter}   min={0} max={100} onChange={setVCutJitter}   display={vCutJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="DLY"   value={vDlyJitter}   min={0} max={100} onChange={setVDlyJitter}   display={vDlyJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="RHY"   value={vRhyJitter}   min={0} max={100} onChange={setVRhyJitter}   display={vRhyJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="OCT"   value={vOctJitter}   min={0} max={100} onChange={setVOctJitter}   display={vOctJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/>
+                        <KnobSlider label="DUR"   value={vDurJitter}   min={0} max={100} onChange={setVDurJitter}   display={vDurJitter+"%"}   accent="#9fb4c7"/>
+                      </div>
+                    </SynthSection>
+                  </div>
                 </div>
               )}
               {/* SOUND content in right column */}
@@ -1895,7 +1902,7 @@ export default function Tabula(){
               )}
               {/* Tabs — always at bottom, marginTop:auto pushes them down */}
               <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-                {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+                {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
                   <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
                 ))}
               </div>
@@ -1963,10 +1970,13 @@ export default function Tabula(){
                   const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                   return(<div key={lane.key} style={S.stepLaneSection}><div style={S.stepLaneHdr}><div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>{liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}<div style={{flex:1}}/><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button></div><StepLane lane={lane} values={vals} colHasNote={colHasNote} activeStep={playing&&playId===activeId?step:-1} onChange={(col,val)=>setStepParam(col,lane.key,val)} tall/></div>);
                 })}
-                <div style={S.stepVaryDivider}/>
+              </div>
+            )}
+            {page==="set"&&(
+              <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
                 <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a"><div style={S.threeGrid}><KnobSlider label="DROP" value={vDropRate} min={0} max={60} onChange={setVDropRate} display={vDropRate+"%"} accent="#c4967a"/><KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"} accent="#c4967a"/><KnobSlider label="RANGE" value={vShiftRange} min={1} max={8} onChange={setVShiftRange} display={vShiftRange+"st"} accent="#c4967a"/></div></SynthSection>
                 <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4"><div style={S.threeGrid}><KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"} accent="#b5a0c4"/><KnobSlider label="RANGE" value={vPitchRange} min={1} max={12} onChange={setVPitchRange} display={vPitchRange+"st"} accent="#b5a0c4"/><KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"} accent="#b5a0c4"/></div></SynthSection>
-                <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#9fb4c7"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#9fb4c7"/><KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/></div></SynthSection>
+                <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#9fb4c7"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#9fb4c7"/><KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DUR" value={vDurJitter} min={0} max={100} onChange={setVDurJitter} display={vDurJitter+"%"} accent="#9fb4c7"/></div></SynthSection>
               </div>
             )}
             {page==="sound"&&(
@@ -1999,7 +2009,7 @@ export default function Tabula(){
             </div>
             {/* Tabs + play + tray toggle */}
             <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 12px 10px"}}>
-              {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+              {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
                 <button key={p} style={Object.assign({},S.tab,{flex:1,fontSize:9,padding:"10px 0"},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
               ))}
               <button style={Object.assign({},S.playBtn,{width:46,height:46,fontSize:20,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
