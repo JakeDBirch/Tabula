@@ -1709,8 +1709,10 @@ export default function Tabula(){
 
         {/* ── RIGHT COLUMN ── */}
         <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
-          {page==="edit"&&(
-            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+          {/* Page content — always present, fills 1fr */}
+          <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
+            {page==="edit"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
               <div style={{width:"min(100%, calc(100dvh - 120px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -1791,19 +1793,14 @@ export default function Tabula(){
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
-            </div>
-          )}
-
-          {/* Desktop: STEP/SOUND content + tabs pinned to bottom */}
-          {!IS_MOBILE&&(
-            <>
-              {/* STEP content fills space above tabs */}
-              {page==="step"&&(
-                <div style={{...S.stepPage, height:"calc(100dvh - 110px)", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
-                  <div style={S.stepPageHdr}>
-                    <div style={S.stepPagePat}>{activePat?.name||""}</div>
-                    <div style={{flex:1}}/>
-                  </div>
+              </div>
+            )}
+            {page==="step"&&(
+              <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
+                <div style={S.stepPageHdr}>
+                  <div style={S.stepPagePat}>{activePat?.name||""}</div>
+                  <div style={{flex:1}}/>
+                </div>
                   {LANES.map(lane=>{
                     const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
                     const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
@@ -1827,10 +1824,10 @@ export default function Tabula(){
                   })}
                 </div>
               )}
-              {/* SETTINGS page */}
-              {page==="set"&&(
-                <div style={{height:"calc(100dvh - 110px)",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
+            {/* SETTINGS page */}
+            {page==="set"&&(
+              <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
                         <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4967a"/>
@@ -1856,15 +1853,13 @@ export default function Tabula(){
                         <KnobSlider label="DUR"   value={vDurJitter}   min={0} max={100} onChange={setVDurJitter}   display={vDurJitter+"%"}   accent="#9fb4c7"/>
                       </div>
                     </SynthSection>
-                  </div>
                 </div>
-              )}
-              {/* SOUND content in right column */}
-              {page==="sound"&&(
-                <div style={{height:"calc(100dvh - 110px)",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                  {/* Responsive tile grid — 1→2→3 columns as width allows */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
-                    {/* OSC */}
+              </div>
+            )}
+            {/* SOUND content */}
+            {page==="sound"&&(
+              <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
                       <div style={S.wfRow}>
                         {WAVEFORMS.map((w,i)=>(
@@ -1877,7 +1872,6 @@ export default function Tabula(){
                         <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                       </div>
                     </SynthSection>
-                    {/* ENV */}
                     <SynthSection title="ENV" accent={C_ENV}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
                         <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
@@ -1885,7 +1879,6 @@ export default function Tabula(){
                         <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                       </div>
                     </SynthSection>
-                    {/* FILTER */}
                     <SynthSection title="FILTER" accent={C_FILT}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
                         <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
@@ -1893,7 +1886,6 @@ export default function Tabula(){
                         <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                       </div>
                     </SynthSection>
-                    {/* DELAY */}
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
                         <KnobSlider vertical label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
@@ -1903,11 +1895,10 @@ export default function Tabula(){
                         <KnobSlider vertical label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
                       </div>
                     </SynthSection>
-                  </div>
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            )}
+          </div>
           {/* Tabs — always visible */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
             {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(

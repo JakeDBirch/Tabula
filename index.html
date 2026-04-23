@@ -3904,8 +3904,16 @@ function Tabula() {
       gridTemplateRows: "1fr auto auto",
       overflow: "hidden"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: 0,
+      overflow: "hidden",
+      position: "relative"
+    }
   }, page === "edit" && /*#__PURE__*/React.createElement("div", {
     style: {
+      width: "100%",
+      height: "100%",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
@@ -4138,9 +4146,9 @@ function Tabula() {
       letterSpacing: 1,
       pointerEvents: "none"
     }
-  }, gridLen)))), !IS_MOBILE && /*#__PURE__*/React.createElement(React.Fragment, null, page === "step" && /*#__PURE__*/React.createElement("div", {
+  }, gridLen)))), page === "step" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
-      height: "calc(100dvh - 110px)",
+      height: "100%",
       minHeight: 0,
       overflowY: "scroll",
       paddingBottom: 40,
@@ -4216,7 +4224,7 @@ function Tabula() {
     }));
   })), page === "set" && /*#__PURE__*/React.createElement("div", {
     style: {
-      height: "calc(100dvh - 110px)",
+      height: "100%",
       minHeight: 0,
       overflowY: "auto",
       padding: "8px 12px 40px"
@@ -4372,7 +4380,7 @@ function Tabula() {
     accent: "#9fb4c7"
   }))))), page === "sound" && /*#__PURE__*/React.createElement("div", {
     style: {
-      height: "calc(100dvh - 110px)",
+      height: "100%",
       minHeight: 0,
       overflowY: "auto",
       padding: "8px 12px 40px"
