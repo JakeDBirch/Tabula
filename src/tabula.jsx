@@ -57,7 +57,7 @@ const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
-const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,oct:2,glide:0}));
+const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16});
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
@@ -117,6 +117,7 @@ const jitterStepParam=(sp,vp)=>{
     rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [0,1,1,2,3,4][Math.floor(Math.random()*6)] : sp.rhy,
     oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
     glide: vp.glideJitter>0 ? (Math.random()<vp.glideJitter/100?1:sp.glide) : sp.glide,
+    dur:   vp.durJitter>0   ? jit(sp.dur??0, vp.durJitter*0.8, -100, 100) : (sp.dur??0),
   };
 };
 
@@ -160,24 +161,25 @@ function StepPicker({label,display,sub,onDec,onInc,accent}){
 
 // ─── Step param lane definitions ─────────────────────────────────────────────
 const LANES=[
-  {key:"vel", label:"VEL", color:"#ffffff",min:0,  max:127,def:100,center:null, bool:false},
-  {key:"cut", label:"CUT", color:"#c97b8a",min:0,  max:100,def:50, center:50,  bool:false},
-  {key:"dly", label:"DLY", color:"#7aaa96",min:0,  max:100,def:0,  center:null, bool:false},
-  {key:"rhy", label:"RHY", color:"#c9a96e",min:0,  max:4,  def:1,  center:null, bool:false},
-  {key:"oct", label:"OCT", color:"#b5a0c4",min:0,  max:4,  def:2,  center:2,   bool:false},
-  {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,max:1,  def:0,  center:null, bool:true},
+  {key:"vel",  label:"VEL",  color:"#c8bfb0",min:0,   max:127, def:100, center:null, bool:false},
+  {key:"cut",  label:"CUT",  color:"#c97b8a",min:0,   max:100, def:50,  center:50,   bool:false},
+  {key:"dly",  label:"DLY",  color:"#7aaa96",min:0,   max:100, def:0,   center:null, bool:false},
+  {key:"rhy",  label:"RTCH", color:"#c9a96e",min:1,   max:4,   def:1,   center:null, bool:false},
+  {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
+  {key:"oct",  label:"OCT",  color:"#b5a0c4",min:0,   max:4,   def:2,   center:2,    bool:false},
+  {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,   max:1,   def:0,   center:null, bool:true},
 ];
-// rhy: 0=tie (extend into next step), 1=normal, 2/3/4=ratchet (N notes per step)
+// rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
+// dur: -100 to +100 — percentage modifier on note gate length (0=default)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
 
-// Radial param popup arms — angle in degrees (0=right, 90=up, screen-Y inverted)
-// All arms fan above the note (30°–150°)
 const PARAM_ARMS=[
-  {key:"rhy", label:"RHY", color:"#c9a96e", angle:150, min:0, max:4,   discrete:true},
-  {key:"dly", label:"DLY", color:"#7aaa96", angle:120, min:0, max:100, discrete:false},
-  {key:"vel", label:"VEL", color:"#ffffff", angle:90,  min:0, max:127, discrete:false},
-  {key:"cut", label:"CUT", color:"#c97b8a", angle:60,  min:0, max:100, discrete:false},
-  {key:"oct", label:"OCT", color:"#b5a0c4", angle:30,  min:0, max:4,   discrete:true},
+  {key:"rhy", label:"RTCH", color:"#c9a96e", angle:150, min:1,    max:4,   discrete:true},
+  {key:"dly", label:"DLY",  color:"#7aaa96", angle:120, min:0,    max:100, discrete:false},
+  {key:"vel", label:"VEL",  color:"#c8bfb0", angle:90,  min:0,    max:127, discrete:false},
+  {key:"dur", label:"DUR",  color:"#9fb4c7", angle:60,  min:-100, max:100, discrete:false},
+  {key:"cut", label:"CUT",  color:"#c97b8a", angle:30,  min:0,    max:100, discrete:false},
+  {key:"oct", label:"OCT",  color:"#b5a0c4", angle:10,  min:0,    max:4,   discrete:true},
 ];
 
 function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
@@ -222,9 +224,9 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
     if(lane.key==='rhy'){
       const rect=ref.current.getBoundingClientRect();
       const col=Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/rect.width*COLS)));
-      if(colHasNote&&!colHasNote[col])return; // locked
+      if(colHasNote&&!colHasNote[col])return;
       const cur=Math.round(values[col]??lane.def);
-      const next=cur===0?1:cur>=4?0:cur+1;
+      const next=cur>=4?1:cur+1; // cycle ×1→×2→×3→×4→×1
       onChange(col,next);
       return;
     }
@@ -251,23 +253,13 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
           const isRhy=lane.key==='rhy';
           const rhyVal=isRhy?Math.round(v):null;
           const isQ=c%4===0;
-          // rhy=0 is tie: render as horizontal dash, not a vertical bar
-          if(isRhy && rhyVal===0){
-            return(
-              <div key={c} style={Object.assign({},S.laneBarWrap,{alignItems:"center",justifyContent:"center",opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(255,255,255,0.15)":"none"})}>
-                <div style={{width:"80%",height:tall?3:2,borderRadius:1,
-                  background:isAct?lane.color:lane.color+"88",
-                  boxShadow:isAct?"0 0 5px "+lane.color:"none"}}/>
-              </div>
-            );
-          }
-          const pct=isRhy ? (rhyVal/4) : (v-lane.min)/(lane.max-lane.min);
+          const pct=isRhy ? ((rhyVal-1)/3) : (v-lane.min)/(lane.max-lane.min);
           const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
           return(
-            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(255,255,255,0.15)":"none"})}>
+            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}>
               {lane.center!=null&&<div style={Object.assign({},S.laneCenterLine,{bottom:(cp*100)+"%",borderColor:lane.color+"22"})}/>}
               <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none",position:"relative",display:"flex",alignItems:"flex-start",justifyContent:"center"})}>
-                {tall&&isRhy&&rhyVal>1&&<span style={{fontSize:7,fontWeight:700,color:isAct?"#000":"rgba(0,0,0,0.8)",lineHeight:1,paddingTop:1,pointerEvents:"none"}}>{rhyVal}</span>}
+                {tall&&isRhy&&<span style={{fontSize:7,fontWeight:700,color:isAct?"#000":"rgba(0,0,0,0.8)",lineHeight:1,paddingTop:1,pointerEvents:"none"}}>{"×"+rhyVal}</span>}
               </div>
             </div>
           );
@@ -329,8 +321,10 @@ class Bell{
     const dlyMul   = (sp && sp.dly > 0) ? stepDly : globalDly;
     const octShift = sp ? (sp.oct-2) : 0;
     const playFreq = freq * Math.pow(2, octShift);
+    const durMod   = (sp && sp.dur!=null) ? sp.dur/100 : 0;
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
-    const dur=Math.max(atk+dec+0.02, noteDur!=null ? noteDur : this.stepDur);
+    const rawDur=noteDur!=null ? noteDur : this.stepDur;
+    const dur=Math.max(atk+0.01, rawDur*(1+durMod));
     const end=dur+rel;
 
     const vcf=this.ctx.createBiquadFilter();
@@ -467,6 +461,7 @@ export default function Tabula(){
   const [vRhyJitter, setVRhyJitter] = useState(0);
   const [vOctJitter, setVOctJitter] = useState(0);
   const [vGlideJitter,setVGlideJitter]=useState(0);
+  const [vDurJitter,  setVDurJitter]  =useState(0);
 
   // Synth
   const [waveform,     setWaveform]     = useState("sawtooth");
@@ -518,8 +513,8 @@ export default function Tabula(){
   useEffect(()=>{swingR.current=swing;},[swing]);
   useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
   useEffect(()=>{
-    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter};
-  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vGlideJitter]);
+    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
+  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,vGlideJitter,vDurJitter]);
   useEffect(()=>{bell.current.p.waveform=waveform;},[waveform]);
   useEffect(()=>{bell.current.p.detune=detune;},[detune]);
   useEffect(()=>{bell.current.p.attack=attack;},[attack]);
@@ -569,7 +564,7 @@ export default function Tabula(){
     waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
-    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,
+    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     monoMode,loopMode
   });
 
@@ -671,9 +666,9 @@ export default function Tabula(){
         const rawSp=(p&&p.params&&p.params[s])?p.params[s]:null;
         const sp=varyModeR.current&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
 
-        const rhy   = sp ? Math.round(sp.rhy??1) : 1;
-        const ratch = rhy > 1 ? rhy : 1;
-        const isTie = rhy === 0;
+        const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
+        const ratch = rhy;
+        const isTie = false; // tie is done via grid only now
         const subDur = stepDur / ratch;
 
         // Non-tie step: look ahead for consecutive tied steps and extend duration
@@ -878,29 +873,15 @@ export default function Tabula(){
     // Popup is sticky — dismiss if empty space AND outside arm reach; otherwise re-engage
     if(popupR.current){
       const pr=popupR.current;
+      // Dismiss if dragging far from popup origin
       const distFromOrigin=Math.sqrt((e.clientX-pr.originX)**2+(e.clientY-pr.originY)**2);
-      if(!isOnNote&&distFromOrigin>130){
+      if(!isOnNote&&distFromOrigin>160){
         g.state="pending-dismiss";g.startX=e.clientX;g.startY=e.clientY;
         gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
         return;
       }
-      // Touching any note — immediately re-engage popup adjustment
       g.state="popup";
       gridRef.current&&gridRef.current.setPointerCapture(e.pointerId);
-      const fdx=e.clientX-pr.originX,fdy=e.clientY-pr.originY;
-      const dist=Math.sqrt(fdx*fdx+fdy*fdy);
-      if(dist>=14){
-        const fingerAngle=Math.atan2(-fdy,fdx)*180/Math.PI;
-        let bestArm=null,bestDiff=180;
-        ((popupR.current?.adaptedArms)||PARAM_ARMS).forEach(arm=>{const diff=Math.abs(((fingerAngle-arm.angle)+540)%360-180);if(diff<bestDiff){bestDiff=diff;bestArm=arm;}});
-        if(bestArm){
-          const armRad=bestArm.angle*Math.PI/180;
-          const proj=fdx*Math.cos(armRad)+(-fdy)*Math.sin(armRad);
-          const pct=Math.max(0,Math.min(1,proj/100));
-          const newVal=Math.round(pct*(bestArm.max-bestArm.min)+bestArm.min);
-          setParamPopup(p=>p?{...p,activeArm:bestArm.key,values:{...p.values,[bestArm.key]:newVal}}:p);
-        }
-      }
       return;
     }
 
@@ -947,13 +928,7 @@ export default function Tabula(){
   const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
     const g=gesture.current;
     g.state="popup";
-    const vw2=window.innerWidth,REACH2=150;
-    let fc=90;
-    if(oy<REACH2+20)fc=-90;
-    else if(ox<REACH2)fc=0;
-    else if(ox>vw2-REACH2)fc=180;
-    const adaptedArms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fc+(i-2)*30}));
-    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,adaptedArms};
+    popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals};
     setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
   },[]);
 
@@ -1405,72 +1380,67 @@ export default function Tabula(){
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
 
-      {/* Radial param popup */}
+      {/* Synth-panel param popup */}
       {paramPopup&&(()=>{
-        const ARM_LEN=100, TRACK_W=4, FILL_W=4;
-        const ox=paramPopup.x, oy=paramPopup.y;
         const vw=window.innerWidth, vh=window.innerHeight;
-        const REACH=ARM_LEN+55;
-        let fanCenter=90;
-        if(oy<REACH+20) fanCenter=-90;
-        else if(ox<REACH) fanCenter=0;
-        else if(ox>vw-REACH) fanCenter=180;
-        const arms=PARAM_ARMS.map((arm,i)=>({...arm,angle:fanCenter+(i-2)*30}));
-        const scrimAngle=fanCenter*Math.PI/180;
-        // Background panel bounds — covers arm area
-        const panW=300, panH=280;
-        const panX=Math.max(8,Math.min(vw-panW-8, ox-panW/2));
-        const panY=Math.max(8,Math.min(vh-panH-8, oy-panH/2));
+        const W=260, H=220;
+        const px=Math.max(10,Math.min(vw-W-10, paramPopup.x-W/2));
+        const py=Math.max(10,Math.min(vh-H-10, paramPopup.y-H-16));
         return(
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}} onPointerMove={handleGridMove}>
-            {/* Translucent background panel */}
-            <div style={{position:"absolute",left:panX,top:panY,width:panW,height:panH,
-              background:"rgba(10,10,10,0.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",
-              borderRadius:16,border:"1px solid rgba(255,255,255,0.1)",
-              boxShadow:"0 8px 32px rgba(0,0,0,0.6)",pointerEvents:"none"}}/>
-            {/* X close button */}
-            <div onClick={commitAndClose} style={{position:"absolute",
-              left:panX+panW-40,top:panY+6,width:34,height:34,
-              display:"flex",alignItems:"center",justifyContent:"center",
-              color:"rgba(210,195,175,0.5)",fontSize:22,fontWeight:300,cursor:"pointer",
-              pointerEvents:"all",borderRadius:17,
-              transition:"color .1s, background .1s"}}
-              onMouseEnter={e=>{e.currentTarget.style.color="#fff";e.currentTarget.style.background="rgba(255,255,255,0.1)";}}
-              onMouseLeave={e=>{e.currentTarget.style.color="rgba(210,195,175,0.5)";e.currentTarget.style.background="transparent";}}>×</div>
-            <svg style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none"}}>
-              {arms.map(arm=>{
-                const rad=arm.angle*Math.PI/180;
-                const cos=Math.cos(rad), sin=Math.sin(rad);
-                const ex=ox+cos*ARM_LEN, ey=oy-sin*ARM_LEN;
-                const active=paramPopup.activeArm===arm.key;
+            <div style={{position:"absolute",left:px,top:py,width:W,
+              background:"rgba(26,24,20,0.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",
+              borderRadius:14,border:"1px solid rgba(200,185,165,0.15)",
+              boxShadow:"0 12px 40px rgba(0,0,0,0.5)",
+              padding:"10px 14px 12px",pointerEvents:"all"}}
+              onPointerDown={e=>e.stopPropagation()}>
+              {/* Header row */}
+              <div style={{display:"flex",alignItems:"center",marginBottom:8}}>
+                <span style={{fontSize:9,color:"rgba(210,195,175,0.4)",letterSpacing:2,flex:1}}>STEP {(popupR.current?.col??0)+1}</span>
+                <div onClick={commitAndClose} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(210,195,175,0.4)",fontSize:16,cursor:"pointer",borderRadius:11}}>×</div>
+              </div>
+              {/* Sliders */}
+              {PARAM_ARMS.map(arm=>{
                 const val=paramPopup.values?.[arm.key]??arm.min;
+                const active=paramPopup.activeArm===arm.key;
                 const pct=(val-arm.min)/(arm.max-arm.min);
-                const fillLen=Math.max(4, pct*ARM_LEN);
-                const fx=ox+cos*fillLen, fy=oy-sin*fillLen;
-                return <g key={arm.key}>
-                  <line x1={ox} y1={oy} x2={ex} y2={ey} stroke={arm.color+"28"} strokeWidth={TRACK_W} strokeLinecap="round"/>
-                  <line x1={ox} y1={oy} x2={fx} y2={fy} stroke={active?arm.color:arm.color+"99"} strokeWidth={FILL_W} strokeLinecap="round"/>
-                  <circle cx={fx} cy={fy} r={active?5:3.5} fill={active?arm.color:arm.color+"bb"}/>
-                </g>;
+                const displayVal=arm.key==="oct"?(val-2===0?"0":(val-2>0?"+":"")+(val-2))
+                  :arm.key==="rhy"?("×"+Math.max(1,val)):arm.key==="dur"?(val>0?"+"+val+"%":val+"%")
+                  :val;
+                return(
+                  <div key={arm.key} style={{marginBottom:8}}
+                    onPointerDown={e=>{
+                      e.stopPropagation();
+                      const rect=e.currentTarget.getBoundingClientRect();
+                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
+                      const newVal=arm.discrete
+                        ?Math.round(newPct*(arm.max-arm.min)+arm.min)
+                        :Math.round(newPct*(arm.max-arm.min)+arm.min);
+                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={e=>{
+                      if(e.buttons===0)return;
+                      const rect=e.currentTarget.getBoundingClientRect();
+                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
+                      const newVal=Math.round(newPct*(arm.max-arm.min)+arm.min);
+                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
+                    }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
+                      <span style={{fontSize:9,fontWeight:500,color:active?arm.color:arm.color+"88",letterSpacing:1}}>{arm.label}</span>
+                      <span style={{fontSize:12,fontWeight:500,color:active?arm.color:arm.color+"99"}}>{displayVal}</span>
+                    </div>
+                    <div style={{height:6,background:"rgba(200,185,165,0.1)",borderRadius:3,position:"relative",cursor:"ew-resize"}}>
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:(pct*100)+"%",
+                        background:active?arm.color:arm.color+"66",borderRadius:3,transition:"width .04s"}}/>
+                      <div style={{position:"absolute",top:-3,bottom:-3,width:10,borderRadius:3,
+                        background:active?arm.color:"rgba(200,185,165,0.6)",
+                        left:`calc(${pct*100}% - 5px)`}}/>
+                    </div>
+                  </div>
+                );
               })}
-              <circle cx={ox} cy={oy} r={6} fill="#fff" opacity={0.9}/>
-            </svg>
-            {arms.map(arm=>{
-              const rad=arm.angle*Math.PI/180;
-              const lx=ox+Math.cos(rad)*(ARM_LEN+26);
-              const ly=oy-Math.sin(rad)*(ARM_LEN+26);
-              const active=paramPopup.activeArm===arm.key;
-              const val=paramPopup.values?.[arm.key]??arm.min;
-              const displayVal=arm.key==="oct"?(val-2===0?"0":(val-2>0?"+":"")+(val-2))
-                :arm.key==="rhy"?(val===0?"TIE":val===1?"—":"×"+val)
-                :val;
-              return(
-                <div key={arm.key} style={{position:"absolute",left:lx-28,top:ly-18,width:56,textAlign:"center",pointerEvents:"none"}}>
-                  <div style={{fontSize:9,fontWeight:700,letterSpacing:2,color:active?arm.color:arm.color+"99",transition:"color .1s"}}>{arm.label}</div>
-                  <div style={{fontSize:15,fontWeight:700,color:active?"#fff":arm.color+"cc",lineHeight:1.1,transition:"color .1s"}}>{displayVal}</div>
-                </div>
-              );
-            })}
+            </div>
           </div>
         );
       })()}
@@ -1566,13 +1536,13 @@ export default function Tabula(){
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
                 <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-                  <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM ↕</span>
+                  <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
                 </div>
                 <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-                  <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST ↕</span>
+                  <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
                 </div>
                 <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-                  <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG ↕</span>
+                  <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
                 </div>
               </div>
             </>
@@ -1690,7 +1660,7 @@ export default function Tabula(){
               {/* Transport: 3-row grid — VARY/REC/MUT8 left, ▶ center, MONO/LOOP right */}
               <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginTop:"auto",paddingTop:16,alignItems:"center"}}>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
+                <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
                 <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>
                   {recMode?"■ REC":"● REC"}
@@ -1715,9 +1685,8 @@ export default function Tabula(){
                   const fromBot=ROWS-1-r;
                   const isOct=fromBot%SCALE_SPAN===0;
                   const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
-                  const rowBorder=isOct?"1px solid rgba(200,185,165,0.2)":isFifth?"1px solid rgba(160,190,170,0.12)":"none";
                   return(
-                  <div key={r} style={Object.assign({},S.gridRow,{borderTop:rowBorder,position:"relative"})}>
+                  <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
                       const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
                       const on=activePat?activePat.grid[r][c]:false;
@@ -1805,7 +1774,7 @@ export default function Tabula(){
                     const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
                     const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
                     const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
-                    const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?(curVal===0?"TIE":curVal===1?"—":"×"+curVal):String(curVal);
+                    const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                     return(
                       <div key={lane.key} style={S.stepLaneSection}>
                         <div style={S.stepLaneHdr}>
@@ -1927,8 +1896,7 @@ export default function Tabula(){
                     onContextMenu={handleGridContextMenu}>
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
-                      const rowBorder=isOct?"1px solid rgba(200,185,165,0.2)":isFifth?"1px solid rgba(160,190,170,0.12)":"none";
-                      return(<div key={r} style={Object.assign({},S.gridRow,{borderTop:rowBorder,position:"relative"})}>
+                      return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
                           const on=activePat?activePat.grid[r][c]:false;const inactive=c>=gridLen;
@@ -1936,7 +1904,7 @@ export default function Tabula(){
                             background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;let span=1,nc=ci+1;const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
@@ -1957,7 +1925,7 @@ export default function Tabula(){
                   const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
                   const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
                   const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
-                  const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?(curVal===0?"TIE":curVal===1?"—":"×"+curVal):String(curVal);
+                  const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                   return(<div key={lane.key} style={S.stepLaneSection}><div style={S.stepLaneHdr}><div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>{liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}<div style={{flex:1}}/><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button></div><StepLane lane={lane} values={vals} colHasNote={colHasNote} activeStep={playing&&playId===activeId?step:-1} onChange={(col,val)=>setStepParam(col,lane.key,val)} tall/></div>);
                 })}
                 <div style={S.stepVaryDivider}/>
@@ -1999,7 +1967,7 @@ export default function Tabula(){
               {[["edit","EDIT"],["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
                 <button key={p} style={Object.assign({},S.tab,{flex:1,fontSize:9,padding:"10px 0"},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
               ))}
-              <button style={Object.assign({},S.playBtn,{width:46,height:46,fontSize:20,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>{playing?"■":"▶"}</button>
+              <button style={Object.assign({},S.playBtn,{width:46,height:46,fontSize:20,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
               <button style={{padding:"0 10px",height:46,border:"1px solid rgba(255,255,255,0.14)",background:bottomTrayOpen?"rgba(255,255,255,0.08)":"transparent",color:"rgba(210,195,175,0.5)",fontSize:20,cursor:"pointer",borderRadius:8,flexShrink:0,transition:"all .12s"}}
                 onClick={()=>{setBottomTrayOpen(b=>!b);setTopTrayOpen(false);}}>⋯</button>
             </div>
@@ -2017,13 +1985,13 @@ export default function Tabula(){
             </select>
             <div style={{display:"flex",gap:8}}>
               <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-                <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM ↕</span>
+                <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
               </div>
               <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-                <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST ↕</span>
+                <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
               </div>
               <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-                <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG ↕</span>
+                <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
               </div>
             </div>
           </div>
@@ -2044,7 +2012,7 @@ export default function Tabula(){
             {/* Transport */}
             <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gridTemplateRows:"1fr 1fr 1fr",gap:8,marginBottom:14,alignItems:"center"}}>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-              <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?"■":"▶"}</button>
+              <button style={Object.assign({},S.playBtn,playing?S.playOn:{},{gridColumn:2,gridRow:"1/4",alignSelf:"center"})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(255,77,77,0.4)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%"},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>

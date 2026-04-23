@@ -185,6 +185,7 @@ var defaultStepParams = function defaultStepParams() {
       cut: 50,
       dly: 0,
       rhy: 1,
+      dur: 0,
       oct: 2,
       glide: 0
     };
@@ -355,6 +356,7 @@ var genVariation = function genVariation(grid) {
 
 // Jitter a step's params by vary settings
 var jitterStepParam = function jitterStepParam(sp, vp) {
+  var _sp$dur, _sp$dur2;
   if (!sp) return sp;
   var jit = function jit(v, amt, lo, hi) {
     return Math.max(lo, Math.min(hi, v + Math.round((Math.random() * 2 - 1) * amt)));
@@ -365,7 +367,8 @@ var jitterStepParam = function jitterStepParam(sp, vp) {
     dly: vp.dlyJitter > 0 ? jit(sp.dly, vp.dlyJitter * 0.4, 0, 100) : sp.dly,
     rhy: vp.rhyJitter > 0 && Math.random() < vp.rhyJitter / 100 ? [0, 1, 1, 2, 3, 4][Math.floor(Math.random() * 6)] : sp.rhy,
     oct: vp.octJitter > 0 && Math.random() < vp.octJitter / 100 ? Math.max(0, Math.min(4, sp.oct + (Math.random() < .5 ? 1 : -1))) : sp.oct,
-    glide: vp.glideJitter > 0 ? Math.random() < vp.glideJitter / 100 ? 1 : sp.glide : sp.glide
+    glide: vp.glideJitter > 0 ? Math.random() < vp.glideJitter / 100 ? 1 : sp.glide : sp.glide,
+    dur: vp.durJitter > 0 ? jit((_sp$dur = sp.dur) !== null && _sp$dur !== void 0 ? _sp$dur : 0, vp.durJitter * 0.8, -100, 100) : (_sp$dur2 = sp.dur) !== null && _sp$dur2 !== void 0 ? _sp$dur2 : 0
   };
 };
 
@@ -467,7 +470,7 @@ function StepPicker(_ref4) {
 var LANES = [{
   key: "vel",
   label: "VEL",
-  color: "#ffffff",
+  color: "#c8bfb0",
   min: 0,
   max: 127,
   def: 100,
@@ -493,12 +496,21 @@ var LANES = [{
   bool: false
 }, {
   key: "rhy",
-  label: "RHY",
+  label: "RTCH",
   color: "#c9a96e",
-  min: 0,
+  min: 1,
   max: 4,
   def: 1,
   center: null,
+  bool: false
+}, {
+  key: "dur",
+  label: "DUR",
+  color: "#9fb4c7",
+  min: -100,
+  max: 100,
+  def: 0,
+  center: 0,
   bool: false
 }, {
   key: "oct",
@@ -519,17 +531,16 @@ var LANES = [{
   center: null,
   bool: true
 }];
-// rhy: 0=tie (extend into next step), 1=normal, 2/3/4=ratchet (N notes per step)
+// rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
+// dur: -100 to +100 — percentage modifier on note gate length (0=default)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
 
-// Radial param popup arms — angle in degrees (0=right, 90=up, screen-Y inverted)
-// All arms fan above the note (30°–150°)
 var PARAM_ARMS = [{
   key: "rhy",
-  label: "RHY",
+  label: "RTCH",
   color: "#c9a96e",
   angle: 150,
-  min: 0,
+  min: 1,
   max: 4,
   discrete: true
 }, {
@@ -543,16 +554,24 @@ var PARAM_ARMS = [{
 }, {
   key: "vel",
   label: "VEL",
-  color: "#ffffff",
+  color: "#c8bfb0",
   angle: 90,
   min: 0,
   max: 127,
   discrete: false
 }, {
+  key: "dur",
+  label: "DUR",
+  color: "#9fb4c7",
+  angle: 60,
+  min: -100,
+  max: 100,
+  discrete: false
+}, {
   key: "cut",
   label: "CUT",
   color: "#c97b8a",
-  angle: 60,
+  angle: 30,
   min: 0,
   max: 100,
   discrete: false
@@ -560,7 +579,7 @@ var PARAM_ARMS = [{
   key: "oct",
   label: "OCT",
   color: "#b5a0c4",
-  angle: 30,
+  angle: 10,
   min: 0,
   max: 4,
   discrete: true
@@ -644,9 +663,9 @@ function StepLane(_ref5) {
       var _values$_col;
       var rect = ref.current.getBoundingClientRect();
       var _col = Math.max(0, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / rect.width * COLS)));
-      if (colHasNote && !colHasNote[_col]) return; // locked
+      if (colHasNote && !colHasNote[_col]) return;
       var cur = Math.round((_values$_col = values[_col]) !== null && _values$_col !== void 0 ? _values$_col : lane.def);
-      var next = cur === 0 ? 1 : cur >= 4 ? 0 : cur + 1;
+      var next = cur >= 4 ? 1 : cur + 1; // cycle ×1→×2→×3→×4→×1
       onChange(_col, next);
       return;
     }
@@ -694,33 +713,13 @@ function StepLane(_ref5) {
     var isRhy = lane.key === 'rhy';
     var rhyVal = isRhy ? Math.round(v) : null;
     var isQ = c % 4 === 0;
-    // rhy=0 is tie: render as horizontal dash, not a vertical bar
-    if (isRhy && rhyVal === 0) {
-      return /*#__PURE__*/React.createElement("div", {
-        key: c,
-        style: Object.assign({}, S.laneBarWrap, {
-          alignItems: "center",
-          justifyContent: "center",
-          opacity: locked ? 0.15 : 1,
-          borderLeft: isQ ? "1px solid rgba(255,255,255,0.15)" : "none"
-        })
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          width: "80%",
-          height: tall ? 3 : 2,
-          borderRadius: 1,
-          background: isAct ? lane.color : lane.color + "88",
-          boxShadow: isAct ? "0 0 5px " + lane.color : "none"
-        }
-      }));
-    }
-    var pct = isRhy ? rhyVal / 4 : (v - lane.min) / (lane.max - lane.min);
+    var pct = isRhy ? (rhyVal - 1) / 3 : (v - lane.min) / (lane.max - lane.min);
     var cp = lane.center != null ? (lane.center - lane.min) / (lane.max - lane.min) : 0;
     return /*#__PURE__*/React.createElement("div", {
       key: c,
       style: Object.assign({}, S.laneBarWrap, {
         opacity: locked ? 0.15 : 1,
-        borderLeft: isQ ? "1px solid rgba(255,255,255,0.15)" : "none"
+        borderLeft: isQ ? "1px solid rgba(200,185,165,0.15)" : "none"
       })
     }, lane.center != null && /*#__PURE__*/React.createElement("div", {
       style: Object.assign({}, S.laneCenterLine, {
@@ -737,7 +736,7 @@ function StepLane(_ref5) {
         alignItems: "flex-start",
         justifyContent: "center"
       })
-    }, tall && isRhy && rhyVal > 1 && /*#__PURE__*/React.createElement("span", {
+    }, tall && isRhy && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 7,
         fontWeight: 700,
@@ -746,7 +745,7 @@ function StepLane(_ref5) {
         paddingTop: 1,
         pointerEvents: "none"
       }
-    }, rhyVal)));
+    }, "×" + rhyVal)));
   })));
 }
 
@@ -868,11 +867,13 @@ var Bell = /*#__PURE__*/function () {
       var dlyMul = sp && sp.dly > 0 ? stepDly : globalDly;
       var octShift = sp ? sp.oct - 2 : 0;
       var playFreq = freq * Math.pow(2, octShift);
+      var durMod = sp && sp.dur != null ? sp.dur / 100 : 0;
       var atk = ms(p.attack),
         dec = ms(p.decay),
         sus = Math.max(0.001, p.sustain / 100),
         rel = ms(p.decay);
-      var dur = Math.max(atk + dec + 0.02, noteDur != null ? noteDur : this.stepDur);
+      var rawDur = noteDur != null ? noteDur : this.stepDur;
+      var dur = Math.max(atk + 0.01, rawDur * (1 + durMod));
       var end = dur + rel;
       var vcf = this.ctx.createBiquadFilter();
       vcf.type = "lowpass";
@@ -1197,62 +1198,66 @@ function Tabula() {
     _useState80 = _slicedToArray(_useState79, 2),
     vGlideJitter = _useState80[0],
     setVGlideJitter = _useState80[1];
+  var _useState81 = useState(0),
+    _useState82 = _slicedToArray(_useState81, 2),
+    vDurJitter = _useState82[0],
+    setVDurJitter = _useState82[1];
 
   // Synth
-  var _useState81 = useState("sawtooth"),
-    _useState82 = _slicedToArray(_useState81, 2),
-    waveform = _useState82[0],
-    setWaveform = _useState82[1];
-  var _useState83 = useState(8),
+  var _useState83 = useState("sawtooth"),
     _useState84 = _slicedToArray(_useState83, 2),
-    detune = _useState84[0],
-    setDetune = _useState84[1];
+    waveform = _useState84[0],
+    setWaveform = _useState84[1];
   var _useState85 = useState(8),
     _useState86 = _slicedToArray(_useState85, 2),
-    attack = _useState86[0],
-    setAttack = _useState86[1];
-  var _useState87 = useState(400),
+    detune = _useState86[0],
+    setDetune = _useState86[1];
+  var _useState87 = useState(8),
     _useState88 = _slicedToArray(_useState87, 2),
-    decay = _useState88[0],
-    setDecay = _useState88[1];
-  var _useState89 = useState(40),
+    attack = _useState88[0],
+    setAttack = _useState88[1];
+  var _useState89 = useState(400),
     _useState90 = _slicedToArray(_useState89, 2),
-    sustain = _useState90[0],
-    setSustain = _useState90[1];
-  var _useState91 = useState(80),
+    decay = _useState90[0],
+    setDecay = _useState90[1];
+  var _useState91 = useState(40),
     _useState92 = _slicedToArray(_useState91, 2),
-    vcfCutoff = _useState92[0],
-    setVcfCutoff = _useState92[1];
-  var _useState93 = useState(15),
+    sustain = _useState92[0],
+    setSustain = _useState92[1];
+  var _useState93 = useState(80),
     _useState94 = _slicedToArray(_useState93, 2),
-    vcfRes = _useState94[0],
-    setVcfRes = _useState94[1];
-  var _useState95 = useState(0),
+    vcfCutoff = _useState94[0],
+    setVcfCutoff = _useState94[1];
+  var _useState95 = useState(15),
     _useState96 = _slicedToArray(_useState95, 2),
-    filterEnvAmt = _useState96[0],
-    setFilterEnvAmt = _useState96[1];
+    vcfRes = _useState96[0],
+    setVcfRes = _useState96[1];
+  var _useState97 = useState(0),
+    _useState98 = _slicedToArray(_useState97, 2),
+    filterEnvAmt = _useState98[0],
+    setFilterEnvAmt = _useState98[1];
 
   // Delay
-  var _useState97 = useState(3),
-    _useState98 = _slicedToArray(_useState97, 2),
-    dlyIdx = _useState98[0],
-    setDlyIdx = _useState98[1];
-  var _useState99 = useState(45),
+  var _useState99 = useState(3),
     _useState100 = _slicedToArray(_useState99, 2),
-    dlyFbPct = _useState100[0],
-    setDlyFbPct = _useState100[1];
-  var _useState101 = useState(50),
+    dlyIdx = _useState100[0],
+    setDlyIdx = _useState100[1];
+  var _useState101 = useState(45),
     _useState102 = _slicedToArray(_useState101, 2),
-    dlyWetPct = _useState102[0],
-    setDlyWetPct = _useState102[1];
-  var _useState103 = useState(8),
+    dlyFbPct = _useState102[0],
+    setDlyFbPct = _useState102[1];
+  var _useState103 = useState(50),
     _useState104 = _slicedToArray(_useState103, 2),
-    dlyHpVal = _useState104[0],
-    setDlyHpVal = _useState104[1];
-  var _useState105 = useState(78),
+    dlyWetPct = _useState104[0],
+    setDlyWetPct = _useState104[1];
+  var _useState105 = useState(8),
     _useState106 = _slicedToArray(_useState105, 2),
-    dlyLpVal = _useState106[0],
-    setDlyLpVal = _useState106[1];
+    dlyHpVal = _useState106[0],
+    setDlyHpVal = _useState106[1];
+  var _useState107 = useState(78),
+    _useState108 = _slicedToArray(_useState107, 2),
+    dlyLpVal = _useState108[0],
+    setDlyLpVal = _useState108[1];
   var bell = useRef(new Bell());
   var stepR = useRef(0),
     cposR = useRef(0),
@@ -1355,9 +1360,10 @@ function Tabula() {
       dlyJitter: vDlyJitter,
       rhyJitter: vRhyJitter,
       octJitter: vOctJitter,
-      glideJitter: vGlideJitter
+      glideJitter: vGlideJitter,
+      durJitter: vDurJitter
     };
-  }, [vDropRate, vShiftRate, vShiftRange, vPitchRate, vPitchRange, vGhostRate, vVelJitter, vCutJitter, vDlyJitter, vRhyJitter, vOctJitter, vGlideJitter, vGlideJitter]);
+  }, [vDropRate, vShiftRate, vShiftRange, vPitchRate, vPitchRange, vGhostRate, vVelJitter, vCutJitter, vDlyJitter, vRhyJitter, vOctJitter, vGlideJitter, vDurJitter, vGlideJitter, vDurJitter]);
   useEffect(function () {
     bell.current.p.waveform = waveform;
   }, [waveform]);
@@ -1537,6 +1543,7 @@ function Tabula() {
       vRhyJitter: vRhyJitter,
       vOctJitter: vOctJitter,
       vGlideJitter: vGlideJitter,
+      vDurJitter: vDurJitter,
       monoMode: monoMode,
       loopMode: loopMode
     };
@@ -1721,9 +1728,9 @@ function Tabula() {
         var ratio = stR(transpR.current);
         var rawSp = p && p.params && p.params[s] ? p.params[s] : null;
         var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
-        var rhy = sp ? Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1) : 1;
-        var ratch = rhy > 1 ? rhy : 1;
-        var isTie = rhy === 0;
+        var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
+        var ratch = rhy;
+        var isTie = false; // tie is done via grid only now
         var subDur = stepDur / ratch;
 
         // Non-tie step: look ahead for consecutive tied steps and extend duration
@@ -2097,45 +2104,17 @@ function Tabula() {
     // Popup is sticky — dismiss if empty space AND outside arm reach; otherwise re-engage
     if (popupR.current) {
       var pr = popupR.current;
+      // Dismiss if dragging far from popup origin
       var distFromOrigin = Math.sqrt(Math.pow(e.clientX - pr.originX, 2) + Math.pow(e.clientY - pr.originY, 2));
-      if (!isOnNote && distFromOrigin > 130) {
+      if (!isOnNote && distFromOrigin > 160) {
         g.state = "pending-dismiss";
         g.startX = e.clientX;
         g.startY = e.clientY;
         gridRef.current && gridRef.current.setPointerCapture(e.pointerId);
         return;
       }
-      // Touching any note — immediately re-engage popup adjustment
       g.state = "popup";
       gridRef.current && gridRef.current.setPointerCapture(e.pointerId);
-      var fdx = e.clientX - pr.originX,
-        fdy = e.clientY - pr.originY;
-      var dist = Math.sqrt(fdx * fdx + fdy * fdy);
-      if (dist >= 14) {
-        var _popupR$current;
-        var fingerAngle = Math.atan2(-fdy, fdx) * 180 / Math.PI;
-        var bestArm = null,
-          bestDiff = 180;
-        (((_popupR$current = popupR.current) === null || _popupR$current === void 0 ? void 0 : _popupR$current.adaptedArms) || PARAM_ARMS).forEach(function (arm) {
-          var diff = Math.abs((fingerAngle - arm.angle + 540) % 360 - 180);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestArm = arm;
-          }
-        });
-        if (bestArm) {
-          var armRad = bestArm.angle * Math.PI / 180;
-          var proj = fdx * Math.cos(armRad) + -fdy * Math.sin(armRad);
-          var pct = Math.max(0, Math.min(1, proj / 100));
-          var newVal = Math.round(pct * (bestArm.max - bestArm.min) + bestArm.min);
-          setParamPopup(function (p) {
-            return p ? _objectSpread(_objectSpread({}, p), {}, {
-              activeArm: bestArm.key,
-              values: _objectSpread(_objectSpread({}, p.values), {}, _defineProperty({}, bestArm.key, newVal))
-            }) : p;
-          });
-        }
-      }
       return;
     }
     g.state = "pending";
@@ -2207,21 +2186,11 @@ function Tabula() {
   var openParamPopup = useCallback(function (c, ox, oy, baseVals) {
     var g = gesture.current;
     g.state = "popup";
-    var vw2 = window.innerWidth,
-      REACH2 = 150;
-    var fc = 90;
-    if (oy < REACH2 + 20) fc = -90;else if (ox < REACH2) fc = 0;else if (ox > vw2 - REACH2) fc = 180;
-    var adaptedArms = PARAM_ARMS.map(function (arm, i) {
-      return _objectSpread(_objectSpread({}, arm), {}, {
-        angle: fc + (i - 2) * 30
-      });
-    });
     popupR.current = {
       col: c,
       originX: ox,
       originY: oy,
-      baseValues: baseVals,
-      adaptedArms: adaptedArms
+      baseValues: baseVals
     };
     setParamPopup({
       col: c,
@@ -2256,7 +2225,7 @@ function Tabula() {
     var dx = e.clientX - g.startX,
       dy = e.clientY - g.startY;
     if (g.state === "popup" && popupR.current) {
-      var _popupR$current2;
+      var _popupR$current;
       var pr = popupR.current;
       // For mouse (right-click popup): only update on drag with button held; touch always has buttons>0
       if (e.pointerType === 'mouse' && e.buttons === 0) return;
@@ -2274,7 +2243,7 @@ function Tabula() {
       var fingerAngle = Math.atan2(-fdy, fdx) * 180 / Math.PI;
       var bestArm = null,
         bestDiff = 180;
-      (((_popupR$current2 = popupR.current) === null || _popupR$current2 === void 0 ? void 0 : _popupR$current2.adaptedArms) || PARAM_ARMS).forEach(function (arm) {
+      (((_popupR$current = popupR.current) === null || _popupR$current === void 0 ? void 0 : _popupR$current.adaptedArms) || PARAM_ARMS).forEach(function (arm) {
         var diff = Math.abs((fingerAngle - arm.angle + 540) % 360 - 180);
         if (diff < bestDiff) {
           bestDiff = diff;
@@ -2882,10 +2851,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState107 = useState(false),
-    _useState108 = _slicedToArray(_useState107, 2),
-    bpmDragging = _useState108[0],
-    setBpmDragging = _useState108[1];
+  var _useState109 = useState(false),
+    _useState110 = _slicedToArray(_useState109, 2),
+    bpmDragging = _useState110[0],
+    setBpmDragging = _useState110[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -2914,10 +2883,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState109 = useState(false),
-    _useState110 = _slicedToArray(_useState109, 2),
-    stDragging = _useState110[0],
-    setStDragging = _useState110[1];
+  var _useState111 = useState(false),
+    _useState112 = _slicedToArray(_useState111, 2),
+    stDragging = _useState112[0],
+    setStDragging = _useState112[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -2946,10 +2915,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState111 = useState(false),
-    _useState112 = _slicedToArray(_useState111, 2),
-    swingDragging = _useState112[0],
-    setSwingDragging = _useState112[1];
+  var _useState113 = useState(false),
+    _useState114 = _slicedToArray(_useState113, 2),
+    swingDragging = _useState114[0],
+    setSwingDragging = _useState114[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -3141,28 +3110,13 @@ function Tabula() {
     onDragStart: function onDragStart(e) {
       return e.preventDefault();
     }
-  }, /*#__PURE__*/React.createElement("style", null, CSS), paramPopup && function () {
-    var ARM_LEN = 100,
-      TRACK_W = 4,
-      FILL_W = 4;
-    var ox = paramPopup.x,
-      oy = paramPopup.y;
+  }, /*#__PURE__*/React.createElement("style", null, CSS), paramPopup && function (_popupR$current$col, _popupR$current2) {
     var vw = window.innerWidth,
       vh = window.innerHeight;
-    var REACH = ARM_LEN + 55;
-    var fanCenter = 90;
-    if (oy < REACH + 20) fanCenter = -90;else if (ox < REACH) fanCenter = 0;else if (ox > vw - REACH) fanCenter = 180;
-    var arms = PARAM_ARMS.map(function (arm, i) {
-      return _objectSpread(_objectSpread({}, arm), {}, {
-        angle: fanCenter + (i - 2) * 30
-      });
-    });
-    var scrimAngle = fanCenter * Math.PI / 180;
-    // Background panel bounds — covers arm area
-    var panW = 300,
-      panH = 280;
-    var panX = Math.max(8, Math.min(vw - panW - 8, ox - panW / 2));
-    var panY = Math.max(8, Math.min(vh - panH - 8, oy - panH / 2));
+    var W = 260,
+      H = 220;
+    var px = Math.max(10, Math.min(vw - W - 10, paramPopup.x - W / 2));
+    var py = Math.max(10, Math.min(vh - H - 10, paramPopup.y - H - 16));
     return /*#__PURE__*/React.createElement("div", {
       style: {
         position: "fixed",
@@ -3177,133 +3131,134 @@ function Tabula() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        left: panX,
-        top: panY,
-        width: panW,
-        height: panH,
-        background: "rgba(10,10,10,0.82)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        borderRadius: 16,
-        border: "1px solid rgba(255,255,255,0.1)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-        pointerEvents: "none"
+        left: px,
+        top: py,
+        width: W,
+        background: "rgba(26,24,20,0.96)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        borderRadius: 14,
+        border: "1px solid rgba(200,185,165,0.15)",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+        padding: "10px 14px 12px",
+        pointerEvents: "all"
+      },
+      onPointerDown: function onPointerDown(e) {
+        return e.stopPropagation();
       }
-    }), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 9,
+        color: "rgba(210,195,175,0.4)",
+        letterSpacing: 2,
+        flex: 1
+      }
+    }, "STEP ", ((_popupR$current$col = (_popupR$current2 = popupR.current) === null || _popupR$current2 === void 0 ? void 0 : _popupR$current2.col) !== null && _popupR$current$col !== void 0 ? _popupR$current$col : 0) + 1), /*#__PURE__*/React.createElement("div", {
       onClick: commitAndClose,
       style: {
-        position: "absolute",
-        left: panX + panW - 40,
-        top: panY + 6,
-        width: 34,
-        height: 34,
+        width: 22,
+        height: 22,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        color: "rgba(210,195,175,0.5)",
-        fontSize: 22,
-        fontWeight: 300,
+        color: "rgba(210,195,175,0.4)",
+        fontSize: 16,
         cursor: "pointer",
-        pointerEvents: "all",
-        borderRadius: 17,
-        transition: "color .1s, background .1s"
-      },
-      onMouseEnter: function onMouseEnter(e) {
-        e.currentTarget.style.color = "#fff";
-        e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-      },
-      onMouseLeave: function onMouseLeave(e) {
-        e.currentTarget.style.color = "rgba(210,195,175,0.5)";
-        e.currentTarget.style.background = "transparent";
+        borderRadius: 11
       }
-    }, "\xD7"), /*#__PURE__*/React.createElement("svg", {
-      style: {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none"
-      }
-    }, arms.map(function (arm) {
+    }, "\xD7")), PARAM_ARMS.map(function (arm) {
       var _paramPopup$values$ar, _paramPopup$values;
-      var rad = arm.angle * Math.PI / 180;
-      var cos = Math.cos(rad),
-        sin = Math.sin(rad);
-      var ex = ox + cos * ARM_LEN,
-        ey = oy - sin * ARM_LEN;
-      var active = paramPopup.activeArm === arm.key;
       var val = (_paramPopup$values$ar = (_paramPopup$values = paramPopup.values) === null || _paramPopup$values === void 0 ? void 0 : _paramPopup$values[arm.key]) !== null && _paramPopup$values$ar !== void 0 ? _paramPopup$values$ar : arm.min;
-      var pct = (val - arm.min) / (arm.max - arm.min);
-      var fillLen = Math.max(4, pct * ARM_LEN);
-      var fx = ox + cos * fillLen,
-        fy = oy - sin * fillLen;
-      return /*#__PURE__*/React.createElement("g", {
-        key: arm.key
-      }, /*#__PURE__*/React.createElement("line", {
-        x1: ox,
-        y1: oy,
-        x2: ex,
-        y2: ey,
-        stroke: arm.color + "28",
-        strokeWidth: TRACK_W,
-        strokeLinecap: "round"
-      }), /*#__PURE__*/React.createElement("line", {
-        x1: ox,
-        y1: oy,
-        x2: fx,
-        y2: fy,
-        stroke: active ? arm.color : arm.color + "99",
-        strokeWidth: FILL_W,
-        strokeLinecap: "round"
-      }), /*#__PURE__*/React.createElement("circle", {
-        cx: fx,
-        cy: fy,
-        r: active ? 5 : 3.5,
-        fill: active ? arm.color : arm.color + "bb"
-      }));
-    }), /*#__PURE__*/React.createElement("circle", {
-      cx: ox,
-      cy: oy,
-      r: 6,
-      fill: "#fff",
-      opacity: 0.9
-    })), arms.map(function (arm) {
-      var _paramPopup$values$ar2, _paramPopup$values2;
-      var rad = arm.angle * Math.PI / 180;
-      var lx = ox + Math.cos(rad) * (ARM_LEN + 26);
-      var ly = oy - Math.sin(rad) * (ARM_LEN + 26);
       var active = paramPopup.activeArm === arm.key;
-      var val = (_paramPopup$values$ar2 = (_paramPopup$values2 = paramPopup.values) === null || _paramPopup$values2 === void 0 ? void 0 : _paramPopup$values2[arm.key]) !== null && _paramPopup$values$ar2 !== void 0 ? _paramPopup$values$ar2 : arm.min;
-      var displayVal = arm.key === "oct" ? val - 2 === 0 ? "0" : (val - 2 > 0 ? "+" : "") + (val - 2) : arm.key === "rhy" ? val === 0 ? "TIE" : val === 1 ? "—" : "×" + val : val;
+      var pct = (val - arm.min) / (arm.max - arm.min);
+      var displayVal = arm.key === "oct" ? val - 2 === 0 ? "0" : (val - 2 > 0 ? "+" : "") + (val - 2) : arm.key === "rhy" ? "×" + Math.max(1, val) : arm.key === "dur" ? val > 0 ? "+" + val + "%" : val + "%" : val;
       return /*#__PURE__*/React.createElement("div", {
         key: arm.key,
         style: {
-          position: "absolute",
-          left: lx - 28,
-          top: ly - 18,
-          width: 56,
-          textAlign: "center",
-          pointerEvents: "none"
+          marginBottom: 8
+        },
+        onPointerDown: function onPointerDown(e) {
+          e.stopPropagation();
+          var rect = e.currentTarget.getBoundingClientRect();
+          var newPct = Math.max(0, Math.min(1, (e.clientX - rect.left - 8) / (rect.width - 16)));
+          var newVal = arm.discrete ? Math.round(newPct * (arm.max - arm.min) + arm.min) : Math.round(newPct * (arm.max - arm.min) + arm.min);
+          setParamPopup(function (p) {
+            return p ? _objectSpread(_objectSpread({}, p), {}, {
+              activeArm: arm.key,
+              values: _objectSpread(_objectSpread({}, p.values), {}, _defineProperty({}, arm.key, newVal))
+            }) : p;
+          });
+          e.currentTarget.setPointerCapture(e.pointerId);
+        },
+        onPointerMove: function onPointerMove(e) {
+          if (e.buttons === 0) return;
+          var rect = e.currentTarget.getBoundingClientRect();
+          var newPct = Math.max(0, Math.min(1, (e.clientX - rect.left - 8) / (rect.width - 16)));
+          var newVal = Math.round(newPct * (arm.max - arm.min) + arm.min);
+          setParamPopup(function (p) {
+            return p ? _objectSpread(_objectSpread({}, p), {}, {
+              activeArm: arm.key,
+              values: _objectSpread(_objectSpread({}, p.values), {}, _defineProperty({}, arm.key, newVal))
+            }) : p;
+          });
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: 2,
-          color: active ? arm.color : arm.color + "99",
-          transition: "color .1s"
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: 3
         }
-      }, arm.label), /*#__PURE__*/React.createElement("div", {
+      }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 15,
-          fontWeight: 700,
-          color: active ? "#fff" : arm.color + "cc",
-          lineHeight: 1.1,
-          transition: "color .1s"
+          fontSize: 9,
+          fontWeight: 500,
+          color: active ? arm.color : arm.color + "88",
+          letterSpacing: 1
         }
-      }, displayVal));
-    }));
+      }, arm.label), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          fontWeight: 500,
+          color: active ? arm.color : arm.color + "99"
+        }
+      }, displayVal)), /*#__PURE__*/React.createElement("div", {
+        style: {
+          height: 6,
+          background: "rgba(200,185,165,0.1)",
+          borderRadius: 3,
+          position: "relative",
+          cursor: "ew-resize"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: pct * 100 + "%",
+          background: active ? arm.color : arm.color + "66",
+          borderRadius: 3,
+          transition: "width .04s"
+        }
+      }), /*#__PURE__*/React.createElement("div", {
+        style: {
+          position: "absolute",
+          top: -3,
+          bottom: -3,
+          width: 10,
+          borderRadius: 3,
+          background: active ? arm.color : "rgba(200,185,165,0.6)",
+          left: "calc(".concat(pct * 100, "% - 5px)")
+        }
+      })));
+    })));
   }(), patMenu && function () {
     var pm = patMenu;
     var vw = window.innerWidth,
@@ -3511,7 +3466,7 @@ function Tabula() {
     style: S.widgetN
   }, bpm), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "BPM \u2195")), /*#__PURE__*/React.createElement("div", {
+  }, "BPM")), /*#__PURE__*/React.createElement("div", {
     ref: stDragRef,
     style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
       flex: 1
@@ -3524,7 +3479,7 @@ function Tabula() {
     style: S.widgetN
   }, stLabel), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "ST \u2195")), /*#__PURE__*/React.createElement("div", {
+  }, "ST")), /*#__PURE__*/React.createElement("div", {
     ref: swingDragRef,
     style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
       flex: 1
@@ -3537,7 +3492,7 @@ function Tabula() {
     style: S.widgetN
   }, swing), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "SWG \u2195")))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
+  }, "SWG")))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       overflowY: "auto",
@@ -3811,7 +3766,31 @@ function Tabula() {
       alignSelf: "center"
     }),
     onClick: startStop
-  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+  }, playing ? /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "1",
+    y: "1",
+    width: "9",
+    height: "9",
+    rx: "1.5"
+  })) : /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("polygon", {
+    points: "1.5,0.5 10.5,5.5 1.5,10.5"
+  }))), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, {
       width: "100%"
     }, monoMode ? {
@@ -3895,11 +3874,10 @@ function Tabula() {
     var fromBot = ROWS - 1 - r;
     var isOct = fromBot % SCALE_SPAN === 0;
     var isFifth = !isOct && fromBot % SCALE_SPAN === 4;
-    var rowBorder = isOct ? "1px solid rgba(200,185,165,0.2)" : isFifth ? "1px solid rgba(160,190,170,0.12)" : "none";
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       style: Object.assign({}, S.gridRow, {
-        borderTop: rowBorder,
+        background: isOct ? "rgba(200,185,165,0.06)" : isFifth ? "rgba(160,190,170,0.03)" : "transparent",
         position: "relative"
       })
     }, Array.from({
@@ -4127,7 +4105,7 @@ function Tabula() {
       }).some(Boolean));
     });
     var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
-    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? curVal === 0 ? "TIE" : curVal === 1 ? "—" : "×" + curVal : String(curVal);
+    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? "×" + Math.max(1, curVal) : lane.key === "dur" ? curVal > 0 ? "+" + curVal + "%" : curVal + "%" : String(curVal);
     return /*#__PURE__*/React.createElement("div", {
       key: lane.key,
       style: S.stepLaneSection
@@ -4566,11 +4544,10 @@ function Tabula() {
     var fromBot = ROWS - 1 - r;
     var isOct = fromBot % SCALE_SPAN === 0;
     var isFifth = !isOct && fromBot % SCALE_SPAN === 4;
-    var rowBorder = isOct ? "1px solid rgba(200,185,165,0.2)" : isFifth ? "1px solid rgba(160,190,170,0.12)" : "none";
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       style: Object.assign({}, S.gridRow, {
-        borderTop: rowBorder,
+        background: isOct ? "rgba(200,185,165,0.06)" : isFifth ? "rgba(160,190,170,0.03)" : "transparent",
         position: "relative"
       })
     }, Array.from({
@@ -4600,20 +4577,8 @@ function Tabula() {
           var _activePat$params3, _p$rhy2, _p$vel2;
           var p = activePat === null || activePat === void 0 || (_activePat$params3 = activePat.params) === null || _activePat$params3 === void 0 ? void 0 : _activePat$params3[ci];
           var rhy = p ? Math.round((_p$rhy2 = p.rhy) !== null && _p$rhy2 !== void 0 ? _p$rhy2 : 1) : 1;
-          if (rhy === 0) {
-            ci++;
-            continue;
-          }
           var span = 1,
             nc = ci + 1;
-          while (nc < COLS && activePat !== null && activePat !== void 0 && activePat.grid[r][nc]) {
-            var _activePat$params4, _np2$rhy2;
-            var np2 = activePat === null || activePat === void 0 || (_activePat$params4 = activePat.params) === null || _activePat$params4 === void 0 ? void 0 : _activePat$params4[nc];
-            if (np2 && Math.round((_np2$rhy2 = np2.rhy) !== null && _np2$rhy2 !== void 0 ? _np2$rhy2 : 1) === 0) {
-              span++;
-              nc++;
-            } else break;
-          }
           var vel = p ? (_p$vel2 = p.vel) !== null && _p$vel2 !== void 0 ? _p$vel2 : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
@@ -4790,7 +4755,7 @@ function Tabula() {
       }).some(Boolean));
     });
     var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
-    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? curVal === 0 ? "TIE" : curVal === 1 ? "—" : "×" + curVal : String(curVal);
+    var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? "×" + Math.max(1, curVal) : lane.key === "dur" ? curVal > 0 ? "+" + curVal + "%" : curVal + "%" : String(curVal);
     return /*#__PURE__*/React.createElement("div", {
       key: lane.key,
       style: S.stepLaneSection
@@ -5175,7 +5140,31 @@ function Tabula() {
       flexShrink: 0
     }, playing ? S.playOn : {}),
     onClick: startStop
-  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+  }, playing ? /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "1",
+    y: "1",
+    width: "9",
+    height: "9",
+    rx: "1.5"
+  })) : /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("polygon", {
+    points: "1.5,0.5 10.5,5.5 1.5,10.5"
+  }))), /*#__PURE__*/React.createElement("button", {
     style: {
       padding: "0 10px",
       height: 46,
@@ -5244,7 +5233,7 @@ function Tabula() {
     style: S.widgetN
   }, bpm), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "BPM \u2195")), /*#__PURE__*/React.createElement("div", {
+  }, "BPM")), /*#__PURE__*/React.createElement("div", {
     ref: stDragRef,
     style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
       flex: 1
@@ -5257,7 +5246,7 @@ function Tabula() {
     style: S.widgetN
   }, stLabel), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "ST \u2195")), /*#__PURE__*/React.createElement("div", {
+  }, "ST")), /*#__PURE__*/React.createElement("div", {
     ref: swingDragRef,
     style: _objectSpread(_objectSpread({}, S.bpmDragTarget), {}, {
       flex: 1
@@ -5270,7 +5259,7 @@ function Tabula() {
     style: S.widgetN
   }, swing), /*#__PURE__*/React.createElement("span", {
     style: S.widgetU
-  }, "SWG \u2195")))), /*#__PURE__*/React.createElement("div", {
+  }, "SWG")))), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       bottom: 112,
@@ -5327,7 +5316,31 @@ function Tabula() {
       alignSelf: "center"
     }),
     onClick: startStop
-  }, playing ? "■" : "▶"), /*#__PURE__*/React.createElement("button", {
+  }, playing ? /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "1",
+    y: "1",
+    width: "9",
+    height: "9",
+    rx: "1.5"
+  })) : /*#__PURE__*/React.createElement("svg", {
+    width: "11",
+    height: "11",
+    viewBox: "0 0 11 11",
+    fill: "currentColor",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("polygon", {
+    points: "1.5,0.5 10.5,5.5 1.5,10.5"
+  }))), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, {
       width: "100%"
     }, monoMode ? {
