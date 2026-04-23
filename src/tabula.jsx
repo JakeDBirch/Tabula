@@ -347,7 +347,6 @@ class Bell{
     const dur=Math.max(atk+0.015, modDur);
     const end=dur+rel;
     const decayFraction = dur>=atk+dec ? 1 : Math.max(0,(dur-atk)/Math.max(0.001,dec));
-    const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
 
     const vcf=this.ctx.createBiquadFilter();
     vcf.type="lowpass";
@@ -374,6 +373,8 @@ class Bell{
 
     const vca=this.ctx.createGain();
     const peak=(p.detune>2?0.28:0.42)*velMul;
+    // gainAtGate must be computed AFTER peak is defined
+    const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
     vca.gain.linearRampToValueAtTime(peak,t+atk);
     if(dur>=atk+dec){
@@ -628,7 +629,7 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode
+    loopMode,varyMode
   });
 
   const applyShareState=s=>{
@@ -645,13 +646,14 @@ export default function Tabula(){
     if(s.activeId)setActiveId(s.activeId);
     if(s.waveform)setWaveform(s.waveform);
     if(s.loopMode!=null)setLoopMode(s.loopMode);
+    if(s.varyMode!=null)setVaryMode(s.varyMode);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
-     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],
+     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
   };
 

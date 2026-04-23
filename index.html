@@ -964,7 +964,6 @@ var Bell = /*#__PURE__*/function () {
       var dur = Math.max(atk + 0.015, modDur);
       var end = dur + rel;
       var decayFraction = dur >= atk + dec ? 1 : Math.max(0, (dur - atk) / Math.max(0.001, dec));
-      var gainAtGate = decayFraction >= 1 ? sus * peak : Math.max(0.001, peak * Math.pow(Math.max(0.001, sus), decayFraction));
       var vcf = this.ctx.createBiquadFilter();
       vcf.type = "lowpass";
       var rawCut = Math.max(0, Math.min(100, p.vcfCutoff + cutOff));
@@ -989,6 +988,8 @@ var Bell = /*#__PURE__*/function () {
       }
       var vca = this.ctx.createGain();
       var peak = (p.detune > 2 ? 0.28 : 0.42) * velMul;
+      // gainAtGate must be computed AFTER peak is defined
+      var gainAtGate = decayFraction >= 1 ? sus * peak : Math.max(0.001, peak * Math.pow(Math.max(0.001, sus), decayFraction));
       vca.gain.setValueAtTime(0, t);
       vca.gain.linearRampToValueAtTime(peak, t + atk);
       if (dur >= atk + dec) {
@@ -1704,7 +1705,8 @@ function Tabula() {
       vOctJitter: vOctJitter,
       vGlideJitter: vGlideJitter,
       vDurJitter: vDurJitter,
-      loopMode: loopMode
+      loopMode: loopMode,
+      varyMode: varyMode
     };
   };
   var applyShareState = function applyShareState(s) {
@@ -1724,7 +1726,8 @@ function Tabula() {
     if (s.activeId) setActiveId(s.activeId);
     if (s.waveform) setWaveform(s.waveform);
     if (s.loopMode != null) setLoopMode(s.loopMode);
-    [["detune", setDetune], ["attack", setAttack], ["decay", setDecay], ["sustain", setSustain], ["vcfCutoff", setVcfCutoff], ["vcfRes", setVcfRes], ["filterEnvAmt", setFilterEnvAmt], ["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyWetPct", setDlyWetPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vCutJitter", setVCutJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter]].forEach(function (_ref1) {
+    if (s.varyMode != null) setVaryMode(s.varyMode);
+    [["detune", setDetune], ["attack", setAttack], ["decay", setDecay], ["sustain", setSustain], ["vcfCutoff", setVcfCutoff], ["vcfRes", setVcfRes], ["filterEnvAmt", setFilterEnvAmt], ["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyWetPct", setDlyWetPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vCutJitter", setVCutJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref1) {
       var _ref10 = _slicedToArray(_ref1, 2),
         k = _ref10[0],
         fn = _ref10[1];
