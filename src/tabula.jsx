@@ -1906,23 +1906,23 @@ export default function Tabula(){
                   </div>
                 </div>
               )}
-              {/* Tabs */}
-              <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-                {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
-                  <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                ))}
-              </div>
-              {/* Transport — single row centered at bottom of right column */}
-              <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
-                <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-                <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(196,122,122,0.3)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
-                <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-                <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
-                <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
-                <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
-              </div>
             </>
           )}
+          {/* Tabs — always visible */}
+          <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
+            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
+              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+            ))}
+          </div>
+          {/* Transport — always visible, centered */}
+          <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
+            <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+            <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(196,122,122,0.3)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+            <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+            <button style={Object.assign({},S.loopBtnBottom,monoMode?{border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"}:{})} onClick={toggleMono}>MONO</button>
+            <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+            <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
+          </div>
         </div>
       </div>
       )} {/* end !IS_MOBILE desktop layout */}
