@@ -1728,7 +1728,8 @@ export default function Tabula(){
           <div style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             {page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-              <div style={{width:"min(100%, calc(100dvh - 180px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+              {/* Square grid: constrain by whichever is smaller — available width or available height */}
+              <div style={{aspectRatio:"1",height:"min(100%,calc(100vw - 320px))",display:"flex",flexDirection:"column",flexShrink:0}}>
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
