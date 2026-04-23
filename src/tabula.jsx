@@ -344,27 +344,29 @@ class Bell{
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
     const modDur=rawDur*(1+durMod);
-    // Use a small fixed floor — don't clamp by atk+dec, which prevented step DUR from working
-    const dur=Math.max(0.015, modDur);
+    const dur=Math.max(atk+0.015, modDur);
     const end=dur+rel;
+    const decayFraction = dur>=atk+dec ? 1 : Math.max(0,(dur-atk)/Math.max(0.001,dec));
+    const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
 
     const vcf=this.ctx.createBiquadFilter();
     vcf.type="lowpass";
     const rawCut=Math.max(0,Math.min(100,p.vcfCutoff+cutOff));
     const baseHz=vcfHz(rawCut);
     vcf.Q.value=Math.max(0.01, p.vcfRes*0.28);
-    // Tie filter env amount to velocity — higher velocity = more filter sweep
     const envAmt=(p.filterEnvAmt/100)*velMul;
     const peakHz=envAmt>0.001?baseHz*Math.pow(20000/Math.max(20,baseHz),envAmt):baseHz;
     const susHz=Math.max(20,baseHz+(peakHz-baseHz)*sus);
-    // Clamp envelope timing to actual gate duration for short notes
-    const atkClamped=Math.min(atk, dur*0.5);
-    const decClamped=Math.min(dec, dur-atkClamped);
+    const freqAtGate = decayFraction>=1 ? susHz : Math.max(20, peakHz*Math.pow(Math.max(20,susHz)/Math.max(20,peakHz), decayFraction));
     if(envAmt>0.01){
       vcf.frequency.setValueAtTime(baseHz,t);
-      vcf.frequency.linearRampToValueAtTime(peakHz,t+atkClamped);
-      vcf.frequency.exponentialRampToValueAtTime(Math.max(20,susHz),t+atkClamped+decClamped);
-      vcf.frequency.setValueAtTime(Math.max(20,susHz),t+dur);
+      vcf.frequency.linearRampToValueAtTime(peakHz,t+atk);
+      if(dur>=atk+dec){
+        vcf.frequency.exponentialRampToValueAtTime(Math.max(20,susHz),t+atk+dec);
+        vcf.frequency.setValueAtTime(Math.max(20,susHz),t+dur);
+      } else {
+        vcf.frequency.exponentialRampToValueAtTime(Math.max(20,freqAtGate),t+dur);
+      }
       vcf.frequency.exponentialRampToValueAtTime(Math.max(20,baseHz),t+end);
     } else {
       vcf.frequency.value=baseHz;
@@ -373,10 +375,13 @@ class Bell{
     const vca=this.ctx.createGain();
     const peak=(p.detune>2?0.28:0.42)*velMul;
     vca.gain.setValueAtTime(0,t);
-    // Also clamp VCA envelope to gate duration for short notes
-    vca.gain.linearRampToValueAtTime(peak,t+atkClamped);
-    vca.gain.exponentialRampToValueAtTime(Math.max(0.001,sus*peak),t+atkClamped+decClamped);
-    vca.gain.setValueAtTime(Math.max(0.001,sus*peak),t+dur);
+    vca.gain.linearRampToValueAtTime(peak,t+atk);
+    if(dur>=atk+dec){
+      vca.gain.exponentialRampToValueAtTime(Math.max(0.001,sus*peak),t+atk+dec);
+      vca.gain.setValueAtTime(Math.max(0.001,sus*peak),t+dur);
+    } else {
+      vca.gain.exponentialRampToValueAtTime(Math.max(0.001,gainAtGate),t+dur);
+    }
     vca.gain.exponentialRampToValueAtTime(0.0001,t+end);
 
     const o1=this.ctx.createOscillator();
@@ -576,7 +581,7 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const saveSlot=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -587,8 +592,14 @@ export default function Tabula(){
     if(s.waveform)setWaveform(s.waveform);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
-     ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal]
+     ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
+     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
+     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
+     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
+    if(s.loopMode!=null)setLoopMode(s.loopMode);
+    if(s.varyMode!=null)setVaryMode(s.varyMode);
     showFlash("LOADED "+slot);
   };
 
