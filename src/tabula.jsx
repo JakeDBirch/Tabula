@@ -344,23 +344,27 @@ class Bell{
     const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
     const modDur=rawDur*(1+durMod);
-    // Floor at atk+dec only to keep envelope automation in order (prevents clicks)
-    const dur=Math.max(atk+dec+0.01, modDur);
+    // Use a small fixed floor — don't clamp by atk+dec, which prevented step DUR from working
+    const dur=Math.max(0.015, modDur);
     const end=dur+rel;
 
     const vcf=this.ctx.createBiquadFilter();
     vcf.type="lowpass";
     const rawCut=Math.max(0,Math.min(100,p.vcfCutoff+cutOff));
     const baseHz=vcfHz(rawCut);
-    vcf.Q.value=Math.max(0.01, p.vcfRes*0.28); // floor prevents instability at Q=0
-    const envAmt=p.filterEnvAmt/100;
+    vcf.Q.value=Math.max(0.01, p.vcfRes*0.28);
+    // Tie filter env amount to velocity — higher velocity = more filter sweep
+    const envAmt=(p.filterEnvAmt/100)*velMul;
     const peakHz=envAmt>0.001?baseHz*Math.pow(20000/Math.max(20,baseHz),envAmt):baseHz;
     const susHz=Math.max(20,baseHz+(peakHz-baseHz)*sus);
+    // Clamp envelope timing to actual gate duration for short notes
+    const atkClamped=Math.min(atk, dur*0.5);
+    const decClamped=Math.min(dec, dur-atkClamped);
     if(envAmt>0.01){
       vcf.frequency.setValueAtTime(baseHz,t);
-      vcf.frequency.linearRampToValueAtTime(peakHz,t+atk);
-      vcf.frequency.exponentialRampToValueAtTime(susHz,t+atk+dec);
-      vcf.frequency.setValueAtTime(susHz,t+dur);
+      vcf.frequency.linearRampToValueAtTime(peakHz,t+atkClamped);
+      vcf.frequency.exponentialRampToValueAtTime(Math.max(20,susHz),t+atkClamped+decClamped);
+      vcf.frequency.setValueAtTime(Math.max(20,susHz),t+dur);
       vcf.frequency.exponentialRampToValueAtTime(Math.max(20,baseHz),t+end);
     } else {
       vcf.frequency.value=baseHz;
@@ -369,8 +373,9 @@ class Bell{
     const vca=this.ctx.createGain();
     const peak=(p.detune>2?0.28:0.42)*velMul;
     vca.gain.setValueAtTime(0,t);
-    vca.gain.linearRampToValueAtTime(peak,t+atk);
-    vca.gain.exponentialRampToValueAtTime(Math.max(0.001,sus*peak),t+atk+dec);
+    // Also clamp VCA envelope to gate duration for short notes
+    vca.gain.linearRampToValueAtTime(peak,t+atkClamped);
+    vca.gain.exponentialRampToValueAtTime(Math.max(0.001,sus*peak),t+atkClamped+decClamped);
     vca.gain.setValueAtTime(Math.max(0.001,sus*peak),t+dur);
     vca.gain.exponentialRampToValueAtTime(0.0001,t+end);
 
@@ -591,18 +596,19 @@ export default function Tabula(){
   const gridLen=activePat?.gridLen??16;
   useEffect(()=>{gridLenR.current=gridLen;},[gridLen]);
 
-  // Measure available edit area to keep grid perfectly square
-  const editOuterRef = useRef(null);
+  // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
   const [gridPx, setGridPx] = useState(null);
+  const [editOuter, setEditOuter] = useState(null);
+  const editOuterRef = useCallback(node => setEditOuter(node), []);
   useEffect(()=>{
-    if(!editOuterRef.current) return;
+    if(!editOuter) return;
     const ro = new ResizeObserver(entries=>{
       const {width,height} = entries[0].contentRect;
       setGridPx(Math.floor(Math.min(width,height)) - 16);
     });
-    ro.observe(editOuterRef.current);
+    ro.observe(editOuter);
     return ()=>ro.disconnect();
-  },[]);
+  },[editOuter]);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
   const getShareState=()=>({

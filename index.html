@@ -961,22 +961,26 @@ var Bell = /*#__PURE__*/function () {
         rel = ms(p.decay);
       var rawDur = noteDur != null ? noteDur : this.stepDur;
       var modDur = rawDur * (1 + durMod);
-      // Floor at atk+dec only to keep envelope automation in order (prevents clicks)
-      var dur = Math.max(atk + dec + 0.01, modDur);
+      // Use a small fixed floor — don't clamp by atk+dec, which prevented step DUR from working
+      var dur = Math.max(0.015, modDur);
       var end = dur + rel;
       var vcf = this.ctx.createBiquadFilter();
       vcf.type = "lowpass";
       var rawCut = Math.max(0, Math.min(100, p.vcfCutoff + cutOff));
       var baseHz = vcfHz(rawCut);
-      vcf.Q.value = Math.max(0.01, p.vcfRes * 0.28); // floor prevents instability at Q=0
-      var envAmt = p.filterEnvAmt / 100;
+      vcf.Q.value = Math.max(0.01, p.vcfRes * 0.28);
+      // Tie filter env amount to velocity — higher velocity = more filter sweep
+      var envAmt = p.filterEnvAmt / 100 * velMul;
       var peakHz = envAmt > 0.001 ? baseHz * Math.pow(20000 / Math.max(20, baseHz), envAmt) : baseHz;
       var susHz = Math.max(20, baseHz + (peakHz - baseHz) * sus);
+      // Clamp envelope timing to actual gate duration for short notes
+      var atkClamped = Math.min(atk, dur * 0.5);
+      var decClamped = Math.min(dec, dur - atkClamped);
       if (envAmt > 0.01) {
         vcf.frequency.setValueAtTime(baseHz, t);
-        vcf.frequency.linearRampToValueAtTime(peakHz, t + atk);
-        vcf.frequency.exponentialRampToValueAtTime(susHz, t + atk + dec);
-        vcf.frequency.setValueAtTime(susHz, t + dur);
+        vcf.frequency.linearRampToValueAtTime(peakHz, t + atkClamped);
+        vcf.frequency.exponentialRampToValueAtTime(Math.max(20, susHz), t + atkClamped + decClamped);
+        vcf.frequency.setValueAtTime(Math.max(20, susHz), t + dur);
         vcf.frequency.exponentialRampToValueAtTime(Math.max(20, baseHz), t + end);
       } else {
         vcf.frequency.value = baseHz;
@@ -984,8 +988,9 @@ var Bell = /*#__PURE__*/function () {
       var vca = this.ctx.createGain();
       var peak = (p.detune > 2 ? 0.28 : 0.42) * velMul;
       vca.gain.setValueAtTime(0, t);
-      vca.gain.linearRampToValueAtTime(peak, t + atk);
-      vca.gain.exponentialRampToValueAtTime(Math.max(0.001, sus * peak), t + atk + dec);
+      // Also clamp VCA envelope to gate duration for short notes
+      vca.gain.linearRampToValueAtTime(peak, t + atkClamped);
+      vca.gain.exponentialRampToValueAtTime(Math.max(0.001, sus * peak), t + atkClamped + decClamped);
       vca.gain.setValueAtTime(Math.max(0.001, sus * peak), t + dur);
       vca.gain.exponentialRampToValueAtTime(0.0001, t + end);
       var o1 = this.ctx.createOscillator();
@@ -1614,25 +1619,31 @@ function Tabula() {
     gridLenR.current = gridLen;
   }, [gridLen]);
 
-  // Measure available edit area to keep grid perfectly square
-  var editOuterRef = useRef(null);
+  // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
   var _useState109 = useState(null),
     _useState110 = _slicedToArray(_useState109, 2),
     gridPx = _useState110[0],
     setGridPx = _useState110[1];
+  var _useState111 = useState(null),
+    _useState112 = _slicedToArray(_useState111, 2),
+    editOuter = _useState112[0],
+    setEditOuter = _useState112[1];
+  var editOuterRef = useCallback(function (node) {
+    return setEditOuter(node);
+  }, []);
   useEffect(function () {
-    if (!editOuterRef.current) return;
+    if (!editOuter) return;
     var ro = new ResizeObserver(function (entries) {
       var _entries$0$contentRec = entries[0].contentRect,
         width = _entries$0$contentRec.width,
         height = _entries$0$contentRec.height;
       setGridPx(Math.floor(Math.min(width, height)) - 16);
     });
-    ro.observe(editOuterRef.current);
+    ro.observe(editOuter);
     return function () {
       return ro.disconnect();
     };
-  }, []);
+  }, [editOuter]);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
   var getShareState = function getShareState() {
@@ -2999,10 +3010,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState111 = useState(false),
-    _useState112 = _slicedToArray(_useState111, 2),
-    bpmDragging = _useState112[0],
-    setBpmDragging = _useState112[1];
+  var _useState113 = useState(false),
+    _useState114 = _slicedToArray(_useState113, 2),
+    bpmDragging = _useState114[0],
+    setBpmDragging = _useState114[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -3031,10 +3042,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState113 = useState(false),
-    _useState114 = _slicedToArray(_useState113, 2),
-    stDragging = _useState114[0],
-    setStDragging = _useState114[1];
+  var _useState115 = useState(false),
+    _useState116 = _slicedToArray(_useState115, 2),
+    stDragging = _useState116[0],
+    setStDragging = _useState116[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -3063,10 +3074,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState115 = useState(false),
-    _useState116 = _slicedToArray(_useState115, 2),
-    swingDragging = _useState116[0],
-    setSwingDragging = _useState116[1];
+  var _useState117 = useState(false),
+    _useState118 = _slicedToArray(_useState117, 2),
+    swingDragging = _useState118[0],
+    setSwingDragging = _useState118[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
