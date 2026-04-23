@@ -104,19 +104,19 @@ var DLY_NOTES = [{
   label: "1/8",
   mult: .5
 }, {
-  label: "⅛·",
+  label: "1/8·",
   mult: .75
 }, {
   label: "1/4",
   mult: 1
 }, {
-  label: "¼·",
+  label: "1/4·",
   mult: 1.5
 }, {
   label: "1/2",
   mult: 2
 }, {
-  label: "½·",
+  label: "1/2·",
   mult: 3
 }, {
   label: "1/1",
@@ -483,10 +483,20 @@ function KnobSlider(_ref3) {
   return /*#__PURE__*/React.createElement("div", {
     style: S.knobWrap
   }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: Object.assign({}, S.knobLabel, {
       color: col + "cc"
     })
   }, label), /*#__PURE__*/React.createElement("div", {
+    style: Object.assign({}, S.knobValue, {
+      color: col
+    })
+  }, display)), /*#__PURE__*/React.createElement("div", {
     ref: ref,
     style: S.knobTrackWrap,
     onPointerDown: function onPointerDown(e) {
@@ -513,11 +523,7 @@ function KnobSlider(_ref3) {
       background: col,
       boxShadow: "0 0 8px " + col + "99"
     })
-  })), /*#__PURE__*/React.createElement("div", {
-    style: Object.assign({}, S.knobValue, {
-      color: col
-    })
-  }, display));
+  })));
 }
 function StepPicker(_ref4) {
   var label = _ref4.label,
@@ -4540,14 +4546,12 @@ function Tabula() {
     accent: C_DLY
   }, /*#__PURE__*/React.createElement("div", {
     style: {
+      padding: "4px 12px 10px",
       display: "flex",
-      gap: 12,
-      padding: "8px 16px 10px",
-      height: 160,
-      alignItems: "stretch"
+      flexDirection: "column",
+      gap: 6
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
-    vertical: true,
     label: "TIME",
     value: dlyIdx,
     min: 0,
@@ -4556,7 +4560,6 @@ function Tabula() {
     display: DLY_NOTES[dlyIdx].label,
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    vertical: true,
     label: "SEND",
     value: dlyWetPct,
     min: 0,
@@ -4565,7 +4568,6 @@ function Tabula() {
     display: dlyWetPct + "%",
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    vertical: true,
     label: "FDBK",
     value: dlyFbPct,
     min: 0,
@@ -4574,7 +4576,6 @@ function Tabula() {
     display: dlyFbPct + "%",
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    vertical: true,
     label: "HP",
     value: dlyHpVal,
     min: 0,
@@ -4583,7 +4584,6 @@ function Tabula() {
     display: hpLbl(dlyHpVal),
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    vertical: true,
     label: "LP",
     value: dlyLpVal,
     min: 0,

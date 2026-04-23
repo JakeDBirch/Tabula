@@ -23,8 +23,8 @@ const SCALE_SPAN=7;
 // ─── Other constants ──────────────────────────────────────────────────────────
 const DLY_NOTES = [
   {label:"1/16", mult:.25},{label:"1/16·",mult:.375},{label:"1/8",  mult:.5},
-  {label:"⅛·",  mult:.75},{label:"1/4",  mult:1},   {label:"¼·",  mult:1.5},
-  {label:"1/2",  mult:2},  {label:"½·",  mult:3},   {label:"1/1",  mult:4},
+  {label:"1/8·", mult:.75},{label:"1/4",  mult:1},   {label:"1/4·", mult:1.5},
+  {label:"1/2",  mult:2},  {label:"1/2·", mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
 // Device detection — multiple signals for reliability across browsers and iframe contexts
@@ -156,7 +156,10 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
   }
   return(
     <div style={S.knobWrap}>
-      <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+        <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
+        <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
+      </div>
       <div ref={ref} style={S.knobTrackWrap}
         onPointerDown={e=>{e.stopPropagation();ref.current.setPointerCapture(e.pointerId);compute(e);}}
         onPointerMove={e=>{if(e.buttons){e.stopPropagation();compute(e);}}}>
@@ -164,7 +167,6 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
         <div style={Object.assign({},S.knobTrackFill,{width:pct+"%",background:col+"88"})}/>
         <div style={Object.assign({},S.knobThumb,{left:pct+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
       </div>
-      <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
     </div>
   );
 }
@@ -1903,12 +1905,12 @@ export default function Tabula(){
                       </div>
                     </SynthSection>
                     <SynthSection title="DELAY" accent={C_DLY}>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                        <KnobSlider vertical label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
-                        <KnobSlider vertical label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                        <KnobSlider vertical label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                        <KnobSlider vertical label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+                        <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+                        <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
+                        <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                        <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
+                        <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
                       </div>
                     </SynthSection>
                 </div>
