@@ -688,6 +688,7 @@ export default function Tabula(){
   const [clipboard, setClipboard] = useState(null);
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
   const [flash,     setFlash]     = useState("");
+  const [confirmAction, setConfirmAction] = useState(null);
   const [shareFlash,setShareFlash]= useState("");
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
