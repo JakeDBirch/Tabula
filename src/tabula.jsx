@@ -1379,10 +1379,11 @@ export default function Tabula(){
     return p?.mono?collapseToMono(varied):varied;
   });
 
-  const suspendFollow=()=>{followSuspendedR.current=true;};
-  const resumeFollow=()=>{followSuspendedR.current=false;};
+  const suspendFollow=useCallback(()=>{followSuspendedR.current=true;},[]);
+  const resumeFollow=useCallback(()=>{followSuspendedR.current=false;},[]);
   const handleGridDown=useCallback(e=>{
     if(e.button===2)return; // right-click handled by onContextMenu only
+    suspendFollow();
     e.preventDefault();
     pointerCountR.current++;
     const g=gesture.current;
@@ -1672,7 +1673,7 @@ export default function Tabula(){
   },[]);
 
   const handleGridUp=useCallback(e=>{
-    resumeFollow();
+    if(followSuspendedR.current)resumeFollow();
     pointerCountR.current=Math.max(0,pointerCountR.current-1);
     clearTimeout(longPressR.current);longPressR.current=null;
     const g=gesture.current;
