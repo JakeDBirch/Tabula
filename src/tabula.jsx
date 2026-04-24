@@ -705,6 +705,9 @@ export default function Tabula(){
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"vary"|"project"
+  const [seqDrag,       setSeqDrag]       = useState(null); // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+  const seqDragR=useRef(null);
+  const seqTrackRef=useRef(null);
   const [shareFlash,setShareFlash]= useState("");
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
@@ -2851,87 +2854,170 @@ export default function Tabula(){
                   </div>
                 )}
 
-                {/* PATTERN sheet */}
-                {activeSheet==="pattern"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PATTERNS</div>
+                {/* PATTERN sheet — drag-and-drop sequencing */}
+                {activeSheet==="pattern"&&(()=>{
+                  const isSynth=activeLayer==="synth";
+                  const col=isSynth?"#a8c5a0":"#c4967a";
+                  const colFaint=isSynth?"rgba(168,197,160,":"rgba(196,150,122,";
+                  const sources=isSynth?pats:drumPats;
+                  const activePatId=isSynth?activeId:activeDrumId;
+                  const theChain=isSynth?chain:drumChain;
+                  const setTheChain=isSynth?setChain:setDrumChain;
+                  const playingIdx=isSynth?(playing&&!loopMode?cpos:-1):(playing?drumCpos%Math.max(1,drumChain.length):-1);
 
-                    {/* SYNTH section */}
-                    <div style={{marginBottom:16}}>
-                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(168,197,160,0.5)",fontWeight:600,marginBottom:8}}>SYNTH</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                        {pats.map(p=>{
-                          const isA=p.id===activeId&&activeLayer==="synth";const isP=playing&&playId===p.id;
-                          return(<div key={p.id} style={{padding:"5px 14px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:11,fontWeight:700,letterSpacing:1,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}
-                            onClick={()=>{setActiveId(p.id);setActiveLayer("synth");}}
-                            onContextMenu={e=>{e.stopPropagation();handlePillContextMenu(e,p.id);}}>
-                            {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                          </div>);
-                        })}
-                        {pats.length<8&&<button style={{padding:"5px 12px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.3)",background:"transparent",color:"rgba(168,197,160,0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{addPat();setActiveLayer("synth");}}>＋</button>}
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
-                        {[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode]].map(([l,f,d,danger,active])=>(
+                  // Seq drag helpers
+                  const getInsertIdx=(clientX)=>{
+                    if(!seqTrackRef.current)return theChain.length;
+                    const rect=seqTrackRef.current.getBoundingClientRect();
+                    const slotW=rect.width/Math.max(1,theChain.length+1);
+                    return Math.max(0,Math.min(theChain.length,Math.round((clientX-rect.left)/slotW)));
+                  };
+                  const isOverTrack=(clientY)=>{
+                    if(!seqTrackRef.current)return false;
+                    const r=seqTrackRef.current.getBoundingClientRect();
+                    return clientY>=r.top-20&&clientY<=r.bottom+20;
+                  };
+                  const onSeqPointerMove=(e)=>{
+                    if(!seqDragR.current)return;
+                    const over=isOverTrack(e.clientY);
+                    const ins=over?getInsertIdx(e.clientX):seqDragR.current.insertIdx;
+                    const next={...seqDragR.current,x:e.clientX,y:e.clientY,overTrack:over,insertIdx:ins};
+                    seqDragR.current=next;
+                    setSeqDrag({...next});
+                  };
+                  const onSeqPointerUp=(e)=>{
+                    if(!seqDragR.current)return;
+                    const d=seqDragR.current;
+                    const over=isOverTrack(e.clientY);
+                    const ins=getInsertIdx(e.clientX);
+                    if(d.type==="source"&&over&&theChain.length<8){
+                      // Drop from source → insert into chain
+                      setTheChain(c=>{const n=[...c];n.splice(ins,0,d.patId);return n.slice(0,8);});
+                    } else if(d.type==="chain"&&!over){
+                      // Drag chain slot out → remove
+                      setTheChain(c=>c.filter((_,j)=>j!==d.chainIdx));
+                    } else if(d.type==="chain"&&over&&ins!==d.chainIdx&&ins!==d.chainIdx+1){
+                      // Reorder within chain
+                      setTheChain(c=>{
+                        const n=[...c];const [item]=n.splice(d.chainIdx,1);
+                        const finalIns=ins>d.chainIdx?ins-1:ins;
+                        n.splice(finalIns,0,item);return n;
+                      });
+                    }
+                    document.removeEventListener("pointermove",onSeqPointerMove);
+                    document.removeEventListener("pointerup",onSeqPointerUp);
+                    seqDragR.current=null;setSeqDrag(null);
+                  };
+                  const startSourceDrag=(e,patId)=>{
+                    e.stopPropagation();
+                    const d={type:"source",patId,chainIdx:-1,x:e.clientX,y:e.clientY,overTrack:false,insertIdx:theChain.length};
+                    seqDragR.current=d;setSeqDrag(d);
+                    document.addEventListener("pointermove",onSeqPointerMove);
+                    document.addEventListener("pointerup",onSeqPointerUp);
+                  };
+                  const startChainDrag=(e,chainIdx)=>{
+                    e.stopPropagation();
+                    const d={type:"chain",patId:theChain[chainIdx],chainIdx,x:e.clientX,y:e.clientY,overTrack:true,insertIdx:chainIdx};
+                    seqDragR.current=d;setSeqDrag(d);
+                    document.addEventListener("pointermove",onSeqPointerMove);
+                    document.addEventListener("pointerup",onSeqPointerUp);
+                  };
+
+                  const dragPat=seqDrag?sources.find(p=>p.id===seqDrag.patId):null;
+
+                  return(
+                  <div style={{touchAction:"none"}}>
+                    {/* Layer toggle */}
+                    <div style={{display:"flex",gap:5,marginBottom:14}}>
+                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
+                      ))}
+                    </div>
+
+                    {/* Pattern management buttons */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
+                      {isSynth
+                        ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode]].map(([l,f,d,danger,active])=>(
                           <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":active?"0.5":"0.14")+")",borderRadius:7,background:active?"rgba(168,197,160,0.1)":"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":active?"#a8c5a0":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))}
-                      </div>
+                        ))
+                        :[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
+                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                        ))
+                      }
                     </div>
 
-                    {/* DRUMS section */}
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginBottom:16}}>
-                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(196,150,122,0.5)",fontWeight:600,marginBottom:8}}>DRUMS</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                        {drumPats.map(dp=>{
-                          const isA=dp.id===activeDrumId&&activeLayer==="drums";
-                          const isP=playing&&drumChain[drumCpos%Math.max(1,drumChain.length)]===dp.id;
-                          return(<div key={dp.id} style={{padding:"5px 14px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:11,fontWeight:700,letterSpacing:1,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}
-                            onClick={()=>{setActiveDrumId(dp.id);setActiveLayer("drums");}}
-                            onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
-                            {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{dp.name}
+                    {/* Source chips — tap to select, drag down to sequence */}
+                    <div style={{marginBottom:6}}>
+                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>PATTERNS — drag to sequence</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {sources.map(p=>{
+                          const isA=p.id===activePatId;
+                          const isP=playing&&(isSynth?playId===p.id:(drumChain[drumCpos%Math.max(1,drumChain.length)]===p.id));
+                          const isDragging=seqDrag?.type==="source"&&seqDrag.patId===p.id;
+                          return(<div key={p.id}
+                            style={{padding:"6px 16px",borderRadius:20,border:"1.5px solid "+col,background:isA?col:isDragging?"rgba(255,255,255,0.06)":"transparent",color:isA?"#1a1814":isDragging?col+"99":col,fontSize:12,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:3,opacity:isDragging?0.4:1,transition:"opacity .1s"}}
+                            onClick={()=>{isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}
+                            onPointerDown={e=>startSourceDrag(e,p.id)}>
+                            {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
                           </div>);
                         })}
-                        {drumPats.length<8&&<button style={{padding:"5px 12px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.3)",background:"transparent",color:"rgba(196,150,122,0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{addDrumPat();setActiveLayer("drums");}}>＋</button>}
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
-                        {[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
-                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))}
+                        {sources.length<8&&<button style={{padding:"6px 12px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
+                          onClick={()=>{isSynth?addPat():addDrumPat();}}>＋</button>}
                       </div>
                     </div>
 
-                    {/* Sequence */}
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14}}>
-                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",fontWeight:600,marginBottom:8}}>SEQUENCE</div>
-                      <div style={{marginBottom:8}}>
-                        <div style={{fontSize:7,color:"rgba(168,197,160,0.5)",letterSpacing:1,marginBottom:4}}>SYNTH</div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-                          {chain.length===0&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)"}}>empty — tap + to add</span>}
-                          {chain.map((pid,i)=>{const p=pats.find(x=>x.id===pid);const here=playing&&!loopMode&&i===cpos;return(<div key={i} style={{padding:"3px 8px",borderRadius:20,border:"1.5px solid #a8c5a0",background:here?"#a8c5a0":"rgba(168,197,160,0.08)",color:here?"#1a1814":"#a8c5a0",fontSize:9,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:2}}
-                            onClick={()=>{if(p)setActiveId(p.id);}}>
-                            {here&&<span style={{fontSize:5}}>●</span>}{p?.name||"?"}<span style={{fontSize:7,opacity:0.4,marginLeft:2}} onClick={e=>{e.stopPropagation();setChain(c=>c.filter((_,j)=>j!==i));}}>×</span>
-                          </div>);})}
-                          {chain.length<8&&<button style={{padding:"3px 8px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.3)",background:"transparent",color:"rgba(168,197,160,0.4)",fontSize:10,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setChain(c=>c.length<8?[...c,activeId]:c)}>＋</button>}
-                        </div>
+                    {/* Sequence track — drag source chips in, drag chain chips out */}
+                    <div style={{marginTop:16}}>
+                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>SEQUENCE — drag out to remove</div>
+                      <div ref={seqTrackRef} style={{minHeight:52,background:"rgba(220,200,180,0.04)",border:"1px solid "+(seqDrag?.overTrack?col+"66":"rgba(220,200,180,0.1)"),borderRadius:10,padding:"8px 8px",display:"flex",gap:5,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",transition:"border-color .12s",position:"relative"}}>
+                        {theChain.length===0&&!seqDrag&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",padding:"0 4px"}}>drag patterns here to build a sequence</span>}
+                        {theChain.map((pid,i)=>{
+                          const p=sources.find(x=>x.id===pid);
+                          const here=i===playingIdx;
+                          const isDragging=seqDrag?.type==="chain"&&seqDrag.chainIdx===i;
+                          const showInsert=seqDrag?.overTrack&&seqDrag.insertIdx===i;
+                          return(<React.Fragment key={i}>
+                            {showInsert&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
+                            <div style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid "+col,background:here?col:isDragging?"rgba(255,255,255,0.04)":"rgba(220,200,180,0.06)",color:here?"#1a1814":col,fontSize:11,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",flexShrink:0,opacity:isDragging?0.3:1,display:"flex",alignItems:"center",gap:2,transition:"opacity .1s"}}
+                              onClick={()=>{if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}}
+                              onPointerDown={e=>startChainDrag(e,i)}>
+                              {here&&<span style={{fontSize:6}}>●</span>}{p?.name||"?"}
+                            </div>
+                          </React.Fragment>);
+                        })}
+                        {seqDrag?.overTrack&&seqDrag.insertIdx>=theChain.length&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
+                        {!seqDrag&&theChain.length<8&&<button style={{padding:"5px 10px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={()=>setTheChain(c=>c.length<8?[...c,activePatId]:c)}>＋</button>}
                       </div>
-                      <div>
-                        <div style={{fontSize:7,color:"rgba(196,150,122,0.5)",letterSpacing:1,marginBottom:4}}>DRUMS</div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-                          {drumChain.length===0&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)"}}>empty — tap + to add</span>}
-                          {drumChain.map((pid,i)=>{const dp=drumPats.find(x=>x.id===pid);const here=playing&&i===drumCpos%Math.max(1,drumChain.length);return(<div key={i} style={{padding:"3px 8px",borderRadius:20,border:"1.5px solid #c4967a",background:here?"#c4967a":"rgba(196,150,122,0.08)",color:here?"#1a1814":"#c4967a",fontSize:9,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:2}}
-                            onClick={()=>{if(dp)setActiveDrumId(dp.id);}}>
-                            {here&&<span style={{fontSize:5}}>●</span>}{dp?.name||"?"}<span style={{fontSize:7,opacity:0.4,marginLeft:2}} onClick={e=>{e.stopPropagation();setDrumChain(c=>c.filter((_,j)=>j!==i));}}>×</span>
-                          </div>);})}
-                          {drumChain.length<8&&<button style={{padding:"3px 8px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.3)",background:"transparent",color:"rgba(196,150,122,0.4)",fontSize:10,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setDrumChain(c=>c.length<8?[...c,activeDrumId]:c)}>＋</button>}
+                      {/* Drop-to-delete hint when dragging chain slot */}
+                      {seqDrag?.type==="chain"&&!seqDrag.overTrack&&(
+                        <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,border:"1px dashed rgba(196,122,122,0.4)",background:"rgba(196,122,122,0.06)",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                          <span style={{fontSize:9,color:"rgba(196,122,122,0.7)",letterSpacing:1}}>release to remove from sequence</span>
                         </div>
-                      </div>
+                      )}
                     </div>
+
+                    {/* Drag ghost chip */}
+                    {seqDrag&&dragPat&&(
+                      <div style={{position:"fixed",left:seqDrag.x-24,top:seqDrag.y-18,zIndex:9999,pointerEvents:"none",padding:"5px 14px",borderRadius:20,border:"1.5px solid "+col,background:col,color:"#1a1814",fontSize:11,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:0.9}}>
+                        {dragPat.name}
+                      </div>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* SOUND sheet */}
                 {activeSheet==="sound"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
+                    {/* Layer toggle */}
+                    <div style={{display:"flex",gap:5,marginBottom:14}}>
+                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
+                      ))}
+                    </div>
                     {/* Tabs: STEP / SOUND (synth only) */}
                     {activeLayer==="synth"&&(
                       <div style={{display:"flex",gap:4,marginBottom:12}}>

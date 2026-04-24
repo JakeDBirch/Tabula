@@ -1704,207 +1704,213 @@ function Tabula() {
     _useState40 = _slicedToArray(_useState39, 2),
     activeSheet = _useState40[0],
     setActiveSheet = _useState40[1]; // "tempo"|"pattern"|"sound"|"vary"|"project"
-  var _useState41 = useState(""),
+  var _useState41 = useState(null),
     _useState42 = _slicedToArray(_useState41, 2),
-    shareFlash = _useState42[0],
-    setShareFlash = _useState42[1];
-  var importRef = useRef(null);
-  var _useState43 = useState(false),
+    seqDrag = _useState42[0],
+    setSeqDrag = _useState42[1]; // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+  var seqDragR = useRef(null);
+  var seqTrackRef = useRef(null);
+  var _useState43 = useState(""),
     _useState44 = _slicedToArray(_useState43, 2),
-    shifting = _useState44[0],
-    setShifting = _useState44[1];
+    shareFlash = _useState44[0],
+    setShareFlash = _useState44[1];
+  var importRef = useRef(null);
   var _useState45 = useState(false),
     _useState46 = _slicedToArray(_useState45, 2),
-    varyMode = _useState46[0],
-    setVaryMode = _useState46[1];
+    shifting = _useState46[0],
+    setShifting = _useState46[1];
   var _useState47 = useState(false),
     _useState48 = _slicedToArray(_useState47, 2),
-    recMode = _useState48[0],
-    setRecMode = _useState48[1];
+    varyMode = _useState48[0],
+    setVaryMode = _useState48[1];
+  var _useState49 = useState(false),
+    _useState50 = _slicedToArray(_useState49, 2),
+    recMode = _useState50[0],
+    setRecMode = _useState50[1];
   // mono is per-pattern — derived from active pattern
   var monoMode = !!((_pats$find = pats.find(function (p) {
     return p.id === activeId;
   })) !== null && _pats$find !== void 0 && _pats$find.mono);
   var monoModeR = useRef(false);
-  var _useState49 = useState(0),
-    _useState50 = _slicedToArray(_useState49, 2),
-    swing = _useState50[0],
-    setSwing = _useState50[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState51 = useState(0),
+    _useState52 = _slicedToArray(_useState51, 2),
+    swing = _useState52[0],
+    setSwing = _useState52[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState51 = useState(1),
-    _useState52 = _slicedToArray(_useState51, 2),
-    speedMult = _useState52[0],
-    setSpeedMult = _useState52[1];
-  var speedMultR = useRef(1);
-  var _useState53 = useState(false),
+  var _useState53 = useState(1),
     _useState54 = _slicedToArray(_useState53, 2),
-    showMenu = _useState54[0],
-    setShowMenu = _useState54[1];
+    speedMult = _useState54[0],
+    setSpeedMult = _useState54[1];
+  var speedMultR = useRef(1);
   var _useState55 = useState(false),
     _useState56 = _slicedToArray(_useState55, 2),
-    topTrayOpen = _useState56[0],
-    setTopTrayOpen = _useState56[1];
+    showMenu = _useState56[0],
+    setShowMenu = _useState56[1];
   var _useState57 = useState(false),
     _useState58 = _slicedToArray(_useState57, 2),
-    bottomTrayOpen = _useState58[0],
-    setBottomTrayOpen = _useState58[1];
-  var _useState59 = useState(null),
+    topTrayOpen = _useState58[0],
+    setTopTrayOpen = _useState58[1];
+  var _useState59 = useState(false),
     _useState60 = _slicedToArray(_useState59, 2),
-    patMenu = _useState60[0],
-    setPatMenu = _useState60[1]; // {id, x, y}
+    bottomTrayOpen = _useState60[0],
+    setBottomTrayOpen = _useState60[1];
   var _useState61 = useState(null),
     _useState62 = _slicedToArray(_useState61, 2),
-    drumMenu = _useState62[0],
-    setDrumMenu = _useState62[1]; // {id, x, y}
+    patMenu = _useState62[0],
+    setPatMenu = _useState62[1]; // {id, x, y}
   var _useState63 = useState(null),
     _useState64 = _slicedToArray(_useState63, 2),
-    paramPopup = _useState64[0],
-    setParamPopup = _useState64[1]; // {col,x,y,activeArm,values}
+    drumMenu = _useState64[0],
+    setDrumMenu = _useState64[1]; // {id, x, y}
+  var _useState65 = useState(null),
+    _useState66 = _slicedToArray(_useState65, 2),
+    paramPopup = _useState66[0],
+    setParamPopup = _useState66[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState65 = useState(null),
-    _useState66 = _slicedToArray(_useState65, 2),
-    chainDrag = _useState66[0],
-    setChainDrag = _useState66[1]; // {type,id,fromIdx,x,y}
+  var _useState67 = useState(null),
+    _useState68 = _slicedToArray(_useState67, 2),
+    chainDrag = _useState68[0],
+    setChainDrag = _useState68[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
   // Vary params
-  var _useState67 = useState(13),
-    _useState68 = _slicedToArray(_useState67, 2),
-    vDropRate = _useState68[0],
-    setVDropRate = _useState68[1];
-  var _useState69 = useState(17),
+  var _useState69 = useState(13),
     _useState70 = _slicedToArray(_useState69, 2),
-    vShiftRate = _useState70[0],
-    setVShiftRate = _useState70[1];
-  var _useState71 = useState(1),
+    vDropRate = _useState70[0],
+    setVDropRate = _useState70[1];
+  var _useState71 = useState(17),
     _useState72 = _slicedToArray(_useState71, 2),
-    vShiftRange = _useState72[0],
-    setVShiftRange = _useState72[1];
-  var _useState73 = useState(0),
+    vShiftRate = _useState72[0],
+    setVShiftRate = _useState72[1];
+  var _useState73 = useState(1),
     _useState74 = _slicedToArray(_useState73, 2),
-    vPitchRate = _useState74[0],
-    setVPitchRate = _useState74[1];
-  var _useState75 = useState(1),
+    vShiftRange = _useState74[0],
+    setVShiftRange = _useState74[1];
+  var _useState75 = useState(0),
     _useState76 = _slicedToArray(_useState75, 2),
-    vPitchRange = _useState76[0],
-    setVPitchRange = _useState76[1];
-  var _useState77 = useState(0),
+    vPitchRate = _useState76[0],
+    setVPitchRate = _useState76[1];
+  var _useState77 = useState(1),
     _useState78 = _slicedToArray(_useState77, 2),
-    vGhostRate = _useState78[0],
-    setVGhostRate = _useState78[1];
+    vPitchRange = _useState78[0],
+    setVPitchRange = _useState78[1];
   var _useState79 = useState(0),
     _useState80 = _slicedToArray(_useState79, 2),
-    vVelJitter = _useState80[0],
-    setVVelJitter = _useState80[1];
+    vGhostRate = _useState80[0],
+    setVGhostRate = _useState80[1];
   var _useState81 = useState(0),
     _useState82 = _slicedToArray(_useState81, 2),
-    vCutJitter = _useState82[0],
-    setVCutJitter = _useState82[1];
+    vVelJitter = _useState82[0],
+    setVVelJitter = _useState82[1];
   var _useState83 = useState(0),
     _useState84 = _slicedToArray(_useState83, 2),
-    vDlyJitter = _useState84[0],
-    setVDlyJitter = _useState84[1];
+    vCutJitter = _useState84[0],
+    setVCutJitter = _useState84[1];
   var _useState85 = useState(0),
     _useState86 = _slicedToArray(_useState85, 2),
-    vRhyJitter = _useState86[0],
-    setVRhyJitter = _useState86[1];
+    vDlyJitter = _useState86[0],
+    setVDlyJitter = _useState86[1];
   var _useState87 = useState(0),
     _useState88 = _slicedToArray(_useState87, 2),
-    vOctJitter = _useState88[0],
-    setVOctJitter = _useState88[1];
+    vRhyJitter = _useState88[0],
+    setVRhyJitter = _useState88[1];
   var _useState89 = useState(0),
     _useState90 = _slicedToArray(_useState89, 2),
-    vGlideJitter = _useState90[0],
-    setVGlideJitter = _useState90[1];
+    vOctJitter = _useState90[0],
+    setVOctJitter = _useState90[1];
   var _useState91 = useState(0),
     _useState92 = _slicedToArray(_useState91, 2),
-    vDurJitter = _useState92[0],
-    setVDurJitter = _useState92[1];
+    vGlideJitter = _useState92[0],
+    setVGlideJitter = _useState92[1];
+  var _useState93 = useState(0),
+    _useState94 = _slicedToArray(_useState93, 2),
+    vDurJitter = _useState94[0],
+    setVDurJitter = _useState94[1];
 
   // Synth
-  var _useState93 = useState("sawtooth"),
-    _useState94 = _slicedToArray(_useState93, 2),
-    waveform = _useState94[0],
-    setWaveform = _useState94[1];
-  var _useState95 = useState(8),
+  var _useState95 = useState("sawtooth"),
     _useState96 = _slicedToArray(_useState95, 2),
-    detune = _useState96[0],
-    setDetune = _useState96[1];
+    waveform = _useState96[0],
+    setWaveform = _useState96[1];
   var _useState97 = useState(8),
     _useState98 = _slicedToArray(_useState97, 2),
-    attack = _useState98[0],
-    setAttack = _useState98[1];
-  var _useState99 = useState(400),
+    detune = _useState98[0],
+    setDetune = _useState98[1];
+  var _useState99 = useState(8),
     _useState100 = _slicedToArray(_useState99, 2),
-    decay = _useState100[0],
-    setDecay = _useState100[1];
-  var _useState101 = useState(40),
+    attack = _useState100[0],
+    setAttack = _useState100[1];
+  var _useState101 = useState(400),
     _useState102 = _slicedToArray(_useState101, 2),
-    sustain = _useState102[0],
-    setSustain = _useState102[1];
-  var _useState103 = useState(80),
+    decay = _useState102[0],
+    setDecay = _useState102[1];
+  var _useState103 = useState(40),
     _useState104 = _slicedToArray(_useState103, 2),
-    vcfCutoff = _useState104[0],
-    setVcfCutoff = _useState104[1];
-  var _useState105 = useState(15),
+    sustain = _useState104[0],
+    setSustain = _useState104[1];
+  var _useState105 = useState(80),
     _useState106 = _slicedToArray(_useState105, 2),
-    vcfRes = _useState106[0],
-    setVcfRes = _useState106[1];
-  var _useState107 = useState(0),
+    vcfCutoff = _useState106[0],
+    setVcfCutoff = _useState106[1];
+  var _useState107 = useState(15),
     _useState108 = _slicedToArray(_useState107, 2),
-    filterEnvAmt = _useState108[0],
-    setFilterEnvAmt = _useState108[1];
+    vcfRes = _useState108[0],
+    setVcfRes = _useState108[1];
+  var _useState109 = useState(0),
+    _useState110 = _slicedToArray(_useState109, 2),
+    filterEnvAmt = _useState110[0],
+    setFilterEnvAmt = _useState110[1];
 
   // Delay
-  var _useState109 = useState(3),
-    _useState110 = _slicedToArray(_useState109, 2),
-    dlyIdx = _useState110[0],
-    setDlyIdx = _useState110[1];
-  var _useState111 = useState(45),
+  var _useState111 = useState(3),
     _useState112 = _slicedToArray(_useState111, 2),
-    dlyFbPct = _useState112[0],
-    setDlyFbPct = _useState112[1];
-  var _useState113 = useState(50),
+    dlyIdx = _useState112[0],
+    setDlyIdx = _useState112[1];
+  var _useState113 = useState(45),
     _useState114 = _slicedToArray(_useState113, 2),
-    dlyWetPct = _useState114[0],
-    setDlyWetPct = _useState114[1];
-  var _useState115 = useState(8),
+    dlyFbPct = _useState114[0],
+    setDlyFbPct = _useState114[1];
+  var _useState115 = useState(50),
     _useState116 = _slicedToArray(_useState115, 2),
-    dlyHpVal = _useState116[0],
-    setDlyHpVal = _useState116[1];
-  var _useState117 = useState(78),
+    dlyWetPct = _useState116[0],
+    setDlyWetPct = _useState116[1];
+  var _useState117 = useState(8),
     _useState118 = _slicedToArray(_useState117, 2),
-    dlyLpVal = _useState118[0],
-    setDlyLpVal = _useState118[1];
+    dlyHpVal = _useState118[0],
+    setDlyHpVal = _useState118[1];
+  var _useState119 = useState(78),
+    _useState120 = _slicedToArray(_useState119, 2),
+    dlyLpVal = _useState120[0],
+    setDlyLpVal = _useState120[1];
   var bell = useRef(new Bell());
   var drumEngine = useRef(new DrumEngine());
   var silentLoopR = useRef(null);
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat("A");
-  var _useState119 = useState([initDrum]),
-    _useState120 = _slicedToArray(_useState119, 2),
-    drumPats = _useState120[0],
-    setDrumPats = _useState120[1];
-  var _useState121 = useState(initDrum.id),
+  var _useState121 = useState([initDrum]),
     _useState122 = _slicedToArray(_useState121, 2),
-    activeDrumId = _useState122[0],
-    setActiveDrumId = _useState122[1];
-  var _useState123 = useState([initDrum.id]),
+    drumPats = _useState122[0],
+    setDrumPats = _useState122[1];
+  var _useState123 = useState(initDrum.id),
     _useState124 = _slicedToArray(_useState123, 2),
-    drumChain = _useState124[0],
-    setDrumChain = _useState124[1];
-  var _useState125 = useState(0),
+    activeDrumId = _useState124[0],
+    setActiveDrumId = _useState124[1];
+  var _useState125 = useState([initDrum.id]),
     _useState126 = _slicedToArray(_useState125, 2),
-    drumCpos = _useState126[0],
-    setDrumCpos = _useState126[1];
-  var _useState127 = useState(null),
+    drumChain = _useState126[0],
+    setDrumChain = _useState126[1];
+  var _useState127 = useState(0),
     _useState128 = _slicedToArray(_useState127, 2),
-    drumClipboard = _useState128[0],
-    setDrumClipboard = _useState128[1];
+    drumCpos = _useState128[0],
+    setDrumCpos = _useState128[1];
+  var _useState129 = useState(null),
+    _useState130 = _slicedToArray(_useState129, 2),
+    drumClipboard = _useState130[0],
+    setDrumClipboard = _useState130[1];
   var drumPatsR = useRef([initDrum]);
   var activeDrumIdR = useRef(initDrum.id);
   useEffect(function () {
@@ -2240,14 +2246,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState129 = useState(null),
-    _useState130 = _slicedToArray(_useState129, 2),
-    gridPx = _useState130[0],
-    setGridPx = _useState130[1];
   var _useState131 = useState(null),
     _useState132 = _slicedToArray(_useState131, 2),
-    editOuter = _useState132[0],
-    setEditOuter = _useState132[1];
+    gridPx = _useState132[0],
+    setGridPx = _useState132[1];
+  var _useState133 = useState(null),
+    _useState134 = _slicedToArray(_useState133, 2),
+    editOuter = _useState134[0],
+    setEditOuter = _useState134[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4091,10 +4097,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState133 = useState(false),
-    _useState134 = _slicedToArray(_useState133, 2),
-    bpmDragging = _useState134[0],
-    setBpmDragging = _useState134[1];
+  var _useState135 = useState(false),
+    _useState136 = _slicedToArray(_useState135, 2),
+    bpmDragging = _useState136[0],
+    setBpmDragging = _useState136[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -4123,10 +4129,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState135 = useState(false),
-    _useState136 = _slicedToArray(_useState135, 2),
-    stDragging = _useState136[0],
-    setStDragging = _useState136[1];
+  var _useState137 = useState(false),
+    _useState138 = _slicedToArray(_useState137, 2),
+    stDragging = _useState138[0],
+    setStDragging = _useState138[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -4155,10 +4161,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState137 = useState(false),
-    _useState138 = _slicedToArray(_useState137, 2),
-    swingDragging = _useState138[0],
-    setSwingDragging = _useState138[1];
+  var _useState139 = useState(false),
+    _useState140 = _slicedToArray(_useState139, 2),
+    swingDragging = _useState140[0],
+    setSwingDragging = _useState140[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -7501,394 +7507,428 @@ function Tabula() {
         return setSpeedMult(mult);
       }
     }, label);
-  }))), activeSheet === "pattern" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 9,
-      letterSpacing: 2,
-      color: "rgba(210,195,175,0.35)",
-      fontWeight: 500,
-      marginBottom: 14
-    }
-  }, "PATTERNS"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      letterSpacing: 1.5,
-      color: "rgba(168,197,160,0.5)",
-      fontWeight: 600,
-      marginBottom: 8
-    }
-  }, "SYNTH"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      marginBottom: 8
-    }
-  }, pats.map(function (p) {
-    var isA = p.id === activeId && activeLayer === "synth";
-    var isP = playing && playId === p.id;
+  }))), activeSheet === "pattern" && function () {
+    var isSynth = activeLayer === "synth";
+    var col = isSynth ? "#a8c5a0" : "#c4967a";
+    var colFaint = isSynth ? "rgba(168,197,160," : "rgba(196,150,122,";
+    var sources = isSynth ? pats : drumPats;
+    var activePatId = isSynth ? activeId : activeDrumId;
+    var theChain = isSynth ? chain : drumChain;
+    var setTheChain = isSynth ? setChain : setDrumChain;
+    var playingIdx = isSynth ? playing && !loopMode ? cpos : -1 : playing ? drumCpos % Math.max(1, drumChain.length) : -1;
+
+    // Seq drag helpers
+    var getInsertIdx = function getInsertIdx(clientX) {
+      if (!seqTrackRef.current) return theChain.length;
+      var rect = seqTrackRef.current.getBoundingClientRect();
+      var slotW = rect.width / Math.max(1, theChain.length + 1);
+      return Math.max(0, Math.min(theChain.length, Math.round((clientX - rect.left) / slotW)));
+    };
+    var isOverTrack = function isOverTrack(clientY) {
+      if (!seqTrackRef.current) return false;
+      var r = seqTrackRef.current.getBoundingClientRect();
+      return clientY >= r.top - 20 && clientY <= r.bottom + 20;
+    };
+    var onSeqPointerMove = function onSeqPointerMove(e) {
+      if (!seqDragR.current) return;
+      var over = isOverTrack(e.clientY);
+      var ins = over ? getInsertIdx(e.clientX) : seqDragR.current.insertIdx;
+      var next = _objectSpread(_objectSpread({}, seqDragR.current), {}, {
+        x: e.clientX,
+        y: e.clientY,
+        overTrack: over,
+        insertIdx: ins
+      });
+      seqDragR.current = next;
+      setSeqDrag(_objectSpread({}, next));
+    };
+    var _onSeqPointerUp = function onSeqPointerUp(e) {
+      if (!seqDragR.current) return;
+      var d = seqDragR.current;
+      var over = isOverTrack(e.clientY);
+      var ins = getInsertIdx(e.clientX);
+      if (d.type === "source" && over && theChain.length < 8) {
+        // Drop from source → insert into chain
+        setTheChain(function (c) {
+          var n = _toConsumableArray(c);
+          n.splice(ins, 0, d.patId);
+          return n.slice(0, 8);
+        });
+      } else if (d.type === "chain" && !over) {
+        // Drag chain slot out → remove
+        setTheChain(function (c) {
+          return c.filter(function (_, j) {
+            return j !== d.chainIdx;
+          });
+        });
+      } else if (d.type === "chain" && over && ins !== d.chainIdx && ins !== d.chainIdx + 1) {
+        // Reorder within chain
+        setTheChain(function (c) {
+          var n = _toConsumableArray(c);
+          var _n$splice = n.splice(d.chainIdx, 1),
+            _n$splice2 = _slicedToArray(_n$splice, 1),
+            item = _n$splice2[0];
+          var finalIns = ins > d.chainIdx ? ins - 1 : ins;
+          n.splice(finalIns, 0, item);
+          return n;
+        });
+      }
+      document.removeEventListener("pointermove", onSeqPointerMove);
+      document.removeEventListener("pointerup", _onSeqPointerUp);
+      seqDragR.current = null;
+      setSeqDrag(null);
+    };
+    var startSourceDrag = function startSourceDrag(e, patId) {
+      e.stopPropagation();
+      var d = {
+        type: "source",
+        patId: patId,
+        chainIdx: -1,
+        x: e.clientX,
+        y: e.clientY,
+        overTrack: false,
+        insertIdx: theChain.length
+      };
+      seqDragR.current = d;
+      setSeqDrag(d);
+      document.addEventListener("pointermove", onSeqPointerMove);
+      document.addEventListener("pointerup", _onSeqPointerUp);
+    };
+    var startChainDrag = function startChainDrag(e, chainIdx) {
+      e.stopPropagation();
+      var d = {
+        type: "chain",
+        patId: theChain[chainIdx],
+        chainIdx: chainIdx,
+        x: e.clientX,
+        y: e.clientY,
+        overTrack: true,
+        insertIdx: chainIdx
+      };
+      seqDragR.current = d;
+      setSeqDrag(d);
+      document.addEventListener("pointermove", onSeqPointerMove);
+      document.addEventListener("pointerup", _onSeqPointerUp);
+    };
+    var dragPat = seqDrag ? sources.find(function (p) {
+      return p.id === seqDrag.patId;
+    }) : null;
     return /*#__PURE__*/React.createElement("div", {
-      key: p.id,
       style: {
-        padding: "5px 14px",
-        borderRadius: 20,
-        border: "1.5px solid #a8c5a0",
-        background: isA ? "#a8c5a0" : "transparent",
-        color: isA ? "#1a1814" : "#a8c5a0",
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: "pointer",
+        touchAction: "none"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
         display: "flex",
-        alignItems: "center",
-        gap: 3
-      },
-      onClick: function onClick() {
-        setActiveId(p.id);
-        setActiveLayer("synth");
-      },
-      onContextMenu: function onContextMenu(e) {
-        e.stopPropagation();
-        handlePillContextMenu(e, p.id);
+        gap: 5,
+        marginBottom: 14
       }
-    }, isP && /*#__PURE__*/React.createElement("span", {
+    }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref35) {
+      var _ref36 = _slicedToArray(_ref35, 4),
+        lyr = _ref36[0],
+        lbl = _ref36[1],
+        c = _ref36[2],
+        cf = _ref36[3];
+      return /*#__PURE__*/React.createElement("button", {
+        key: lyr,
+        style: {
+          flex: 1,
+          padding: "8px 0",
+          border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
+          borderRadius: 8,
+          background: activeLayer === lyr ? cf + "0.1)" : "transparent",
+          color: activeLayer === lyr ? c : cf + "0.4)",
+          fontSize: 9,
+          letterSpacing: 1.5,
+          fontWeight: 600,
+          cursor: "pointer",
+          fontFamily: "inherit"
+        },
+        onClick: function onClick() {
+          return setActiveLayer(lyr);
+        }
+      }, lbl);
+    })), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 6,
-        opacity: 0.7
+        display: "grid",
+        gridTemplateColumns: "repeat(4,1fr)",
+        gap: 5,
+        marginBottom: 14
       }
-    }, "\u25CF"), p.name);
-  }), pats.length < 8 && /*#__PURE__*/React.createElement("button", {
-    style: {
-      padding: "5px 12px",
-      borderRadius: 20,
-      border: "1px dashed rgba(168,197,160,0.3)",
-      background: "transparent",
-      color: "rgba(168,197,160,0.4)",
-      fontSize: 13,
-      lineHeight: 1,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    },
-    onClick: function onClick() {
-      addPat();
-      setActiveLayer("synth");
-    }
-  }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(4,1fr)",
-      gap: 5
-    }
-  }, [["RAND", function () {
-    return randPatId(activeId);
-  }], ["CLR", function () {
-    return clearPatId(activeId);
-  }], ["DUP", function () {
-    return dupPatId(activeId);
-  }, pats.length >= 8], ["DEL", function () {
-    return delPatId(activeId);
-  }, pats.length <= 1, true], ["CPY", function () {
-    return copyPatId(activeId);
-  }], ["PST", function () {
-    return pastePatId(activeId);
-  }, !clipboard], ["MONO", toggleMono, false, false, monoMode]].map(function (_ref35) {
-    var _ref36 = _slicedToArray(_ref35, 5),
-      l = _ref36[0],
-      f = _ref36[1],
-      d = _ref36[2],
-      danger = _ref36[3],
-      active = _ref36[4];
-    return /*#__PURE__*/React.createElement("button", {
-      key: l,
-      disabled: !!d,
+    }, isSynth ? [["RAND", function () {
+      return randPatId(activeId);
+    }], ["CLR", function () {
+      return clearPatId(activeId);
+    }], ["DUP", function () {
+      return dupPatId(activeId);
+    }, pats.length >= 8], ["DEL", function () {
+      return delPatId(activeId);
+    }, pats.length <= 1, true], ["CPY", function () {
+      return copyPatId(activeId);
+    }], ["PST", function () {
+      return pastePatId(activeId);
+    }, !clipboard], ["MONO", toggleMono, false, false, monoMode]].map(function (_ref37) {
+      var _ref38 = _slicedToArray(_ref37, 5),
+        l = _ref38[0],
+        f = _ref38[1],
+        d = _ref38[2],
+        danger = _ref38[3],
+        active = _ref38[4];
+      return /*#__PURE__*/React.createElement("button", {
+        key: l,
+        disabled: !!d,
+        style: {
+          padding: "7px 0",
+          border: "1px solid rgba(200,185,165," + (d ? "0.06" : active ? "0.5" : "0.14") + ")",
+          borderRadius: 7,
+          background: active ? "rgba(168,197,160,0.1)" : "transparent",
+          color: d ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : active ? "#a8c5a0" : "rgba(200,185,165,0.7)",
+          fontSize: 8,
+          letterSpacing: 1,
+          cursor: d ? "default" : "pointer",
+          fontFamily: "inherit"
+        },
+        onClick: d ? undefined : f
+      }, l);
+    }) : [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref39) {
+      var _ref40 = _slicedToArray(_ref39, 4),
+        l = _ref40[0],
+        f = _ref40[1],
+        d = _ref40[2],
+        danger = _ref40[3];
+      return /*#__PURE__*/React.createElement("button", {
+        key: l,
+        disabled: !!d,
+        style: {
+          padding: "7px 0",
+          border: "1px solid rgba(200,185,165," + (d ? "0.06" : "0.14") + ")",
+          borderRadius: 7,
+          background: "transparent",
+          color: d ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : "rgba(200,185,165,0.7)",
+          fontSize: 8,
+          letterSpacing: 1,
+          cursor: d ? "default" : "pointer",
+          fontFamily: "inherit"
+        },
+        onClick: d ? undefined : f
+      }, l);
+    })), /*#__PURE__*/React.createElement("div", {
       style: {
-        padding: "7px 0",
-        border: "1px solid rgba(200,185,165," + (d ? "0.06" : active ? "0.5" : "0.14") + ")",
-        borderRadius: 7,
-        background: active ? "rgba(168,197,160,0.1)" : "transparent",
-        color: d ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : active ? "#a8c5a0" : "rgba(200,185,165,0.7)",
-        fontSize: 8,
-        letterSpacing: 1,
-        cursor: d ? "default" : "pointer",
-        fontFamily: "inherit"
-      },
-      onClick: d ? undefined : f
-    }, l);
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      borderTop: "1px solid rgba(255,255,255,0.06)",
-      paddingTop: 14,
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      letterSpacing: 1.5,
-      color: "rgba(196,150,122,0.5)",
-      fontWeight: 600,
-      marginBottom: 8
-    }
-  }, "DRUMS"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      marginBottom: 8
-    }
-  }, drumPats.map(function (dp) {
-    var isA = dp.id === activeDrumId && activeLayer === "drums";
-    var isP = playing && drumChain[drumCpos % Math.max(1, drumChain.length)] === dp.id;
-    return /*#__PURE__*/React.createElement("div", {
-      key: dp.id,
+        marginBottom: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
       style: {
-        padding: "5px 14px",
-        borderRadius: 20,
-        border: "1.5px solid #c4967a",
-        background: isA ? "#c4967a" : "transparent",
-        color: isA ? "#1a1814" : "#c4967a",
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: "pointer",
+        fontSize: 7,
+        letterSpacing: 1.5,
+        color: colFaint + "0.45)",
+        fontWeight: 600,
+        marginBottom: 7
+      }
+    }, "PATTERNS \u2014 drag to sequence"), /*#__PURE__*/React.createElement("div", {
+      style: {
         display: "flex",
-        alignItems: "center",
-        gap: 3
-      },
-      onClick: function onClick() {
-        setActiveDrumId(dp.id);
-        setActiveLayer("drums");
-      },
-      onContextMenu: function onContextMenu(e) {
-        e.stopPropagation();
-        setActiveDrumId(dp.id);
-        handleDrumPillCtx(e, dp.id);
+        flexWrap: "wrap",
+        gap: 6
       }
-    }, isP && /*#__PURE__*/React.createElement("span", {
+    }, sources.map(function (p) {
+      var isA = p.id === activePatId;
+      var isP = playing && (isSynth ? playId === p.id : drumChain[drumCpos % Math.max(1, drumChain.length)] === p.id);
+      var isDragging = (seqDrag === null || seqDrag === void 0 ? void 0 : seqDrag.type) === "source" && seqDrag.patId === p.id;
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        style: {
+          padding: "6px 16px",
+          borderRadius: 20,
+          border: "1.5px solid " + col,
+          background: isA ? col : isDragging ? "rgba(255,255,255,0.06)" : "transparent",
+          color: isA ? "#1a1814" : isDragging ? col + "99" : col,
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: 1,
+          cursor: "grab",
+          userSelect: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 3,
+          opacity: isDragging ? 0.4 : 1,
+          transition: "opacity .1s"
+        },
+        onClick: function onClick() {
+          isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
+        },
+        onPointerDown: function onPointerDown(e) {
+          return startSourceDrag(e, p.id);
+        }
+      }, isP && !isA && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 6,
+          opacity: 0.7
+        }
+      }, "\u25CF"), p.name);
+    }), sources.length < 8 && /*#__PURE__*/React.createElement("button", {
       style: {
-        fontSize: 6,
-        opacity: 0.7
-      }
-    }, "\u25CF"), dp.name);
-  }), drumPats.length < 8 && /*#__PURE__*/React.createElement("button", {
-    style: {
-      padding: "5px 12px",
-      borderRadius: 20,
-      border: "1px dashed rgba(196,150,122,0.3)",
-      background: "transparent",
-      color: "rgba(196,150,122,0.4)",
-      fontSize: 13,
-      lineHeight: 1,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    },
-    onClick: function onClick() {
-      addDrumPat();
-      setActiveLayer("drums");
-    }
-  }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(4,1fr)",
-      gap: 5
-    }
-  }, [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref37) {
-    var _ref38 = _slicedToArray(_ref37, 4),
-      l = _ref38[0],
-      f = _ref38[1],
-      d = _ref38[2],
-      danger = _ref38[3];
-    return /*#__PURE__*/React.createElement("button", {
-      key: l,
-      disabled: !!d,
-      style: {
-        padding: "7px 0",
-        border: "1px solid rgba(200,185,165," + (d ? "0.06" : "0.14") + ")",
-        borderRadius: 7,
+        padding: "6px 12px",
+        borderRadius: 20,
+        border: "1px dashed " + colFaint + "0.3)",
         background: "transparent",
-        color: d ? "rgba(200,185,165,0.2)" : danger ? "#c47a7a" : "rgba(200,185,165,0.7)",
-        fontSize: 8,
-        letterSpacing: 1,
-        cursor: d ? "default" : "pointer",
+        color: colFaint + "0.4)",
+        fontSize: 13,
+        lineHeight: 1,
+        cursor: "pointer",
         fontFamily: "inherit"
       },
-      onClick: d ? undefined : f
-    }, l);
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      borderTop: "1px solid rgba(255,255,255,0.06)",
-      paddingTop: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      letterSpacing: 1.5,
-      color: "rgba(210,195,175,0.3)",
-      fontWeight: 600,
-      marginBottom: 8
-    }
-  }, "SEQUENCE"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 8
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 7,
-      color: "rgba(168,197,160,0.5)",
-      letterSpacing: 1,
-      marginBottom: 4
-    }
-  }, "SYNTH"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 4,
-      flexWrap: "wrap",
-      alignItems: "center"
-    }
-  }, chain.length === 0 && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 8,
-      color: "rgba(210,195,175,0.2)"
-    }
-  }, "empty \u2014 tap + to add"), chain.map(function (pid, i) {
-    var p = pats.find(function (x) {
-      return x.id === pid;
-    });
-    var here = playing && !loopMode && i === cpos;
-    return /*#__PURE__*/React.createElement("div", {
-      key: i,
-      style: {
-        padding: "3px 8px",
-        borderRadius: 20,
-        border: "1.5px solid #a8c5a0",
-        background: here ? "#a8c5a0" : "rgba(168,197,160,0.08)",
-        color: here ? "#1a1814" : "#a8c5a0",
-        fontSize: 9,
-        fontWeight: 700,
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: 2
-      },
       onClick: function onClick() {
-        if (p) setActiveId(p.id);
+        isSynth ? addPat() : addDrumPat();
       }
-    }, here && /*#__PURE__*/React.createElement("span", {
+    }, "\uFF0B"))), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 5
+        marginTop: 16
       }
-    }, "\u25CF"), (p === null || p === void 0 ? void 0 : p.name) || "?", /*#__PURE__*/React.createElement("span", {
+    }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 7,
-        opacity: 0.4,
-        marginLeft: 2
-      },
-      onClick: function onClick(e) {
-        e.stopPropagation();
-        setChain(function (c) {
-          return c.filter(function (_, j) {
-            return j !== i;
-          });
-        });
+        letterSpacing: 1.5,
+        color: colFaint + "0.45)",
+        fontWeight: 600,
+        marginBottom: 7
       }
-    }, "\xD7"));
-  }), chain.length < 8 && /*#__PURE__*/React.createElement("button", {
-    style: {
-      padding: "3px 8px",
-      borderRadius: 20,
-      border: "1px dashed rgba(168,197,160,0.3)",
-      background: "transparent",
-      color: "rgba(168,197,160,0.4)",
-      fontSize: 10,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    },
-    onClick: function onClick() {
-      return setChain(function (c) {
-        return c.length < 8 ? [].concat(_toConsumableArray(c), [activeId]) : c;
-      });
-    }
-  }, "\uFF0B"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 7,
-      color: "rgba(196,150,122,0.5)",
-      letterSpacing: 1,
-      marginBottom: 4
-    }
-  }, "DRUMS"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 4,
-      flexWrap: "wrap",
-      alignItems: "center"
-    }
-  }, drumChain.length === 0 && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 8,
-      color: "rgba(210,195,175,0.2)"
-    }
-  }, "empty \u2014 tap + to add"), drumChain.map(function (pid, i) {
-    var dp = drumPats.find(function (x) {
-      return x.id === pid;
-    });
-    var here = playing && i === drumCpos % Math.max(1, drumChain.length);
-    return /*#__PURE__*/React.createElement("div", {
-      key: i,
+    }, "SEQUENCE \u2014 drag out to remove"), /*#__PURE__*/React.createElement("div", {
+      ref: seqTrackRef,
       style: {
-        padding: "3px 8px",
-        borderRadius: 20,
-        border: "1.5px solid #c4967a",
-        background: here ? "#c4967a" : "rgba(196,150,122,0.08)",
-        color: here ? "#1a1814" : "#c4967a",
-        fontSize: 9,
-        fontWeight: 700,
-        cursor: "pointer",
+        minHeight: 52,
+        background: "rgba(220,200,180,0.04)",
+        border: "1px solid " + (seqDrag !== null && seqDrag !== void 0 && seqDrag.overTrack ? col + "66" : "rgba(220,200,180,0.1)"),
+        borderRadius: 10,
+        padding: "8px 8px",
         display: "flex",
+        gap: 5,
         alignItems: "center",
-        gap: 2
+        flexWrap: "nowrap",
+        overflowX: "auto",
+        scrollbarWidth: "none",
+        transition: "border-color .12s",
+        position: "relative"
+      }
+    }, theChain.length === 0 && !seqDrag && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 8,
+        color: "rgba(210,195,175,0.2)",
+        padding: "0 4px"
+      }
+    }, "drag patterns here to build a sequence"), theChain.map(function (pid, i) {
+      var p = sources.find(function (x) {
+        return x.id === pid;
+      });
+      var here = i === playingIdx;
+      var isDragging = (seqDrag === null || seqDrag === void 0 ? void 0 : seqDrag.type) === "chain" && seqDrag.chainIdx === i;
+      var showInsert = (seqDrag === null || seqDrag === void 0 ? void 0 : seqDrag.overTrack) && seqDrag.insertIdx === i;
+      return /*#__PURE__*/React.createElement(React.Fragment, {
+        key: i
+      }, showInsert && /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: 3,
+          height: 36,
+          background: col,
+          borderRadius: 2,
+          flexShrink: 0,
+          boxShadow: "0 0 6px " + col
+        }
+      }), /*#__PURE__*/React.createElement("div", {
+        style: {
+          padding: "5px 12px",
+          borderRadius: 20,
+          border: "1.5px solid " + col,
+          background: here ? col : isDragging ? "rgba(255,255,255,0.04)" : "rgba(220,200,180,0.06)",
+          color: here ? "#1a1814" : col,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 1,
+          cursor: "grab",
+          userSelect: "none",
+          flexShrink: 0,
+          opacity: isDragging ? 0.3 : 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          transition: "opacity .1s"
+        },
+        onClick: function onClick() {
+          if (p) {
+            isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
+          }
+        },
+        onPointerDown: function onPointerDown(e) {
+          return startChainDrag(e, i);
+        }
+      }, here && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 6
+        }
+      }, "\u25CF"), (p === null || p === void 0 ? void 0 : p.name) || "?"));
+    }), (seqDrag === null || seqDrag === void 0 ? void 0 : seqDrag.overTrack) && seqDrag.insertIdx >= theChain.length && /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 3,
+        height: 36,
+        background: col,
+        borderRadius: 2,
+        flexShrink: 0,
+        boxShadow: "0 0 6px " + col
+      }
+    }), !seqDrag && theChain.length < 8 && /*#__PURE__*/React.createElement("button", {
+      style: {
+        padding: "5px 10px",
+        borderRadius: 20,
+        border: "1px dashed " + colFaint + "0.3)",
+        background: "transparent",
+        color: colFaint + "0.4)",
+        fontSize: 12,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        flexShrink: 0
       },
       onClick: function onClick() {
-        if (dp) setActiveDrumId(dp.id);
-      }
-    }, here && /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 5
-      }
-    }, "\u25CF"), (dp === null || dp === void 0 ? void 0 : dp.name) || "?", /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        opacity: 0.4,
-        marginLeft: 2
-      },
-      onClick: function onClick(e) {
-        e.stopPropagation();
-        setDrumChain(function (c) {
-          return c.filter(function (_, j) {
-            return j !== i;
-          });
+        return setTheChain(function (c) {
+          return c.length < 8 ? [].concat(_toConsumableArray(c), [activePatId]) : c;
         });
       }
-    }, "\xD7"));
-  }), drumChain.length < 8 && /*#__PURE__*/React.createElement("button", {
-    style: {
-      padding: "3px 8px",
-      borderRadius: 20,
-      border: "1px dashed rgba(196,150,122,0.3)",
-      background: "transparent",
-      color: "rgba(196,150,122,0.4)",
-      fontSize: 10,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    },
-    onClick: function onClick() {
-      return setDrumChain(function (c) {
-        return c.length < 8 ? [].concat(_toConsumableArray(c), [activeDrumId]) : c;
-      });
-    }
-  }, "\uFF0B"))))), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    }, "\uFF0B")), (seqDrag === null || seqDrag === void 0 ? void 0 : seqDrag.type) === "chain" && !seqDrag.overTrack && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8,
+        padding: "8px 12px",
+        borderRadius: 8,
+        border: "1px dashed rgba(196,122,122,0.4)",
+        background: "rgba(196,122,122,0.06)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 9,
+        color: "rgba(196,122,122,0.7)",
+        letterSpacing: 1
+      }
+    }, "release to remove from sequence"))), seqDrag && dragPat && /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "fixed",
+        left: seqDrag.x - 24,
+        top: seqDrag.y - 18,
+        zIndex: 9999,
+        pointerEvents: "none",
+        padding: "5px 14px",
+        borderRadius: 20,
+        border: "1.5px solid " + col,
+        background: col,
+        color: "#1a1814",
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 1,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        opacity: 0.9
+      }
+    }, dragPat.name));
+  }(), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
       letterSpacing: 2,
@@ -7896,16 +7936,47 @@ function Tabula() {
       fontWeight: 500,
       marginBottom: 10
     }
-  }, "SOUND"), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
+  }, "SOUND"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 5,
+      marginBottom: 14
+    }
+  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref41) {
+    var _ref42 = _slicedToArray(_ref41, 4),
+      lyr = _ref42[0],
+      lbl = _ref42[1],
+      c = _ref42[2],
+      cf = _ref42[3];
+    return /*#__PURE__*/React.createElement("button", {
+      key: lyr,
+      style: {
+        flex: 1,
+        padding: "8px 0",
+        border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
+        borderRadius: 8,
+        background: activeLayer === lyr ? cf + "0.1)" : "transparent",
+        color: activeLayer === lyr ? c : cf + "0.4)",
+        fontSize: 9,
+        letterSpacing: 1.5,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit"
+      },
+      onClick: function onClick() {
+        return setActiveLayer(lyr);
+      }
+    }, lbl);
+  })), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 4,
       marginBottom: 12
     }
-  }, [["step", "STEP"], ["sound", "SOUND"]].map(function (_ref39) {
-    var _ref40 = _slicedToArray(_ref39, 2),
-      p = _ref40[0],
-      lbl = _ref40[1];
+  }, [["step", "STEP"], ["sound", "SOUND"]].map(function (_ref43) {
+    var _ref44 = _slicedToArray(_ref43, 2),
+      p = _ref44[0],
+      lbl = _ref44[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, {
@@ -8548,12 +8619,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref41) {
-      var _ref42 = _slicedToArray(_ref41, 4),
-        label = _ref42[0],
-        fn = _ref42[1],
-        disabled = _ref42[2],
-        danger = _ref42[3];
+    }, isOnlyPat, true]].map(function (_ref45) {
+      var _ref46 = _slicedToArray(_ref45, 4),
+        label = _ref46[0],
+        fn = _ref46[1],
+        disabled = _ref46[2],
+        danger = _ref46[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -8637,12 +8708,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref43) {
-      var _ref44 = _slicedToArray(_ref43, 4),
-        label = _ref44[0],
-        fn = _ref44[1],
-        disabled = _ref44[2],
-        danger = _ref44[3];
+    }, isOnly, true]].map(function (_ref47) {
+      var _ref48 = _slicedToArray(_ref47, 4),
+        label = _ref48[0],
+        fn = _ref48[1],
+        disabled = _ref48[2],
+        danger = _ref48[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
