@@ -338,7 +338,12 @@ class Bell{
   async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();
     await this.ctx.resume();
+    // Drive WaveShaper sits before the master output gain
+    this.driveShaper=this.ctx.createWaveShaper();
+    this.driveShaper.oversample="4x";
+    this.setDrive(0);
     const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
+    this.driveShaper.connect(m);
 
     // Reverb — fixed subtle ambience, always on
     const rv=this.ctx.createGain();rv.gain.value=0.12;rv.connect(m);this.rev=rv;
@@ -367,8 +372,19 @@ class Bell{
     this.dly=dl;this.dlyFb=fb;this.dlyHp=dHp;this.dlyLp=dLp;
     this.ready=true;
   }
+  setDrive(pct){
+    if(!this.driveShaper)return;
+    const n=256;const c=new Float32Array(n);
+    if(pct<1){for(let i=0;i<n;i++)c[i]=(i/128-1);}
+    else{
+      const amt=pct/100*7+0.001; // 0→subtle, 100→heavy
+      for(let i=0;i<n;i++){const x=i/128-1;c[i]=Math.tanh(x*amt)/Math.tanh(amt);}
+    }
+    this.driveShaper.curve=c;
+    // Makeup gain: compensate for loudness increase at high drive
+    if(this.master)this.master.gain.value=0.55*(1-pct/100*0.3);
+  }
   play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime){
-    if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=this.p;
     const velMul   = sp ? (sp.vel/127) : 1;
     const cutOff   = sp ? ((sp.cut-50)/50)*40 : 0;
@@ -477,6 +493,69 @@ class DrumEngine{
   }
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
 
+  // ── Sample kit loading ───────────────────────────────────────────────────
+  // IndexedDB key: "tabula_sample_{kitId}_{voice}"
+  async _idbGet(key){
+    return new Promise((res)=>{
+      try{
+        const req=indexedDB.open("tabula_samples",1);
+        req.onupgradeneeded=e=>e.target.result.createObjectStore("samples");
+        req.onsuccess=e=>{
+          const tx=e.target.result.transaction("samples","readonly");
+          const r2=tx.objectStore("samples").get(key);
+          r2.onsuccess=()=>res(r2.result||null);
+          r2.onerror=()=>res(null);
+        };
+        req.onerror=()=>res(null);
+      }catch(e){res(null);}
+    });
+  }
+  async _idbSet(key,val){
+    return new Promise((res)=>{
+      try{
+        const req=indexedDB.open("tabula_samples",1);
+        req.onupgradeneeded=e=>e.target.result.createObjectStore("samples");
+        req.onsuccess=e=>{
+          const tx=e.target.result.transaction("samples","readwrite");
+          tx.objectStore("samples").put(val,key);
+          tx.oncomplete=()=>res(true);
+          tx.onerror=()=>res(false);
+        };
+        req.onerror=()=>res(false);
+      }catch(e){res(false);}
+    });
+  }
+
+  async loadKit(kitId,onProgress){
+    if(!this.ctx)return{ok:false,error:"not initialized"};
+    const VOICES=["bd","sd","lt","ht","ch","oh","cy","cp"];
+    const BASE=window.location.origin+window.location.pathname.replace(/\/[^/]*$/,"/")+`samples/${kitId}/`;
+    const results={ok:true,loaded:0,errors:[]};
+    await Promise.all(VOICES.map(async(v,i)=>{
+      const cacheKey=`${kitId}_${v}`;
+      try{
+        // Try IndexedDB cache first
+        let arrayBuf=await this._idbGet(cacheKey);
+        if(!arrayBuf){
+          const resp=await fetch(BASE+v+".wav");
+          if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
+          arrayBuf=await resp.arrayBuffer();
+          await this._idbSet(cacheKey,arrayBuf.slice(0)); // store clone
+        }
+        const decoded=await this.ctx.decodeAudioData(arrayBuf.slice(0));
+        if(!this.sampleBuffers)this.sampleBuffers={};
+        if(!this.sampleBuffers[kitId])this.sampleBuffers[kitId]={};
+        this.sampleBuffers[kitId][v]=decoded;
+        results.loaded++;
+        if(onProgress)onProgress(results.loaded,VOICES.length,v);
+      }catch(e){
+        results.errors.push(`${v}: ${e.message}`);
+      }
+    }));
+    results.ok=results.errors.length===0;
+    return results;
+  }
+
   // Exponential envelope — no linear-to-zero artifacts
   _env(g,t,pk,atk,dec,sus,rel){
     g.setValueAtTime(0.0001,t);
@@ -508,9 +587,20 @@ class DrumEngine{
     // Level + pan routing
     const lvlGain=ctx.createGain();lvlGain.gain.value=Math.max(0,level/100);
     const panner=ctx.createStereoPanner?ctx.createStereoPanner():null;
-    if(panner){panner.pan.value=Math.max(-1,Math.min(1,pan/100));lvlGain.connect(panner);panner.connect(this.master);}
-    else{lvlGain.connect(this.master);}
+    const busOut=this.driveShaper||this.master;
+    if(panner){panner.pan.value=Math.max(-1,Math.min(1,pan/100));lvlGain.connect(panner);panner.connect(busOut);}
+    else{lvlGain.connect(busOut);}
     const out=lvlGain;
+    // ── Sample playback (if kit loaded) ───────────────────────────────────
+    const voiceKey=voice.toLowerCase();
+    const kitBufs=this.sampleBuffers&&this.activeKit?this.sampleBuffers[this.activeKit]:null;
+    if(kitBufs&&kitBufs[voiceKey]){
+      const src=ctx.createBufferSource();src.buffer=kitBufs[voiceKey];
+      const g=ctx.createGain();g.gain.setValueAtTime(v,t);
+      src.connect(g);g.connect(out);src.start(t);
+      return; // skip synthesis
+    }
+    // ── Synthesis fallback ─────────────────────────────────────────────────
 
     if(voice==="BD"){
       // Tonal body: deep sine sweep
@@ -656,6 +746,12 @@ class DrumEngine{
   }
 }
 
+// ─── Kit definitions (mirrors kits.json — update both together) ───────────────
+const KITS=[
+  {id:"kit1",name:"KIT 1",color:"#c4967a"},
+  {id:"kit2",name:"KIT 2",color:"#9fb4c7"},
+  {id:"kit3",name:"KIT 3",color:"#a8c5a0"},
+];
 // ─── Synth Panel Section ──────────────────────────────────────────────────────
 function SynthSection({title,accent,children}){
   return(
@@ -705,7 +801,9 @@ export default function Tabula(){
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"vary"|"project"
-  const [seqDrag,       setSeqDrag]       = useState(null); // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+  const [seqDrag,       setSeqDrag]       = useState(null);
+  const [activeKit,     setActiveKit]     = useState(null);   // kitId string or null (synthesis)
+  const [kitLoadState,  setKitLoadState]  = useState({});     // {kitId: "loading"|"loaded"|"error"} // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
   const seqDragR=useRef(null);
   const seqTrackRef=useRef(null);
   const [shareFlash,setShareFlash]= useState("");
@@ -750,6 +848,7 @@ export default function Tabula(){
 
   // Synth
   const [waveform,     setWaveform]     = useState("sawtooth");
+  const [drive,        setDrive]        = useState(0);   // 0-100% global analog drive
   const [detune,       setDetune]       = useState(8);
   const [attack,       setAttack]       = useState(8);
   const [decay,        setDecay]        = useState(400);
@@ -806,7 +905,7 @@ export default function Tabula(){
   useEffect(()=>{speedMultR.current=speedMult;bell.current.stepDur=60/bpmR.current/4*speedMult;},[speedMult]);
   useEffect(()=>{scaleR.current=scale;},[scale]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
-  useEffect(()=>{if(followSeq&&playing&&playId)setActiveId(playId);},[playId,followSeq,playing]);
+  useEffect(()=>{if(followSeq&&playing&&playId&&!followSuspendedR.current)setActiveId(playId);},[playId,followSeq,playing]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
@@ -844,7 +943,7 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const doSave=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,drive,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -858,7 +957,7 @@ export default function Tabula(){
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["drive",setDrive],["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
     if(s.loopMode!=null)setLoopMode(s.loopMode);
@@ -907,7 +1006,7 @@ export default function Tabula(){
   // ── Share / Export / Import ──────────────────────────────────────────────
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
-    waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
+    waveform,drive,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
@@ -937,7 +1036,7 @@ export default function Tabula(){
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["drive",setDrive],["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
   };
@@ -1182,6 +1281,7 @@ export default function Tabula(){
   // Keep a ref to playing state for use in event handlers
   const playingR=useRef(false);
   useEffect(()=>{playingR.current=playing;},[playing]);
+  useEffect(()=>{if(bell.current.ready)bell.current.setDrive(drive);},[drive]);
 
   const requestWakeLock=async()=>{
     if(!("wakeLock" in navigator))return;
@@ -1279,6 +1379,8 @@ export default function Tabula(){
     return p?.mono?collapseToMono(varied):varied;
   });
 
+  const suspendFollow=()=>{followSuspendedR.current=true;};
+  const resumeFollow=()=>{followSuspendedR.current=false;};
   const handleGridDown=useCallback(e=>{
     if(e.button===2)return; // right-click handled by onContextMenu only
     e.preventDefault();
@@ -1570,6 +1672,7 @@ export default function Tabula(){
   },[]);
 
   const handleGridUp=useCallback(e=>{
+    resumeFollow();
     pointerCountR.current=Math.max(0,pointerCountR.current-1);
     clearTimeout(longPressR.current);longPressR.current=null;
     const g=gesture.current;
@@ -1735,6 +1838,31 @@ export default function Tabula(){
       });
     }));
   };
+  const selectKit=async(kitId)=>{
+    if(kitId===null){
+      drumEngine.current.activeKit=null;setActiveKit(null);return;
+    }
+    if(drumEngine.current.sampleBuffers?.[kitId]){
+      // Already loaded
+      drumEngine.current.activeKit=kitId;setActiveKit(kitId);return;
+    }
+    setKitLoadState(s=>({...s,[kitId]:"loading"}));
+    if(!drumEngine.current.ready){
+      // Init engine if not yet started
+      if(!bell.current.ready){
+        const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
+        await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
+      }
+      await drumEngine.current.init(bell.current.master);
+    }
+    const result=await drumEngine.current.loadKit(kitId);
+    if(result.ok||result.loaded>0){
+      drumEngine.current.activeKit=kitId;setActiveKit(kitId);
+      setKitLoadState(s=>({...s,[kitId]:"loaded"}));
+    }else{
+      setKitLoadState(s=>({...s,[kitId]:"error"}));
+    }
+  };
   const setDrumVary=(key,val)=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{[key]:val})));
   const addDrumPat=()=>{
     if(drumPats.length>=8)return;
@@ -1775,6 +1903,7 @@ export default function Tabula(){
 
   const bpmDraggingR = useRef(false);
   const handleBpmDown = useCallback(e=>{
+    suspendFollow();
     e.preventDefault();e.stopPropagation();
     bpmDragData.current = {startY: e.clientY, startBpm: bpmR.current};
     bpmDraggingR.current=true;setBpmDragging(true);
@@ -1786,7 +1915,8 @@ export default function Tabula(){
     const dy = e.clientY - bpmDragData.current.startY;
     setBpm(Math.max(40, Math.min(300, Math.round(bpmDragData.current.startBpm - dy/2))));
   },[]);
-  const handleBpmUp = useCallback(()=>{bpmDraggingR.current=false;setBpmDragging(false);},[]);
+  const handleBpmUp = useCallback(()=>{
+    resumeFollow();bpmDraggingR.current=false;setBpmDragging(false);},[]);
 
   const [stDragging, setStDragging] = useState(false);
   const stDragRef  = useRef(null);
@@ -2092,6 +2222,19 @@ export default function Tabula(){
                 <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
+                {winW>450&&(
+                  <div style={{display:"flex",gap:4}}>
+                    <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                      <span style={{...S.widgetN,fontSize:winW>900?undefined:16}}>{bpm}</span><span style={S.widgetU}>BPM</span>
+                    </div>
+                    <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                      <span style={{...S.widgetN,fontSize:winW>900?undefined:14}}>{stLabel}</span><span style={S.widgetU}>ST</span>
+                    </div>
+                    {winW>650&&<div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                      <span style={{...S.widgetN,fontSize:winW>900?undefined:14}}>{swing}</span><span style={S.widgetU}>SWG</span>
+                    </div>}
+                  </div>
+                )}
               </div>
               {/* Speed — CSS grid forces equal cell width regardless of content */}
               <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(5,1fr)":"repeat(auto-fill,minmax(30px,1fr))",gap:3,marginBottom:winW>900?8:4}}>
@@ -2115,8 +2258,12 @@ export default function Tabula(){
                     const isA=p.id===activeId&&activeLayer==="synth";
                     const isP=playing&&playId===p.id;
                     return(
-                      <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #a8c5a088":"none"}}
-                        onClick={e=>{e.stopPropagation();setActiveId(p.id);setActiveLayer("synth");}}>
+                      <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #a8c5a088":"none",touchAction:"none"}}
+                        onClick={e=>{e.stopPropagation();setActiveId(p.id);setActiveLayer("synth");}}
+                        onPointerDown={e=>{setActiveLayer("synth");startPillDrag(e,p.id);}}
+                        onPointerMove={onDragMove}
+                        onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
+                        onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}>
                         {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
                       </div>
                     );
@@ -2134,7 +2281,8 @@ export default function Tabula(){
                     const isP=playing&&drumCpos>=0&&drumChain[drumCpos]===dp.id;
                     return(
                       <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none"}}
-                        onClick={e=>{e.stopPropagation();setActiveDrumId(dp.id);setActiveLayer("drums");}} onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
+                        onClick={e=>{e.stopPropagation();setActiveDrumId(dp.id);setActiveLayer("drums");if(activeLayer==="drums")setDrumChain(c=>c.length<8?[...c,dp.id]:c);}}
+                        onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
                         {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{dp.name}
                       </div>
                     );
@@ -2193,7 +2341,7 @@ export default function Tabula(){
                       <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
                     </div>
                     <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
-                      {chain.length===0&&!chainDrag&&<span style={S.chainStripEmpty}>drag patterns here</span>}
+                      {chain.length===0&&!chainDrag&&<span style={S.chainStripEmpty}>drag pattern chips here</span>}
                       {chain.map((pid,i)=>{
                         const p=pats.find(p=>p.id===pid);
                         const here=playing&&!loopMode&&i===cpos;
@@ -2459,64 +2607,56 @@ export default function Tabula(){
                 <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
               </div>
             )}
-            {activeLayer==="drums"&&page==="sound"&&(()=>{
-              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const mix=dPat?.mix||defaultDrumMix();
-              return(
-              <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"12px 16px",boxSizing:"border-box"}}>
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>MIXER</div>
-                {DRUM_VOICES.map((voice,r)=>{
-                  const m=mix[r]||{level:100,pan:0};
-                  return(
-                  <div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                    {/* Voice label */}
-                    <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
-                    {/* Level */}
-                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
-                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"level",Math.round(pct*100));};
-                          update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
-                        }}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3,transition:"width .04s"}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
-                      </div>
-                    </div>
-                    {/* Pan */}
-                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
-                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"pan",Math.round((pct*2-1)*100));};
-                          update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
-                        }}
-                        onDoubleClick={()=>setDrumMix(r,"pan",0)}>
-                        {/* Center tick */}
-                        <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
-                        {/* Pan fill — from center */}
-                        <div style={{position:"absolute",top:0,bottom:0,
-                          left:m.pan<=0?`${50+m.pan/2}%`:"50%",
-                          width:`${Math.abs(m.pan)/2}%`,
-                          background:voice.color+"99",borderRadius:3}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
-                      </div>
-                    </div>
-                  </div>
-                  );
+            {activeLayer==="drums"&&page==="sound"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+              {/* Kit selector */}
+              <div style={{display:"flex",alignItems:"center",gap:5,padding:"8px 12px 0",flexShrink:0}}>
+                <button style={{padding:"3px 9px",borderRadius:20,border:"1px solid "+(activeKit===null?"rgba(210,195,175,0.5)":"rgba(210,195,175,0.12)"),background:activeKit===null?"rgba(210,195,175,0.07)":"transparent",color:activeKit===null?"rgba(210,195,175,0.8)":"rgba(210,195,175,0.3)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}
+                  onClick={()=>selectKit(null)}>SYNTH</button>
+                {KITS.map(kit=>{const st=kitLoadState[kit.id];const isA=activeKit===kit.id;return(
+                  <button key={kit.id} style={{padding:"3px 9px",borderRadius:20,border:"1px solid "+(isA?kit.color+"88":"rgba(210,195,175,0.12)"),background:isA?kit.color+"12":"transparent",color:isA?kit.color:st==="error"?"#c47a7a":"rgba(210,195,175,0.3)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:3}}
+                    onClick={()=>selectKit(kit.id)}>
+                    {st==="loading"&&<span style={{fontSize:9}}>⟳</span>}
+                    {st==="loaded"&&!isA&&<span style={{fontSize:6,color:"#a8c5a0"}}>●</span>}
+                    {st==="error"&&<span style={{fontSize:8,color:"#c47a7a"}}>!</span>}
+                    {kit.name}
+                  </button>);
                 })}
               </div>
-              );
-            })()}
-
+              <div style={{flex:1,minHeight:0}}>
+              {(()=>{
+                const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                const mix=dPat?.mix||defaultDrumMix();
+                const FH=120;
+                const mkV=(r,key,val,mn,mx,color,fc)=>{
+                  const onPD=e=>{e.stopPropagation();const sy=e.clientY,sv=val;const upd=ev=>{const dlt=-(ev.clientY-sy);setDrumMix(r,key,Math.max(mn,Math.min(mx,Math.round(sv+dlt/FH*(mx-mn)))));};const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);};
+                  const pct=(val-mn)/(mx-mn);const tt=(1-pct)*(FH-16);
+                  return(<div style={{width:16,height:FH,position:"relative",cursor:"ns-resize",flexShrink:0}} onPointerDown={onPD} onDoubleClick={()=>fc?setDrumMix(r,key,0):null}>
+                    <div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:0,bottom:0,width:3,background:"rgba(220,200,180,0.08)",borderRadius:2}}/>
+                    {fc?(<><div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",width:3,background:color+"55",borderRadius:1,top:val>=0?FH/2:(FH/2+val/100*FH/2),height:Math.abs(val)/100*FH/2}}/><div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:"50%",width:8,height:1,background:"rgba(220,200,180,0.2)"}}/></>):(<div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",width:3,borderRadius:1,background:color+"66",bottom:0,height:`${pct*FH}px`}}/>)}
+                    <div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:tt,width:14,height:14,background:"rgba(240,230,220,0.9)",borderRadius:2,boxShadow:"0 1px 4px rgba(0,0,0,0.5),0 0 6px "+color+"44"}}/>
+                  </div>);
+                };
+                return(
+                  <div style={{width:"100%",height:"100%",overflowX:"auto",overflowY:"hidden",boxSizing:"border-box",padding:"8px 12px"}}>
+                    <div style={{display:"flex",gap:6,height:"100%",minWidth:"min-content"}}>
+                      {DRUM_VOICES.map((voice,r)=>{
+                        const m=mix[r]||{level:100,pan:0};
+                        return(<div key={voice.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,width:36,flexShrink:0}}>
+                          <div style={{fontSize:7,color:"rgba(210,195,175,0.35)",height:10,lineHeight:"10px"}}>{m.pan>0?"+"+m.pan:m.pan===0?"0":m.pan}</div>
+                          {mkV(r,"pan",m.pan,-100,100,voice.color,true)}
+                          <div style={{fontSize:7,color:"rgba(210,195,175,0.35)",height:10,lineHeight:"10px"}}>{m.level}</div>
+                          {mkV(r,"level",m.level,0,100,voice.color,false)}
+                          <div style={{fontSize:8,fontWeight:700,letterSpacing:0.5,color:voice.color,marginTop:2}}>{voice.label}</div>
+                        </div>);
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              </div>
+              </div>
+            )}
             {activeLayer==="drums"&&page==="set"&&(()=>{
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
               const vRhythm=dPat?.vRhythm||0;
@@ -2624,6 +2764,7 @@ export default function Tabula(){
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
                       <div style={{display:"flex",gap:16,padding:"8px 16px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
+                        <KnobSlider vertical label="DRIVE" value={drive} min={0} max={100} onChange={setDrive} display={drive+"%"} accent="#c97b5a"/>
                         <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
@@ -2826,9 +2967,10 @@ export default function Tabula(){
             <>
               {/* Backdrop */}
               <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
+              {/* Sheet */}
               <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
-                {/* TEMPO sheet */}
+                {/* TEMPO */}
                 {activeSheet==="tempo"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>TEMPO</div>
@@ -2836,301 +2978,154 @@ export default function Tabula(){
                       {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                     </select>
                     <div style={{display:"flex",gap:8,marginBottom:14}}>
-                      <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
-                        <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
-                      </div>
-                      <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
-                        <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
-                      </div>
-                      <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
-                        <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
-                      </div>
+                      <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}><span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span></div>
+                      <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}><span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span></div>
+                      <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}><span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span></div>
                     </div>
                     <div style={S.speedRow}>
-                      {SPEED_OPTS.map(({label,mult})=>(
-                        <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
-                      ))}
+                      {SPEED_OPTS.map(({label,mult})=>(<button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>))}
                     </div>
                   </div>
                 )}
 
-                {/* PATTERN sheet — drag-and-drop sequencing */}
+                {/* PATTERN — drag-and-drop sequencing */}
                 {activeSheet==="pattern"&&(()=>{
                   const isSynth=activeLayer==="synth";
                   const col=isSynth?"#a8c5a0":"#c4967a";
-                  const colFaint=isSynth?"rgba(168,197,160,":"rgba(196,150,122,";
+                  const cf=isSynth?"rgba(168,197,160,":"rgba(196,150,122,";
                   const sources=isSynth?pats:drumPats;
                   const activePatId=isSynth?activeId:activeDrumId;
                   const theChain=isSynth?chain:drumChain;
                   const setTheChain=isSynth?setChain:setDrumChain;
                   const playingIdx=isSynth?(playing&&!loopMode?cpos:-1):(playing?drumCpos%Math.max(1,drumChain.length):-1);
-
-                  // Seq drag helpers
-                  const getInsertIdx=(clientX)=>{
-                    if(!seqTrackRef.current)return theChain.length;
-                    const rect=seqTrackRef.current.getBoundingClientRect();
-                    const slotW=rect.width/Math.max(1,theChain.length+1);
-                    return Math.max(0,Math.min(theChain.length,Math.round((clientX-rect.left)/slotW)));
-                  };
-                  const isOverTrack=(clientY)=>{
-                    if(!seqTrackRef.current)return false;
-                    const r=seqTrackRef.current.getBoundingClientRect();
-                    return clientY>=r.top-20&&clientY<=r.bottom+20;
-                  };
-                  const onSeqPointerMove=(e)=>{
-                    if(!seqDragR.current)return;
-                    const over=isOverTrack(e.clientY);
-                    const ins=over?getInsertIdx(e.clientX):seqDragR.current.insertIdx;
-                    const next={...seqDragR.current,x:e.clientX,y:e.clientY,overTrack:over,insertIdx:ins};
-                    seqDragR.current=next;
-                    setSeqDrag({...next});
-                  };
-                  const onSeqPointerUp=(e)=>{
-                    if(!seqDragR.current)return;
-                    const d=seqDragR.current;
-                    const over=isOverTrack(e.clientY);
-                    const ins=getInsertIdx(e.clientX);
-                    if(d.type==="source"&&over&&theChain.length<8){
-                      // Drop from source → insert into chain
-                      setTheChain(c=>{const n=[...c];n.splice(ins,0,d.patId);return n.slice(0,8);});
-                    } else if(d.type==="chain"&&!over){
-                      // Drag chain slot out → remove
-                      setTheChain(c=>c.filter((_,j)=>j!==d.chainIdx));
-                    } else if(d.type==="chain"&&over&&ins!==d.chainIdx&&ins!==d.chainIdx+1){
-                      // Reorder within chain
-                      setTheChain(c=>{
-                        const n=[...c];const [item]=n.splice(d.chainIdx,1);
-                        const finalIns=ins>d.chainIdx?ins-1:ins;
-                        n.splice(finalIns,0,item);return n;
-                      });
-                    }
-                    document.removeEventListener("pointermove",onSeqPointerMove);
-                    document.removeEventListener("pointerup",onSeqPointerUp);
-                    seqDragR.current=null;setSeqDrag(null);
-                  };
-                  const startSourceDrag=(e,patId)=>{
-                    e.stopPropagation();
-                    const d={type:"source",patId,chainIdx:-1,x:e.clientX,y:e.clientY,overTrack:false,insertIdx:theChain.length};
-                    seqDragR.current=d;setSeqDrag(d);
-                    document.addEventListener("pointermove",onSeqPointerMove);
-                    document.addEventListener("pointerup",onSeqPointerUp);
-                  };
-                  const startChainDrag=(e,chainIdx)=>{
-                    e.stopPropagation();
-                    const d={type:"chain",patId:theChain[chainIdx],chainIdx,x:e.clientX,y:e.clientY,overTrack:true,insertIdx:chainIdx};
-                    seqDragR.current=d;setSeqDrag(d);
-                    document.addEventListener("pointermove",onSeqPointerMove);
-                    document.addEventListener("pointerup",onSeqPointerUp);
-                  };
-
+                  const getInsertIdx=(clientX)=>{if(!seqTrackRef.current)return theChain.length;const rect=seqTrackRef.current.getBoundingClientRect();const slotW=rect.width/Math.max(1,theChain.length+1);return Math.max(0,Math.min(theChain.length,Math.round((clientX-rect.left)/slotW)));};
+                  const isOverTrack=(clientY)=>{if(!seqTrackRef.current)return false;const r=seqTrackRef.current.getBoundingClientRect();return clientY>=r.top-20&&clientY<=r.bottom+20;};
+                  const onSPM=(e)=>{if(!seqDragR.current)return;const over=isOverTrack(e.clientY);const ins=over?getInsertIdx(e.clientX):seqDragR.current.insertIdx;const next={...seqDragR.current,x:e.clientX,y:e.clientY,overTrack:over,insertIdx:ins};seqDragR.current=next;setSeqDrag({...next});};
+                  const onSPU=(e)=>{if(!seqDragR.current)return;const d=seqDragR.current;const over=isOverTrack(e.clientY);const ins=getInsertIdx(e.clientX);if(d.type==="source"&&over&&theChain.length<8){setTheChain(c=>{const n=[...c];n.splice(ins,0,d.patId);return n.slice(0,8);});}else if(d.type==="chain"&&!over){setTheChain(c=>c.filter((_,j)=>j!==d.chainIdx));}else if(d.type==="chain"&&over&&ins!==d.chainIdx&&ins!==d.chainIdx+1){setTheChain(c=>{const n=[...c];const[item]=n.splice(d.chainIdx,1);n.splice(ins>d.chainIdx?ins-1:ins,0,item);return n;});}document.removeEventListener("pointermove",onSPM);document.removeEventListener("pointerup",onSPU);seqDragR.current=null;setSeqDrag(null);};
+                  const startSrc=(e,patId)=>{e.stopPropagation();const d={type:"source",patId,chainIdx:-1,x:e.clientX,y:e.clientY,overTrack:false,insertIdx:theChain.length};seqDragR.current=d;setSeqDrag(d);document.addEventListener("pointermove",onSPM);document.addEventListener("pointerup",onSPU);};
+                  const startChn=(e,ci)=>{e.stopPropagation();const d={type:"chain",patId:theChain[ci],chainIdx:ci,x:e.clientX,y:e.clientY,overTrack:true,insertIdx:ci};seqDragR.current=d;setSeqDrag(d);document.addEventListener("pointermove",onSPM);document.addEventListener("pointerup",onSPU);};
                   const dragPat=seqDrag?sources.find(p=>p.id===seqDrag.patId):null;
-
                   return(
-                  <div style={{touchAction:"none"}}>
-                    {/* Layer toggle */}
-                    <div style={{display:"flex",gap:5,marginBottom:14}}>
-                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
-                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
-                      ))}
-                    </div>
-
-                    {/* Pattern management buttons */}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
-                      {isSynth
-                        ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode]].map(([l,f,d,danger,active])=>(
-                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":active?"0.5":"0.14")+")",borderRadius:7,background:active?"rgba(168,197,160,0.1)":"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":active?"#a8c5a0":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))
-                        :[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
-                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))
-                      }
-                    </div>
-
-                    {/* Source chips — tap to select, drag down to sequence */}
-                    <div style={{marginBottom:6}}>
-                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>PATTERNS — drag to sequence</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                        {sources.map(p=>{
-                          const isA=p.id===activePatId;
-                          const isP=playing&&(isSynth?playId===p.id:(drumChain[drumCpos%Math.max(1,drumChain.length)]===p.id));
-                          const isDragging=seqDrag?.type==="source"&&seqDrag.patId===p.id;
-                          return(<div key={p.id}
-                            style={{padding:"6px 16px",borderRadius:20,border:"1.5px solid "+col,background:isA?col:isDragging?"rgba(255,255,255,0.06)":"transparent",color:isA?"#1a1814":isDragging?col+"99":col,fontSize:12,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:3,opacity:isDragging?0.4:1,transition:"opacity .1s"}}
-                            onClick={()=>{isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}
-                            onPointerDown={e=>startSourceDrag(e,p.id)}>
-                            {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                          </div>);
-                        })}
-                        {sources.length<8&&<button style={{padding:"6px 12px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>{isSynth?addPat():addDrumPat();}}>＋</button>}
+                    <div style={{touchAction:"none"}}>
+                      {/* Layer toggle */}
+                      <div style={{display:"flex",gap:5,marginBottom:14}}>
+                        {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,lcf])=>(
+                          <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":lcf+"0.15)"),borderRadius:8,background:activeLayer===lyr?lcf+"0.1)":"transparent",color:activeLayer===lyr?c:lcf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
+                        ))}
                       </div>
-                    </div>
-
-                    {/* Sequence track — drag source chips in, drag chain chips out */}
-                    <div style={{marginTop:16}}>
-                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>SEQUENCE — drag out to remove</div>
-                      <div ref={seqTrackRef} style={{minHeight:52,background:"rgba(220,200,180,0.04)",border:"1px solid "+(seqDrag?.overTrack?col+"66":"rgba(220,200,180,0.1)"),borderRadius:10,padding:"8px 8px",display:"flex",gap:5,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",transition:"border-color .12s",position:"relative"}}>
-                        {theChain.length===0&&!seqDrag&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",padding:"0 4px"}}>drag patterns here to build a sequence</span>}
-                        {theChain.map((pid,i)=>{
-                          const p=sources.find(x=>x.id===pid);
-                          const here=i===playingIdx;
-                          const isDragging=seqDrag?.type==="chain"&&seqDrag.chainIdx===i;
-                          const showInsert=seqDrag?.overTrack&&seqDrag.insertIdx===i;
-                          return(<React.Fragment key={i}>
-                            {showInsert&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
-                            <div style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid "+col,background:here?col:isDragging?"rgba(255,255,255,0.04)":"rgba(220,200,180,0.06)",color:here?"#1a1814":col,fontSize:11,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",flexShrink:0,opacity:isDragging?0.3:1,display:"flex",alignItems:"center",gap:2,transition:"opacity .1s"}}
-                              onClick={()=>{if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}}
-                              onPointerDown={e=>startChainDrag(e,i)}>
-                              {here&&<span style={{fontSize:6}}>●</span>}{p?.name||"?"}
-                            </div>
-                          </React.Fragment>);
-                        })}
-                        {seqDrag?.overTrack&&seqDrag.insertIdx>=theChain.length&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
-                        {!seqDrag&&theChain.length<8&&<button style={{padding:"5px 10px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={()=>setTheChain(c=>c.length<8?[...c,activePatId]:c)}>＋</button>}
+                      {/* Pattern ops */}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
+                        {isSynth
+                          ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode]].map(([l,f,d,danger,active])=>(
+                            <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":active?"0.5":"0.14")+")",borderRadius:7,background:active?"rgba(168,197,160,0.1)":"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":active?"#a8c5a0":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                          ))
+                          :[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
+                            <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                          ))
+                        }
                       </div>
-                      {/* Drop-to-delete hint when dragging chain slot */}
-                      {seqDrag?.type==="chain"&&!seqDrag.overTrack&&(
-                        <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,border:"1px dashed rgba(196,122,122,0.4)",background:"rgba(196,122,122,0.06)",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-                          <span style={{fontSize:9,color:"rgba(196,122,122,0.7)",letterSpacing:1}}>release to remove from sequence</span>
+                      {/* Source chips */}
+                      <div style={{marginBottom:6}}>
+                        <div style={{fontSize:7,letterSpacing:1.5,color:cf+"0.45)",fontWeight:600,marginBottom:7}}>PATTERNS — drag to sequence</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                          {sources.map(p=>{const isA=p.id===activePatId;const isDragging=seqDrag?.type==="source"&&seqDrag.patId===p.id;return(<div key={p.id} style={{padding:"6px 16px",borderRadius:20,border:"1.5px solid "+col,background:isA?col:isDragging?"rgba(255,255,255,0.06)":"transparent",color:isA?"#1a1814":isDragging?col+"99":col,fontSize:12,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:3,opacity:isDragging?0.4:1}} onClick={()=>{isSynth?setActiveId(p.id):setActiveDrumId(p.id);}} onPointerDown={e=>startSrc(e,p.id)}>{p.name}</div>);})}
+                          {sources.length<8&&<button style={{padding:"6px 12px",borderRadius:20,border:"1px dashed "+cf+"0.3)",background:"transparent",color:cf+"0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{isSynth?addPat():addDrumPat();}}>＋</button>}
+                        </div>
+                      </div>
+                      {/* Sequence track */}
+                      <div style={{marginTop:16}}>
+                        <div style={{fontSize:7,letterSpacing:1.5,color:cf+"0.45)",fontWeight:600,marginBottom:7}}>SEQUENCE — drag out to remove</div>
+                        <div ref={seqTrackRef} style={{minHeight:52,background:"rgba(220,200,180,0.04)",border:"1px solid "+(seqDrag?.overTrack?col+"66":"rgba(220,200,180,0.1)"),borderRadius:10,padding:"8px 8px",display:"flex",gap:5,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",position:"relative"}}>
+                          {theChain.length===0&&!seqDrag&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",padding:"0 4px"}}>drag patterns here</span>}
+                          {theChain.map((pid,i)=>{const p=sources.find(x=>x.id===pid);const here=i===playingIdx;const isDragging=seqDrag?.type==="chain"&&seqDrag.chainIdx===i;const showInsert=seqDrag?.overTrack&&seqDrag.insertIdx===i;return(<React.Fragment key={i}>{showInsert&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}<div style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid "+col,background:here?col:isDragging?"rgba(255,255,255,0.04)":"rgba(220,200,180,0.06)",color:here?"#1a1814":col,fontSize:11,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",flexShrink:0,opacity:isDragging?0.3:1}} onClick={()=>{if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}} onPointerDown={e=>startChn(e,i)}>{here&&<span style={{fontSize:6,marginRight:3}}>●</span>}{p?.name||"?"}</div></React.Fragment>);})}
+                          {seqDrag?.overTrack&&seqDrag.insertIdx>=theChain.length&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
+                          {!seqDrag&&theChain.length<8&&<button style={{padding:"5px 10px",borderRadius:20,border:"1px dashed "+cf+"0.3)",background:"transparent",color:cf+"0.4)",fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={()=>setTheChain(c=>c.length<8?[...c,activePatId]:c)}>＋</button>}
+                        </div>
+                        {seqDrag?.type==="chain"&&!seqDrag.overTrack&&(
+                          <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,border:"1px dashed rgba(196,122,122,0.4)",background:"rgba(196,122,122,0.06)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            <span style={{fontSize:9,color:"rgba(196,122,122,0.7)",letterSpacing:1}}>release to remove</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Drag ghost */}
+                      {seqDrag&&dragPat&&(
+                        <div style={{position:"fixed",left:seqDrag.x-24,top:seqDrag.y-18,zIndex:9999,pointerEvents:"none",padding:"5px 14px",borderRadius:20,border:"1.5px solid "+col,background:col,color:"#1a1814",fontSize:11,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:0.9}}>
+                          {dragPat.name}
                         </div>
                       )}
                     </div>
-
-                    {/* Drag ghost chip */}
-                    {seqDrag&&dragPat&&(
-                      <div style={{position:"fixed",left:seqDrag.x-24,top:seqDrag.y-18,zIndex:9999,pointerEvents:"none",padding:"5px 14px",borderRadius:20,border:"1.5px solid "+col,background:col,color:"#1a1814",fontSize:11,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:0.9}}>
-                        {dragPat.name}
-                      </div>
-                    )}
-                  </div>
                   );
                 })()}
 
-                {/* SOUND sheet */}
-                {activeSheet==="sound"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
-                    {/* Layer toggle */}
-                    <div style={{display:"flex",gap:5,marginBottom:14}}>
-                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
-                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
-                      ))}
-                    </div>
-                    {/* Tabs: STEP / SOUND (synth only) */}
-                    {activeLayer==="synth"&&(
-                      <div style={{display:"flex",gap:4,marginBottom:12}}>
-                        {[["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
-                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                {/* SOUND */}
+                {activeSheet==="sound"&&(()=>{
+                  const FH=100;
+                  const mkV=(r,key,val,mn,mx,color,fc)=>{
+                    const onPD=e=>{e.stopPropagation();const sy=e.clientY,sv=val;const upd=ev=>{setDrumMix(r,key,Math.max(mn,Math.min(mx,Math.round(sv-(ev.clientY-sy)/FH*(mx-mn)))));};const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);};
+                    const pct=(val-mn)/(mx-mn);const tt=(1-pct)*(FH-14);
+                    return(<div style={{width:14,height:FH,position:"relative",cursor:"ns-resize",flexShrink:0}} onPointerDown={onPD} onDoubleClick={()=>fc?setDrumMix(r,key,0):null}><div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:0,bottom:0,width:3,background:"rgba(220,200,180,0.08)",borderRadius:2}}/>{fc?(<><div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",width:3,background:color+"55",borderRadius:1,top:val>=0?FH/2:(FH/2+val/100*FH/2),height:Math.abs(val)/100*FH/2}}/><div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:"50%",width:6,height:1,background:"rgba(220,200,180,0.2)"}}/></>):(<div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",width:3,borderRadius:1,background:color+"66",bottom:0,height:`${pct*FH}px`}}/>)}<div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",top:tt,width:12,height:12,background:"rgba(240,230,220,0.9)",borderRadius:2,boxShadow:"0 1px 4px rgba(0,0,0,0.5)"}}/></div>);
+                  };
+                  return(
+                    <div>
+                      {/* Layer toggle */}
+                      <div style={{display:"flex",gap:5,marginBottom:12}}>
+                        {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+                          <button key={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
                         ))}
                       </div>
-                    )}
-                    {/* Synth STEP */}
-                    {activeLayer==="synth"&&page==="step"&&(
-                      <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
-                        <div style={S.stepPageHdr}>
-                          <div style={S.stepPagePat}>{activePat?.name||""}</div>
-                          <div style={{flex:1}}/>
+                      {activeLayer==="synth"&&(
+                        <div>
+                          <div style={{display:"flex",gap:4,marginBottom:12}}>
+                            {[["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(<button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>))}
+                          </div>
+                          {page==="step"&&(
+                            <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20}}>
+                              <div style={S.stepPageHdr}><div style={S.stepPagePat}>{activePat?.name||""}</div><div style={{flex:1}}/></div>
+                              {LANES.map(lane=>{
+                                const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
+                                const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
+                                const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
+                                const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
+                                return(<div key={lane.key} style={S.stepLaneSection}><div style={S.stepLaneHdr}><div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>{liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}<div style={{flex:1}}/><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button><button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button></div><StepLane lane={lane} values={vals} colHasNote={colHasNote} activeStep={playing&&playId===activeId?step:-1} onChange={(col,val)=>setStepParam(col,lane.key,val)} tall/></div>);
+                              })}
+                            </div>
+                          )}
+                          {page==="sound"&&(
+                            <div style={{overflowY:"auto"}}>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                <SynthSection title="OSCILLATOR" accent={C_OSC}><div style={{display:"flex",gap:10,padding:"6px 12px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}><KnobSlider vertical label="DRIVE" value={drive} min={0} max={100} onChange={setDrive} display={drive+"%"} accent="#c97b5a"/><KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/><div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>{WAVEFORMS.map((w,i)=>(<button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>))}</div></div></SynthSection>
+                                <SynthSection title="ENV" accent={C_ENV}><div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}><KnobSlider vertical label="ATK" value={attack} min={1} max={2000} onChange={setAttack} display={attack+"ms"} accent={C_ENV}/><KnobSlider vertical label="DEC" value={decay} min={10} max={4000} onChange={setDecay} display={decay+"ms"} accent={C_ENV}/><KnobSlider vertical label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"} accent={C_ENV}/></div></SynthSection>
+                                <SynthSection title="FILTER" accent={C_FILT}><div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}><KnobSlider vertical label="CUT" value={vcfCutoff} min={0} max={100} onChange={setVcfCutoff} display={vcfLbl(vcfCutoff)} accent={C_FILT}/><KnobSlider vertical label="RES" value={vcfRes} min={0} max={100} onChange={setVcfRes} display={vcfRes+"%"} accent={C_FILT}/><KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"} accent={C_FILT}/></div></SynthSection>
+                                <SynthSection title="DELAY" accent={C_DLY}><div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}><KnobSlider label="TIME" value={dlyIdx} min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx} display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/><KnobSlider label="SEND" value={dlyWetPct} min={0} max={100} onChange={setDlyWetPct} display={dlyWetPct+"%"} accent={C_DLY}/><KnobSlider label="FDBK" value={dlyFbPct} min={0} max={95} onChange={setDlyFbPct} display={dlyFbPct+"%"} accent={C_DLY}/><KnobSlider label="HP" value={dlyHpVal} min={0} max={100} onChange={setDlyHpVal} display={hpLbl(dlyHpVal)} accent={C_DLY}/><KnobSlider label="LP" value={dlyLpVal} min={0} max={100} onChange={setDlyLpVal} display={lpLbl(dlyLpVal)} accent={C_DLY}/></div></SynthSection>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        {LANES.map(lane=>{
-                          const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                          const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
-                          const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
-                          const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
-                          return(
-                            <div key={lane.key} style={S.stepLaneSection}>
-                              <div style={S.stepLaneHdr}>
-                                <div style={Object.assign({},S.stepLaneName,{color:lane.color})}>{lane.label}</div>
-                                {liveLabel&&<div style={Object.assign({},S.stepLiveVal,{color:lane.color})}>{liveLabel}</div>}
-                                <div style={{flex:1}}/>
-                                <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"33",color:lane.color+"99"})} onClick={()=>resetStepLane(lane.key)}>RST</button>
-                                <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button>
-                              </div>
-                              <StepLane lane={lane} values={vals} colHasNote={colHasNote}
-                                activeStep={playing&&playId===activeId?step:-1}
-                                onChange={(col,val)=>setStepParam(col,lane.key,val)}
-                                tall/>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {/* Synth SOUND */}
-                    {activeLayer==="synth"&&page==="sound"&&(
-                      <div style={{overflowY:"auto"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                          <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                            <div style={{display:"flex",gap:10,padding:"6px 12px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
-                              <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
-                              <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
-                                {WAVEFORMS.map((w,i)=>(
-                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
-                                ))}
-                              </div>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="ENV" accent={C_ENV}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
-                              <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
-                              <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
-                              <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="FILTER" accent={C_FILT}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
-                              <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
-                              <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
-                              <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="DELAY" accent={C_DLY}>
-                            <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                              <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
-                              <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                              <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                              <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
-                            </div>
-                          </SynthSection>
+                      )}
+                      {activeLayer==="drums"&&(
+                        <div>
+                          {/* Kit selector */}
+                          <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:12,flexWrap:"wrap"}}>
+                            <button style={{padding:"4px 10px",borderRadius:20,border:"1px solid "+(activeKit===null?"rgba(210,195,175,0.5)":"rgba(210,195,175,0.12)"),background:activeKit===null?"rgba(210,195,175,0.07)":"transparent",color:activeKit===null?"rgba(210,195,175,0.85)":"rgba(210,195,175,0.3)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>selectKit(null)}>SYNTH</button>
+                            {KITS.map(kit=>{const st=kitLoadState[kit.id];const isA=activeKit===kit.id;return(<button key={kit.id} style={{padding:"4px 10px",borderRadius:20,border:"1px solid "+(isA?kit.color+"88":"rgba(210,195,175,0.12)"),background:isA?kit.color+"12":"transparent",color:isA?kit.color:st==="error"?"#c47a7a":"rgba(210,195,175,0.3)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}} onClick={()=>selectKit(kit.id)}>{st==="loading"&&<span>⟳</span>}{st==="loaded"&&!isA&&<span style={{fontSize:7,color:"#a8c5a0"}}>●</span>}{kit.name}</button>);})}
+                          </div>
+                          {/* Mixer */}
+                          <div style={{display:"flex",gap:6,overflowX:"auto",scrollbarWidth:"none",paddingBottom:4}}>
+                            {DRUM_VOICES.map((voice,r)=>{const m=(drumPats.find(p=>p.id===activeDrumId)||drumPats[0])?.mix?.[r]||{level:100,pan:0};return(<div key={voice.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:32,flexShrink:0}}>
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.35)",height:9}}>{m.pan>0?"+"+m.pan:m.pan===0?"0":m.pan}</div>
+                              {mkV(r,"pan",m.pan,-100,100,voice.color,true)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.35)",height:9}}>{m.level}</div>
+                              {mkV(r,"level",m.level,0,100,voice.color,false)}
+                              <div style={{fontSize:7,fontWeight:700,color:voice.color,marginTop:2}}>{voice.label}</div>
+                            </div>);})}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {/* Drums SOUND page — mixer */}
-                    {activeLayer==="drums"&&(()=>{
-                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=dPat?.mix||defaultDrumMix();
-                      return(<div style={{overflowY:"auto"}}>
-                        {DRUM_VOICES.map((voice,r)=>{
-                          const m=mix[r]||{level:100,pan:0};
-                          return(<div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                            <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"level",Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
-                                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
-                            </div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"pan",Math.round((Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*2-1)*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
-                                onDoubleClick={()=>setDrumMix(r,"pan",0)}>
-                                <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
-                                <div style={{position:"absolute",top:0,bottom:0,left:m.pan<=0?`${50+m.pan/2}%`:"50%",width:`${Math.abs(m.pan)/2}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
-                            </div>
-                          </div>);
-                        })}
-                      </div>);
-                    })()}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  );
+                })()}
 
-                {/* PROJECT sheet */}
+                {/* PROJECT */}
                 {activeSheet==="project"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
@@ -3143,13 +3138,7 @@ export default function Tabula(){
                       </div>
                     )}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                      {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                        <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                          <span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                          <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                        </div>
-                      );})}
+                      {SLOTS.map(slot=>{const has=!!slotData[slot];return(<div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}><span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span><button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button><button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button></div>);})}
                     </div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>SHARE</div>
                     {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}

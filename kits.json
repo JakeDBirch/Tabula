@@ -1,0 +1,23 @@
+{
+  "kits": [
+    {
+      "id": "kit1",
+      "name": "KIT 1",
+      "description": "Custom kit 1",
+      "color": "#c4967a"
+    },
+    {
+      "id": "kit2",
+      "name": "KIT 2",
+      "description": "Custom kit 2",
+      "color": "#9fb4c7"
+    },
+    {
+      "id": "kit3",
+      "name": "KIT 3",
+      "description": "Custom kit 3",
+      "color": "#a8c5a0"
+    }
+  ],
+  "voices": ["bd", "sd", "lt", "ht", "ch", "oh", "cy", "cp"]
+}
