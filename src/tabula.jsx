@@ -706,6 +706,7 @@ export default function Tabula(){
   const [topTrayOpen,   setTopTrayOpen]   = useState(false);
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
+  const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   const longPressR   = useRef(null); // setTimeout id
@@ -760,6 +761,7 @@ export default function Tabula(){
   useEffect(()=>{activeDrumIdR.current=activeDrumId;},[activeDrumId]);
   const variedDrumGrids=useRef(new Map());
   const variedDrumVels=useRef(new Map());
+  const drumPillLongPressR=useRef(null);
   const drumChainR=useRef([initDrum.id]);
   const drumCposR=useRef(0);
   useEffect(()=>{drumChainR.current=drumChain;},[drumChain]);
@@ -2030,7 +2032,7 @@ export default function Tabula(){
                     const isP=playing&&drumCpos>=0&&drumChain[drumCpos]===dp.id;
                     return(
                       <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none"}}
-                        onClick={e=>{e.stopPropagation();setActiveDrumId(dp.id);setActiveLayer("drums");}}>
+                        onClick={e=>{e.stopPropagation();setActiveDrumId(dp.id);setActiveLayer("drums");}} onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
                         {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{dp.name}
                       </div>
                     );
@@ -2595,9 +2597,24 @@ export default function Tabula(){
 
           {/* ── CONTENT AREA ── */}
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
-            {page==="edit"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:4}}>
-                <div style={{width:"min(100%,calc(100dvh - 174px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+            {activeLayer==="synth"&&page==="edit"&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 10px 4px",boxSizing:"border-box"}}>
+                {/* Pattern pills above grid */}
+                <div style={{display:"flex",gap:4,overflowX:"auto",scrollbarWidth:"none",alignItems:"center",flexShrink:0,marginBottom:6,width:"100%"}}>
+                  {pats.map(p=>{
+                    const isA=p.id===activeId;const isP=playing&&playId===p.id;
+                    return(<div key={p.id} style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:9,fontWeight:700,letterSpacing:1,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",gap:2}}
+                      onClick={()=>setActiveId(p.id)}
+                      onContextMenu={e=>{e.stopPropagation();handlePillContextMenu(e,p.id);}}>
+                      {isP&&!isA&&<span style={{fontSize:5,opacity:0.7}}>●</span>}{p.name}
+                    </div>);
+                  })}
+                  {pats.length<8&&<button style={{padding:"3px 8px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.35)",background:"transparent",color:"rgba(168,197,160,0.45)",fontSize:11,lineHeight:1,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={addPat}>＋</button>}
+                  <div style={{flex:1}}/>
+                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,"+(monoMode?"0.5":"0.18")+")",borderRadius:20,background:monoMode?"rgba(159,180,199,0.12)":"transparent",color:monoMode?"#9fb4c7":"rgba(200,185,165,0.4)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={toggleMono}>MONO</button>
+                </div>
+                {/* Grid */}
+                <div style={{width:"min(100%,calc(100dvh - 215px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
@@ -2626,104 +2643,179 @@ export default function Tabula(){
               </div>
             )}
             {activeLayer==="drums"&&page==="edit"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden",padding:"8px 8px 0",boxSizing:"border-box"}}>
-                {/* Drum grid header row */}
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexShrink:0}}>
-                  <span style={{fontSize:10,letterSpacing:2,color:"rgba(210,195,175,0.4)",fontWeight:500}}>DRUMS</span>
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",padding:"4px 4px 4px 8px",boxSizing:"border-box",overflow:"hidden"}}>
+                {/* RAND / CLR header */}
+                <div style={{display:"flex",alignItems:"center",flexShrink:0,marginBottom:3,paddingRight:4}}>
                   <div style={{flex:1}}/>
-                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
-                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
+                  <button style={{padding:"2px 8px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
+                  <button style={{padding:"2px 8px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
                 </div>
-                {/* Drum grid — 8 rows × gridLen cols */}
-                {(()=>{
-                  const activeDrumPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                  const drums=activeDrumPat;
-                  const dLen=drums.gridLen??16;
-                  return(
-                    <>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:0,marginBottom:4}}>
-                    <div style={{width:"100%",aspectRatio:"16/8",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
-                      {DRUM_VOICES.map((voice,r)=>(
-                        <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2,position:"relative"}}>
-                          {/* Voice label — outside grid width via absolute positioning */}
-                          <div style={{position:"absolute",right:"100%",top:0,bottom:0,width:26,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color+"99"}}>{voice.label}</div>
-                          {/* Step cells fill full dw */}
-                          <div style={{flex:1,display:"flex",gap:2}}>
-                            {Array.from({length:COLS},(_,c)=>{
-                              const on=drums.grid[r]?.[c]||false;
-                              const isActive=playing&&c===drumStep;
-                              const inactive=c>=dLen;
-                              const isQ=c%4===0;
-                              return(
-                                <div key={c} style={{
-                                  flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
-                                  background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",
-                                  border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),
-                                  boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",
-                                  transition:"background .06s"
-                                }}
-                                  onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}
-                                />
-                              );
-                            })}
-                          </div>
+                {/* Row: pattern pills | portrait grid | vertical length slider */}
+                <div style={{flex:1,minHeight:0,display:"flex",gap:5,alignItems:"stretch"}}>
+                  {/* Left: pattern pills column */}
+                  <div style={{display:"flex",flexDirection:"column",gap:3,flexShrink:0,alignSelf:"flex-start",paddingTop:18}}>
+                    {drumPats.map(dp=>{
+                      const isA=dp.id===activeDrumId;
+                      return(<div key={dp.id} style={{padding:"3px 6px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:9,fontWeight:700,letterSpacing:0.5,cursor:"pointer",textAlign:"center",minWidth:22}}
+                        onClick={()=>setActiveDrumId(dp.id)}
+                        onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}
+                        onPointerDown={e=>{const t=setTimeout(()=>{setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);drumPillLongPressR.current=null;},500);drumPillLongPressR.current=t;}}
+                        onPointerUp={()=>{if(drumPillLongPressR.current){clearTimeout(drumPillLongPressR.current);drumPillLongPressR.current=null;}}}
+                        onPointerCancel={()=>{if(drumPillLongPressR.current){clearTimeout(drumPillLongPressR.current);drumPillLongPressR.current=null;}}}>
+                        {dp.name}
+                      </div>);
+                    })}
+                    {drumPats.length<8&&<button style={{padding:"3px 6px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.35)",background:"transparent",color:"rgba(196,150,122,0.45)",fontSize:11,lineHeight:1,cursor:"pointer",fontFamily:"inherit",textAlign:"center"}} onClick={addDrumPat}>＋</button>}
+                  </div>
+                  {/* Center: portrait grid */}
+                  {(()=>{
+                    const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                    const dLen=dPat.gridLen??16;
+                    const GAP=2;
+                    return(
+                      <div style={{height:"100%",aspectRatio:"8/16",maxWidth:"calc(100% - 58px)",display:"flex",flexDirection:"column",flexShrink:0}}>
+                        {/* Voice labels */}
+                        <div style={{display:"flex",gap:GAP,flexShrink:0,marginBottom:3}}>
+                          {DRUM_VOICES.map(v=>(
+                            <div key={v.key} style={{flex:1,textAlign:"center",fontSize:7,fontWeight:700,color:v.color+"cc",letterSpacing:0.5}}>{v.label}</div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                    </div>
-                      <div style={{height:32,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",marginTop:4}}>
-                        <div style={{width:26,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
-                        <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
-                          {Array.from({length:COLS},(_,c)=>{
-                            const vel=drums.vel?.[c]??100;
-                            const pct=vel/127;
-                            const inactive=c>=dLen;
+                        {/* Step rows */}
+                        <div style={{flex:1,display:"flex",flexDirection:"column",gap:GAP,minHeight:0}}>
+                          {Array.from({length:COLS},(_,step)=>{
+                            const isActive=playing&&step===drumStep;
+                            const inactive=step>=dLen;
+                            const isQ=step%4===0;
                             return(
-                              <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
-                                onPointerDown={e=>{
-                                  if(inactive)return;
-                                  e.stopPropagation();
-                                  const startY=e.clientY,startV=vel;
-                                  const onMove=ev=>{
-                                    if(!ev.buttons)return;
-                                    const delta=startY-ev.clientY;
-                                    setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+delta*1.5))));
-                                  };
-                                  const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
-                                  document.addEventListener("pointermove",onMove);
-                                  document.addEventListener("pointerup",onUp);
-                                }}>
-                                <div style={{width:"100%",height:(pct*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
+                              <div key={step} style={{flex:1,display:"flex",gap:GAP,background:isActive?"rgba(220,200,180,0.06)":"transparent",borderRadius:2,borderTop:isQ?"1px solid rgba(220,200,180,0.1)":"none"}}>
+                                {DRUM_VOICES.map((voice,r)=>{
+                                  const on=dPat.grid[r]?.[step]||false;
+                                  return(<div key={r} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
+                                    background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
+                                    border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
+                                    boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
+                                  }} onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
+                                })}
                               </div>
                             );
                           })}
                         </div>
                       </div>
-                      <div style={{...S.lenSlider,flexShrink:0,marginTop:6}}
+                    );
+                  })()}
+                  {/* Right: vertical length slider */}
+                  {(()=>{
+                    const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                    const dLen=dPat.gridLen??16;
+                    return(
+                      <div style={{width:10,alignSelf:"stretch",background:"rgba(220,200,180,0.07)",borderRadius:5,position:"relative",cursor:"ns-resize",flexShrink:0,marginTop:20}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
-                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
-                        }}
-                        onPointerMove={e=>{
-                          if(!e.buttons)return;
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-                          setDrumLen(Math.max(1,Math.round(pct*COLS)));
+                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
+                          update(e);
+                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                         }}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                        <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
-                        <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
+                        <div style={{position:"absolute",top:0,left:0,right:0,height:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.2)",borderRadius:"5px 5px 0 0"}}/>
+                        <div style={{position:"absolute",left:-3,right:-3,height:8,top:`calc(${(dLen/COLS)*100}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
+                        <span style={{position:"absolute",bottom:2,left:"50%",transform:"translateX(-50%)",fontSize:7,color:"rgba(210,195,175,0.35)",pointerEvents:"none"}}>{dLen}</span>
                       </div>
-                    </>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
             )}
-            {page==="step"&&(
+            {activeLayer==="drums"&&page==="step"&&(
+              <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
+              </div>
+            )}
+            {activeLayer==="drums"&&page==="sound"&&(()=>{
+              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+              const mix=dPat?.mix||defaultDrumMix();
+              return(
+              <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"12px 16px",boxSizing:"border-box"}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>MIXER</div>
+                {DRUM_VOICES.map((voice,r)=>{
+                  const m=mix[r]||{level:100,pan:0};
+                  return(
+                  <div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                    <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
+                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
+                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
+                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"level",Math.round(pct*100));};
+                          update(e);
+                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                        }}>
+                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3}}/>
+                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
+                      </div>
+                    </div>
+                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
+                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
+                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"pan",Math.round((pct*2-1)*100));};
+                          update(e);
+                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                        }}
+                        onDoubleClick={()=>setDrumMix(r,"pan",0)}>
+                        <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,left:m.pan<=0?`${50+m.pan/2}%`:"50%",width:`${Math.abs(m.pan)/2}%`,background:voice.color+"99",borderRadius:3}}/>
+                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
+                      </div>
+                    </div>
+                  </div>
+                  );
+                })}
+              </div>
+              );
+            })()}
+            {activeLayer==="drums"&&page==="set"&&(()=>{
+              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+              const vRhythm=dPat?.vRhythm||0;
+              const vVelocity=dPat?.vVelocity||0;
+              const MSlider=({label,value,onChange,accent})=>(
+                <div style={{marginBottom:16}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}>
+                    <span style={{fontSize:9,letterSpacing:2,color:accent||"rgba(210,195,175,0.5)",fontWeight:500}}>{label}</span>
+                    <span style={{fontSize:11,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{value}<span style={{fontSize:8,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                  </div>
+                  <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                    onPointerDown={e=>{
+                      e.stopPropagation();
+                      const rect=e.currentTarget.getBoundingClientRect();
+                      const upd=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};
+                      upd(e);
+                      const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};
+                      document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);
+                    }}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(210,195,175,0.4)")+"99",borderRadius:3}}/>
+                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
+                  </div>
+                </div>
+              );
+              return(
+              <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"16px 20px",boxSizing:"border-box"}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
+                <div style={{padding:"14px 16px",background:"rgba(220,200,180,0.04)",borderRadius:8,border:"1px solid rgba(220,200,180,0.08)"}}>
+                  <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",marginBottom:12}}>Active when VARY is on.</div>
+                  <MSlider label="RHYTHM" value={vRhythm} onChange={v=>setDrumVary("vRhythm",v)} accent="#c8a840"/>
+                  <MSlider label="VELOCITY" value={vVelocity} onChange={v=>setDrumVary("vVelocity",v)} accent="#7888d0"/>
+                </div>
+              </div>
+              );
+            })()}
+            {activeLayer==="synth"&&page==="step"&&(
               <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
                 <div style={S.stepPageHdr}><div style={S.stepPagePat}>{activePat?.name||""}</div></div>
                 {LANES.map(lane=>{
@@ -2735,14 +2827,14 @@ export default function Tabula(){
                 })}
               </div>
             )}
-            {page==="set"&&(
+            {activeLayer==="synth"&&page==="set"&&(
               <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
                 <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a"><div style={S.threeGrid}><KnobSlider label="DROP" value={vDropRate} min={0} max={60} onChange={setVDropRate} display={vDropRate+"%"} accent="#c4967a"/><KnobSlider label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"} accent="#c4967a"/><KnobSlider label="RANGE" value={vShiftRange} min={1} max={8} onChange={setVShiftRange} display={vShiftRange+"st"} accent="#c4967a"/></div></SynthSection>
                 <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4"><div style={S.threeGrid}><KnobSlider label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"} accent="#b5a0c4"/><KnobSlider label="RANGE" value={vPitchRange} min={1} max={12} onChange={setVPitchRange} display={vPitchRange+"st"} accent="#b5a0c4"/><KnobSlider label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"} accent="#b5a0c4"/></div></SynthSection>
                 <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7"><div style={S.threeGrid}><KnobSlider label="VEL" value={vVelJitter} min={0} max={100} onChange={setVVelJitter} display={vVelJitter+"%"} accent="#9fb4c7"/><KnobSlider label="CUT" value={vCutJitter} min={0} max={100} onChange={setVCutJitter} display={vCutJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DLY" value={vDlyJitter} min={0} max={100} onChange={setVDlyJitter} display={vDlyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="RHY" value={vRhyJitter} min={0} max={100} onChange={setVRhyJitter} display={vRhyJitter+"%"} accent="#9fb4c7"/><KnobSlider label="OCT" value={vOctJitter} min={0} max={100} onChange={setVOctJitter} display={vOctJitter+"%"} accent="#9fb4c7"/><KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/><KnobSlider label="DUR" value={vDurJitter} min={0} max={100} onChange={setVDurJitter} display={vDurJitter+"%"} accent="#9fb4c7"/></div></SynthSection>
               </div>
             )}
-            {page==="sound"&&(
+            {activeLayer==="synth"&&page==="sound"&&(
               <div style={{height:"100%",overflowY:"scroll",padding:"12px 12px 20px"}}>
                 <SynthSection title="OSCILLATOR" accent={C_OSC}><div style={S.wfRow}>{WAVEFORMS.map((w,i)=>(<button key={w} style={Object.assign({},S.wfBtn,{borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>))}</div><div style={S.threeGrid}><KnobSlider label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/></div></SynthSection>
                 <SynthSection title="ENV" accent={C_ENV}><div style={S.threeGrid}><KnobSlider label="ATK" value={attack} min={1} max={2000} onChange={setAttack} display={attack+"ms"} accent={C_ENV}/><KnobSlider label="DEC" value={decay} min={10} max={4000} onChange={setDecay} display={decay+"ms"} accent={C_ENV}/><KnobSlider label="SUS" value={sustain} min={0} max={100} onChange={setSustain} display={sustain+"%"} accent={C_ENV}/></div></SynthSection>
@@ -2754,23 +2846,46 @@ export default function Tabula(){
 
           {/* ── BOTTOM HANDLE ── */}
           <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(26,24,20,0.98)"}}>
-            {/* Pills row */}
-            <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"7px 12px 3px",alignItems:"center",touchAction:"none"}}>
-              {pats.map((p,i)=>{
-                const isA=p.id===activeId,isP=playing&&playId===p.id,col=patCol(i);
-                const isDragging=chainDrag&&chainDrag.type==='pill'&&chainDrag.id===p.id;
-                return(<div key={p.id} style={Object.assign({},S.pill,{border:"1.5px solid "+col,background:isA?col:"transparent",color:isA?"#000":col,boxShadow:isDragging?"0 0 20px "+col:isP?"0 0 14px "+col+"88":"none",opacity:isDragging?0.5:1,touchAction:"none"})}
-                  onClick={()=>setActiveId(p.id)}
-                  onPointerDown={e=>startPillDrag(e,p.id)} onPointerMove={onDragMove}
-                  onPointerUp={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                  onPointerCancel={e=>{if(pillLongPressR.current){clearTimeout(pillLongPressR.current);pillLongPressR.current=null;}onDragUp(e);}}
-                  onContextMenu={e=>handlePillContextMenu(e,p.id)}>
-                  {isP&&<span className="pp">●</span>}{p.name}
-                </div>);
-              })}
-              {pats.length<8&&<button style={S.newPill} onClick={addPat}>＋</button>}
-              <div style={{flex:1}}/>
-              <button style={{flexShrink:0,padding:"4px 10px",border:"1px solid rgba(200,185,165,"+(monoMode?"0.6":"0.2")+")",borderRadius:20,background:monoMode?"rgba(159,180,199,0.12)":"transparent",color:monoMode?"#9fb4c7":"rgba(200,185,165,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={toggleMono}>MONO</button>
+            {/* Layer cards — show sequence chain, collapsing when inactive */}
+            <div style={{display:"flex",gap:5,padding:"7px 12px 4px"}}>
+              {/* SYNTH: shows playback chain */}
+              <div style={{flex:activeLayer==="synth"?1:"0 0 auto",border:"1px solid "+(activeLayer==="synth"?"rgba(168,197,160,0.6)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"4px 8px",background:activeLayer==="synth"?"rgba(168,197,160,0.06)":"transparent",display:"flex",alignItems:"center",gap:4,overflow:"hidden",minWidth:0,touchAction:"none"}}
+                onClick={()=>setActiveLayer("synth")}>
+                <span style={{fontSize:7,letterSpacing:1.5,color:activeLayer==="synth"?"rgba(168,197,160,0.7)":"rgba(210,195,175,0.3)",fontWeight:600,flexShrink:0}}>SYN</span>
+                {activeLayer==="synth"&&<div style={{display:"flex",gap:3,overflowX:"auto",scrollbarWidth:"none",alignItems:"center",flex:1,minWidth:0}}>
+                  {chain.length===0&&<span style={{fontSize:7,color:"rgba(168,197,160,0.3)",letterSpacing:1}}>empty</span>}
+                  {chain.map((pid,i)=>{
+                    const p=pats.find(x=>x.id===pid);
+                    const here=playing&&!loopMode&&i===cpos;
+                    const isEdit=pid===activeId;
+                    return(<div key={i} style={{padding:"2px 6px",borderRadius:20,border:"1.5px solid #a8c5a0",background:here?"#a8c5a0":isEdit?"rgba(168,197,160,0.18)":"transparent",color:here?"#1a1814":"#a8c5a0",fontSize:9,fontWeight:700,letterSpacing:1,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",gap:2}}
+                      onClick={e=>{e.stopPropagation();if(p)setActiveId(p.id);}}>
+                      {here&&<span style={{fontSize:5,opacity:0.7}}>●</span>}{p?.name||"?"}
+                      <span style={{fontSize:7,opacity:0.4,marginLeft:1}} onClick={e=>{e.stopPropagation();setChain(c=>c.filter((_,idx)=>idx!==i));}}>×</span>
+                    </div>);
+                  })}
+                  {chain.length<8&&<button style={{padding:"2px 6px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.3)",background:"transparent",color:"rgba(168,197,160,0.4)",fontSize:10,lineHeight:1,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={e=>{e.stopPropagation();setChain(c=>c.length<8?[...c,activeId]:c);}}>＋</button>}
+                </div>}
+              </div>
+              {/* DRUMS: shows drum playback chain */}
+              <div style={{flex:activeLayer==="drums"?1:"0 0 auto",border:"1px solid "+(activeLayer==="drums"?"rgba(196,150,122,0.6)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"4px 8px",background:activeLayer==="drums"?"rgba(196,150,122,0.06)":"transparent",display:"flex",alignItems:"center",gap:4,overflow:"hidden",minWidth:0,touchAction:"none"}}
+                onClick={()=>setActiveLayer("drums")}>
+                <span style={{fontSize:7,letterSpacing:1.5,color:activeLayer==="drums"?"rgba(196,150,122,0.7)":"rgba(210,195,175,0.3)",fontWeight:600,flexShrink:0}}>DRM</span>
+                {activeLayer==="drums"&&<div style={{display:"flex",gap:3,overflowX:"auto",scrollbarWidth:"none",alignItems:"center",flex:1,minWidth:0}}>
+                  {drumChain.length===0&&<span style={{fontSize:7,color:"rgba(196,150,122,0.3)",letterSpacing:1}}>empty</span>}
+                  {drumChain.map((pid,i)=>{
+                    const dp=drumPats.find(x=>x.id===pid);
+                    const here=playing&&i===drumCpos%Math.max(1,drumChain.length);
+                    const isEdit=pid===activeDrumId;
+                    return(<div key={i} style={{padding:"2px 6px",borderRadius:20,border:"1.5px solid #c4967a",background:here?"#c4967a":isEdit?"rgba(196,150,122,0.18)":"transparent",color:here?"#1a1814":"#c4967a",fontSize:9,fontWeight:700,letterSpacing:1,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",gap:2}}
+                      onClick={e=>{e.stopPropagation();if(dp)setActiveDrumId(dp.id);}}>
+                      {here&&<span style={{fontSize:5,opacity:0.7}}>●</span>}{dp?.name||"?"}
+                      <span style={{fontSize:7,opacity:0.4,marginLeft:1}} onClick={e=>{e.stopPropagation();setDrumChain(c=>c.filter((_,idx)=>idx!==i));}}>×</span>
+                    </div>);
+                  })}
+                  {drumChain.length<8&&<button style={{padding:"2px 6px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.3)",background:"transparent",color:"rgba(196,150,122,0.4)",fontSize:10,lineHeight:1,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={e=>{e.stopPropagation();setDrumChain(c=>c.length<8?[...c,activeDrumId]:c);}}>＋</button>}
+                </div>}
+              </div>
             </div>
             {/* Tabs + play + tray toggle */}
             <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 12px 10px"}}>
@@ -2896,6 +3011,23 @@ export default function Tabula(){
                   {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=8],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
                     <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}} onMouseLeave={e=>e.currentTarget.style.background="rgba(10,10,10,0.9)"}
+                      onClick={disabled?undefined:fn}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>);
+          })()}
+
+          {/* Drum context menu (mobile) */}
+          {drumMenu&&(()=>{
+            const dm=drumMenu;const vw=window.innerWidth,vh=window.innerHeight;const W=180,H=120;
+            const px=Math.max(8,Math.min(vw-W-8,dm.x-W/2));const py=Math.max(8,Math.min(vh-H-8,dm.y+12));
+            const close=()=>setDrumMenu(null);const act=(fn)=>{fn();close();};const isOnly=drumPats.length<=1;
+            return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
+              <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
+                  {[["RAND",()=>act(randDrumVel)],["CLR",()=>act(clearDrums)],["CPY",()=>act(copyDrumPatFn)],["PST",()=>act(pasteDrumPatFn),!drumClipboard],["DUP",()=>act(dupDrumPat),drumPats.length>=8],["DEL",()=>act(delDrumPat),isOnly,true]].map(([label,fn,disabled,danger])=>(
+                    <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onClick={disabled?undefined:fn}>{label}</button>
                   ))}
                 </div>
