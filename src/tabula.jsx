@@ -312,6 +312,21 @@ function StepLane({lane,values,activeStep,onChange,tall,colHasNote}){
 }
 
 // ─── Bell / Synth engine ──────────────────────────────────────────────────────
+// ─── Silent audio loop for iOS WebKit audio session keep-alive ───────────────
+// A nearly-silent looping audio element prevents iOS from suspending Web Audio
+// when the page is backgrounded or the screen locks.
+function createSilentLoop(){
+  try{
+    // 1-second silent MP3 as data URI — minimal size, real audio format
+    // iOS requires actual audio playback (not just Web Audio) to maintain session
+    const SILENT_MP3='data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU2LjM2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV6urq6urq6urq6urq6urq6urq6urq6urq6ur///////////////////////////////////////////////8AAAAATGF2YzU2LjQxAAAAAAAAAAAAAAAAJAAAAAAAAAAAASDs90hvAAAAAAAAAAAAAAAAAAAA//MUZAAAAAGkAAAAAAAAA0gAAAAATEFN//MUZAMAAAGkAAAAAAAAA0gAAAAARTMu//MUZAYAAAGkAAAAAAAAA0gAAAAAOTku//MUZAkAAAGkAAAAAAAAA0gAAAAANVVV';
+    const audio=new Audio(SILENT_MP3);
+    audio.loop=true;
+    audio.volume=0.001;
+    return audio;
+  }catch(e){return null;}
+}
+
 class Bell{
   constructor(){
     this.ctx=null;this.master=null;this.rev=null;
@@ -749,6 +764,8 @@ export default function Tabula(){
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
+  const silentLoopR=useRef(null);
+  const wakeLockR=useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   const initDrum=mkDrumPat("A");
   const [drumPats,    setDrumPats]    = useState([initDrum]);
@@ -1081,18 +1098,99 @@ export default function Tabula(){
   },[]);
 
   const startStop=async()=>{
-    if(playing){clearInterval(tmrR.current);setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;setRecMode(false);recModeR.current=false;return;}
+    if(playing){
+      clearInterval(tmrR.current);
+      setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
+      prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
+      setRecMode(false);recModeR.current=false;
+      if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
+      releaseWakeLock();
+      if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
+      return;
+    }
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,dlyWetPct,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
     bell.current.stepDur=60/bpm/4*speedMult;
     await drumEngine.current.init(bell.current.master);
     if(!loopR.current&&!chainR.current.length){chainR.current=[activeId];setChain([activeId]);}
+    // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
+    if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
+    if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
+    // Wake lock — prevent auto screen-off while playing
+    await requestWakeLock();
+    // MediaSession — lock screen transport controls + registers as audio app
+    if("mediaSession" in navigator){
+      try{
+        navigator.mediaSession.metadata=new MediaMetadata({
+          title:"Tabula",artist:"Sequencer",album:"",
+          artwork:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%231a1814'/%3E%3Ctext x='48' y='64' text-anchor='middle' font-size='44' fill='%23c4a882' font-family='Georgia%2Cserif' font-weight='bold'%3ET%3C/text%3E%3C/svg%3E",sizes:"96x96",type:"image/svg+xml"}]
+        });
+        navigator.mediaSession.playbackState="playing";
+        navigator.mediaSession.setActionHandler("play",()=>{if(!playingR.current)startStop();});
+        navigator.mediaSession.setActionHandler("pause",()=>{if(playingR.current)startStop();});
+        navigator.mediaSession.setActionHandler("stop",()=>{if(playingR.current)startStop();});
+      }catch(e){}
+    }
     stepR.current=0;cposR.current=0;
     nextNoteR.current=bell.current.ctx.currentTime+0.05; // small initial offset
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
   };
   useEffect(()=>()=>clearInterval(tmrR.current),[]);
+
+  // ── iOS audio session + wake lock management ──────────────────────────────
+  useEffect(()=>{
+    // Resume AudioContext and silent loop when page becomes visible
+    const onVisible=async()=>{
+      if(document.visibilityState==="visible"){
+        if(bell.current.ctx&&bell.current.ctx.state==="suspended"){
+          try{await bell.current.ctx.resume();}catch(e){}
+        }
+        if(drumEngine.current.ctx&&drumEngine.current.ctx.state==="suspended"){
+          try{await drumEngine.current.ctx.resume();}catch(e){}
+        }
+        // Re-play silent loop (iOS may have paused it)
+        if(silentLoopR.current&&silentLoopR.current.paused){
+          try{await silentLoopR.current.play();}catch(e){}
+        }
+        // Re-request wake lock if playing
+        if(playingR.current)requestWakeLock();
+      }
+    };
+    // iOS pageshow fires when returning from bfcache (app switch)
+    const onPageShow=async(e)=>{
+      if(e.persisted){
+        if(bell.current.ctx&&bell.current.ctx.state==="suspended"){
+          try{await bell.current.ctx.resume();}catch(e2){}
+        }
+        if(silentLoopR.current&&silentLoopR.current.paused){
+          try{await silentLoopR.current.play();}catch(e2){}
+        }
+      }
+    };
+    document.addEventListener("visibilitychange",onVisible);
+    window.addEventListener("pageshow",onPageShow);
+    return()=>{
+      document.removeEventListener("visibilitychange",onVisible);
+      window.removeEventListener("pageshow",onPageShow);
+    };
+  },[]);
+
+  // Keep a ref to playing state for use in event handlers
+  const playingR=useRef(false);
+  useEffect(()=>{playingR.current=playing;},[playing]);
+
+  const requestWakeLock=async()=>{
+    if(!("wakeLock" in navigator))return;
+    try{
+      if(wakeLockR.current)return; // already held
+      wakeLockR.current=await navigator.wakeLock.request("screen");
+      wakeLockR.current.addEventListener("release",()=>{wakeLockR.current=null;});
+    }catch(e){}
+  };
+  const releaseWakeLock=()=>{
+    if(wakeLockR.current){try{wakeLockR.current.release();}catch(e){}wakeLockR.current=null;}
+  };
 
   // Lock the interface against iOS sheet-dismiss swipe and long-press selection
   useEffect(()=>{

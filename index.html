@@ -926,6 +926,22 @@ function StepLane(_ref5) {
 }
 
 // ─── Bell / Synth engine ──────────────────────────────────────────────────────
+// ─── Silent audio loop for iOS WebKit audio session keep-alive ───────────────
+// A nearly-silent looping audio element prevents iOS from suspending Web Audio
+// when the page is backgrounded or the screen locks.
+function createSilentLoop() {
+  try {
+    // 1-second silent MP3 as data URI — minimal size, real audio format
+    // iOS requires actual audio playback (not just Web Audio) to maintain session
+    var SILENT_MP3 = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU2LjM2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV6urq6urq6urq6urq6urq6urq6urq6urq6ur///////////////////////////////////////////////8AAAAATGF2YzU2LjQxAAAAAAAAAAAAAAAAJAAAAAAAAAAAASDs90hvAAAAAAAAAAAAAAAAAAAA//MUZAAAAAGkAAAAAAAAA0gAAAAATEFN//MUZAMAAAGkAAAAAAAAA0gAAAAARTMu//MUZAYAAAGkAAAAAAAAA0gAAAAAOTku//MUZAkAAAGkAAAAAAAAA0gAAAAANVVV';
+    var audio = new Audio(SILENT_MP3);
+    audio.loop = true;
+    audio.volume = 0.001;
+    return audio;
+  } catch (e) {
+    return null;
+  }
+}
 var Bell = /*#__PURE__*/function () {
   function Bell() {
     _classCallCheck(this, Bell);
@@ -1865,6 +1881,8 @@ function Tabula() {
     setDlyLpVal = _useState118[1];
   var bell = useRef(new Bell());
   var drumEngine = useRef(new DrumEngine());
+  var silentLoopR = useRef(null);
+  var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat("A");
   var _useState119 = useState([initDrum]),
@@ -2577,11 +2595,11 @@ function Tabula() {
       _loop();
     }
   }, []);
-  var startStop = /*#__PURE__*/function () {
+  var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT;
+      var dlyT, _t4;
       return _regenerator().w(function (_context9) {
-        while (1) switch (_context9.n) {
+        while (1) switch (_context9.p = _context9.n) {
           case 0:
             if (!playing) {
               _context9.n = 1;
@@ -2597,6 +2615,13 @@ function Tabula() {
             lastGlideEnabledR.current = false;
             setRecMode(false);
             recModeR.current = false;
+            if (silentLoopR.current) {
+              try {
+                silentLoopR.current.pause();
+              } catch (e) {}
+            }
+            releaseWakeLock();
+            if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
             return _context9.a(2);
           case 1:
             dlyT = 60 / bpm * DLY_NOTES[dlyIdx].mult;
@@ -2621,15 +2646,59 @@ function Tabula() {
               chainR.current = [activeId];
               setChain([activeId]);
             }
+            // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
+            if (!silentLoopR.current) silentLoopR.current = createSilentLoop();
+            if (!silentLoopR.current) {
+              _context9.n = 9;
+              break;
+            }
+            _context9.p = 6;
+            _context9.n = 7;
+            return silentLoopR.current.play();
+          case 7:
+            _context9.n = 9;
+            break;
+          case 8:
+            _context9.p = 8;
+            _t4 = _context9.v;
+          case 9:
+            _context9.n = 10;
+            return requestWakeLock();
+          case 10:
+            // MediaSession — lock screen transport controls + registers as audio app
+            if ("mediaSession" in navigator) {
+              try {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                  title: "Tabula",
+                  artist: "Sequencer",
+                  album: "",
+                  artwork: [{
+                    src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%231a1814'/%3E%3Ctext x='48' y='64' text-anchor='middle' font-size='44' fill='%23c4a882' font-family='Georgia%2Cserif' font-weight='bold'%3ET%3C/text%3E%3C/svg%3E",
+                    sizes: "96x96",
+                    type: "image/svg+xml"
+                  }]
+                });
+                navigator.mediaSession.playbackState = "playing";
+                navigator.mediaSession.setActionHandler("play", function () {
+                  if (!playingR.current) _startStop();
+                });
+                navigator.mediaSession.setActionHandler("pause", function () {
+                  if (playingR.current) _startStop();
+                });
+                navigator.mediaSession.setActionHandler("stop", function () {
+                  if (playingR.current) _startStop();
+                });
+              } catch (e) {}
+            }
             stepR.current = 0;
             cposR.current = 0;
             nextNoteR.current = bell.current.ctx.currentTime + 0.05; // small initial offset
             tmrR.current = setInterval(scheduler, 25);
             setPlaying(true);
-          case 6:
+          case 11:
             return _context9.a(2);
         }
-      }, _callee9);
+      }, _callee9, null, [[6, 8]]);
     }));
     return function startStop() {
       return _ref11.apply(this, arguments);
@@ -2640,6 +2709,181 @@ function Tabula() {
       return clearInterval(tmrR.current);
     };
   }, []);
+
+  // ── iOS audio session + wake lock management ──────────────────────────────
+  useEffect(function () {
+    // Resume AudioContext and silent loop when page becomes visible
+    var onVisible = /*#__PURE__*/function () {
+      var _ref12 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0() {
+        var _t5, _t6, _t7;
+        return _regenerator().w(function (_context0) {
+          while (1) switch (_context0.p = _context0.n) {
+            case 0:
+              if (!(document.visibilityState === "visible")) {
+                _context0.n = 13;
+                break;
+              }
+              if (!(bell.current.ctx && bell.current.ctx.state === "suspended")) {
+                _context0.n = 4;
+                break;
+              }
+              _context0.p = 1;
+              _context0.n = 2;
+              return bell.current.ctx.resume();
+            case 2:
+              _context0.n = 4;
+              break;
+            case 3:
+              _context0.p = 3;
+              _t5 = _context0.v;
+            case 4:
+              if (!(drumEngine.current.ctx && drumEngine.current.ctx.state === "suspended")) {
+                _context0.n = 8;
+                break;
+              }
+              _context0.p = 5;
+              _context0.n = 6;
+              return drumEngine.current.ctx.resume();
+            case 6:
+              _context0.n = 8;
+              break;
+            case 7:
+              _context0.p = 7;
+              _t6 = _context0.v;
+            case 8:
+              if (!(silentLoopR.current && silentLoopR.current.paused)) {
+                _context0.n = 12;
+                break;
+              }
+              _context0.p = 9;
+              _context0.n = 10;
+              return silentLoopR.current.play();
+            case 10:
+              _context0.n = 12;
+              break;
+            case 11:
+              _context0.p = 11;
+              _t7 = _context0.v;
+            case 12:
+              // Re-request wake lock if playing
+              if (playingR.current) requestWakeLock();
+            case 13:
+              return _context0.a(2);
+          }
+        }, _callee0, null, [[9, 11], [5, 7], [1, 3]]);
+      }));
+      return function onVisible() {
+        return _ref12.apply(this, arguments);
+      };
+    }();
+    // iOS pageshow fires when returning from bfcache (app switch)
+    var onPageShow = /*#__PURE__*/function () {
+      var _ref13 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee1(e) {
+        var _t8, _t9;
+        return _regenerator().w(function (_context1) {
+          while (1) switch (_context1.p = _context1.n) {
+            case 0:
+              if (!e.persisted) {
+                _context1.n = 8;
+                break;
+              }
+              if (!(bell.current.ctx && bell.current.ctx.state === "suspended")) {
+                _context1.n = 4;
+                break;
+              }
+              _context1.p = 1;
+              _context1.n = 2;
+              return bell.current.ctx.resume();
+            case 2:
+              _context1.n = 4;
+              break;
+            case 3:
+              _context1.p = 3;
+              _t8 = _context1.v;
+            case 4:
+              if (!(silentLoopR.current && silentLoopR.current.paused)) {
+                _context1.n = 8;
+                break;
+              }
+              _context1.p = 5;
+              _context1.n = 6;
+              return silentLoopR.current.play();
+            case 6:
+              _context1.n = 8;
+              break;
+            case 7:
+              _context1.p = 7;
+              _t9 = _context1.v;
+            case 8:
+              return _context1.a(2);
+          }
+        }, _callee1, null, [[5, 7], [1, 3]]);
+      }));
+      return function onPageShow(_x1) {
+        return _ref13.apply(this, arguments);
+      };
+    }();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    return function () {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
+
+  // Keep a ref to playing state for use in event handlers
+  var playingR = useRef(false);
+  useEffect(function () {
+    playingR.current = playing;
+  }, [playing]);
+  var requestWakeLock = /*#__PURE__*/function () {
+    var _ref14 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10() {
+      var _t0;
+      return _regenerator().w(function (_context10) {
+        while (1) switch (_context10.p = _context10.n) {
+          case 0:
+            if ("wakeLock" in navigator) {
+              _context10.n = 1;
+              break;
+            }
+            return _context10.a(2);
+          case 1:
+            _context10.p = 1;
+            if (!wakeLockR.current) {
+              _context10.n = 2;
+              break;
+            }
+            return _context10.a(2);
+          case 2:
+            _context10.n = 3;
+            return navigator.wakeLock.request("screen");
+          case 3:
+            wakeLockR.current = _context10.v;
+            wakeLockR.current.addEventListener("release", function () {
+              wakeLockR.current = null;
+            });
+            _context10.n = 5;
+            break;
+          case 4:
+            _context10.p = 4;
+            _t0 = _context10.v;
+          case 5:
+            return _context10.a(2);
+        }
+      }, _callee10, null, [[1, 4]]);
+    }));
+    return function requestWakeLock() {
+      return _ref14.apply(this, arguments);
+    };
+  }();
+  var releaseWakeLock = function releaseWakeLock() {
+    if (wakeLockR.current) {
+      try {
+        wakeLockR.current.release();
+      } catch (e) {}
+      wakeLockR.current = null;
+    }
+  };
 
   // Lock the interface against iOS sheet-dismiss swipe and long-press selection
   useEffect(function () {
@@ -3839,9 +4083,9 @@ function Tabula() {
     if (j < 0 || j >= chain.length) return;
     setChain(function (c) {
       var n = _toConsumableArray(c);
-      var _ref12 = [n[j], n[i]];
-      n[i] = _ref12[0];
-      n[j] = _ref12[1];
+      var _ref15 = [n[j], n[i]];
+      n[i] = _ref15[0];
+      n[j] = _ref15[1];
       return n;
     });
   };
@@ -4338,12 +4582,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref13) {
-      var _ref14 = _slicedToArray(_ref13, 4),
-        label = _ref14[0],
-        fn = _ref14[1],
-        disabled = _ref14[2],
-        danger = _ref14[3];
+    }, isOnlyPat, true]].map(function (_ref16) {
+      var _ref17 = _slicedToArray(_ref16, 4),
+        label = _ref17[0],
+        fn = _ref17[1],
+        disabled = _ref17[2],
+        danger = _ref17[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -4449,10 +4693,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref15) {
-    var _ref16 = _slicedToArray(_ref15, 2),
-      k = _ref16[0],
-      v = _ref16[1];
+  }, Object.entries(SCALES).map(function (_ref18) {
+    var _ref19 = _slicedToArray(_ref18, 2),
+      k = _ref19[0],
+      v = _ref19[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -4464,9 +4708,9 @@ function Tabula() {
       gap: 3,
       marginBottom: winW > 900 ? 8 : 4
     }
-  }, SPEED_OPTS.map(function (_ref17) {
-    var label = _ref17.label,
-      mult = _ref17.mult;
+  }, SPEED_OPTS.map(function (_ref20) {
+    var label = _ref20.label,
+      mult = _ref20.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, {
@@ -4662,11 +4906,11 @@ function Tabula() {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["MONO", toggleMono, false, false]].map(function (_ref18) {
-      var _ref19 = _slicedToArray(_ref18, 3),
-        l = _ref19[0],
-        f = _ref19[1],
-        d = _ref19[2];
+    }, false, false], ["MONO", toggleMono, false, false]].map(function (_ref21) {
+      var _ref22 = _slicedToArray(_ref21, 3),
+        l = _ref22[0],
+        f = _ref22[1],
+        d = _ref22[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         style: {
@@ -4696,12 +4940,12 @@ function Tabula() {
       return dupPatId(targetId);
     }, pats.length >= 8, false], ["DEL", function () {
       return delPatId(targetId);
-    }, isOnlyPat, true]].map(function (_ref20) {
-      var _ref21 = _slicedToArray(_ref20, 4),
-        l = _ref21[0],
-        f = _ref21[1],
-        d = _ref21[2],
-        danger = _ref21[3];
+    }, isOnlyPat, true]].map(function (_ref23) {
+      var _ref24 = _slicedToArray(_ref23, 4),
+        l = _ref24[0],
+        f = _ref24[1],
+        d = _ref24[2],
+        danger = _ref24[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -4733,11 +4977,11 @@ function Tabula() {
         gridTemplateColumns: "repeat(3,1fr)",
         gap: 2
       }
-    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["─", null, true, false]].map(function (_ref22) {
-      var _ref23 = _slicedToArray(_ref22, 3),
-        l = _ref23[0],
-        f = _ref23[1],
-        d = _ref23[2];
+    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["─", null, true, false]].map(function (_ref25) {
+      var _ref26 = _slicedToArray(_ref25, 3),
+        l = _ref26[0],
+        f = _ref26[1],
+        d = _ref26[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -4760,12 +5004,12 @@ function Tabula() {
         gridTemplateColumns: "repeat(4,1fr)",
         gap: 2
       }
-    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref24) {
-      var _ref25 = _slicedToArray(_ref24, 4),
-        l = _ref25[0],
-        f = _ref25[1],
-        d = _ref25[2],
-        danger = _ref25[3];
+    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref27) {
+      var _ref28 = _slicedToArray(_ref27, 4),
+        l = _ref28[0],
+        f = _ref28[1],
+        d = _ref28[2],
+        danger = _ref28[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -5818,11 +6062,11 @@ function Tabula() {
     }) || drumPats[0];
     var vRhythm = (dPat === null || dPat === void 0 ? void 0 : dPat.vRhythm) || 0;
     var vVelocity = (dPat === null || dPat === void 0 ? void 0 : dPat.vVelocity) || 0;
-    var SliderRow = function SliderRow(_ref26) {
-      var label = _ref26.label,
-        value = _ref26.value,
-        onChange = _ref26.onChange,
-        accent = _ref26.accent;
+    var SliderRow = function SliderRow(_ref29) {
+      var label = _ref29.label,
+        value = _ref29.value,
+        onChange = _ref29.onChange,
+        accent = _ref29.accent;
       return /*#__PURE__*/React.createElement("div", {
         style: {
           marginBottom: 16
@@ -6378,10 +6622,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref27) {
-    var _ref28 = _slicedToArray(_ref27, 2),
-      p = _ref28[0],
-      lbl = _ref28[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref30) {
+    var _ref31 = _slicedToArray(_ref30, 2),
+      p = _ref31[0],
+      lbl = _ref31[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -6431,7 +6675,7 @@ function Tabula() {
       height: 44,
       fontSize: 16
     }, playing ? S.playOn : {}),
-    onClick: startStop
+    onClick: _startStop
   }, playing ? /*#__PURE__*/React.createElement("svg", {
     width: "11",
     height: "11",
@@ -7107,7 +7351,7 @@ function Tabula() {
       height: 44,
       flexShrink: 0
     }, playing ? S.playOn : {}),
-    onClick: startStop
+    onClick: _startStop
   }, playing ? /*#__PURE__*/React.createElement("svg", {
     width: "11",
     height: "11",
@@ -7192,10 +7436,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref29) {
-    var _ref30 = _slicedToArray(_ref29, 2),
-      k = _ref30[0],
-      v = _ref30[1];
+  }, Object.entries(SCALES).map(function (_ref32) {
+    var _ref33 = _slicedToArray(_ref32, 2),
+      k = _ref33[0],
+      v = _ref33[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -7247,9 +7491,9 @@ function Tabula() {
     style: S.widgetU
   }, "SWG"))), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref31) {
-    var label = _ref31.label,
-      mult = _ref31.mult;
+  }, SPEED_OPTS.map(function (_ref34) {
+    var label = _ref34.label,
+      mult = _ref34.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -7351,13 +7595,13 @@ function Tabula() {
     return copyPatId(activeId);
   }], ["PST", function () {
     return pastePatId(activeId);
-  }, !clipboard], ["MONO", toggleMono, false, false, monoMode]].map(function (_ref32) {
-    var _ref33 = _slicedToArray(_ref32, 5),
-      l = _ref33[0],
-      f = _ref33[1],
-      d = _ref33[2],
-      danger = _ref33[3],
-      active = _ref33[4];
+  }, !clipboard], ["MONO", toggleMono, false, false, monoMode]].map(function (_ref35) {
+    var _ref36 = _slicedToArray(_ref35, 5),
+      l = _ref36[0],
+      f = _ref36[1],
+      d = _ref36[2],
+      danger = _ref36[3],
+      active = _ref36[4];
     return /*#__PURE__*/React.createElement("button", {
       key: l,
       disabled: !!d,
@@ -7451,12 +7695,12 @@ function Tabula() {
       gridTemplateColumns: "repeat(4,1fr)",
       gap: 5
     }
-  }, [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref34) {
-    var _ref35 = _slicedToArray(_ref34, 4),
-      l = _ref35[0],
-      f = _ref35[1],
-      d = _ref35[2],
-      danger = _ref35[3];
+  }, [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref37) {
+    var _ref38 = _slicedToArray(_ref37, 4),
+      l = _ref38[0],
+      f = _ref38[1],
+      d = _ref38[2],
+      danger = _ref38[3];
     return /*#__PURE__*/React.createElement("button", {
       key: l,
       disabled: !!d,
@@ -7658,10 +7902,10 @@ function Tabula() {
       gap: 4,
       marginBottom: 12
     }
-  }, [["step", "STEP"], ["sound", "SOUND"]].map(function (_ref36) {
-    var _ref37 = _slicedToArray(_ref36, 2),
-      p = _ref37[0],
-      lbl = _ref37[1];
+  }, [["step", "STEP"], ["sound", "SOUND"]].map(function (_ref39) {
+    var _ref40 = _slicedToArray(_ref39, 2),
+      p = _ref40[0],
+      lbl = _ref40[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, {
@@ -8304,12 +8548,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref38) {
-      var _ref39 = _slicedToArray(_ref38, 4),
-        label = _ref39[0],
-        fn = _ref39[1],
-        disabled = _ref39[2],
-        danger = _ref39[3];
+    }, isOnlyPat, true]].map(function (_ref41) {
+      var _ref42 = _slicedToArray(_ref41, 4),
+        label = _ref42[0],
+        fn = _ref42[1],
+        disabled = _ref42[2],
+        danger = _ref42[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -8393,12 +8637,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref40) {
-      var _ref41 = _slicedToArray(_ref40, 4),
-        label = _ref41[0],
-        fn = _ref41[1],
-        disabled = _ref41[2],
-        danger = _ref41[3];
+    }, isOnly, true]].map(function (_ref43) {
+      var _ref44 = _slicedToArray(_ref43, 4),
+        label = _ref44[0],
+        fn = _ref44[1],
+        disabled = _ref44[2],
+        danger = _ref44[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
