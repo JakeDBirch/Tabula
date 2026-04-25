@@ -2202,7 +2202,13 @@ function Tabula() {
               vDurJitter: vDurJitter,
               drumPats: drumPats,
               activeDrumId: activeDrumId,
-              drumChain: drumChain
+              drumChain: drumChain,
+              synthPhrases: synthPhrases,
+              drumPhrases: drumPhrases,
+              sections: sections,
+              activeSynthPhraseId: activeSynthPhraseId,
+              activeDrumPhraseId: activeDrumPhraseId,
+              activeSectionId: activeSectionId
             };
             next = Object.assign({}, slotData, _defineProperty({}, slot, snap));
             setSlotData(next);
@@ -2246,6 +2252,12 @@ function Tabula() {
     if (s.drumPats) setDrumPats(s.drumPats);
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
     if (s.drumChain) setDrumChain(s.drumChain);
+    if (s.synthPhrases) setSynthPhrases(s.synthPhrases);
+    if (s.drumPhrases) setDrumPhrases(s.drumPhrases);
+    if (s.sections) setSections(s.sections);
+    if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
+    if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
+    if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
     showFlash("LOADED " + slot);
   };
   var saveSlot = function saveSlot(slot) {
@@ -2366,7 +2378,14 @@ function Tabula() {
       loopMode: loopMode,
       varyMode: varyMode,
       drumPats: drumPats,
-      activeDrumId: activeDrumId
+      activeDrumId: activeDrumId,
+      drumChain: drumChain,
+      synthPhrases: synthPhrases,
+      drumPhrases: drumPhrases,
+      sections: sections,
+      activeSynthPhraseId: activeSynthPhraseId,
+      activeDrumPhraseId: activeDrumPhraseId,
+      activeSectionId: activeSectionId
     };
   };
   var applyShareState = function applyShareState(s) {
@@ -2390,6 +2409,12 @@ function Tabula() {
     if (s.drumPats) setDrumPats(s.drumPats);
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
     if (s.drumChain) setDrumChain(s.drumChain);
+    if (s.synthPhrases) setSynthPhrases(s.synthPhrases);
+    if (s.drumPhrases) setDrumPhrases(s.drumPhrases);
+    if (s.sections) setSections(s.sections);
+    if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
+    if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
+    if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
     [["detune", setDetune], ["attack", setAttack], ["decay", setDecay], ["sustain", setSustain], ["vcfCutoff", setVcfCutoff], ["vcfRes", setVcfRes], ["filterEnvAmt", setFilterEnvAmt], ["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyWetPct", setDlyWetPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref1) {
       var _ref10 = _slicedToArray(_ref1, 2),
         k = _ref10[0],

@@ -862,7 +862,7 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const doSave=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -884,6 +884,12 @@ export default function Tabula(){
     if(s.drumPats)setDrumPats(s.drumPats);
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(s.drumChain);
+    if(s.synthPhrases)setSynthPhrases(s.synthPhrases);
+    if(s.drumPhrases)setDrumPhrases(s.drumPhrases);
+    if(s.sections)setSections(s.sections);
+    if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
+    if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
+    if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
     showFlash("LOADED "+slot);
   };
   const saveSlot=slot=>{
@@ -929,7 +935,8 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,varyMode,drumPats,activeDrumId
+    loopMode,varyMode,drumPats,activeDrumId,drumChain,
+    synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId
   });
 
   const applyShareState=s=>{
@@ -950,6 +957,12 @@ export default function Tabula(){
     if(s.drumPats)setDrumPats(s.drumPats);
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(s.drumChain);
+    if(s.synthPhrases)setSynthPhrases(s.synthPhrases);
+    if(s.drumPhrases)setDrumPhrases(s.drumPhrases);
+    if(s.sections)setSections(s.sections);
+    if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
+    if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
+    if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
