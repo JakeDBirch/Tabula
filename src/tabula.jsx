@@ -2594,7 +2594,7 @@ function TabulaInner(){
                                 background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.12)":isQ?"rgba(220,200,180,0.04)":"rgba(220,200,180,0.025)",
                                 border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:isQ?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.06)"),
                                 boxShadow:on&&isActive?"0 0 5px "+voice.color:"none",
-                              }} onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
+                              }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
                             })}
                           </div>
                         );
@@ -2886,7 +2886,7 @@ function TabulaInner(){
 
             {/* DRUMS EDIT grid */}
             {activeLayer==="drums"&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"row",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box",overflow:"hidden",gap:6}}>
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"row",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box",gap:6}}>
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
@@ -2896,7 +2896,7 @@ function TabulaInner(){
                   const H="min(calc(100dvh - 120px), calc(100vw * 1.35))";
                   return(<>
                     {/* Portrait grid */}
-                    <div style={{height:H,aspectRatio:"8/16",display:"flex",flexDirection:"column",gap:GAP,flexShrink:0}}>
+                    <div style={{height:H,aspectRatio:"8/16",display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
                       {/* Voice labels */}
                       <div style={{display:"flex",gap:GAP,flexShrink:0}}>
                         {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,textAlign:"center",fontSize:7,fontWeight:700,color:v.color+"cc",letterSpacing:0.3}}>{v.label}</div>))}
@@ -2915,7 +2915,7 @@ function TabulaInner(){
                                   background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
                                   border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
                                   boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
-                                }} onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
+                                }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
                               })}
                             </div>
                           );
@@ -2923,7 +2923,7 @@ function TabulaInner(){
                       </div>
                     </div>
                     {/* Vertical length slider */}
-                    <div style={{width:10,height:H,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ns-resize",flexShrink:0}}
+                    <div style={{width:10,height:H,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}
                       onPointerDown={e=>{
                         e.stopPropagation();
                         const rect=e.currentTarget.getBoundingClientRect();
@@ -3367,6 +3367,8 @@ const S={
   stepLaneName: {fontSize:IS_MOBILE?9:12,fontWeight:700,letterSpacing:1,minWidth:32},
   stepLiveVal:  {fontSize:13,fontWeight:700,letterSpacing:1,minWidth:36,textAlign:"right"},
   stepLaneBtn:  {padding:"5px 10px",border:"1px solid",background:"transparent",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
+  gridWrap:     {position:"relative",touchAction:"none",userSelect:"none",WebkitUserSelect:"none"},
+  gridShifting: {cursor:"grabbing"},
 };
 
 export default function Tabula(){
