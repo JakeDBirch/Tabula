@@ -191,8 +191,7 @@ var mkPat = function mkPat(name) {
     name: name,
     grid: mkGrid(),
     params: defaultStepParams(),
-    gridLen: 16,
-    mono: false
+    gridLen: 16
   };
 };
 // ─── Drum layer ───────────────────────────────────────────────────────────────
@@ -770,6 +769,7 @@ function StepLane(_ref5) {
     values = _ref5.values,
     activeStep = _ref5.activeStep,
     onChange = _ref5.onChange,
+    onDragStart = _ref5.onDragStart,
     tall = _ref5.tall,
     colHasNote = _ref5.colHasNote;
   var ref = useRef(null);
@@ -813,6 +813,7 @@ function StepLane(_ref5) {
         onPointerDown: function onPointerDown(e) {
           e.stopPropagation();
           if (locked) return;
+          onDragStart && onDragStart();
           onChange(c, on ? 0 : 1);
         }
       }, /*#__PURE__*/React.createElement("div", {
@@ -845,8 +846,9 @@ function StepLane(_ref5) {
       col = _getCV.col,
       val = _getCV.val;
     if (colHasNote && !colHasNote[col]) return;
+    onDragStart && onDragStart();
     onChange(col, val);
-  }, [getCV, onChange, lane, values, colHasNote]);
+  }, [getCV, onChange, lane, values, colHasNote, onDragStart]);
   var onMove = useCallback(function (e) {
     if (!drag.current.active) return;
     e.stopPropagation();
@@ -1592,7 +1594,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _pats$find, _activePat$gridLen, _pats$find2, _drumPats$find2;
+  var _activePat$gridLen, _pats$find, _drumPats$find2;
   var _useState = useState(function () {
       var a = mkPat("A");
       return [a];
@@ -1615,7 +1617,7 @@ function Tabula() {
   var _useState9 = useState("synth"),
     _useState0 = _slicedToArray(_useState9, 2),
     activeLayer = _useState0[0],
-    setActiveLayer = _useState0[1]; // "synth" | "drums"
+    setActiveLayer = _useState0[1]; // "synth" | "lead" | "bass" | "drums"
   var _useState1 = useState(120),
     _useState10 = _slicedToArray(_useState1, 2),
     bpm = _useState10[0],
@@ -1725,11 +1727,6 @@ function Tabula() {
     _useState50 = _slicedToArray(_useState49, 2),
     recMode = _useState50[0],
     setRecMode = _useState50[1];
-  // mono is per-pattern — derived from active pattern
-  var monoMode = !!((_pats$find = pats.find(function (p) {
-    return p.id === activeId;
-  })) !== null && _pats$find !== void 0 && _pats$find.mono);
-  var monoModeR = useRef(false);
   var _useState51 = useState(0),
     _useState52 = _slicedToArray(_useState51, 2),
     swing = _useState52[0],
@@ -1960,6 +1957,66 @@ function Tabula() {
     _useState146 = _slicedToArray(_useState145, 2),
     seqTab = _useState146[0],
     setSeqTab = _useState146[1]; // "patterns"|"phrases"|"sections"
+  // ── Multi-voice layer store: lead and bass synth layers held in a ref ─────
+  // Synth-type layers (synth, lead, bass) share the editing UI by swapping
+  // their data in/out of the live state on layer switch. Each layer has its
+  // own pats array, active pattern, phrases, and active phrase.
+  var _initLeadPat = mkPat("A");
+  var _initBassPat = mkPat("A");
+  var layerStoreR = useRef({
+    synth: null,
+    // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
+    lead: {
+      pats: [_initLeadPat],
+      activeId: _initLeadPat.id,
+      phrases: [{
+        id: "LP1",
+        name: "1",
+        chain: [_initLeadPat.id]
+      }],
+      activePhraseId: "LP1"
+    },
+    bass: {
+      pats: [_initBassPat],
+      activeId: _initBassPat.id,
+      phrases: [{
+        id: "BP1",
+        name: "1",
+        chain: [_initBassPat.id]
+      }],
+      activePhraseId: "BP1"
+    }
+  });
+  var activeLayerR = useRef("synth");
+  useEffect(function () {
+    activeLayerR.current = activeLayer;
+  }, [activeLayer]);
+  var SYNTH_LAYERS = ["synth", "lead", "bass"];
+  var switchLayer = function switchLayer(newLayer) {
+    if (newLayer === activeLayer) return;
+    var oldIsSynth = SYNTH_LAYERS.indexOf(activeLayer) >= 0;
+    var newIsSynth = SYNTH_LAYERS.indexOf(newLayer) >= 0;
+    // Save old synth-type layer state
+    if (oldIsSynth) {
+      layerStoreR.current[activeLayer] = {
+        pats: pats,
+        activeId: activeId,
+        phrases: synthPhrases,
+        activePhraseId: activeSynthPhraseId
+      };
+    }
+    // Load new synth-type layer state
+    if (newIsSynth) {
+      var data = layerStoreR.current[newLayer];
+      if (data) {
+        setPats(data.pats);
+        setActiveId(data.activeId);
+        setSynthPhrases(data.phrases);
+        setActiveSynthPhraseId(data.activePhraseId);
+      }
+    }
+    setActiveLayer(newLayer);
+  };
   var _useState147 = useState("sequence"),
     _useState148 = _slicedToArray(_useState147, 2),
     seqPage = _useState148[0],
@@ -2065,9 +2122,6 @@ function Tabula() {
     else recSourceIdR.current = null;
   }, [recMode]);
   useEffect(function () {
-    monoModeR.current = monoMode;
-  }, [monoMode]);
-  useEffect(function () {
     swingR.current = swing;
   }, [swing]);
   useEffect(function () {
@@ -2169,6 +2223,16 @@ function Tabula() {
     return null;
   });
   captureSnapshotR.current = function () {
+    // Build layer store snapshot: include current synth-type layer's live data
+    var liveLayerStore = _objectSpread({}, layerStoreR.current);
+    if (SYNTH_LAYERS.indexOf(activeLayer) >= 0) {
+      liveLayerStore[activeLayer] = {
+        pats: pats,
+        activeId: activeId,
+        phrases: synthPhrases,
+        activePhraseId: activeSynthPhraseId
+      };
+    }
     return {
       pats: JSON.parse(JSON.stringify(pats)),
       drumPats: JSON.parse(JSON.stringify(drumPats)),
@@ -2182,6 +2246,8 @@ function Tabula() {
       activeSynthPhraseId: activeSynthPhraseId,
       activeDrumPhraseId: activeDrumPhraseId,
       activeSectionId: activeSectionId,
+      activeLayer: activeLayer,
+      layerStore: JSON.parse(JSON.stringify(liveLayerStore)),
       bpm: bpm,
       scale: scale,
       transpose: transpose,
@@ -2217,6 +2283,16 @@ function Tabula() {
   };
   var applySnapshot = function applySnapshot(s) {
     if (!s) return;
+    if (s.layerStore) {
+      // Restore non-active layers to the store
+      for (var _i = 0, _SYNTH_LAYERS = SYNTH_LAYERS; _i < _SYNTH_LAYERS.length; _i++) {
+        var layer = _SYNTH_LAYERS[_i];
+        if (s.layerStore[layer] && layer !== (s.activeLayer || activeLayer)) {
+          layerStoreR.current[layer] = JSON.parse(JSON.stringify(s.layerStore[layer]));
+        }
+      }
+    }
+    if (s.activeLayer && s.activeLayer !== activeLayer) setActiveLayer(s.activeLayer);
     setPats(s.pats);
     setDrumPats(s.drumPats);
     setChain(s.chain);
@@ -2314,10 +2390,19 @@ function Tabula() {
   });
   var doSave = /*#__PURE__*/function () {
     var _ref8 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee8(slot) {
-      var snap, next;
+      var liveLayerStore, snap, next;
       return _regenerator().w(function (_context8) {
         while (1) switch (_context8.n) {
           case 0:
+            liveLayerStore = _objectSpread({}, layerStoreR.current);
+            if (SYNTH_LAYERS.indexOf(activeLayer) >= 0) {
+              liveLayerStore[activeLayer] = {
+                pats: pats,
+                activeId: activeId,
+                phrases: synthPhrases,
+                activePhraseId: activeSynthPhraseId
+              };
+            }
             snap = {
               pats: pats,
               chain: chain,
@@ -2327,6 +2412,8 @@ function Tabula() {
               swing: swing,
               speedMult: speedMult,
               activeId: activeId,
+              activeLayer: activeLayer,
+              layerStore: liveLayerStore,
               waveform: waveform,
               detune: detune,
               attack: attack,
@@ -2383,6 +2470,13 @@ function Tabula() {
   var doLoad = function doLoad(slot) {
     var s = slotData[slot];
     if (!s) return;
+    if (s.layerStore) {
+      for (var _i2 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS2.length; _i2++) {
+        var layer = _SYNTH_LAYERS2[_i2];
+        if (s.layerStore[layer]) layerStoreR.current[layer] = JSON.parse(JSON.stringify(s.layerStore[layer]));
+      }
+    }
+    if (s.activeLayer) setActiveLayer(s.activeLayer);
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(s.pats.map(function (p) {
       return p.id;
     }))));
@@ -2663,25 +2757,12 @@ function Tabula() {
         var cp = cposR.current,
           s = s_,
           pid = ch[cp];
-        var _p = patsR.current.find(function (x) {
+        var p = patsR.current.find(function (x) {
           return x.id === pid;
         });
-        var activeLen = _p ? (_p$gridLen = _p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
-        if (s === 0 && varyModeR.current && _p) {
-          var vg = genVariation(_p.grid, varyParamsR.current);
-          if (_p !== null && _p !== void 0 && _p.mono) {
-            var out = Array.from({
-              length: ROWS
-            }, function () {
-              return new Array(COLS).fill(false);
-            });
-            for (var c = 0; c < COLS; c++) {
-              var hits = [];
-              for (var r = 0; r < ROWS; r++) if (vg[r][c]) hits.push(r);
-              if (hits.length) out[hits[Math.floor(Math.random() * hits.length)]][c] = true;
-            }
-            vg = out;
-          }
+        var activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
+        if (s === 0 && varyModeR.current && p) {
+          var vg = genVariation(p.grid, varyParamsR.current);
           variedGrids.current.set(pid, vg);
           // Self-record: always vary the original source pattern, not the current playing one
           if (recModeR.current && patsR.current.length < 8) {
@@ -2689,21 +2770,8 @@ function Tabula() {
             var vp = varyParamsR.current;
             var src = patsR.current.find(function (x) {
               return x.id === recSourceIdR.current;
-            }) || _p;
+            }) || p;
             var rvg = genVariation(src.grid, vp);
-            if (src !== null && src !== void 0 && src.mono) {
-              var _out = Array.from({
-                length: ROWS
-              }, function () {
-                return new Array(COLS).fill(false);
-              });
-              for (var _c = 0; _c < COLS; _c++) {
-                var _hits = [];
-                for (var _r = 0; _r < ROWS; _r++) if (rvg[_r][_c]) _hits.push(_r);
-                if (_hits.length) _out[_hits[Math.floor(Math.random() * _hits.length)]][_c] = true;
-              }
-              rvg = _out;
-            }
             var newParams = (src.params || defaultStepParams()).map(function (sp) {
               return jitterStepParam(sp, vp);
             });
@@ -2727,10 +2795,10 @@ function Tabula() {
             });
           }
         }
-        var grid = varyModeR.current ? variedGrids.current.get(pid) || _p && _p.grid : _p && _p.grid;
+        var grid = varyModeR.current ? variedGrids.current.get(pid) || p && p.grid : p && p.grid;
         var freqs = SCALES[scaleR.current].freqs;
         var ratio = stR(transpR.current);
-        var rawSp = _p && _p.params && _p.params[s] ? _p.params[s] : null;
+        var rawSp = p && p.params && p.params[s] ? p.params[s] : null;
         var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
         var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
         var ratch = rhy;
@@ -2739,21 +2807,21 @@ function Tabula() {
 
         // Non-tie step: look ahead for consecutive tied steps and extend duration
         var noteDur = stepDur;
-        if (!isTie && _p && _p.params) {
+        if (!isTie && p && p.params) {
           var ts = (s + 1) % COLS,
             count = 0;
-          while (count < COLS - 1 && _p.params[ts] && Math.round((_p$params$ts$rhy = _p.params[ts].rhy) !== null && _p$params$ts$rhy !== void 0 ? _p$params$ts$rhy : 1) === 0) {
+          while (count < COLS - 1 && p.params[ts] && Math.round((_p$params$ts$rhy = p.params[ts].rhy) !== null && _p$params$ts$rhy !== void 0 ? _p$params$ts$rhy : 1) === 0) {
             var _p$params$ts$rhy;
             noteDur += stepDur;
             ts = (ts + 1) % COLS;
             count++;
           }
         }
-        if (grid) for (var _r2 = 0; _r2 < ROWS; _r2++) {
+        if (grid) for (var r = 0; r < ROWS; r++) {
           var _lastPlayedFreqR$curr;
-          if (!grid[_r2][s]) continue;
+          if (!grid[r][s]) continue;
           if (isTie) continue;
-          var f = freqs[_r2] * ratio;
+          var f = freqs[r] * ratio;
           var octShift = sp ? sp.oct - 2 : 0;
           var actualF = f * Math.pow(2, octShift);
           var hasGlide = !!(sp && sp.glide);
@@ -2768,6 +2836,56 @@ function Tabula() {
           } else {
             bell.current.play(f, at, sp, noteDur, dlyWetPctR.current, prevF, glideTime);
           }
+        }
+        // Lead & Bass — play their currently-active pattern through the same Bell
+        var _loop2 = function _loop2() {
+            var _lp$gridLen, _lSp$rhy;
+            var layer = _arr[_i3];
+            var lData = activeLayerR.current === layer ? {
+              pats: patsR.current,
+              activeId: activeIdR.current
+            } : layerStoreR.current[layer];
+            if (!lData) return 0; // continue
+            var lp = lData.pats.find(function (x) {
+              return x.id === lData.activeId;
+            });
+            if (!lp || !lp.grid) return 0; // continue
+            var lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
+            var ls = s % lLen;
+            var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
+            var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
+            var lRhy = lSp ? Math.max(1, Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1)) : 1;
+            if (lRhy === 0) return 0; // continue
+            // tied step
+            var lSubDur = stepDur / lRhy;
+            var lNoteDur = stepDur;
+            if (lp.params) {
+              var _ts = (ls + 1) % COLS,
+                _count = 0;
+              while (_count < COLS - 1 && lp.params[_ts] && Math.round((_lp$params$_ts$rhy = lp.params[_ts].rhy) !== null && _lp$params$_ts$rhy !== void 0 ? _lp$params$_ts$rhy : 1) === 0) {
+                var _lp$params$_ts$rhy;
+                lNoteDur += stepDur;
+                _ts = (_ts + 1) % COLS;
+                _count++;
+              }
+            }
+            for (var _r = 0; _r < ROWS; _r++) {
+              if (!lp.grid[_r][ls]) continue;
+              var lOctShift = lSp ? lSp.oct - 2 : 0;
+              // Bass auto-octave: -1 octave default to differentiate
+              var layerOct = layer === "bass" ? -1 : 0;
+              var lF = freqs[_r] * ratio * Math.pow(2, layerOct);
+              if (lRhy > 1) {
+                for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF * Math.pow(2, lOctShift), at + _ri * lSubDur, lSp, lSubDur * 0.9, dlyWetPctR.current, null, 0);
+              } else {
+                bell.current.play(lF * Math.pow(2, lOctShift), at, lSp, lNoteDur, dlyWetPctR.current, null, 0);
+              }
+            }
+          },
+          _ret;
+        for (var _i3 = 0, _arr = ["lead", "bass"]; _i3 < _arr.length; _i3++) {
+          _ret = _loop2();
+          if (_ret === 0) continue;
         }
         // Drum layer — uses drumChain for sequencing
         if (drumEngine.current.ready) {
@@ -2809,15 +2927,15 @@ function Tabula() {
             }
             var useGrid = varyModeR.current ? variedDrumGrids.current.get(dPat.id) || dPat.grid : dPat.grid;
             var useVel = varyModeR.current ? variedDrumVels.current.get(dPat.id) || dPat.vel : dPat.vel;
-            for (var _r3 = 0; _r3 < DRUM_ROWS; _r3++) {
-              if (useGrid[_r3] && useGrid[_r3][ds]) {
+            for (var _r2 = 0; _r2 < DRUM_ROWS; _r2++) {
+              if (useGrid[_r2] && useGrid[_r2][ds]) {
                 var _useVel$ds;
                 var dVel = (_useVel$ds = useVel === null || useVel === void 0 ? void 0 : useVel[ds]) !== null && _useVel$ds !== void 0 ? _useVel$ds : 100;
-                var dMix = (dPat.mix || defaultDrumMix())[_r3] || {
+                var dMix = (dPat.mix || defaultDrumMix())[_r2] || {
                   level: 100,
                   pan: 0
                 };
-                drumEngine.current.play(DRUM_VOICES[_r3].key, at, dVel, dMix.level, dMix.pan);
+                drumEngine.current.play(DRUM_VOICES[_r2].key, at, dVel, dMix.level, dMix.pan);
               }
             }
             setDrumStep(ds);
@@ -3256,26 +3374,180 @@ function Tabula() {
     }
     return out;
   };
-  var toggleMono = function toggleMono() {
+  var mutatePat1 = function mutatePat1() {
+    pushHistory();
+    return mutatePat(function (g) {
+      var varied = genVariation(g, varyParamsR.current);
+      return varied;
+    });
+  };
+
+  // ── Octave Rectify ──────────────────────────────────────────────────────
+  // Collapse oct step-param mods onto the grid where possible.
+  // Each scale has 7 rows/octave (SCALE_SPAN). Shifting a note by 7 grid rows
+  // is musically equivalent to shifting its oct param by ±1. This tries to
+  // maximize the number of columns where oct=0 (unmodified), optionally
+  // applying a global octave offset that benefits the whole pattern.
+  var rectifyOctaves = function rectifyOctaves() {
     pushHistory();
     setPats(function (ps) {
       return ps.map(function (p) {
         if (p.id !== activeId) return p;
-        var next = !p.mono;
-        var grid = next ? collapseToMono(p.grid) : p.grid;
+        var OCT = SCALE_SPAN; // 7 rows per octave
+        var cols = [];
+        for (var c = 0; c < COLS; c++) {
+          var rows = [];
+          for (var r = 0; r < ROWS; r++) if (p.grid[r][c]) rows.push(r);
+          var oct = (p.params && p.params[c] ? p.params[c].oct : 2) - 2;
+          cols.push({
+            c: c,
+            rows: rows,
+            oct: oct
+          });
+        }
+        var colsAbs = cols.map(function (col) {
+          return _objectSpread(_objectSpread({}, col), {}, {
+            abs: col.rows.map(function (r) {
+              return r + col.oct * OCT;
+            })
+          });
+        });
+        var bestShift = 0,
+          bestUnmodified = -1;
+        var _loop3 = function _loop3() {
+          var gs = go * OCT;
+          var unmodified = 0;
+          var _iterator6 = _createForOfIteratorHelper(colsAbs),
+            _step6;
+          try {
+            for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+              var col = _step6.value;
+              if (col.abs.length === 0) {
+                unmodified++;
+                continue;
+              }
+              var shifted = col.abs.map(function (a) {
+                return a + gs;
+              });
+              if (shifted.every(function (s) {
+                return s >= 0 && s < ROWS;
+              })) unmodified++;
+            }
+          } catch (err) {
+            _iterator6.e(err);
+          } finally {
+            _iterator6.f();
+          }
+          if (unmodified > bestUnmodified) {
+            bestUnmodified = unmodified;
+            bestShift = gs;
+          }
+        };
+        for (var go = -2; go <= 2; go++) {
+          _loop3();
+        }
+        var newGrid = Array.from({
+          length: ROWS
+        }, function () {
+          return new Array(COLS).fill(false);
+        });
+        var baseParams = p.params || defaultStepParams();
+        var newParams = baseParams.map(function (sp) {
+          return _objectSpread({}, sp);
+        });
+        var _iterator5 = _createForOfIteratorHelper(colsAbs),
+          _step5;
+        try {
+          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+            var col = _step5.value;
+            if (col.abs.length === 0) {
+              newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
+                oct: 2
+              });
+              continue;
+            }
+            var shifted = col.abs.map(function (a) {
+              return a + bestShift;
+            });
+            if (shifted.every(function (s) {
+              return s >= 0 && s < ROWS;
+            })) {
+              var _iterator7 = _createForOfIteratorHelper(shifted),
+                _step7;
+              try {
+                for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+                  var _r3 = _step7.value;
+                  newGrid[_r3][col.c] = true;
+                }
+              } catch (err) {
+                _iterator7.e(err);
+              } finally {
+                _iterator7.f();
+              }
+              newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
+                oct: 2
+              });
+              continue;
+            }
+            var chosenOct = null;
+            var _loop4 = function _loop4(o) {
+              var adj = shifted.map(function (s) {
+                return s - o * OCT;
+              });
+              if (adj.every(function (a) {
+                return a >= 0 && a < ROWS;
+              })) {
+                chosenOct = o;
+                return 1; // break
+              }
+            };
+            for (var o = -2; o <= 2; o++) {
+              if (_loop4(o)) break;
+            }
+            if (chosenOct == null) {
+              chosenOct = 0;
+              var _iterator8 = _createForOfIteratorHelper(shifted),
+                _step8;
+              try {
+                for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+                  var s = _step8.value;
+                  var _r4 = Math.max(0, Math.min(ROWS - 1, s));
+                  newGrid[_r4][col.c] = true;
+                }
+              } catch (err) {
+                _iterator8.e(err);
+              } finally {
+                _iterator8.f();
+              }
+            } else {
+              var _iterator9 = _createForOfIteratorHelper(shifted),
+                _step9;
+              try {
+                for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+                  var _s = _step9.value;
+                  var _r5 = _s - chosenOct * OCT;
+                  newGrid[_r5][col.c] = true;
+                }
+              } catch (err) {
+                _iterator9.e(err);
+              } finally {
+                _iterator9.f();
+              }
+            }
+            newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
+              oct: chosenOct + 2
+            });
+          }
+        } catch (err) {
+          _iterator5.e(err);
+        } finally {
+          _iterator5.f();
+        }
         return Object.assign({}, p, {
-          mono: next,
-          grid: grid
+          grid: newGrid,
+          params: newParams
         });
       });
-    });
-  };
-  var mutatePat1 = function mutatePat1() {
-    pushHistory();
-    return mutatePat(function (g) {
-      var _p2;
-      var varied = genVariation(g, varyParamsR.current);
-      return (_p2 = p) !== null && _p2 !== void 0 && _p2.mono ? collapseToMono(varied) : varied;
     });
   };
   var handleGridDown = useCallback(function (e) {
@@ -3670,7 +3942,12 @@ function Tabula() {
               setPats(function (ps) {
                 return ps.map(function (p) {
                   if (p.id !== activeIdR.current) return p;
-                  var ng = p.grid.map(function (r) {
+                  var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+                  var ng = isMono && !isExisting ? p.grid.map(function (row, ri) {
+                    return row.map(function (v, ci) {
+                      return ci === sc.c ? ri === sc.r : v;
+                    });
+                  }) : p.grid.map(function (r) {
                     return _toConsumableArray(r);
                   });
                   var np = (p.params || defaultStepParams()).map(function (s) {
@@ -3679,8 +3956,7 @@ function Tabula() {
                   var colWasEmpty = !p.grid.some(function (row) {
                     return row[sc.c];
                   });
-                  if (!isExisting && monoModeR.current) for (var _ri = 0; _ri < ROWS; _ri++) ng[_ri][sc.c] = false;
-                  ng[sc.r][sc.c] = true;
+                  if (!isMono || isExisting) ng[sc.r][sc.c] = true;
                   np[sc.c] = !isExisting && colWasEmpty ? _objectSpread(_objectSpread({}, defaultStepParams()[0]), {}, {
                     rhy: 1
                   }) : _objectSpread(_objectSpread({}, np[sc.c]), {}, {
@@ -3751,7 +4027,12 @@ function Tabula() {
           setPats(function (ps) {
             return ps.map(function (p) {
               if (p.id !== activeIdR.current) return p;
-              var ng = p.grid.map(function (r) {
+              var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+              var ng = isMono ? p.grid.map(function (row, ri) {
+                return row.map(function (v, ci) {
+                  return ci === cc ? ri === cr : v;
+                });
+              }) : p.grid.map(function (r) {
                 return _toConsumableArray(r);
               });
               var np = (p.params || defaultStepParams()).map(function (s) {
@@ -3760,8 +4041,7 @@ function Tabula() {
               var colWasEmpty = !p.grid.some(function (row) {
                 return row[cc];
               });
-              if (monoModeR.current) for (var _ri2 = 0; _ri2 < ROWS; _ri2++) ng[_ri2][cc] = false;
-              ng[cr][cc] = true;
+              if (!isMono) ng[cr][cc] = true;
               np[cc] = colWasEmpty ? _objectSpread(_objectSpread({}, defaultStepParams()[0]), {}, {
                 rhy: 1
               }) : _objectSpread(_objectSpread({}, np[cc]), {}, {
@@ -3872,6 +4152,7 @@ function Tabula() {
       // Tap: use paintStartCell which was recorded before pointer capture was set
       var sc = g.paintStartCell;
       if (sc && !isNaN(sc.r) && !isNaN(sc.c)) {
+        var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
         setPats(function (ps) {
           return ps.map(function (p) {
             if (p.id !== activeIdR.current) return p;
@@ -3881,11 +4162,12 @@ function Tabula() {
             var colWasEmpty = !p.grid.some(function (row) {
               return row[c];
             });
+            var wasOn = p.grid[r][c];
             var newGrid = p.grid.map(function (row, ri) {
-              if (monoModeR.current) {
-                var _wasOn = p.grid[r][c];
+              if (isMono && !wasOn) {
+                // Mono layer: tapping on cell adds it and clears all others in this column
                 return row.map(function (v, ci) {
-                  return ci === c ? ri === r ? !_wasOn : false : v;
+                  return ci === c ? ri === r : v;
                 });
               }
               return ri !== r ? row : row.map(function (v, ci) {
@@ -3893,7 +4175,6 @@ function Tabula() {
               });
             });
             // Reset column params to defaults if we just added the first note
-            var wasOn = p.grid[r][c];
             var np = (p.params || defaultStepParams()).map(function (sp, i) {
               return i === c && !wasOn && colWasEmpty ? defaultStepParams()[0] : sp;
             });
@@ -4098,22 +4379,31 @@ function Tabula() {
     setPats(function (ps) {
       return ps.map(function (p) {
         if (p.id !== id) return p;
-        var isMono = !!p.mono;
-        var grid = isMono ? mkGrid() : Array.from({
-          length: ROWS
-        }, function () {
-          return Array.from({
-            length: COLS
-          }, function () {
-            return Math.random() < .12;
-          });
-        });
+        var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+        var grid;
         if (isMono) {
+          // One note per column at most, ~50% column-fill density
+          grid = Array.from({
+            length: ROWS
+          }, function () {
+            return new Array(COLS).fill(false);
+          });
           for (var c = 0; c < COLS; c++) {
-            var hits = [];
-            for (var r = 0; r < ROWS; r++) if (Math.random() < .12) hits.push(r);
-            if (hits.length) grid[hits[Math.floor(Math.random() * hits.length)]][c] = true;
+            if (Math.random() < 0.5) {
+              var r = Math.floor(Math.random() * ROWS);
+              grid[r][c] = true;
+            }
           }
+        } else {
+          grid = Array.from({
+            length: ROWS
+          }, function () {
+            return Array.from({
+              length: COLS
+            }, function () {
+              return Math.random() < .12;
+            });
+          });
         }
         return Object.assign({}, p, {
           grid: grid
@@ -4123,16 +4413,6 @@ function Tabula() {
   };
   var randPat = function randPat() {
     return mutatePat(function () {
-      if (monoMode) {
-        // Generate poly-density grid then collapse each column to at most one note
-        var grid = mkGrid();
-        for (var c = 0; c < COLS; c++) {
-          var hits = [];
-          for (var r = 0; r < ROWS; r++) if (Math.random() < .12) hits.push(r);
-          if (hits.length) grid[hits[Math.floor(Math.random() * hits.length)]][c] = true;
-        }
-        return grid;
-      }
       return Array.from({
         length: ROWS
       }, function () {
@@ -4881,7 +5161,11 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref16) {
+    }, isOnlyPat, true], ["MUT8", function () {
+      return act(mutatePat1);
+    }], ["OCT⇄", function () {
+      return act(rectifyOctaves);
+    }], ["", null, true]].map(function (_ref16) {
       var _ref17 = _slicedToArray(_ref16, 4),
         label = _ref17[0],
         fn = _ref17[1],
@@ -5205,7 +5489,7 @@ function Tabula() {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["MONO", toggleMono, false, false]].map(function (_ref21) {
+    }, false, false], ["OCT⇄", rectifyOctaves, false, false]].map(function (_ref21) {
       var _ref22 = _slicedToArray(_ref21, 3),
         l = _ref22[0],
         f = _ref22[1],
@@ -5214,10 +5498,10 @@ function Tabula() {
         key: l,
         style: {
           padding: "4px 0",
-          border: "1px solid rgba(200,185,165," + (l === "MONO" && monoMode ? "0.5" : "0.13") + ")",
+          border: "1px solid rgba(200,185,165,0.13)",
           borderRadius: 5,
-          background: l === "MONO" && monoMode ? "rgba(168,197,160,0.1)" : "transparent",
-          color: l === "MONO" && monoMode ? "#a8c5a0" : "rgba(200,185,165,0.55)",
+          background: "transparent",
+          color: "rgba(200,185,165,0.55)",
           fontSize: 8,
           letterSpacing: 1,
           cursor: "pointer",
@@ -5644,7 +5928,7 @@ function Tabula() {
       overflow: "hidden",
       position: "relative"
     }
-  }, activeLayer === "synth" && page === "edit" && /*#__PURE__*/React.createElement("div", {
+  }, activeLayer !== "drums" && page === "edit" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -5705,12 +5989,12 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop2 = function _loop2() {
+      var _loop5 = function _loop5() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
-          var _activePat$params, _p3$rhy, _p3$vel;
-          var _p3 = activePat === null || activePat === void 0 || (_activePat$params = activePat.params) === null || _activePat$params === void 0 ? void 0 : _activePat$params[ci];
-          var rhy = _p3 ? Math.round((_p3$rhy = _p3.rhy) !== null && _p3$rhy !== void 0 ? _p3$rhy : 1) : 1;
+          var _activePat$params, _p$rhy, _p$vel;
+          var p = activePat === null || activePat === void 0 || (_activePat$params = activePat.params) === null || _activePat$params === void 0 ? void 0 : _activePat$params[ci];
+          var rhy = p ? Math.round((_p$rhy = p.rhy) !== null && _p$rhy !== void 0 ? _p$rhy : 1) : 1;
           if (rhy === 0) {
             ci++;
             return 1; // continue
@@ -5725,7 +6009,7 @@ function Tabula() {
               nc++;
             } else break;
           }
-          var vel = _p3 ? (_p3$vel = _p3.vel) !== null && _p3$vel !== void 0 ? _p3$vel : 100 : 100;
+          var vel = p ? (_p$vel = p.vel) !== null && _p$vel !== void 0 ? _p$vel : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
           var bright = inactive ? "rgba(220,200,180,0.12)" : "rgba(230,215,195,".concat(b, ")");
@@ -5802,8 +6086,8 @@ function Tabula() {
                 background: "rgba(0,0,0,0.25)"
               }
             });
-          })), !inactive && function (_p3$oct) {
-            var octV = _p3 ? (_p3$oct = _p3.oct) !== null && _p3$oct !== void 0 ? _p3$oct : 2 : 2,
+          })), !inactive && function (_p$oct) {
+            var octV = p ? (_p$oct = p.oct) !== null && _p$oct !== void 0 ? _p$oct : 2 : 2,
               sh = octV - 2;
             if (sh === 0) return null;
             var n = Math.abs(sh),
@@ -5845,7 +6129,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        if (_loop2()) continue;
+        if (_loop5()) continue;
       }
       return rects;
     }());
@@ -6541,7 +6825,7 @@ function Tabula() {
         marginTop: 10
       }
     }, "RHYTHM randomly drops existing hits and adds ghosts each loop cycle. VELOCITY jitters hit strengths around their set values.")));
-  }(), activeLayer === "synth" && page === "step" && /*#__PURE__*/React.createElement("div", {
+  }(), activeLayer !== "drums" && page === "step" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
       height: "100%",
       minHeight: 0,
@@ -6615,9 +6899,10 @@ function Tabula() {
       onChange: function onChange(col, val) {
         return setStepParam(col, lane.key, val);
       },
+      onDragStart: pushHistory,
       tall: true
     }));
-  })), activeLayer === "synth" && page === "set" && /*#__PURE__*/React.createElement("div", {
+  })), activeLayer !== "drums" && page === "set" && /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
       minHeight: 0,
@@ -6773,7 +7058,7 @@ function Tabula() {
     onChange: setVDurJitter,
     display: vDurJitter + "%",
     accent: "#9fb4c7"
-  }))))), activeLayer === "synth" && page === "sound" && /*#__PURE__*/React.createElement("div", {
+  }))))), activeLayer !== "drums" && page === "sound" && /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
       minHeight: 0,
@@ -7083,7 +7368,7 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref33) {
+  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["lead", "LEAD", "#b5a0c4", "rgba(181,160,196,"], ["bass", "BASS", "#d4a574", "rgba(212,165,116,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref33) {
     var _ref34 = _slicedToArray(_ref33, 4),
       lyr = _ref34[0],
       lbl = _ref34[1],
@@ -7098,14 +7383,14 @@ function Tabula() {
         borderRadius: 8,
         background: activeLayer === lyr ? cf + "0.1)" : "transparent",
         color: activeLayer === lyr ? c : cf + "0.4)",
-        fontSize: 9,
-        letterSpacing: 1.5,
+        fontSize: 8,
+        letterSpacing: 1.2,
         fontWeight: 600,
         cursor: "pointer",
         fontFamily: "inherit"
       },
       onClick: function onClick() {
-        setActiveLayer(lyr);
+        switchLayer(lyr);
         if (page === "step" && lyr === "drums") setPage("edit");
       }
     }, lbl);
@@ -7119,11 +7404,12 @@ function Tabula() {
       alignItems: "center",
       touchAction: "none"
     }
-  }, (activeLayer === "synth" ? pats : drumPats).map(function (p) {
-    var isSynth = activeLayer === "synth";
-    var isA = isSynth ? p.id === activeId : p.id === activeDrumId;
-    var isP = playing && (isSynth ? playId === p.id : false);
-    var accent = isSynth ? "#a8c5a0" : "#c4967a";
+  }, (activeLayer === "drums" ? drumPats : pats).map(function (p) {
+    var isDrums = activeLayer === "drums";
+    var isSynth = !isDrums; // any synth-type layer
+    var isA = isDrums ? p.id === activeDrumId : p.id === activeId;
+    var isP = playing && (isSynth && activeLayer === "synth" ? playId === p.id : false);
+    var accent = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#b5a0c4" : activeLayer === "bass" ? "#d4a574" : "#c4967a";
     var isDragging = patternDrag && patternDrag.patId === p.id;
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
@@ -7226,12 +7512,12 @@ function Tabula() {
         opacity: 0.7
       }
     }, "\u25CF"), p.name);
-  }), (activeLayer === "synth" ? pats : drumPats).length < 8 && /*#__PURE__*/React.createElement("div", {
+  }), (activeLayer === "drums" ? drumPats : pats).length < 8 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "4px 10px",
       borderRadius: 20,
-      border: "1px dashed " + (activeLayer === "synth" ? "rgba(168,197,160,0.35)" : "rgba(196,150,122,0.35)"),
-      color: activeLayer === "synth" ? "rgba(168,197,160,0.45)" : "rgba(196,150,122,0.45)",
+      border: "1px dashed " + (activeLayer === "synth" ? "rgba(168,197,160,0.35)" : activeLayer === "lead" ? "rgba(181,160,196,0.35)" : activeLayer === "bass" ? "rgba(212,165,116,0.35)" : "rgba(196,150,122,0.35)"),
+      color: activeLayer === "synth" ? "rgba(168,197,160,0.45)" : activeLayer === "lead" ? "rgba(181,160,196,0.45)" : activeLayer === "bass" ? "rgba(212,165,116,0.45)" : "rgba(196,150,122,0.45)",
       fontSize: 12,
       cursor: "pointer",
       flexShrink: 0,
@@ -7239,7 +7525,7 @@ function Tabula() {
     },
     onPointerDown: function onPointerDown(e) {
       e.stopPropagation();
-      activeLayer === "synth" ? addPat() : addDrumPat();
+      activeLayer === "drums" ? addDrumPat() : addPat();
     }
   }, "\uFF0B")), patternDrag && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7268,7 +7554,7 @@ function Tabula() {
       overflow: "hidden",
       position: "relative"
     }
-  }, activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
+  }, activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -7281,7 +7567,7 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      width: "min(100%,calc(100dvh - 108px))",
+      width: "min(100%,calc(100dvh - 150px))",
       aspectRatio: "1",
       display: "flex",
       flexDirection: "column",
@@ -7333,12 +7619,12 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop3 = function _loop3() {
+      var _loop6 = function _loop6() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
-          var _activePat$params3, _p4$rhy, _p4$vel;
-          var _p4 = activePat === null || activePat === void 0 || (_activePat$params3 = activePat.params) === null || _activePat$params3 === void 0 ? void 0 : _activePat$params3[ci];
-          var rhy = _p4 ? Math.round((_p4$rhy = _p4.rhy) !== null && _p4$rhy !== void 0 ? _p4$rhy : 1) : 1;
+          var _activePat$params3, _p$rhy2, _p$vel2;
+          var p = activePat === null || activePat === void 0 || (_activePat$params3 = activePat.params) === null || _activePat$params3 === void 0 ? void 0 : _activePat$params3[ci];
+          var rhy = p ? Math.round((_p$rhy2 = p.rhy) !== null && _p$rhy2 !== void 0 ? _p$rhy2 : 1) : 1;
           if (rhy === 0) {
             ci++;
             return 1; // continue
@@ -7353,7 +7639,7 @@ function Tabula() {
               nc++;
             } else break;
           }
-          var vel = _p4 ? (_p4$vel = _p4.vel) !== null && _p4$vel !== void 0 ? _p4$vel : 100 : 100;
+          var vel = p ? (_p$vel2 = p.vel) !== null && _p$vel2 !== void 0 ? _p$vel2 : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
           var bright = inactive ? "rgba(220,200,180,0.12)" : "rgba(230,215,195,".concat(b, ")");
@@ -7430,8 +7716,8 @@ function Tabula() {
                 background: "rgba(0,0,0,0.25)"
               }
             });
-          })), !inactive && function (_p4$oct) {
-            var octV = _p4 ? (_p4$oct = _p4.oct) !== null && _p4$oct !== void 0 ? _p4$oct : 2 : 2,
+          })), !inactive && function (_p$oct2) {
+            var octV = p ? (_p$oct2 = p.oct) !== null && _p$oct2 !== void 0 ? _p$oct2 : 2 : 2,
               sh = octV - 2;
             if (sh === 0) return null;
             var n = Math.abs(sh),
@@ -7473,7 +7759,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        if (_loop3()) continue;
+        if (_loop6()) continue;
       }
       return rects;
     }());
@@ -7560,7 +7846,14 @@ function Tabula() {
     }) || drumPats[0];
     var dLen = (_dPat$gridLen3 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen3 !== void 0 ? _dPat$gridLen3 : 16;
     var GAP = 2;
-    var H = "min(calc(100dvh - 162px), calc(100vw * 1.3))";
+    var HEADER = 14;
+    // Match synth grid TOTAL size. Labels go inside the same area as synth cells —
+    // not added on top of it. So drum cells absorb the header overhead and end up
+    // slightly smaller than synth cells. Also use DRUM_ROWS (10) for column count.
+    var SIZE = "min(calc(100vw - 20px), calc(100dvh - 150px))";
+    var cell = "calc((".concat(SIZE, " - ").concat(HEADER, "px - ").concat(16 * GAP, "px) / 16)");
+    var gridW = "calc(".concat(cell, " * ").concat(DRUM_ROWS, " + ").concat((DRUM_ROWS - 1) * GAP, "px)");
+    var gridH = SIZE;
     return /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
@@ -7570,8 +7863,8 @@ function Tabula() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        height: H,
-        aspectRatio: "8/16",
+        width: gridW,
+        height: gridH,
         display: "flex",
         flexDirection: "column",
         gap: GAP,
@@ -7582,7 +7875,9 @@ function Tabula() {
       style: {
         display: "flex",
         gap: GAP,
-        flexShrink: 0
+        flexShrink: 0,
+        height: HEADER,
+        alignItems: "center"
       }
     }, DRUM_VOICES.map(function (v) {
       return /*#__PURE__*/React.createElement("div", {
@@ -7593,12 +7888,12 @@ function Tabula() {
           fontSize: 7,
           fontWeight: 700,
           color: v.color + "cc",
-          letterSpacing: 0.3
+          letterSpacing: 0.3,
+          lineHeight: 1
         }
       }, v.label);
     })), /*#__PURE__*/React.createElement("div", {
       style: {
-        flex: 1,
         display: "flex",
         flexDirection: "column",
         gap: GAP,
@@ -7613,7 +7908,7 @@ function Tabula() {
       return /*#__PURE__*/React.createElement("div", {
         key: step,
         style: {
-          flex: 1,
+          height: cell,
           display: "flex",
           gap: GAP,
           background: isActive ? "rgba(220,200,180,0.06)" : "transparent",
@@ -7626,12 +7921,16 @@ function Tabula() {
         return /*#__PURE__*/React.createElement("div", {
           key: r,
           style: {
-            flex: 1,
+            width: cell,
+            height: cell,
+            aspectRatio: "1",
             borderRadius: 2,
             cursor: inactive ? "default" : "pointer",
+            flexShrink: 0,
             background: inactive ? "rgba(220,200,180,0.015)" : on ? isActive ? "rgba(255,255,255,0.88)" : voice.color : isActive ? "rgba(220,200,180,0.1)" : "rgba(220,200,180,0.03)",
             border: "1px solid " + (inactive ? "rgba(220,200,180,0.03)" : on ? voice.color : "rgba(220,200,180,0.07)"),
-            boxShadow: on && isActive ? "0 0 4px " + voice.color : "none"
+            boxShadow: on && isActive ? "0 0 4px " + voice.color : "none",
+            boxSizing: "border-box"
           },
           onPointerDown: function onPointerDown(e) {
             e.preventDefault();
@@ -7646,7 +7945,7 @@ function Tabula() {
     }))), /*#__PURE__*/React.createElement("div", {
       style: {
         width: 10,
-        height: H,
+        height: gridH,
         background: "rgba(220,200,180,0.06)",
         borderRadius: 5,
         position: "relative",
@@ -7831,9 +8130,9 @@ function Tabula() {
       color: activeLayer === "synth" ? "#a8c5a0" : "#c4967a",
       lineHeight: 1.1
     }
-  }, activeLayer === "synth" ? ((_pats$find2 = pats.find(function (p) {
+  }, activeLayer === "synth" ? ((_pats$find = pats.find(function (p) {
     return p.id === activeId;
-  })) === null || _pats$find2 === void 0 ? void 0 : _pats$find2.name) || "A" : ((_drumPats$find2 = drumPats.find(function (p) {
+  })) === null || _pats$find === void 0 ? void 0 : _pats$find.name) || "A" : ((_drumPats$find2 = drumPats.find(function (p) {
     return p.id === activeDrumId;
   })) === null || _drumPats$find2 === void 0 ? void 0 : _drumPats$find2.name) || "A", playing && /*#__PURE__*/React.createElement("span", {
     style: {
@@ -8149,7 +8448,7 @@ function Tabula() {
         return setSeqPage(p);
       }
     }, lbl);
-  })), seqPage === "step" && activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
+  })), seqPage === "step" && activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
       minHeight: 0,
       overflowY: "scroll",
@@ -8253,12 +8552,13 @@ function Tabula() {
       onChange: function onChange(col, val) {
         return setStepParam(col, lane.key, val);
       },
+      onDragStart: pushHistory,
       tall: true
     }));
   })), seqPage === "sequence" && function () {
-    var isSynth = activeLayer === "synth";
-    var col = isSynth ? "#a8c5a0" : "#c4967a";
-    var colF = isSynth ? "rgba(168,197,160," : "rgba(196,150,122,";
+    var isSynth = activeLayer !== "drums"; // any synth-type layer
+    var col = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#b5a0c4" : activeLayer === "bass" ? "#d4a574" : "#c4967a";
+    var colF = activeLayer === "synth" ? "rgba(168,197,160," : activeLayer === "lead" ? "rgba(181,160,196," : activeLayer === "bass" ? "rgba(212,165,116," : "rgba(196,150,122,";
     var sources = isSynth ? pats : drumPats;
     var phrases = isSynth ? synthPhrases : drumPhrases;
     var setPhrases = isSynth ? setSynthPhrases : setDrumPhrases;
@@ -8699,7 +8999,7 @@ function Tabula() {
       fontWeight: 500,
       marginBottom: 12
     }
-  }, "SOUND"), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
+  }, "SOUND"), activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       overflowY: "auto"
     }
@@ -9183,7 +9483,7 @@ function Tabula() {
       fontWeight: 500,
       marginBottom: 14
     }
-  }, "VARY"), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "VARY"), activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
