@@ -3061,41 +3061,6 @@ export default function Tabula(){
                       </div>
                     </div>
 
-                    {/* ── VARY SETTINGS ── */}
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",fontWeight:600}}>VARY</div>
-                        <button style={{padding:"3px 12px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"ON":"OFF"}</button>
-                      </div>
-                      {[
-                        ["DROP",vDropRate,setVDropRate],
-                        ["SHIFT",vShiftRate,setVShiftRate],
-                        ["PITCH",vPitchRate,setVPitchRate],
-                        ["GHOST",vGhostRate,setVGhostRate],
-                        ["VEL",vVelJitter,setVVelJitter],
-                        ["CUT",vCutJitter,setVCutJitter],
-                        ["DUR",vDurJitter,setVDurJitter],
-                      ].map(([label,val,setter])=>(
-                        <div key={label} style={{marginBottom:10}}>
-                          <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                            <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:44}}>{label}</span>
-                            <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
-                          </div>
-                          <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                            onPointerDown={e=>{
-                              e.stopPropagation();
-                              const rect=e.currentTarget.getBoundingClientRect();
-                              const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};
-                              update(e);
-                              const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                              document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
-                            }}>
-                            <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(210,195,175,0.35)",borderRadius:3}}/>
-                            <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                   );
                 })()}
@@ -3111,10 +3076,10 @@ export default function Tabula(){
                           onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
                       ))}
                     </div>
-                    {/* Tabs: STEP / SOUND (synth only) */}
+                    {/* Tabs: STEP / SOUND / VARY (synth only) */}
                     {activeLayer==="synth"&&(
                       <div style={{display:"flex",gap:4,marginBottom:12}}>
-                        {[["step","STEP"],["sound","SOUND"]].map(([p,lbl])=>(
+                        {[["step","STEP"],["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
                           <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
                         ))}
                       </div>
@@ -3187,6 +3152,42 @@ export default function Tabula(){
                             </div>
                           </SynthSection>
                         </div>
+                      </div>
+                    )}
+                    {/* Synth VARY page */}
+                    {activeLayer==="synth"&&page==="vary"&&(
+                      <div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
+                        </div>
+                        {[
+                          ["DROP",vDropRate,setVDropRate],
+                          ["SHIFT",vShiftRate,setVShiftRate],
+                          ["PITCH",vPitchRate,setVPitchRate],
+                          ["GHOST",vGhostRate,setVGhostRate],
+                          ["VEL",vVelJitter,setVVelJitter],
+                          ["CUT",vCutJitter,setVCutJitter],
+                          ["DUR",vDurJitter,setVDurJitter],
+                        ].map(([label,val,setter])=>(
+                          <div key={label} style={{marginBottom:10}}>
+                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:44}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                            </div>
+                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                              onPointerDown={e=>{
+                                e.stopPropagation();
+                                const rect=e.currentTarget.getBoundingClientRect();
+                                const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};
+                                update(e);
+                                const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                                document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                              }}>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(210,195,175,0.35)",borderRadius:3}}/>
+                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                     {/* Drums SOUND page — mixer */}

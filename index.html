@@ -8058,124 +8058,7 @@ function Tabula() {
           return setSpeedMult(mult);
         }
       }, label);
-    }))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        borderTop: "1px solid rgba(255,255,255,0.06)",
-        paddingTop: 14,
-        marginTop: 16
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginBottom: 12
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 8,
-        letterSpacing: 1.5,
-        color: "rgba(210,195,175,0.3)",
-        fontWeight: 600
-      }
-    }, "VARY"), /*#__PURE__*/React.createElement("button", {
-      style: {
-        padding: "3px 12px",
-        borderRadius: 20,
-        border: "1px solid " + (varyMode ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.2)"),
-        background: varyMode ? "rgba(201,169,110,0.12)" : "transparent",
-        color: varyMode ? "#c9a96e" : "rgba(200,185,165,0.4)",
-        fontSize: 9,
-        letterSpacing: 1,
-        cursor: "pointer",
-        fontFamily: "inherit"
-      },
-      onClick: function onClick() {
-        return setVaryMode(function (v) {
-          return !v;
-        });
-      }
-    }, varyMode ? "ON" : "OFF")), [["DROP", vDropRate, setVDropRate], ["SHIFT", vShiftRate, setVShiftRate], ["PITCH", vPitchRate, setVPitchRate], ["GHOST", vGhostRate, setVGhostRate], ["VEL", vVelJitter, setVVelJitter], ["CUT", vCutJitter, setVCutJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref42) {
-      var _ref43 = _slicedToArray(_ref42, 3),
-        label = _ref43[0],
-        val = _ref43[1],
-        setter = _ref43[2];
-      return /*#__PURE__*/React.createElement("div", {
-        key: label,
-        style: {
-          marginBottom: 10
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "baseline",
-          marginBottom: 4
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 8,
-          letterSpacing: 1.5,
-          color: "rgba(210,195,175,0.5)",
-          fontWeight: 500,
-          width: 44
-        }
-      }, label), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 10,
-          color: "rgba(210,195,175,0.7)",
-          marginLeft: "auto"
-        }
-      }, val, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 7,
-          color: "rgba(210,195,175,0.35)",
-          marginLeft: 2
-        }
-      }, "%"))), /*#__PURE__*/React.createElement("div", {
-        style: {
-          height: 6,
-          background: "rgba(220,200,180,0.07)",
-          borderRadius: 3,
-          position: "relative",
-          cursor: "pointer",
-          touchAction: "none"
-        },
-        onPointerDown: function onPointerDown(e) {
-          e.stopPropagation();
-          var rect = e.currentTarget.getBoundingClientRect();
-          var update = function update(ev) {
-            setter(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
-          };
-          update(e);
-          var _up5 = function up() {
-            document.removeEventListener("pointermove", update);
-            document.removeEventListener("pointerup", _up5);
-          };
-          document.addEventListener("pointermove", update);
-          document.addEventListener("pointerup", _up5);
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          position: "absolute",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: val + "%",
-          background: "rgba(210,195,175,0.35)",
-          borderRadius: 3
-        }
-      }), /*#__PURE__*/React.createElement("div", {
-        style: {
-          position: "absolute",
-          top: -4,
-          bottom: -4,
-          width: 12,
-          left: "calc(".concat(val, "% - 6px)"),
-          background: "rgba(255,255,255,0.85)",
-          borderRadius: 3
-        }
-      })));
-    })));
+    }))));
   }(), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
@@ -8190,12 +8073,12 @@ function Tabula() {
       gap: 5,
       marginBottom: 14
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 4),
-      lyr = _ref45[0],
-      lbl = _ref45[1],
-      c = _ref45[2],
-      cf = _ref45[3];
+  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref42) {
+    var _ref43 = _slicedToArray(_ref42, 4),
+      lyr = _ref43[0],
+      lbl = _ref43[1],
+      c = _ref43[2],
+      cf = _ref43[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       style: {
@@ -8221,10 +8104,10 @@ function Tabula() {
       gap: 4,
       marginBottom: 12
     }
-  }, [["step", "STEP"], ["sound", "SOUND"]].map(function (_ref46) {
-    var _ref47 = _slicedToArray(_ref46, 2),
-      p = _ref47[0],
-      lbl = _ref47[1];
+  }, [["step", "STEP"], ["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref44) {
+    var _ref45 = _slicedToArray(_ref44, 2),
+      p = _ref45[0],
+      lbl = _ref45[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, {
@@ -8490,7 +8373,111 @@ function Tabula() {
     onChange: setDlyLpVal,
     display: lpLbl(dlyLpVal),
     accent: C_DLY
-  }))))), activeLayer === "drums" && function () {
+  }))))), activeLayer === "synth" && page === "vary" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: {
+      padding: "4px 14px",
+      borderRadius: 20,
+      border: "1px solid " + (varyMode ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.2)"),
+      background: varyMode ? "rgba(201,169,110,0.12)" : "transparent",
+      color: varyMode ? "#c9a96e" : "rgba(200,185,165,0.4)",
+      fontSize: 10,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    },
+    onClick: function onClick() {
+      return setVaryMode(function (v) {
+        return !v;
+      });
+    }
+  }, varyMode ? "VARY ON" : "VARY OFF")), [["DROP", vDropRate, setVDropRate], ["SHIFT", vShiftRate, setVShiftRate], ["PITCH", vPitchRate, setVPitchRate], ["GHOST", vGhostRate, setVGhostRate], ["VEL", vVelJitter, setVVelJitter], ["CUT", vCutJitter, setVCutJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref46) {
+    var _ref47 = _slicedToArray(_ref46, 3),
+      label = _ref47[0],
+      val = _ref47[1],
+      setter = _ref47[2];
+    return /*#__PURE__*/React.createElement("div", {
+      key: label,
+      style: {
+        marginBottom: 10
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "baseline",
+        marginBottom: 4
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 8,
+        letterSpacing: 1.5,
+        color: "rgba(210,195,175,0.5)",
+        fontWeight: 500,
+        width: 44
+      }
+    }, label), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: "rgba(210,195,175,0.7)",
+        marginLeft: "auto"
+      }
+    }, val, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 7,
+        color: "rgba(210,195,175,0.35)",
+        marginLeft: 2
+      }
+    }, "%"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        height: 6,
+        background: "rgba(220,200,180,0.07)",
+        borderRadius: 3,
+        position: "relative",
+        cursor: "pointer",
+        touchAction: "none"
+      },
+      onPointerDown: function onPointerDown(e) {
+        e.stopPropagation();
+        var rect = e.currentTarget.getBoundingClientRect();
+        var update = function update(ev) {
+          setter(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
+        };
+        update(e);
+        var _up5 = function up() {
+          document.removeEventListener("pointermove", update);
+          document.removeEventListener("pointerup", _up5);
+        };
+        document.addEventListener("pointermove", update);
+        document.addEventListener("pointerup", _up5);
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: val + "%",
+        background: "rgba(210,195,175,0.35)",
+        borderRadius: 3
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        top: -4,
+        bottom: -4,
+        width: 12,
+        left: "calc(".concat(val, "% - 6px)"),
+        background: "rgba(255,255,255,0.85)",
+        borderRadius: 3
+      }
+    })));
+  })), activeLayer === "drums" && function () {
     var dPat = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
