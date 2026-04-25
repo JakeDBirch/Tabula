@@ -1,18 +1,30 @@
 <!DOCTYPE html>
-<html lang="en"><head>
+<html lang="en">
+<head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Tabula"><title>Tabula</title>
+  <meta name="apple-mobile-web-app-title" content="Tabula">
+  <title>Tabula</title>
   <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#1a1814;overflow:hidden;}</style>
-</head><body>
+</head>
+<body>
   <div id="root"></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script>const { useState, useEffect, useRef, useCallback, Fragment } = React;
+  <script>
+const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
+function _callSuper(t, o, e) { return o = _getPrototypeOf(o), _possibleConstructorReturn(t, _isNativeReflectConstruct() ? Reflect.construct(o, e || [], _getPrototypeOf(t).constructor) : o.apply(t, e)); }
+function _possibleConstructorReturn(t, e) { if (e && ("object" == _typeof(e) || "function" == typeof e)) return e; if (void 0 !== e) throw new TypeError("Derived constructors may only return object or undefined"); return _assertThisInitialized(t); }
+function _assertThisInitialized(e) { if (void 0 === e) throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); return e; }
+function _isNativeReflectConstruct() { try { var t = !Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); } catch (t) {} return (_isNativeReflectConstruct = function _isNativeReflectConstruct() { return !!t; })(); }
+function _getPrototypeOf(t) { return _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf.bind() : function (t) { return t.__proto__ || Object.getPrototypeOf(t); }, _getPrototypeOf(t); }
+function _inherits(t, e) { if ("function" != typeof e && null !== e) throw new TypeError("Super expression must either be null or a function"); t.prototype = Object.create(e && e.prototype, { constructor: { value: t, writable: !0, configurable: !0 } }), Object.defineProperty(t, "prototype", { writable: !1 }), e && _setPrototypeOf(t, e); }
+function _setPrototypeOf(t, e) { return _setPrototypeOf = Object.setPrototypeOf ? Object.setPrototypeOf.bind() : function (t, e) { return t.__proto__ = e, t; }, _setPrototypeOf(t, e); }
 function _classCallCheck(a, n) { if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function"); }
 function _defineProperties(e, r) { for (var t = 0; t < r.length; t++) { var o = r[t]; o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, _toPropertyKey(o.key), o); } }
 function _createClass(e, r, t) { return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", { writable: !1 }), e; }
@@ -1811,8 +1823,95 @@ function SynthSection(_ref7) {
   }, title), children);
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
-function Tabula() {
+// ─── Error Boundary — catches render errors and shows the error message ───────
+var ErrorBoundary = /*#__PURE__*/function (_React$Component) {
+  function ErrorBoundary(p) {
+    var _this4;
+    _classCallCheck(this, ErrorBoundary);
+    _this4 = _callSuper(this, ErrorBoundary, [p]);
+    _this4.state = {
+      err: null,
+      info: null
+    };
+    return _this4;
+  }
+  _inherits(ErrorBoundary, _React$Component);
+  return _createClass(ErrorBoundary, [{
+    key: "componentDidCatch",
+    value: function componentDidCatch(err, info) {
+      console.error("TABULA CRASH:", err, info);
+      this.setState({
+        info: info
+      });
+    }
+  }, {
+    key: "render",
+    value: function render() {
+      var _this5 = this;
+      if (this.state.err) {
+        var _this$state$err;
+        return /*#__PURE__*/React.createElement("div", {
+          style: {
+            background: "#1a1814",
+            color: "#c4a882",
+            fontFamily: "monospace",
+            padding: 24,
+            height: "100vh",
+            boxSizing: "border-box",
+            overflow: "auto"
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 12,
+            color: "#c47a7a"
+          }
+        }, "TABULA ERROR \u2014 please report this"), /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 11,
+            marginBottom: 8,
+            color: "rgba(200,180,160,0.8)"
+          }
+        }, String(this.state.err)), /*#__PURE__*/React.createElement("pre", {
+          style: {
+            fontSize: 9,
+            color: "rgba(200,180,160,0.5)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all"
+          }
+        }, (_this$state$err = this.state.err) === null || _this$state$err === void 0 ? void 0 : _this$state$err.stack), /*#__PURE__*/React.createElement("button", {
+          style: {
+            marginTop: 16,
+            padding: "8px 16px",
+            background: "rgba(196,150,122,0.2)",
+            border: "1px solid #c4967a",
+            color: "#c4967a",
+            borderRadius: 6,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 11
+          },
+          onClick: function onClick() {
+            return _this5.setState({
+              err: null,
+              info: null
+            });
+          }
+        }, "RELOAD APP"));
+      }
+      return this.props.children;
+    }
+  }], [{
+    key: "getDerivedStateFromError",
+    value: function getDerivedStateFromError(err) {
+      return {
+        err: err
+      };
+    }
+  }]);
+}(React.Component); // ─── App ──────────────────────────────────────────────────────────────────────
+function TabulaInner() {
   var _pats$find, _activePat$gridLen, _pats$find2, _drumPats$find2;
   var _useState = useState(function () {
       var a = mkPat("A");
@@ -5975,8 +6074,7 @@ function Tabula() {
       return p.id === activeDrumId;
     }) || drumPats[0];
     var dLen = (_dPat$gridLen2 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen2 !== void 0 ? _dPat$gridLen2 : 16;
-    var dw = gridPx || null;
-    var dh = dw ? Math.floor(dw * DRUM_ROWS / COLS) : null;
+    var GAP = 2;
     return /*#__PURE__*/React.createElement("div", {
       style: {
         width: "100%",
@@ -5989,7 +6087,7 @@ function Tabula() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        width: dw || "80%",
+        width: "min(55%, calc((100dvh - 108px) / 2 * 1.1))",
         display: "flex",
         alignItems: "center",
         gap: 6,
@@ -6011,7 +6109,7 @@ function Tabula() {
       }
     }), /*#__PURE__*/React.createElement("button", {
       style: {
-        padding: "3px 10px",
+        padding: "3px 8px",
         border: "1px solid rgba(200,185,165,0.15)",
         borderRadius: 5,
         background: "transparent",
@@ -6019,13 +6117,12 @@ function Tabula() {
         fontSize: 8,
         letterSpacing: 1,
         cursor: "pointer",
-        fontFamily: "inherit",
-        marginRight: 4
+        fontFamily: "inherit"
       },
       onClick: randDrumVel
     }, "RAND"), /*#__PURE__*/React.createElement("button", {
       style: {
-        padding: "3px 10px",
+        padding: "3px 8px",
         border: "1px solid rgba(200,185,165,0.15)",
         borderRadius: 5,
         background: "transparent",
@@ -6038,219 +6135,139 @@ function Tabula() {
       onClick: clearDrums
     }, "CLR")), /*#__PURE__*/React.createElement("div", {
       style: {
-        position: "relative",
-        width: dw || "80%",
-        height: dh || "auto",
+        display: "flex",
+        gap: 6,
+        alignItems: "flex-start",
         flexShrink: 0
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        position: "absolute",
-        right: "100%",
-        top: 0,
-        bottom: 0,
-        width: 26,
+        width: "min(55%, calc((100dvh - 108px) / 2 * 1.1))",
+        aspectRatio: "8/16",
         display: "flex",
         flexDirection: "column",
-        gap: 2,
-        paddingRight: 4,
-        boxSizing: "border-box"
+        gap: GAP,
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: GAP,
+        flexShrink: 0
       }
     }, DRUM_VOICES.map(function (v) {
       return /*#__PURE__*/React.createElement("div", {
         key: v.key,
         style: {
           flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          fontSize: 8,
+          textAlign: "center",
+          fontSize: 7,
           fontWeight: 700,
-          letterSpacing: 1,
-          color: v.color + "99"
+          color: v.color + "cc",
+          letterSpacing: 0.3
         }
       }, v.label);
     })), /*#__PURE__*/React.createElement("div", {
       style: {
-        width: "100%",
-        height: "100%",
+        flex: 1,
         display: "flex",
         flexDirection: "column",
-        gap: 2
+        gap: GAP,
+        minHeight: 0
       }
-    }, DRUM_VOICES.map(function (voice, r) {
+    }, Array.from({
+      length: COLS
+    }, function (_, step) {
+      var isActive = playing && step === drumStep;
+      var inactive = step >= dLen;
+      var isQ = step % 4 === 0;
       return /*#__PURE__*/React.createElement("div", {
-        key: voice.key,
+        key: step,
         style: {
           flex: 1,
           display: "flex",
-          alignItems: "stretch",
-          gap: 2
+          gap: GAP,
+          background: isActive ? "rgba(220,200,180,0.05)" : "transparent",
+          borderRadius: 2,
+          borderTop: isQ && step > 0 ? "1px solid rgba(220,200,180,0.08)" : "none"
         }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          flex: 1,
-          display: "flex",
-          gap: 2
-        }
-      }, Array.from({
-        length: COLS
-      }, function (_, c) {
+      }, DRUM_VOICES.map(function (voice, r) {
         var _dPat$grid$r;
-        var on = (dPat === null || dPat === void 0 || (_dPat$grid$r = dPat.grid[r]) === null || _dPat$grid$r === void 0 ? void 0 : _dPat$grid$r[c]) || false;
-        var isActive = playing && c === drumStep;
-        var inactive = c >= dLen;
-        var isQ = c % 4 === 0;
+        var on = (dPat === null || dPat === void 0 || (_dPat$grid$r = dPat.grid[r]) === null || _dPat$grid$r === void 0 ? void 0 : _dPat$grid$r[step]) || false;
         return /*#__PURE__*/React.createElement("div", {
-          key: c,
+          key: r,
           style: {
             flex: 1,
             borderRadius: 2,
             cursor: inactive ? "default" : "pointer",
-            background: inactive ? "rgba(220,200,180,0.02)" : on ? isActive ? "rgba(255,255,255,0.9)" : voice.color : isActive ? "rgba(220,200,180,0.15)" : isQ ? "rgba(220,200,180,0.06)" : "rgba(220,200,180,0.03)",
-            border: "1px solid " + (inactive ? "rgba(220,200,180,0.04)" : on ? voice.color : isQ ? "rgba(220,200,180,0.12)" : "rgba(220,200,180,0.06)"),
-            boxShadow: on && isActive ? "0 0 6px " + voice.color : "none",
-            transition: "background .06s"
+            background: inactive ? "rgba(220,200,180,0.015)" : on ? isActive ? "rgba(255,255,255,0.9)" : voice.color : isActive ? "rgba(220,200,180,0.12)" : isQ ? "rgba(220,200,180,0.04)" : "rgba(220,200,180,0.025)",
+            border: "1px solid " + (inactive ? "rgba(220,200,180,0.03)" : on ? voice.color : isQ ? "rgba(220,200,180,0.1)" : "rgba(220,200,180,0.06)"),
+            boxShadow: on && isActive ? "0 0 5px " + voice.color : "none"
           },
           onPointerDown: function onPointerDown(e) {
             e.stopPropagation();
-            if (!inactive) setDrumCell(r, c, !on);
+            if (!inactive) setDrumCell(r, step, !on);
           }
         });
-      })));
-    }))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: dw || "80%",
-        height: 28,
-        flexShrink: 0,
-        display: "flex",
-        gap: 2,
-        alignItems: "flex-end",
-        position: "relative"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        position: "absolute",
-        right: "100%",
-        bottom: 0,
-        height: "100%",
-        width: 26,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        paddingRight: 4,
-        fontSize: 7,
-        color: "rgba(210,195,175,0.3)",
-        letterSpacing: 1
-      }
-    }, "VEL"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1,
-        display: "flex",
-        gap: 2,
-        alignItems: "flex-end",
-        height: "100%"
-      }
-    }, Array.from({
-      length: COLS
-    }, function (_, c) {
-      var _dPat$vel$c, _dPat$vel;
-      var vel = (_dPat$vel$c = dPat === null || dPat === void 0 || (_dPat$vel = dPat.vel) === null || _dPat$vel === void 0 ? void 0 : _dPat$vel[c]) !== null && _dPat$vel$c !== void 0 ? _dPat$vel$c : 100;
-      var inactive = c >= dLen;
-      return /*#__PURE__*/React.createElement("div", {
-        key: c,
-        style: {
-          flex: 1,
-          height: "100%",
-          display: "flex",
-          alignItems: "flex-end",
-          cursor: inactive ? "default" : "ns-resize",
-          opacity: inactive ? 0.2 : 1
-        },
-        onPointerDown: function onPointerDown(e) {
-          if (inactive) return;
-          e.stopPropagation();
-          var startY = e.clientY,
-            startV = vel;
-          var onMove = function onMove(ev) {
-            if (!ev.buttons) return;
-            setDrumVel(c, Math.max(1, Math.min(127, Math.round(startV + (startY - ev.clientY) * 1.5))));
-          };
-          var _onUp = function onUp() {
-            document.removeEventListener("pointermove", onMove);
-            document.removeEventListener("pointerup", _onUp);
-          };
-          document.addEventListener("pointermove", onMove);
-          document.addEventListener("pointerup", _onUp);
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          width: "100%",
-          height: vel / 127 * 100 + "%",
-          background: "rgba(210,195,175,0.35)",
-          borderRadius: "1px 1px 0 0",
-          minHeight: 1
-        }
       }));
     }))), /*#__PURE__*/React.createElement("div", {
-      style: _objectSpread(_objectSpread({}, S.lenSlider), {}, {
+      style: {
+        width: 10,
+        alignSelf: "stretch",
+        background: "rgba(220,200,180,0.06)",
+        borderRadius: 5,
+        position: "relative",
+        cursor: "ns-resize",
         flexShrink: 0,
-        width: dw || "80%"
-      }),
+        marginTop: 16
+      },
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
-        var r = e.currentTarget.getBoundingClientRect();
-        setDrumLen(Math.max(1, Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * COLS)));
-      },
-      onPointerMove: function onPointerMove(e) {
-        if (!e.buttons) return;
-        e.stopPropagation();
-        var r = e.currentTarget.getBoundingClientRect();
-        setDrumLen(Math.max(1, Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * COLS)));
+        var rect = e.currentTarget.getBoundingClientRect();
+        var update = function update(ev) {
+          var pct = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+          setDrumLen(Math.max(1, Math.round(pct * COLS)));
+        };
+        update(e);
+        var _up = function up() {
+          document.removeEventListener("pointermove", update);
+          document.removeEventListener("pointerup", _up);
+        };
+        document.addEventListener("pointermove", update);
+        document.addEventListener("pointerup", _up);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
+        top: 0,
         left: 0,
-        top: 0,
-        bottom: 0,
-        width: "".concat(dLen / COLS * 100, "%"),
-        background: "rgba(210,195,175,0.15)",
-        borderRadius: "3px 0 0 3px"
-      }
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        position: "absolute",
         right: 0,
-        top: 0,
-        bottom: 0,
-        width: "".concat((COLS - dLen) / COLS * 100, "%"),
-        background: "rgba(220,200,180,0.035)",
-        borderRadius: "0 3px 3px 0"
+        height: "".concat(dLen / COLS * 100, "%"),
+        background: "rgba(210,195,175,0.18)",
+        borderRadius: "5px 5px 0 0"
       }
     }), /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        top: -3,
-        bottom: -3,
-        width: 12,
-        left: "calc(".concat(dLen / COLS * 100, "% - 6px)"),
-        background: "rgba(255,255,255,0.8)",
+        left: -2,
+        right: -2,
+        height: 6,
+        top: "calc(".concat(dLen / COLS * 100, "% - 3px)"),
+        background: "rgba(255,255,255,0.85)",
         borderRadius: 3,
-        boxShadow: "0 0 6px rgba(255,255,255,0.4)"
+        boxShadow: "0 0 5px rgba(255,255,255,0.3)"
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
         position: "absolute",
-        right: 4,
-        top: "50%",
-        transform: "translateY(-50%)",
-        fontSize: 7,
-        color: "rgba(210,195,175,0.3)",
-        letterSpacing: 1,
+        bottom: 3,
+        left: "50%",
+        transform: "translateX(-50%)",
+        fontSize: 6,
+        color: "rgba(210,195,175,0.4)",
         pointerEvents: "none"
       }
-    }, dLen)));
+    }, dLen))));
   }(), activeLayer === "drums" && page === "step" && /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
@@ -6352,12 +6369,12 @@ function Tabula() {
           var dlt = -(ev.clientY - sy);
           setDrumMix(r, key, Math.max(mn, Math.min(mx, Math.round(sv + dlt / FH * (mx - mn)))));
         };
-        var _up = function up() {
+        var _up2 = function up() {
           document.removeEventListener("pointermove", upd);
-          document.removeEventListener("pointerup", _up);
+          document.removeEventListener("pointerup", _up2);
         };
         document.addEventListener("pointermove", upd);
-        document.addEventListener("pointerup", _up);
+        document.addEventListener("pointerup", _up2);
       };
       var pct = (val - mn) / (mx - mn);
       var tt = (1 - pct) * (FH - 16);
@@ -6542,12 +6559,12 @@ function Tabula() {
             onChange(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
           };
           upd(e);
-          var _up2 = function up() {
+          var _up3 = function up() {
             document.removeEventListener("pointermove", upd);
-            document.removeEventListener("pointerup", _up2);
+            document.removeEventListener("pointerup", _up3);
           };
           document.addEventListener("pointermove", upd);
-          document.addEventListener("pointerup", _up2);
+          document.addEventListener("pointerup", _up3);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -7396,12 +7413,13 @@ function Tabula() {
       width: "100%",
       height: "100%",
       display: "flex",
-      flexDirection: "column",
+      flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       padding: "6px 10px",
       boxSizing: "border-box",
-      overflow: "hidden"
+      overflow: "hidden",
+      gap: 6
     }
   }, function (_dPat$gridLen3) {
     var dPat = drumPats.find(function (p) {
@@ -7409,21 +7427,23 @@ function Tabula() {
     }) || drumPats[0];
     var dLen = (_dPat$gridLen3 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen3 !== void 0 ? _dPat$gridLen3 : 16;
     var GAP = 2;
-    return /*#__PURE__*/React.createElement("div", {
+    // Height matches synth grid: min(available height, 100vw)
+    // Width follows from aspectRatio 8/16 = half the height
+    var H = "min(calc(100dvh - 120px), calc(100vw * 1.35))";
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
-        height: "min(100%,calc((100dvh - 108px)*0.5625))",
+        height: H,
         aspectRatio: "8/16",
-        maxWidth: "calc(100dvh - 120px)",
         display: "flex",
         flexDirection: "column",
+        gap: GAP,
         flexShrink: 0
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: GAP,
-        flexShrink: 0,
-        marginBottom: 3
+        flexShrink: 0
       }
     }, DRUM_VOICES.map(function (v) {
       return /*#__PURE__*/React.createElement("div", {
@@ -7434,7 +7454,7 @@ function Tabula() {
           fontSize: 7,
           fontWeight: 700,
           color: v.color + "cc",
-          letterSpacing: 0.5
+          letterSpacing: 0.3
         }
       }, v.label);
     })), /*#__PURE__*/React.createElement("div", {
@@ -7459,7 +7479,7 @@ function Tabula() {
           gap: GAP,
           background: isActive ? "rgba(220,200,180,0.06)" : "transparent",
           borderRadius: 2,
-          borderTop: isQ ? "1px solid rgba(220,200,180,0.1)" : "none"
+          borderTop: isQ && step > 0 ? "1px solid rgba(220,200,180,0.08)" : "none"
         }
       }, DRUM_VOICES.map(function (voice, r) {
         var _dPat$grid$r2;
@@ -7480,56 +7500,60 @@ function Tabula() {
           }
         });
       }));
-    })), /*#__PURE__*/React.createElement("div", {
-      style: _objectSpread(_objectSpread({}, S.lenSlider), {}, {
-        marginTop: 4
-      }),
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 10,
+        height: H,
+        background: "rgba(220,200,180,0.06)",
+        borderRadius: 5,
+        position: "relative",
+        cursor: "ns-resize",
+        flexShrink: 0
+      },
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
         var rect = e.currentTarget.getBoundingClientRect();
-        var upd = function upd(ev) {
-          var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+        var update = function update(ev) {
+          var pct = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
           setDrumLen(Math.max(1, Math.round(pct * COLS)));
         };
-        upd(e);
-        var _up3 = function up() {
-          document.removeEventListener("pointermove", upd);
-          document.removeEventListener("pointerup", _up3);
+        update(e);
+        var _up4 = function up() {
+          document.removeEventListener("pointermove", update);
+          document.removeEventListener("pointerup", _up4);
         };
-        document.addEventListener("pointermove", upd);
-        document.addEventListener("pointerup", _up3);
-      },
-      onPointerMove: function onPointerMove(e) {
-        if (!e.buttons) return;
+        document.addEventListener("pointermove", update);
+        document.addEventListener("pointerup", _up4);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        left: 0,
         top: 0,
-        bottom: 0,
-        width: "".concat(dLen / COLS * 100, "%"),
-        background: "rgba(210,195,175,0.15)",
-        borderRadius: "3px 0 0 3px"
+        left: 0,
+        right: 0,
+        height: "".concat(dLen / COLS * 100, "%"),
+        background: "rgba(210,195,175,0.18)",
+        borderRadius: "5px 5px 0 0"
       }
     }), /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        top: -3,
-        bottom: -3,
-        width: 3,
-        left: "calc(".concat(dLen / COLS * 100, "% - 1px)"),
-        background: "rgba(255,255,255,0.8)",
-        borderRadius: 2
+        left: -2,
+        right: -2,
+        height: 6,
+        top: "calc(".concat(dLen / COLS * 100, "% - 3px)"),
+        background: "rgba(255,255,255,0.85)",
+        borderRadius: 3,
+        boxShadow: "0 0 5px rgba(255,255,255,0.3)"
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
         position: "absolute",
-        right: 4,
-        top: "50%",
-        transform: "translateY(-50%)",
-        fontSize: 7,
-        color: "rgba(210,195,175,0.3)",
+        bottom: 3,
+        left: "50%",
+        transform: "translateX(-50%)",
+        fontSize: 6,
+        color: "rgba(210,195,175,0.4)",
         pointerEvents: "none"
       }
     }, dLen)));
@@ -8352,12 +8376,12 @@ function Tabula() {
         var upd = function upd(ev) {
           setDrumMix(r, key, Math.max(mn, Math.min(mx, Math.round(sv - (ev.clientY - sy) / FH * (mx - mn)))));
         };
-        var _up4 = function up() {
+        var _up5 = function up() {
           document.removeEventListener("pointermove", upd);
-          document.removeEventListener("pointerup", _up4);
+          document.removeEventListener("pointerup", _up5);
         };
         document.addEventListener("pointermove", upd);
-        document.addEventListener("pointerup", _up4);
+        document.addEventListener("pointerup", _up5);
       };
       var pct = (val - mn) / (mx - mn);
       var tt = (1 - pct) * (FH - 14);
@@ -9943,6 +9967,11 @@ var S = {
     borderRadius: 5
   }
 };
+function Tabula() {
+  return /*#__PURE__*/React.createElement(ErrorBoundary, null, /*#__PURE__*/React.createElement(TabulaInner, null));
+}
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Tabula));
-</script>
-</body></html>
+
+  </script>
+</body>
+</html>
