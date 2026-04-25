@@ -706,7 +706,7 @@ export default function Tabula(){
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
-  const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"vary"|"project"
+  const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"function"
   const [seqDrag,       setSeqDrag]       = useState(null); // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
   const seqDragR=useRef(null);
   const seqTrackRef=useRef(null);
@@ -2769,37 +2769,47 @@ export default function Tabula(){
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
                   const GAP=2;
+                  const H="min(calc(100dvh - 162px), calc(100vw * 1.3))";
                   return(
-                    <div style={{height:"min(100%,calc((100dvh - 108px)*0.5625))",aspectRatio:"8/16",maxWidth:"calc(100dvh - 120px)",display:"flex",flexDirection:"column",flexShrink:0}}>
-                      <div style={{display:"flex",gap:GAP,flexShrink:0,marginBottom:3}}>
-                        {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,textAlign:"center",fontSize:7,fontWeight:700,color:v.color+"cc",letterSpacing:0.5}}>{v.label}</div>))}
+                    <div style={{display:"flex",gap:6,alignItems:"flex-start",flexShrink:0}}>
+                      {/* Portrait grid */}
+                      <div style={{height:H,aspectRatio:"8/16",display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
+                        <div style={{display:"flex",gap:GAP,flexShrink:0}}>
+                          {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,textAlign:"center",fontSize:7,fontWeight:700,color:v.color+"cc",letterSpacing:0.3}}>{v.label}</div>))}
+                        </div>
+                        <div style={{flex:1,display:"flex",flexDirection:"column",gap:GAP,minHeight:0}}>
+                          {Array.from({length:COLS},(_,step)=>{
+                            const isActive=playing&&step===drumStep;
+                            const inactive=step>=dLen;
+                            const isQ=step%4===0;
+                            return(
+                              <div key={step} style={{flex:1,display:"flex",gap:GAP,background:isActive?"rgba(220,200,180,0.06)":"transparent",borderRadius:2,borderTop:isQ&&step>0?"1px solid rgba(220,200,180,0.08)":"none"}}>
+                                {DRUM_VOICES.map((voice,r)=>{
+                                  const on=dPat?.grid[r]?.[step]||false;
+                                  return(<div key={r} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
+                                    background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
+                                    border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
+                                    boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
+                                  }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div style={{flex:1,display:"flex",flexDirection:"column",gap:GAP,minHeight:0}}>
-                        {Array.from({length:COLS},(_,step)=>{
-                          const isActive=playing&&step===drumStep;
-                          const inactive=step>=dLen;
-                          const isQ=step%4===0;
-                          return(
-                            <div key={step} style={{flex:1,display:"flex",gap:GAP,background:isActive?"rgba(220,200,180,0.06)":"transparent",borderRadius:2,borderTop:isQ?"1px solid rgba(220,200,180,0.1)":"none"}}>
-                              {DRUM_VOICES.map((voice,r)=>{
-                                const on=dPat?.grid[r]?.[step]||false;
-                                return(<div key={r} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",
-                                  background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
-                                  border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
-                                  boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
-                                }} onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
-                              })}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {/* Drum length slider */}
-                      <div style={{...S.lenSlider,marginTop:4}}
-                        onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const upd=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumLen(Math.max(1,Math.round(pct*COLS)));};upd(e);const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);}}
-                        onPointerMove={e=>{if(!e.buttons)return;}}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(dLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2}}/>
-                        <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",pointerEvents:"none"}}>{dLen}</span>
+                      {/* Vertical length slider */}
+                      <div style={{width:10,height:H,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const rect=e.currentTarget.getBoundingClientRect();
+                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
+                          update(e);
+                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                        }}>
+                        <div style={{position:"absolute",top:0,left:0,right:0,height:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 5px 0 0"}}/>
+                        <div style={{position:"absolute",left:-2,right:-2,height:6,top:`calc(${(dLen/COLS)*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
+                        <span style={{position:"absolute",bottom:3,left:"50%",transform:"translateX(-50%)",fontSize:6,color:"rgba(210,195,175,0.4)",pointerEvents:"none"}}>{dLen}</span>
                       </div>
                     </div>
                   );
@@ -2845,10 +2855,10 @@ export default function Tabula(){
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SOUND</span>
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="function"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="function"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+                onClick={()=>{setActiveSheet(s=>s==="function"?null:"function");setPage("vary");}}>
                 <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>PROJECT</span>
+                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>FUNCTION</span>
               </button>
             </div>
             {/* Row 2: persistent transport */}
@@ -2887,11 +2897,6 @@ export default function Tabula(){
                       <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
                         <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
                       </div>
-                    </div>
-                    <div style={S.speedRow}>
-                      {SPEED_OPTS.map(({label,mult})=>(
-                        <button key={label} style={Object.assign({},S.speedBtn,speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
-                      ))}
                     </div>
                   </div>
                 )}
@@ -3181,29 +3186,125 @@ export default function Tabula(){
                   );
                 })()}
 
-                {/* SOUND sheet */}
                 {activeSheet==="sound"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
-                    {/* PATTERN | STEP nav (synth only) */}
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
                     {activeLayer==="synth"&&(
-                      <div style={{display:"flex",gap:4,marginBottom:14}}>
-                        {[["edit","PATTERN"],["step","STEP"]].map(([p,lbl])=>(
-                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                        ))}
+                      <div style={{overflowY:"auto"}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                          <SynthSection title="OSCILLATOR" accent={C_OSC}>
+                            <div style={{display:"flex",gap:10,padding:"6px 12px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
+                              <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                              <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
+                                {WAVEFORMS.map((w,i)=>(
+                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
+                                ))}
+                              </div>
+                            </div>
+                          </SynthSection>
+                          <SynthSection title="ENV" accent={C_ENV}>
+                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
+                              <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
+                              <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
+                              <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                            </div>
+                          </SynthSection>
+                          <SynthSection title="FILTER" accent={C_FILT}>
+                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
+                              <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
+                              <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
+                              <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
+                            </div>
+                          </SynthSection>
+                          <SynthSection title="DELAY" accent={C_DLY}>
+                            <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
+                              <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+                              <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
+                              <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                              <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
+                              <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                            </div>
+                          </SynthSection>
+                        </div>
                       </div>
                     )}
-                    {/* Tabs: SOUND / VARY (synth only) */}
-                    {activeLayer==="synth"&&(
-                      <div style={{display:"flex",gap:4,marginBottom:12}}>
-                        {[["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
-                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                        ))}
-                      </div>
-                    )}
+                    {activeLayer==="drums"&&(()=>{
+                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                      const mix=dPat?.mix||defaultDrumMix();
+                      return(<div style={{overflowY:"auto"}}>
+                        {DRUM_VOICES.map((voice,r)=>{
+                          const m=mix[r]||{level:100,pan:0};
+                          return(<div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                            <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
+                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
+                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"level",Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
+                                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3}}/>
+                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
+                              </div>
+                            </div>
+                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
+                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"pan",Math.round((Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*2-1)*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
+                                onDoubleClick={()=>setDrumMix(r,"pan",0)}>
+                                <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
+                                <div style={{position:"absolute",top:0,bottom:0,left:m.pan<=0?`${50+m.pan/2}%`:"50%",width:`${Math.abs(m.pan)/2}%`,background:voice.color+"99",borderRadius:3}}/>
+                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
+                              </div>
+                            </div>
+                          </div>);
+                        })}
+                      </div>);
+                    })()}
+                  </div>
+                )}
+                {/* FUNCTION sheet — PROJECT + VARY pills */}
+                {activeSheet==="function"&&(
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>FUNCTION</div>
+                    {/* PROJECT | VARY pills */}
+                    <div style={{display:"flex",gap:4,marginBottom:16}}>
+                      {[["vary","VARY"],["project","PROJECT"]].map(([p,lbl])=>(
+                        <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                      ))}
+                    </div>
+                    {/* PROJECT page */}
+                    {page==="project"&&(
+                      <div>
 
-                    {/* Synth VARY page */}
-                    {activeLayer==="synth"&&page==="vary"&&(
+                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
+                    {flash&&<div style={S.menuFlash}>{flash}</div>}
+                    {confirmAction&&(
+                      <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:8}}>
+                        <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
+                        <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
+                        <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
+                      </div>
+                    )}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+                      {SLOTS.map(slot=>{const has=!!slotData[slot];return(
+                        <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
+                          <span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
+                          <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
+                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                        </div>
+                      );})}
+                    </div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>SHARE</div>
+                    {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
+                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
+                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+                    </div>
+                    <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
+                    </div>
+                      </div>
+                    )}
+                    {/* VARY page */}
+                    {page==="vary"&&activeLayer==="synth"&&(
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
                           <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
@@ -3268,69 +3369,6 @@ export default function Tabula(){
                         ))}
                       </div>
                     )}
-                    {/* Drums SOUND page — mixer */}
-                    {activeLayer==="drums"&&(()=>{
-                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=dPat?.mix||defaultDrumMix();
-                      return(<div style={{overflowY:"auto"}}>
-                        {DRUM_VOICES.map((voice,r)=>{
-                          const m=mix[r]||{level:100,pan:0};
-                          return(<div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                            <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"level",Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
-                                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
-                            </div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"pan",Math.round((Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*2-1)*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
-                                onDoubleClick={()=>setDrumMix(r,"pan",0)}>
-                                <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
-                                <div style={{position:"absolute",top:0,bottom:0,left:m.pan<=0?`${50+m.pan/2}%`:"50%",width:`${Math.abs(m.pan)/2}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
-                            </div>
-                          </div>);
-                        })}
-                      </div>);
-                    })()}
-                  </div>
-                )}
-
-                {/* PROJECT sheet */}
-                {activeSheet==="project"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
-                    {flash&&<div style={S.menuFlash}>{flash}</div>}
-                    {confirmAction&&(
-                      <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:8}}>
-                        <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
-                        <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
-                        <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
-                      </div>
-                    )}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                      {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                        <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                          <span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                          <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                        </div>
-                      );})}
-                    </div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>SHARE</div>
-                    {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
-                    </div>
-                    <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
                   </div>
                 )}
 
