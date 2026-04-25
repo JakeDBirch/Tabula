@@ -56,7 +56,7 @@ const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
-const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,cut:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
+const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16,mono:false});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
@@ -134,7 +134,7 @@ const jitterStepParam=(sp,vp)=>{
   const jit=(v,amt,lo,hi)=>Math.max(lo,Math.min(hi,v+Math.round((Math.random()*2-1)*amt)));
   return{
     vel: vp.velJitter>0   ? jit(sp.vel, vp.velJitter*0.4, 0,127) : sp.vel,
-    cut: vp.cutJitter>0   ? jit(sp.cut, vp.cutJitter*0.25,0,100) : sp.cut,
+    flt: vp.fltJitter>0   ? jit(sp.flt, vp.fltJitter*0.25,0,100) : sp.flt,
     dly: vp.dlyJitter>0   ? jit(sp.dly, vp.dlyJitter*0.4, 0,100) : sp.dly,
     rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [0,1,1,2,3,4][Math.floor(Math.random()*6)] : sp.rhy,
     oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
@@ -212,7 +212,7 @@ function StepPicker({label,display,sub,onDec,onInc,accent}){
 // ─── Step param lane definitions ─────────────────────────────────────────────
 const LANES=[
   {key:"vel",  label:"VEL",  color:"#c8bfb0",min:0,   max:127, def:100, center:null, bool:false},
-  {key:"cut",  label:"CUT",  color:"#c97b8a",min:0,   max:100, def:50,  center:50,   bool:false},
+  {key:"flt",  label:"FLT",  color:"#c97b8a",min:0,   max:100, def:50,  center:50,   bool:false},
   {key:"dly",  label:"DLY",  color:"#7aaa96",min:0,   max:100, def:0,   center:null, bool:false},
   {key:"rhy",  label:"RTCH", color:"#c9a96e",min:1,   max:4,   def:1,   center:null, bool:false},
   {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
@@ -228,7 +228,7 @@ const PARAM_ARMS=[
   {key:"dly", label:"DLY",  color:"#7aaa96", angle:120, min:0,    max:100, discrete:false},
   {key:"vel", label:"VEL",  color:"#c8bfb0", angle:90,  min:0,    max:127, discrete:false},
   {key:"dur", label:"DUR",  color:"#9fb4c7", angle:60,  min:-100, max:100, discrete:false},
-  {key:"cut", label:"CUT",  color:"#c97b8a", angle:30,  min:0,    max:100, discrete:false},
+  {key:"flt", label:"FLT",  color:"#c97b8a", angle:30,  min:0,    max:100, discrete:false},
   {key:"oct", label:"OCT",  color:"#b5a0c4", angle:10,  min:0,    max:4,   discrete:true},
 ];
 
@@ -371,7 +371,9 @@ class Bell{
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=this.p;
     const velMul   = sp ? (sp.vel/127) : 1;
-    const cutOff   = sp ? ((sp.cut-50)/50)*40 : 0;
+    const fltDev  = sp ? (((sp.flt??50)-50)/50) : 0; // -1..+1
+    const cutOff   = fltDev * 0.3 * 40;               // 30% → ±12 semitone cutoff offset
+    const envScale = 1 + fltDev * 0.7;                // 70% → scale filter env amount
     const stepDly  = sp ? sp.dly/100 : 0;
     const globalDly= (globalSend!=null) ? globalSend/100 : 0;
     // dly=0 means "use global send"; any other value overrides it entirely
@@ -391,7 +393,7 @@ class Bell{
     const rawCut=Math.max(0,Math.min(100,p.vcfCutoff+cutOff));
     const baseHz=vcfHz(rawCut);
     vcf.Q.value=Math.max(0.01, p.vcfRes*0.28);
-    const envAmt=(p.filterEnvAmt/100)*velMul;
+    const envAmt=(p.filterEnvAmt/100)*velMul*Math.max(0,envScale);
     const peakHz=envAmt>0.001?baseHz*Math.pow(20000/Math.max(20,baseHz),envAmt):baseHz;
     const susHz=Math.max(20,baseHz+(peakHz-baseHz)*sus);
     const freqAtGate = decayFraction>=1 ? susHz : Math.max(20, peakHz*Math.pow(Math.max(20,susHz)/Math.max(20,peakHz), decayFraction));
@@ -741,7 +743,7 @@ export default function Tabula(){
   const [vPitchRange,setVPitchRange]= useState(1);
   const [vGhostRate, setVGhostRate] = useState(0);
   const [vVelJitter, setVVelJitter] = useState(0);
-  const [vCutJitter, setVCutJitter] = useState(0);
+  const [vFltJitter, setVFltJitter] = useState(0);
   const [vDlyJitter, setVDlyJitter] = useState(0);
   const [vRhyJitter, setVRhyJitter] = useState(0);
   const [vOctJitter, setVOctJitter] = useState(0);
@@ -792,7 +794,7 @@ export default function Tabula(){
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
   const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false),recSourceIdR=useRef(null);
-  const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,cutJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
+  const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
   const variedGrids=useRef(new Map());
   const prevFreqByRowR=useRef({});
   const lastPlayedFreqR=useRef(null);
@@ -819,8 +821,8 @@ export default function Tabula(){
   useEffect(()=>{swingR.current=swing;},[swing]);
   useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
   useEffect(()=>{
-    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,cutJitter:vCutJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
-  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,vGlideJitter,vDurJitter]);
+    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,fltJitter:vFltJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
+  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,vGlideJitter,vDurJitter]);
   useEffect(()=>{bell.current.p.waveform=waveform;},[waveform]);
   useEffect(()=>{bell.current.p.detune=detune;},[detune]);
   useEffect(()=>{bell.current.p.attack=attack;},[attack]);
@@ -844,7 +846,7 @@ export default function Tabula(){
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
   const doSave=async slot=>{
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -858,7 +860,7 @@ export default function Tabula(){
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
     if(s.loopMode!=null)setLoopMode(s.loopMode);
@@ -910,7 +912,7 @@ export default function Tabula(){
     waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
     dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
-    vVelJitter,vCutJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
+    vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId
   });
 
@@ -937,7 +939,7 @@ export default function Tabula(){
      ["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyWetPct",setDlyWetPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vCutJitter",setVCutJitter],["vDlyJitter",setVDlyJitter],
+     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
   };
@@ -1337,13 +1339,16 @@ export default function Tabula(){
     // Compute cell from physical coordinates — most reliable on mobile
     // (elementFromPoint and e.target both fail when note rects intercept)
     const gridEl=gridRef.current;
-    let r=null,c=null,hasCell=false;
+    let r=null,c=null,hasCell=false,cellFracX=0.5;
     if(gridEl){
       const rect=gridEl.getBoundingClientRect();
       const relY=e.clientY-rect.top, relX=e.clientX-rect.left;
       const ri=Math.floor(relY/(rect.height/ROWS));
       const ci=Math.floor(relX/(rect.width/COLS));
-      if(ri>=0&&ri<ROWS&&ci>=0&&ci<COLS){r=ri;c=ci;hasCell=true;}
+      if(ri>=0&&ri<ROWS&&ci>=0&&ci<COLS){
+        r=ri;c=ci;hasCell=true;
+        cellFracX=(relX-ci*(rect.width/COLS))/(rect.width/COLS);
+      }
     }
     const pat=patsR.current.find(p=>p.id===activeIdR.current);
     const isOnNote=hasCell&&pat&&pat.grid[r]&&pat.grid[r][c];
@@ -1367,6 +1372,24 @@ export default function Tabula(){
     g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
     // Record initial cell and whether it had a note (for paint mode)
     g.paintStartCell=hasCell&&!isNaN(r)&&!isNaN(c)?{r,c,wasOn:!!(pat&&pat.grid[r]&&pat.grid[r][c])}:null;
+
+    // Tie gesture: press on left portion (<40%) of an existing note with a note to its left
+    if(hasCell&&isOnNote&&c>0&&cellFracX<0.4){
+      const leftHasNote=pat&&pat.grid[r]&&pat.grid[r][c-1];
+      if(leftHasNote){
+        clearTimeout(longPressR.current);longPressR.current=null;
+        g.paintStartCell=null; // cancel normal tap
+        const alreadyTied=(pat.params?.[c]?.rhy??1)===0;
+        if(alreadyTied){
+          setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{params:(p.params||defaultStepParams()).map((sp,i)=>i===c?Object.assign({},sp,{rhy:1}):sp)})));
+        } else {
+          setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{params:(p.params||defaultStepParams()).map((sp,i)=>i===c?Object.assign({},sp,{rhy:0}):sp)})));
+        }
+        g.state="idle";
+        try{if(gridRef.current)gridRef.current.releasePointerCapture(e.pointerId);}catch(_){}
+        return;
+      }
+    }
     if(gridRef.current){
       const c0=gridRef.current.querySelector('[data-col="0"]'),c1=gridRef.current.querySelector('[data-col="1"]');
       if(c0&&c1){const px=c1.getBoundingClientRect().left-c0.getBoundingClientRect().left;if(px>2)g.cellPx=px;}
@@ -2342,12 +2365,13 @@ export default function Tabula(){
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,
                               boxShadow:isActive?glow:"none",
-                              pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>
+                              pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>
                               {!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
                               {!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
-                              {!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>
+                              {!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>
                                 {[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}
                               </div>}
+                              {!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}
                             </div>
                           );
                           ci+=span;
@@ -2608,7 +2632,7 @@ export default function Tabula(){
                     <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
                         <KnobSlider label="VEL"   value={vVelJitter}   min={0} max={100} onChange={setVVelJitter}   display={vVelJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="CUT"   value={vCutJitter}   min={0} max={100} onChange={setVCutJitter}   display={vCutJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="FLT"   value={vFltJitter}   min={0} max={100} onChange={setVFltJitter}   display={vFltJitter+"%"}   accent="#9fb4c7"/>
                         <KnobSlider label="DLY"   value={vDlyJitter}   min={0} max={100} onChange={setVDlyJitter}   display={vDlyJitter+"%"}   accent="#9fb4c7"/>
                         <KnobSlider label="RHY"   value={vRhyJitter}   min={0} max={100} onChange={setVRhyJitter}   display={vRhyJitter+"%"}   accent="#9fb4c7"/>
                         <KnobSlider label="OCT"   value={vOctJitter}   min={0} max={100} onChange={setVOctJitter}   display={vOctJitter+"%"}   accent="#9fb4c7"/>
@@ -2714,7 +2738,7 @@ export default function Tabula(){
                             background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;let span=1,nc=ci+1;const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1px",width:"80%",height:"80%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
@@ -2921,6 +2945,7 @@ export default function Tabula(){
                     e.stopPropagation();
                     const startX=e.clientX,startY=e.clientY;
                     let dragging=false;
+                    const cleanup=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);};
                     const onMove=(ev)=>{
                       if(!dragging){
                         if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
@@ -2931,10 +2956,8 @@ export default function Tabula(){
                       onSeqPointerMove(ev);
                     };
                     const onUp=(ev)=>{
-                      document.removeEventListener("pointermove",onMove);
-                      document.removeEventListener("pointerup",onUp);
+                      cleanup();
                       if(!dragging){
-                        // Tap — just select the pattern
                         isSynth?setActiveId(patId):setActiveDrumId(patId);
                       } else {
                         onSeqPointerUp(ev);
@@ -2942,11 +2965,13 @@ export default function Tabula(){
                     };
                     document.addEventListener("pointermove",onMove);
                     document.addEventListener("pointerup",onUp);
+                    document.addEventListener("pointercancel",onUp);
                   };
                   const startChainDrag=(e,chainIdx)=>{
                     e.stopPropagation();
                     const startX=e.clientX,startY=e.clientY;
                     let dragging=false;
+                    const cleanup=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);};
                     const onMove=(ev)=>{
                       if(!dragging){
                         if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
@@ -2957,8 +2982,7 @@ export default function Tabula(){
                       onSeqPointerMove(ev);
                     };
                     const onUp=(ev)=>{
-                      document.removeEventListener("pointermove",onMove);
-                      document.removeEventListener("pointerup",onUp);
+                      cleanup();
                       if(!dragging){
                         const p=sources.find(x=>x.id===theChain[chainIdx]);
                         if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}
@@ -2968,18 +2992,20 @@ export default function Tabula(){
                     };
                     document.addEventListener("pointermove",onMove);
                     document.addEventListener("pointerup",onUp);
+                    document.addEventListener("pointercancel",onUp);
                   };
 
                   const dragPat=seqDrag?sources.find(p=>p.id===seqDrag.patId):null;
 
                   return(
                   <div style={{touchAction:"none"}}>
-                    {/* Layer toggle */}
+                    {/* Layer toggle + STEP pill */}
                     <div style={{display:"flex",gap:5,marginBottom:14}}>
                       {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
                         <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                           onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
                       ))}
+                      {activeLayer==="synth"&&<button style={Object.assign({},S.tab,{padding:"8px 14px",fontSize:9},page==="step"?S.tabOn:{})} onClick={()=>setPage(p=>p==="step"?"edit":"step")}>STEP</button>}
                     </div>
 
                     {/* Pattern management buttons */}
@@ -3051,39 +3077,6 @@ export default function Tabula(){
                       </div>
                     )}
 
-                    {/* ── SPEED MULTIPLIERS ── */}
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
-                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",fontWeight:600,marginBottom:10}}>SPEED</div>
-                      <div style={{display:"flex",gap:6}}>
-                        {SPEED_OPTS.map(({label,mult})=>(
-                          <button key={label} style={Object.assign({},S.speedBtn,{flex:1,padding:"8px 0",fontSize:10},speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
-                        ))}
-                      </div>
-                    </div>
-
-                  </div>
-                  );
-                })()}
-
-                {/* SOUND sheet */}
-                {activeSheet==="sound"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
-                    {/* Layer toggle */}
-                    <div style={{display:"flex",gap:5,marginBottom:14}}>
-                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
-                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
-                      ))}
-                    </div>
-                    {/* Tabs: STEP / SOUND / VARY (synth only) */}
-                    {activeLayer==="synth"&&(
-                      <div style={{display:"flex",gap:4,marginBottom:12}}>
-                        {[["step","STEP"],["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
-                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                        ))}
-                      </div>
-                    )}
                     {/* Synth STEP */}
                     {activeLayer==="synth"&&page==="step"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
@@ -3154,36 +3147,102 @@ export default function Tabula(){
                         </div>
                       </div>
                     )}
+
+                    {/* ── SPEED MULTIPLIERS ── */}
+                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
+                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",fontWeight:600,marginBottom:10}}>SPEED</div>
+                      <div style={{display:"flex",gap:6}}>
+                        {SPEED_OPTS.map(({label,mult})=>(
+                          <button key={label} style={Object.assign({},S.speedBtn,{flex:1,padding:"8px 0",fontSize:10},speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+                  );
+                })()}
+
+                {/* SOUND sheet */}
+                {activeSheet==="sound"&&(
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
+                    {/* Layer toggle + STEP pill */}
+                    <div style={{display:"flex",gap:5,marginBottom:14}}>
+                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
+                      ))}
+                      {activeLayer==="synth"&&<button style={Object.assign({},S.tab,{padding:"8px 14px",fontSize:9},page==="step"?S.tabOn:{})} onClick={()=>setPage(p=>p==="step"?"edit":"step")}>STEP</button>}
+                    </div>
+                    {/* Tabs: SOUND / VARY (synth only) */}
+                    {activeLayer==="synth"&&(
+                      <div style={{display:"flex",gap:4,marginBottom:12}}>
+                        {[["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
+                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Synth VARY page */}
                     {activeLayer==="synth"&&page==="vary"&&(
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
                           <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
                         </div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"#c4967a",fontWeight:600,marginBottom:8}}>RHYTHM</div>
                         {[
-                          ["DROP",vDropRate,setVDropRate],
-                          ["SHIFT",vShiftRate,setVShiftRate],
-                          ["PITCH",vPitchRate,setVPitchRate],
-                          ["GHOST",vGhostRate,setVGhostRate],
+                          ["DROP",vDropRate,setVDropRate,60],
+                          ["SHIFT",vShiftRate,setVShiftRate,60],
+                          ["RANGE",vShiftRange,setVShiftRange,8,"st"],
+                        ].map(([label,val,setter,max,unit])=>(
+                          <div key={label} style={{marginBottom:10}}>
+                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
+                            </div>
+                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(196,150,122,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"#b5a0c4",fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
+                        {[
+                          ["PITCH",vPitchRate,setVPitchRate,60],
+                          ["RANGE",vPitchRange,setVPitchRange,12,"st"],
+                          ["GHOST",vGhostRate,setVGhostRate,60],
+                        ].map(([label,val,setter,max,unit])=>(
+                          <div key={label} style={{marginBottom:10}}>
+                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
+                            </div>
+                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(181,160,196,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"#9fb4c7",fontWeight:600,marginBottom:8,marginTop:14}}>STEP</div>
+                        {[
                           ["VEL",vVelJitter,setVVelJitter],
-                          ["CUT",vCutJitter,setVCutJitter],
+                          ["FLT",vFltJitter,setVFltJitter],
+                          ["DLY",vDlyJitter,setVDlyJitter],
+                          ["RHY",vRhyJitter,setVRhyJitter],
+                          ["OCT",vOctJitter,setVOctJitter],
+                          ["GLIDE",vGlideJitter,setVGlideJitter],
                           ["DUR",vDurJitter,setVDurJitter],
                         ].map(([label,val,setter])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:44}}>{label}</span>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{
-                                e.stopPropagation();
-                                const rect=e.currentTarget.getBoundingClientRect();
-                                const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};
-                                update(e);
-                                const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                                document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
-                              }}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(210,195,175,0.35)",borderRadius:3}}/>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(159,180,199,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
