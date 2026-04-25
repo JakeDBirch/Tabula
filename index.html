@@ -6811,6 +6811,39 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
+      display: "flex",
+      gap: 6,
+      padding: "8px 12px 6px",
+      flexShrink: 0
+    }
+  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref33) {
+    var _ref34 = _slicedToArray(_ref33, 4),
+      lyr = _ref34[0],
+      lbl = _ref34[1],
+      c = _ref34[2],
+      cf = _ref34[3];
+    return /*#__PURE__*/React.createElement("button", {
+      key: lyr,
+      style: {
+        flex: 1,
+        padding: "7px 0",
+        border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
+        borderRadius: 8,
+        background: activeLayer === lyr ? cf + "0.1)" : "transparent",
+        color: activeLayer === lyr ? c : cf + "0.4)",
+        fontSize: 9,
+        letterSpacing: 1.5,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit"
+      },
+      onClick: function onClick() {
+        setActiveLayer(lyr);
+        if (page === "step" && lyr === "drums") setPage("edit");
+      }
+    }, lbl);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
       flex: 1,
       minHeight: 0,
       overflow: "hidden",
@@ -7585,9 +7618,17 @@ function Tabula() {
     style: Object.assign({}, S.loopBtnBottom, {
       flex: 1,
       height: 36
-    }),
-    onClick: mutatePat1
-  }, "MUT8"))), activeSheet && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    }, followSeq ? {
+      border: "1px solid #7aaa96",
+      color: "#7aaa96",
+      background: "rgba(122,170,150,0.12)"
+    } : {}),
+    onClick: function onClick() {
+      return setFollowSeq(function (f) {
+        return !f;
+      });
+    }
+  }, "FOLLOW"))), activeSheet && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -7631,10 +7672,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref34) {
-    var _ref35 = _slicedToArray(_ref34, 2),
-      k = _ref35[0],
-      v = _ref35[1];
+  }, Object.entries(SCALES).map(function (_ref36) {
+    var _ref37 = _slicedToArray(_ref36, 2),
+      k = _ref37[0],
+      v = _ref37[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -7686,9 +7727,9 @@ function Tabula() {
     style: S.widgetU
   }, "SWG"))), /*#__PURE__*/React.createElement("div", {
     style: S.speedRow
-  }, SPEED_OPTS.map(function (_ref36) {
-    var label = _ref36.label,
-      mult = _ref36.mult;
+  }, SPEED_OPTS.map(function (_ref38) {
+    var label = _ref38.label,
+      mult = _ref38.mult;
     return /*#__PURE__*/React.createElement("button", {
       key: label,
       style: Object.assign({}, S.speedBtn, speedMult === mult ? S.speedBtnOn : {}),
@@ -7859,48 +7900,28 @@ function Tabula() {
       style: {
         touchAction: "none"
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
-        gap: 5,
+        gap: 4,
         marginBottom: 14
       }
-    }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref37) {
-      var _ref38 = _slicedToArray(_ref37, 4),
-        lyr = _ref38[0],
-        lbl = _ref38[1],
-        c = _ref38[2],
-        cf = _ref38[3];
+    }, [["edit", "PATTERN"], ["step", "STEP"]].map(function (_ref39) {
+      var _ref40 = _slicedToArray(_ref39, 2),
+        p = _ref40[0],
+        lbl = _ref40[1];
       return /*#__PURE__*/React.createElement("button", {
-        key: lyr,
-        style: {
+        key: p,
+        style: Object.assign({}, S.tab, {
           flex: 1,
-          padding: "8px 0",
-          border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
-          borderRadius: 8,
-          background: activeLayer === lyr ? cf + "0.1)" : "transparent",
-          color: activeLayer === lyr ? c : cf + "0.4)",
-          fontSize: 9,
-          letterSpacing: 1.5,
-          fontWeight: 600,
-          cursor: "pointer",
-          fontFamily: "inherit"
-        },
+          padding: "7px 0",
+          fontSize: 9
+        }, page === p ? S.tabOn : {}),
         onClick: function onClick() {
-          return setActiveLayer(lyr);
+          return setPage(p);
         }
       }, lbl);
-    }), activeLayer === "synth" && /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.tab, {
-        padding: "8px 14px",
-        fontSize: 9
-      }, page === "step" ? S.tabOn : {}),
-      onClick: function onClick() {
-        return setPage(function (p) {
-          return p === "step" ? "edit" : "step";
-        });
-      }
-    }, "STEP")), /*#__PURE__*/React.createElement("div", {
+    })), page !== "step" && /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
         gridTemplateColumns: "repeat(4,1fr)",
@@ -7919,13 +7940,13 @@ function Tabula() {
       return copyPatId(activeId);
     }], ["PST", function () {
       return pastePatId(activeId);
-    }, !clipboard], ["MONO", toggleMono, false, false, monoMode]].map(function (_ref39) {
-      var _ref40 = _slicedToArray(_ref39, 5),
-        l = _ref40[0],
-        f = _ref40[1],
-        d = _ref40[2],
-        danger = _ref40[3],
-        active = _ref40[4];
+    }, !clipboard], ["MONO", toggleMono, false, false, monoMode], ["MUT8", mutatePat1]].map(function (_ref41) {
+      var _ref42 = _slicedToArray(_ref41, 5),
+        l = _ref42[0],
+        f = _ref42[1],
+        d = _ref42[2],
+        danger = _ref42[3],
+        active = _ref42[4];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -7942,12 +7963,12 @@ function Tabula() {
         },
         onClick: d ? undefined : f
       }, l);
-    }) : [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref41) {
-      var _ref42 = _slicedToArray(_ref41, 4),
-        l = _ref42[0],
-        f = _ref42[1],
-        d = _ref42[2],
-        danger = _ref42[3];
+    }) : [["RAND", randDrumVel], ["CLR", clearDrums], ["DUP", dupDrumPat, drumPats.length >= 8], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn], ["PST", pasteDrumPatFn, !drumClipboard]].map(function (_ref43) {
+      var _ref44 = _slicedToArray(_ref43, 4),
+        l = _ref44[0],
+        f = _ref44[1],
+        d = _ref44[2],
+        danger = _ref44[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -7964,7 +7985,7 @@ function Tabula() {
         },
         onClick: d ? undefined : f
       }, l);
-    })), /*#__PURE__*/React.createElement("div", {
+    })), page !== "step" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
         marginBottom: 6
       }
@@ -8161,7 +8182,7 @@ function Tabula() {
         color: "rgba(196,122,122,0.7)",
         letterSpacing: 1
       }
-    }, "release to remove from sequence"))), seqDrag && dragPat && /*#__PURE__*/React.createElement("div", {
+    }, "release to remove from sequence")))), "                    ", seqDrag && dragPat && /*#__PURE__*/React.createElement("div", {
       style: {
         position: "fixed",
         left: seqDrag.x - 24,
@@ -8188,6 +8209,37 @@ function Tabula() {
         paddingRight: 4
       })
     }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 5,
+        overflowX: "auto",
+        scrollbarWidth: "none",
+        flexShrink: 0,
+        marginBottom: 10
+      }
+    }, pats.map(function (p) {
+      var isA = p.id === activeId;
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        style: {
+          padding: "4px 12px",
+          borderRadius: 20,
+          border: "1.5px solid #a8c5a0",
+          background: isA ? "#a8c5a0" : "transparent",
+          color: isA ? "#1a1814" : "#a8c5a0",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: 1,
+          cursor: "pointer",
+          flexShrink: 0,
+          userSelect: "none"
+        },
+        onPointerDown: function onPointerDown(e) {
+          e.stopPropagation();
+          setActiveId(p.id);
+        }
+      }, p.name);
+    })), /*#__PURE__*/React.createElement("div", {
       style: S.stepPageHdr
     }, /*#__PURE__*/React.createElement("div", {
       style: S.stepPagePat
@@ -8452,9 +8504,9 @@ function Tabula() {
         display: "flex",
         gap: 6
       }
-    }, SPEED_OPTS.map(function (_ref43) {
-      var label = _ref43.label,
-        mult = _ref43.mult;
+    }, SPEED_OPTS.map(function (_ref45) {
+      var label = _ref45.label,
+        mult = _ref45.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -8475,57 +8527,37 @@ function Tabula() {
       fontWeight: 500,
       marginBottom: 10
     }
-  }, "SOUND"), /*#__PURE__*/React.createElement("div", {
+  }, "SOUND"), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 5,
+      gap: 4,
       marginBottom: 14
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 4),
-      lyr = _ref45[0],
-      lbl = _ref45[1],
-      c = _ref45[2],
-      cf = _ref45[3];
+  }, [["edit", "PATTERN"], ["step", "STEP"]].map(function (_ref46) {
+    var _ref47 = _slicedToArray(_ref46, 2),
+      p = _ref47[0],
+      lbl = _ref47[1];
     return /*#__PURE__*/React.createElement("button", {
-      key: lyr,
-      style: {
+      key: p,
+      style: Object.assign({}, S.tab, {
         flex: 1,
-        padding: "8px 0",
-        border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
-        borderRadius: 8,
-        background: activeLayer === lyr ? cf + "0.1)" : "transparent",
-        color: activeLayer === lyr ? c : cf + "0.4)",
-        fontSize: 9,
-        letterSpacing: 1.5,
-        fontWeight: 600,
-        cursor: "pointer",
-        fontFamily: "inherit"
-      },
+        padding: "7px 0",
+        fontSize: 9
+      }, page === p ? S.tabOn : {}),
       onClick: function onClick() {
-        return setActiveLayer(lyr);
+        return setPage(p);
       }
     }, lbl);
-  }), activeLayer === "synth" && /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.tab, {
-      padding: "8px 14px",
-      fontSize: 9
-    }, page === "step" ? S.tabOn : {}),
-    onClick: function onClick() {
-      return setPage(function (p) {
-        return p === "step" ? "edit" : "step";
-      });
-    }
-  }, "STEP")), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
+  })), activeLayer === "synth" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 4,
       marginBottom: 12
     }
-  }, [["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref46) {
-    var _ref47 = _slicedToArray(_ref46, 2),
-      p = _ref47[0],
-      lbl = _ref47[1];
+  }, [["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref48) {
+    var _ref49 = _slicedToArray(_ref48, 2),
+      p = _ref49[0],
+      lbl = _ref49[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, {
@@ -8569,13 +8601,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref48) {
-    var _ref49 = _slicedToArray(_ref48, 5),
-      label = _ref49[0],
-      val = _ref49[1],
-      setter = _ref49[2],
-      max = _ref49[3],
-      unit = _ref49[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref50) {
+    var _ref51 = _slicedToArray(_ref50, 5),
+      label = _ref51[0],
+      val = _ref51[1],
+      setter = _ref51[2],
+      max = _ref51[3],
+      unit = _ref51[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -8660,13 +8692,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref50) {
-    var _ref51 = _slicedToArray(_ref50, 5),
-      label = _ref51[0],
-      val = _ref51[1],
-      setter = _ref51[2],
-      max = _ref51[3],
-      unit = _ref51[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref52) {
+    var _ref53 = _slicedToArray(_ref52, 5),
+      label = _ref53[0],
+      val = _ref53[1],
+      setter = _ref53[2],
+      max = _ref53[3],
+      unit = _ref53[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -8751,11 +8783,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref52) {
-    var _ref53 = _slicedToArray(_ref52, 3),
-      label = _ref53[0],
-      val = _ref53[1],
-      setter = _ref53[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref54) {
+    var _ref55 = _slicedToArray(_ref54, 3),
+      label = _ref55[0],
+      val = _ref55[1],
+      setter = _ref55[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -9208,12 +9240,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref54) {
-      var _ref55 = _slicedToArray(_ref54, 4),
-        label = _ref55[0],
-        fn = _ref55[1],
-        disabled = _ref55[2],
-        danger = _ref55[3];
+    }, isOnlyPat, true]].map(function (_ref56) {
+      var _ref57 = _slicedToArray(_ref56, 4),
+        label = _ref57[0],
+        fn = _ref57[1],
+        disabled = _ref57[2],
+        danger = _ref57[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -9297,12 +9329,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref56) {
-      var _ref57 = _slicedToArray(_ref56, 4),
-        label = _ref57[0],
-        fn = _ref57[1],
-        disabled = _ref57[2],
-        danger = _ref57[3];
+    }, isOnly, true]].map(function (_ref58) {
+      var _ref59 = _slicedToArray(_ref58, 4),
+        label = _ref59[0],
+        fn = _ref59[1],
+        disabled = _ref59[2],
+        danger = _ref59[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,

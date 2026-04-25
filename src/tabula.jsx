@@ -2709,6 +2709,15 @@ export default function Tabula(){
       {IS_MOBILE&&(
         <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#1a1814",overflow:"hidden"}}>
 
+          {/* ── PERSISTENT LAYER BAR — top of screen ── */}
+          <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
+            {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+              <button key={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                onClick={()=>{setActiveLayer(lyr);if(page==="step"&&lyr==="drums")setPage("edit");}}>
+                {lbl}
+              </button>
+            ))}
+          </div>
           {/* ── CONTENT AREA — full height grid ── */}
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
@@ -2850,7 +2859,7 @@ export default function Tabula(){
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36})} onClick={mutatePat1}>MUT8</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
             </div>
           </div>
 
@@ -2999,27 +3008,28 @@ export default function Tabula(){
 
                   return(
                   <div style={{touchAction:"none"}}>
-                    {/* Layer toggle + STEP pill */}
-                    <div style={{display:"flex",gap:5,marginBottom:14}}>
-                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
-                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
-                      ))}
-                      {activeLayer==="synth"&&<button style={Object.assign({},S.tab,{padding:"8px 14px",fontSize:9},page==="step"?S.tabOn:{})} onClick={()=>setPage(p=>p==="step"?"edit":"step")}>STEP</button>}
-                    </div>
+                    {/* PATTERN | STEP nav (synth only) */}
+                    {activeLayer==="synth"&&(
+                      <div style={{display:"flex",gap:4,marginBottom:14}}>
+                        {[["edit","PATTERN"],["step","STEP"]].map(([p,lbl])=>(
+                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                        ))}
+                      </div>
+                    )}
 
-                    {/* Pattern management buttons */}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
+                    {/* Pattern management buttons — hidden on STEP page */}
+                    {page!=="step"&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
                       {isSynth
-                        ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode]].map(([l,f,d,danger,active])=>(
+                        ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode],["MUT8",mutatePat1]].map(([l,f,d,danger,active])=>(
                           <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":active?"0.5":"0.14")+")",borderRadius:7,background:active?"rgba(168,197,160,0.1)":"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":active?"#a8c5a0":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                         ))
                         :[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
                           <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                         ))
                       }
-                    </div>
+                    </div>}
 
+{page!=="step"&&<>
                     {/* Source chips — tap to select, drag down to sequence */}
                     <div style={{marginBottom:6}}>
                       <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>PATTERNS — drag to sequence</div>
@@ -3070,7 +3080,8 @@ export default function Tabula(){
                       )}
                     </div>
 
-                    {/* Drag ghost chip */}
+</>
+}                    {/* Drag ghost chip */}
                     {seqDrag&&dragPat&&(
                       <div style={{position:"fixed",left:seqDrag.x-24,top:seqDrag.y-18,zIndex:9999,pointerEvents:"none",padding:"5px 14px",borderRadius:20,border:"1.5px solid "+col,background:col,color:"#1a1814",fontSize:11,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:0.9}}>
                         {dragPat.name}
@@ -3080,6 +3091,14 @@ export default function Tabula(){
                     {/* Synth STEP */}
                     {activeLayer==="synth"&&page==="step"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
+                        {/* Pattern selector pills */}
+                        <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",flexShrink:0,marginBottom:10}}>
+                          {pats.map(p=>{const isA=p.id===activeId;return(
+                            <div key={p.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();setActiveId(p.id);}}>
+                              {p.name}
+                            </div>);})}
+                        </div>
                         <div style={S.stepPageHdr}>
                           <div style={S.stepPagePat}>{activePat?.name||""}</div>
                           <div style={{flex:1}}/>
@@ -3166,14 +3185,14 @@ export default function Tabula(){
                 {activeSheet==="sound"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>SOUND</div>
-                    {/* Layer toggle + STEP pill */}
-                    <div style={{display:"flex",gap:5,marginBottom:14}}>
-                      {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
-                        <button key={lyr} style={{flex:1,padding:"8px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>setActiveLayer(lyr)}>{lbl}</button>
-                      ))}
-                      {activeLayer==="synth"&&<button style={Object.assign({},S.tab,{padding:"8px 14px",fontSize:9},page==="step"?S.tabOn:{})} onClick={()=>setPage(p=>p==="step"?"edit":"step")}>STEP</button>}
-                    </div>
+                    {/* PATTERN | STEP nav (synth only) */}
+                    {activeLayer==="synth"&&(
+                      <div style={{display:"flex",gap:4,marginBottom:14}}>
+                        {[["edit","PATTERN"],["step","STEP"]].map(([p,lbl])=>(
+                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+                        ))}
+                      </div>
+                    )}
                     {/* Tabs: SOUND / VARY (synth only) */}
                     {activeLayer==="synth"&&(
                       <div style={{display:"flex",gap:4,marginBottom:12}}>
