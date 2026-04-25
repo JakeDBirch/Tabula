@@ -861,6 +861,81 @@ export default function Tabula(){
 
   const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
 
+  // ── Undo / Redo history ──────────────────────────────────────────────────
+  const historyR = useRef([]);
+  const redoR    = useRef([]);
+  const MAX_HISTORY = 50;
+  // Ref-based — these are reassigned every render with fresh closures so
+  // captureSnapshot() always reads the LATEST state, regardless of where
+  // pushHistory is called from (including stale useCallback closures).
+  const captureSnapshotR = useRef(()=>null);
+  captureSnapshotR.current = ()=>({
+    pats:JSON.parse(JSON.stringify(pats)),
+    drumPats:JSON.parse(JSON.stringify(drumPats)),
+    chain:[...chain],drumChain:[...drumChain],
+    synthPhrases:JSON.parse(JSON.stringify(synthPhrases)),
+    drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
+    sections:JSON.parse(JSON.stringify(sections)),
+    activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
+    bpm,scale,transpose,swing,speedMult,
+    waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,
+    dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,
+    vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
+    vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
+  });
+  const applySnapshot = s=>{
+    if(!s)return;
+    setPats(s.pats);setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
+    setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
+    setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
+    setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
+    setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
+    setWaveform(s.waveform);setDetune(s.detune);setAttack(s.attack);setDecay(s.decay);setSustain(s.sustain);
+    setVcfCutoff(s.vcfCutoff);setVcfRes(s.vcfRes);setFilterEnvAmt(s.filterEnvAmt);
+    setDlyIdx(s.dlyIdx);setDlyFbPct(s.dlyFbPct);setDlyWetPct(s.dlyWetPct);setDlyHpVal(s.dlyHpVal);setDlyLpVal(s.dlyLpVal);
+    setVDropRate(s.vDropRate);setVShiftRate(s.vShiftRate);setVShiftRange(s.vShiftRange);
+    setVPitchRate(s.vPitchRate);setVPitchRange(s.vPitchRange);setVGhostRate(s.vGhostRate);
+    setVVelJitter(s.vVelJitter);setVFltJitter(s.vFltJitter);setVDlyJitter(s.vDlyJitter);
+    setVRhyJitter(s.vRhyJitter);setVOctJitter(s.vOctJitter);setVGlideJitter(s.vGlideJitter);setVDurJitter(s.vDurJitter);
+  };
+  // Stable function references — read live state via the refs above
+  const pushHistoryR = useRef(()=>{});
+  pushHistoryR.current = ()=>{
+    const snap=captureSnapshotR.current();
+    if(!snap)return;
+    historyR.current.push(snap);
+    if(historyR.current.length>MAX_HISTORY)historyR.current.shift();
+    redoR.current=[];
+  };
+  const pushHistory = ()=>pushHistoryR.current();
+  const undo = ()=>{
+    if(!historyR.current.length){showFlash("NOTHING TO UNDO");return;}
+    redoR.current.push(captureSnapshotR.current());
+    if(redoR.current.length>MAX_HISTORY)redoR.current.shift();
+    applySnapshot(historyR.current.pop());
+    showFlash("UNDO");
+  };
+  const redo = ()=>{
+    if(!redoR.current.length){showFlash("NOTHING TO REDO");return;}
+    historyR.current.push(captureSnapshotR.current());
+    if(historyR.current.length>MAX_HISTORY)historyR.current.shift();
+    applySnapshot(redoR.current.pop());
+    showFlash("REDO");
+  };
+
+
+  // ── Undo/Redo keyboard shortcuts ─────────────────────────────────────────
+  useEffect(()=>{
+    const onKey=(e)=>{
+      const isUndo=(e.metaKey||e.ctrlKey)&&!e.shiftKey&&(e.key==="z"||e.key==="Z");
+      const isRedo=(e.metaKey||e.ctrlKey)&&((e.shiftKey&&(e.key==="z"||e.key==="Z"))||(e.key==="y"||e.key==="Y"));
+      if(isUndo){e.preventDefault();undo();}
+      else if(isRedo){e.preventDefault();redo();}
+    };
+    document.addEventListener("keydown",onKey);
+    return()=>document.removeEventListener("keydown",onKey);
+  });
+
   const doSave=async slot=>{
     const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId};
     const next=Object.assign({},slotData,{[slot]:snap});
@@ -1296,7 +1371,7 @@ export default function Tabula(){
     return out;
   };
 
-  const toggleMono=()=>{
+  const toggleMono=()=>{pushHistory();
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
       const next=!p.mono;
@@ -1305,12 +1380,13 @@ export default function Tabula(){
     }));
   };
 
-  const mutatePat1=()=>mutatePat(g=>{
+  const mutatePat1=()=>{pushHistory();return mutatePat(g=>{
     const varied=genVariation(g,varyParamsR.current);
     return p?.mono?collapseToMono(varied):varied;
-  });
+  });};
 
   const handleGridDown=useCallback(e=>{
+    pushHistory();
     if(e.button===2)return; // right-click handled by onContextMenu only
     e.preventDefault();
     pointerCountR.current++;
@@ -1700,7 +1776,7 @@ export default function Tabula(){
 
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
-  const addPat=()=>{if(pats.length>=8)return;const p=mkPat("ABCDEFGH"[pats.length]);setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat("ABCDEFGH"[pats.length]);setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
@@ -1708,12 +1784,12 @@ export default function Tabula(){
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const delPatId=(id)=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
-  const pastePatId=(id)=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
-  const clearPatId=(id)=>{setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
-  const randPatId=(id)=>{setPats(ps=>ps.map(p=>{if(p.id!==id)return p;const isMono=!!p.mono;const grid=isMono?mkGrid():Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));if(isMono){for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(Math.random()<.12)hits.push(r);if(hits.length)grid[hits[Math.floor(Math.random()*hits.length)]][c]=true;}}return Object.assign({},p,{grid});}));};
+  const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
+  const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
+  const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{if(p.id!==id)return p;const isMono=!!p.mono;const grid=isMono?mkGrid():Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));if(isMono){for(let c=0;c<COLS;c++){const hits=[];for(let r=0;r<ROWS;r++)if(Math.random()<.12)hits.push(r);if(hits.length)grid[hits[Math.floor(Math.random()*hits.length)]][c]=true;}}return Object.assign({},p,{grid});}));};
   const randPat=()=>mutatePat(()=>{
     if(monoMode){
       // Generate poly-density grid then collapse each column to at most one note
@@ -1741,20 +1817,20 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{gridLen:len});
   }));
-  const clearDrums=()=>setDrumPats(ps=>ps.map(p=>{
+  const clearDrums=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
-  }));
+  }));}
   const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     const mix=(p.mix||defaultDrumMix()).map((m,i)=>i===row?Object.assign({},m,{[key]:val}):m);
     return Object.assign({},p,{mix});
   }));
-  const randDrumVel=()=>setDrumPats(ps=>ps.map(p=>{
+  const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     const vel=p.vel.map(()=>Math.round(80+Math.random()*Math.random()*47));
     return Object.assign({},p,{vel});
-  }));
+  }));}
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
@@ -1788,7 +1864,7 @@ export default function Tabula(){
     }));
   };
   const setDrumVary=(key,val)=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{[key]:val})));
-  const addDrumPat=()=>{
+  const addDrumPat=()=>{pushHistory();
     if(drumPats.length>=8)return;
     const d=mkDrumPat("ABCDEFGH"[drumPats.length]);
     setDrumPats(ps=>[...ps,d]);
@@ -1799,7 +1875,7 @@ export default function Tabula(){
     const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
     return Object.assign({},p,{params});
   }));
-  const randStepLane=(key)=>{
+  const randStepLane=(key)=>{pushHistory();
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
@@ -1808,7 +1884,7 @@ export default function Tabula(){
     }));
   };
   const randStepAll=()=>LANES.forEach(l=>randStepLane(l.key));
-  const resetStepLane=(key)=>{
+  const resetStepLane=(key)=>{pushHistory();
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
@@ -2465,7 +2541,7 @@ export default function Tabula(){
                           const isQ=c%4===0;
                           return(
                             <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
-                              onPointerDown={e=>{e.stopPropagation();if(!inactive)setDrumCell(r,c,!on);}}/>
+                              onPointerDown={e=>{e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,c,!on);}}}/>
                           );
                         })}
                       </div>
@@ -2725,7 +2801,8 @@ export default function Tabula(){
           {/* Transport — always visible, centered */}
           <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
             <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
-            <button style={Object.assign({},S.loopBtnBottom,recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)",fontWeight:900}:{border:"1px solid rgba(196,122,122,0.3)",color:"rgba(196,122,122,0.6)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+            <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
+            <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
             <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
             <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
@@ -2796,6 +2873,7 @@ export default function Tabula(){
                       if(phraseDropRef.current){
                         const rect=phraseDropRef.current.getBoundingClientRect();
                         if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right){
+                          pushHistory();
                           if(isSynth)setSynthPhrases(ps=>ps.map(ph=>ph.id===activeSynthPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
                           else setDrumPhrases(ps=>ps.map(ph=>ph.id===activeDrumPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
                         }
@@ -2880,7 +2958,7 @@ export default function Tabula(){
                                     background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
                                     border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
                                     boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
-                                  }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive)setDrumCell(r,step,!on);}}/> );
+                                  }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,step,!on);}}}/> );
                                 })}
                               </div>
                             );
@@ -2944,6 +3022,12 @@ export default function Tabula(){
                 <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="sound"?"rgba(139,191,159,0.9)":"rgba(210,195,175,0.5)"}}>♩</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SOUND</span>
               </button>
+              {/* VARY chip */}
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||varyMode?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||varyMode?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
+                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||varyMode?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
+                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||varyMode?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
+              </button>
               {/* PROJECT chip */}
               <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
@@ -2953,12 +3037,8 @@ export default function Tabula(){
             </div>
             {/* Row 2: persistent transport */}
             <div style={{display:"flex",alignItems:"center",padding:"0 10px 10px",gap:5}}>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},varyMode||activeSheet==="vary"?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})}
-                  onPointerDown={e=>{e.stopPropagation();varyLongPressR.current=setTimeout(()=>{varyLongPressR.current=null;setActiveSheet(s=>s==="vary"?null:"vary");},400);}}
-                  onPointerUp={e=>{if(varyLongPressR.current){clearTimeout(varyLongPressR.current);varyLongPressR.current=null;setVaryMode(v=>!v);}}}
-                  onPointerCancel={e=>{if(varyLongPressR.current){clearTimeout(varyLongPressR.current);varyLongPressR.current=null;}}}
-                >VARY</button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)"}:{border:"1px solid rgba(255,77,77,0.3)",color:"rgba(196,122,122,0.5)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
@@ -3110,14 +3190,14 @@ export default function Tabula(){
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
                           {phrases.map(ph=>{const isA=ph.id===activePhId;return(
                             <div key={ph.id} style={{...chipStyle(false,col),background:isA?col+"22":"transparent",boxShadow:isA?"inset 0 0 0 1.5px "+col:"none"}} onPointerDown={e=>startDrag(e,"phrase",ph.id)}>{ph.name}</div>);})}
-                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed "+colF+"0.3)",color:colF+"0.35)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();const id=(isSynth?"SP":"DP")+Date.now();setPhrases(ps=>[...ps,{id,name:String(phrases.length+1),chain:[]}]);setActivePhId(id);}}>＋</div>
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed "+colF+"0.3)",color:colF+"0.35)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id=(isSynth?"SP":"DP")+Date.now();setPhrases(ps=>[...ps,{id,name:String(phrases.length+1),chain:[]}]);setActivePhId(id);}}>＋</div>
                         </div>
                         <div ref={phraseDropRef} style={{minHeight:36,background:patternDrag&&patternDrag.overDrop?col+"22":"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid "+(patternDrag&&patternDrag.overDrop?col:"rgba(220,200,180,0.07)"),padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"all 0.1s",boxShadow:patternDrag&&patternDrag.overDrop?"inset 0 0 0 2px "+col:"none"}}>
                           {activePhChain.length===0
                             ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag patterns here</span>
                             :activePhChain.map((pid,ci)=>{const pp=sources.find(x=>x.id===pid);if(!pp)return null;return(
                               <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid "+col+"88",background:col+"15",color:col,fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
-                                {pp.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setActivePhChain(activePhChain.filter((_,i)=>i!==ci));}}>×</span>
+                                {pp.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setActivePhChain(activePhChain.filter((_,i)=>i!==ci));}}>×</span>
                               </div>);})}
                         </div>
 
@@ -3126,14 +3206,14 @@ export default function Tabula(){
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
                           {sections.map(sc=>{const isA=sc.id===activeSectionId;return(
                             <div key={sc.id} style={chipStyle(isA,"rgba(210,195,175,0.6)")} onPointerDown={e=>startDrag(e,"section",sc.id)}>{sc.name}</div>);})}
-                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed rgba(210,195,175,0.2)",color:"rgba(210,195,175,0.25)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();const id="SC"+Date.now();setSections(ss=>[...ss,{id,name:String(sections.length+1),synthPhraseIds:[],drumPhraseIds:[]}]);setActiveSectionId(id);}}>＋</div>
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed rgba(210,195,175,0.2)",color:"rgba(210,195,175,0.25)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id="SC"+Date.now();setSections(ss=>[...ss,{id,name:String(sections.length+1),synthPhraseIds:[],drumPhraseIds:[]}]);setActiveSectionId(id);}}>＋</div>
                         </div>
                         <div ref={sectionDropRef} style={{minHeight:36,background:"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid rgba(220,200,180,0.07)",padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"box-shadow 0.1s"}}>
                           {(()=>{const key=isSynth?"synthPhraseIds":"drumPhraseIds";const ids=activeSection?.[key]||[];
                           if(ids.length===0)return[<span key="empty" style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag phrases here</span>];
                           return ids.map((pid,ci)=>{const ph=phrases.find(x=>x.id===pid);if(!ph)return null;return(
                             <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
-                              {ph.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setSections(ss=>ss.map(s=>s.id!==activeSectionId?s:{...s,[key]:s[key].filter((_,i)=>i!==ci)}));}}>×</span>
+                              {ph.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setSections(ss=>ss.map(s=>s.id!==activeSectionId?s:{...s,[key]:s[key].filter((_,i)=>i!==ci)}));}}>×</span>
                             </div>);});})()}
                         </div>
 
@@ -3144,7 +3224,7 @@ export default function Tabula(){
                             ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag sections here</span>
                             :chain.map((sid,ci)=>{const sc=sections.find(x=>x.id===sid);if(!sc)return null;return(
                               <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
-                                {sc.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setChain(ch=>ch.filter((_,i)=>i!==ci));}}>×</span>
+                                {sc.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setChain(ch=>ch.filter((_,i)=>i!==ci));}}>×</span>
                               </div>);})}
                         </div>
                       </div>);
