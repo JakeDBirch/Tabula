@@ -2919,17 +2919,55 @@ export default function Tabula(){
                   };
                   const startSourceDrag=(e,patId)=>{
                     e.stopPropagation();
-                    const d={type:"source",patId,chainIdx:-1,x:e.clientX,y:e.clientY,overTrack:false,insertIdx:theChain.length};
-                    seqDragR.current=d;setSeqDrag(d);
-                    document.addEventListener("pointermove",onSeqPointerMove);
-                    document.addEventListener("pointerup",onSeqPointerUp);
+                    const startX=e.clientX,startY=e.clientY;
+                    let dragging=false;
+                    const onMove=(ev)=>{
+                      if(!dragging){
+                        if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                        dragging=true;
+                        const d={type:"source",patId,chainIdx:-1,x:ev.clientX,y:ev.clientY,overTrack:false,insertIdx:theChain.length};
+                        seqDragR.current=d;setSeqDrag(d);
+                      }
+                      onSeqPointerMove(ev);
+                    };
+                    const onUp=(ev)=>{
+                      document.removeEventListener("pointermove",onMove);
+                      document.removeEventListener("pointerup",onUp);
+                      if(!dragging){
+                        // Tap — just select the pattern
+                        isSynth?setActiveId(patId):setActiveDrumId(patId);
+                      } else {
+                        onSeqPointerUp(ev);
+                      }
+                    };
+                    document.addEventListener("pointermove",onMove);
+                    document.addEventListener("pointerup",onUp);
                   };
                   const startChainDrag=(e,chainIdx)=>{
                     e.stopPropagation();
-                    const d={type:"chain",patId:theChain[chainIdx],chainIdx,x:e.clientX,y:e.clientY,overTrack:true,insertIdx:chainIdx};
-                    seqDragR.current=d;setSeqDrag(d);
-                    document.addEventListener("pointermove",onSeqPointerMove);
-                    document.addEventListener("pointerup",onSeqPointerUp);
+                    const startX=e.clientX,startY=e.clientY;
+                    let dragging=false;
+                    const onMove=(ev)=>{
+                      if(!dragging){
+                        if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                        dragging=true;
+                        const d={type:"chain",patId:theChain[chainIdx],chainIdx,x:ev.clientX,y:ev.clientY,overTrack:true,insertIdx:chainIdx};
+                        seqDragR.current=d;setSeqDrag(d);
+                      }
+                      onSeqPointerMove(ev);
+                    };
+                    const onUp=(ev)=>{
+                      document.removeEventListener("pointermove",onMove);
+                      document.removeEventListener("pointerup",onUp);
+                      if(!dragging){
+                        const p=sources.find(x=>x.id===theChain[chainIdx]);
+                        if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}
+                      } else {
+                        onSeqPointerUp(ev);
+                      }
+                    };
+                    document.addEventListener("pointermove",onMove);
+                    document.addEventListener("pointerup",onUp);
                   };
 
                   const dragPat=seqDrag?sources.find(p=>p.id===seqDrag.patId):null;

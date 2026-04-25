@@ -7634,35 +7634,79 @@ function Tabula() {
     };
     var startSourceDrag = function startSourceDrag(e, patId) {
       e.stopPropagation();
-      var d = {
-        type: "source",
-        patId: patId,
-        chainIdx: -1,
-        x: e.clientX,
-        y: e.clientY,
-        overTrack: false,
-        insertIdx: theChain.length
+      var startX = e.clientX,
+        startY = e.clientY;
+      var dragging = false;
+      var onMove = function onMove(ev) {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 6 && Math.abs(ev.clientY - startY) < 6) return;
+          dragging = true;
+          var d = {
+            type: "source",
+            patId: patId,
+            chainIdx: -1,
+            x: ev.clientX,
+            y: ev.clientY,
+            overTrack: false,
+            insertIdx: theChain.length
+          };
+          seqDragR.current = d;
+          setSeqDrag(d);
+        }
+        onSeqPointerMove(ev);
       };
-      seqDragR.current = d;
-      setSeqDrag(d);
-      document.addEventListener("pointermove", onSeqPointerMove);
-      document.addEventListener("pointerup", _onSeqPointerUp);
+      var _onUp2 = function onUp(ev) {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", _onUp2);
+        if (!dragging) {
+          // Tap — just select the pattern
+          isSynth ? setActiveId(patId) : setActiveDrumId(patId);
+        } else {
+          _onSeqPointerUp(ev);
+        }
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", _onUp2);
     };
     var startChainDrag = function startChainDrag(e, chainIdx) {
       e.stopPropagation();
-      var d = {
-        type: "chain",
-        patId: theChain[chainIdx],
-        chainIdx: chainIdx,
-        x: e.clientX,
-        y: e.clientY,
-        overTrack: true,
-        insertIdx: chainIdx
+      var startX = e.clientX,
+        startY = e.clientY;
+      var dragging = false;
+      var onMove = function onMove(ev) {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 6 && Math.abs(ev.clientY - startY) < 6) return;
+          dragging = true;
+          var d = {
+            type: "chain",
+            patId: theChain[chainIdx],
+            chainIdx: chainIdx,
+            x: ev.clientX,
+            y: ev.clientY,
+            overTrack: true,
+            insertIdx: chainIdx
+          };
+          seqDragR.current = d;
+          setSeqDrag(d);
+        }
+        onSeqPointerMove(ev);
       };
-      seqDragR.current = d;
-      setSeqDrag(d);
-      document.addEventListener("pointermove", onSeqPointerMove);
-      document.addEventListener("pointerup", _onSeqPointerUp);
+      var _onUp3 = function onUp(ev) {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", _onUp3);
+        if (!dragging) {
+          var _p5 = sources.find(function (x) {
+            return x.id === theChain[chainIdx];
+          });
+          if (_p5) {
+            isSynth ? setActiveId(_p5.id) : setActiveDrumId(_p5.id);
+          }
+        } else {
+          _onSeqPointerUp(ev);
+        }
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", _onUp3);
     };
     var dragPat = seqDrag ? sources.find(function (p) {
       return p.id === seqDrag.patId;
