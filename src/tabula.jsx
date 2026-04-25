@@ -668,6 +668,7 @@ function SynthSection({title,accent,children}){
   );
 }
 
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function Tabula(){
   const [pats,setPats]=useState(()=>{
@@ -732,10 +733,15 @@ export default function Tabula(){
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   const longPressR   = useRef(null); // setTimeout id
   const varyLongPressR = useRef(null);
+  const patDropRef   = useRef(null); // sequence drawer drop zones
+  const phraseDropRef= useRef(null);
+  const sectionDropRef=useRef(null);
+  const seqDropRef   = useRef(null);
   const pointerCountR= useRef(0);    // active pointers on grid
   const [chainDrag, setChainDrag] = useState(null); // {type,id,fromIdx,x,y}
   const chainStripRef = useRef(null);
   const chainDragR    = useRef(null); // mirror of chainDrag for handlers
+  const [patternDrag, setPatternDrag] = useState(null); // {patId, name, accent, x, y, overDrop}
   // Vary params
   const [vDropRate,  setVDropRate]  = useState(13);
   const [vShiftRate, setVShiftRate] = useState(17);
@@ -779,6 +785,15 @@ export default function Tabula(){
   const [drumChain,   setDrumChain]   = useState([initDrum.id]);
   const [drumCpos,    setDrumCpos]    = useState(0);
   const [drumClipboard,setDrumClipboard]=useState(null);
+  // ── Phrase & Section architecture ──────────────────────────────────────────
+  const [synthPhrases,  setSynthPhrases]  = useState([{id:"SP1",name:"1",chain:["A"]}]);
+  const [drumPhrases,   setDrumPhrases]   = useState([{id:"DP1",name:"1",chain:[initDrum.id]}]);
+  const [sections,      setSections]      = useState([{id:"SC1",name:"1",synthPhraseId:"SP1",drumPhraseId:"DP1"}]);
+  const [activeSynthPhraseId, setActiveSynthPhraseId] = useState("SP1");
+  const [activeDrumPhraseId,  setActiveDrumPhraseId]  = useState("DP1");
+  const [activeSectionId,     setActiveSectionId]     = useState("SC1");
+  const [seqTab,        setSeqTab]        = useState("patterns"); // "patterns"|"phrases"|"sections"
+  const [seqPage,       setSeqPage]       = useState("sequence"); // "sequence"|"step"
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
   useEffect(()=>{drumPatsR.current=drumPats;},[drumPats]);
@@ -795,7 +810,7 @@ export default function Tabula(){
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
   const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false),recSourceIdR=useRef(null);
-  const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0});
+  const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0,glideJitter:0,durJitter:0});
   const variedGrids=useRef(new Map());
   const prevFreqByRowR=useRef({});
   const lastPlayedFreqR=useRef(null);
@@ -2710,6 +2725,11 @@ export default function Tabula(){
       {IS_MOBILE&&(
         <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#1a1814",overflow:"hidden"}}>
 
+          {/* ── TABULA BRANDING ── */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
+            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:18,fontWeight:300,letterSpacing:6,color:"rgba(210,195,175,0.7)",textTransform:"uppercase"}}>Tabula</span>
+          </div>
+
           {/* ── PERSISTENT LAYER BAR — top of screen ── */}
           <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
             {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
@@ -2719,21 +2739,77 @@ export default function Tabula(){
               </button>
             ))}
           </div>
+          {/* ── PERSISTENT PATTERN PILLS — tap to select, drag to phrase ── */}
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",flexShrink:0,padding:"4px 12px 6px",alignItems:"center",touchAction:"none"}}>
+            {(activeLayer==="synth"?pats:drumPats).map(p=>{
+              const isSynth=activeLayer==="synth";
+              const isA=isSynth?p.id===activeId:p.id===activeDrumId;
+              const isP=playing&&(isSynth?playId===p.id:false);
+              const accent=isSynth?"#a8c5a0":"#c4967a";
+              const isDragging=patternDrag&&patternDrag.patId===p.id;
+              return(
+                <div key={p.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",WebkitUserSelect:"none",touchAction:"none",display:"flex",alignItems:"center",gap:2,opacity:isDragging?0.4:1}}
+                  onPointerDown={e=>{
+                    e.stopPropagation();
+                    const startX=e.clientX,startY=e.clientY;
+                    const pointerId=e.pointerId;
+                    const target=e.currentTarget;
+                    let dragging=false;
+                    const onMove=(ev)=>{
+                      if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                      if(!dragging){
+                        if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
+                        dragging=true;
+                        try{target.setPointerCapture(pointerId);}catch(_){}
+                        setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false});
+                      }
+                      let overDrop=false;
+                      if(phraseDropRef.current){
+                        const rect=phraseDropRef.current.getBoundingClientRect();
+                        overDrop=ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right;
+                      }
+                      setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overDrop}:null);
+                    };
+                    const onUp=(ev)=>{
+                      if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                      document.removeEventListener("pointermove",onMove);
+                      document.removeEventListener("pointerup",onUp);
+                      document.removeEventListener("pointercancel",onUp);
+                      try{target.releasePointerCapture(pointerId);}catch(_){}
+                      if(!dragging){
+                        isSynth?setActiveId(p.id):setActiveDrumId(p.id);
+                        return;
+                      }
+                      if(phraseDropRef.current){
+                        const rect=phraseDropRef.current.getBoundingClientRect();
+                        if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right){
+                          if(isSynth)setSynthPhrases(ps=>ps.map(ph=>ph.id===activeSynthPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
+                          else setDrumPhrases(ps=>ps.map(ph=>ph.id===activeDrumPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
+                        }
+                      }
+                      setPatternDrag(null);
+                    };
+                    document.addEventListener("pointermove",onMove);
+                    document.addEventListener("pointerup",onUp);
+                    document.addEventListener("pointercancel",onUp);
+                  }}>
+                  {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
+                </div>);
+            })}
+            {(activeLayer==="synth"?pats:drumPats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":"rgba(196,150,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":"rgba(196,150,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="synth"?addPat():addDrumPat();}}>＋</div>}
+          </div>
+          {/* ── DRAG GHOST — floating pill that follows pointer ── */}
+          {patternDrag&&(
+            <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:10,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+              {patternDrag.name}
+            </div>
+          )}
           {/* ── CONTENT AREA — full height grid ── */}
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
             {/* SYNTH EDIT grid */}
             {activeLayer==="synth"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
-                {/* Pattern selector — tap to switch */}
-              <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch",flexShrink:0,marginBottom:6,width:"min(100%,calc(100dvh - 108px))"}}>
-                {pats.map(p=>{const isA=p.id===activeId;const isP=playing&&playId===p.id;return(
-                  <div key={p.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",display:"flex",alignItems:"center",gap:2,WebkitUserSelect:"none"}}
-                    onPointerDown={e=>{e.stopPropagation();setActiveId(p.id);}}>
-                    {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                  </div>);})}
-                {pats.length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.35)",color:"rgba(168,197,160,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();addPat();}}>＋</div>}
-              </div>
               <div style={{width:"min(100%,calc(100dvh - 108px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -2840,7 +2916,7 @@ export default function Tabula(){
                 <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
               </button>
-              {/* PATTERN chip */}
+              {/* SEQUENCE chip */}
               <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="pattern"?(activeLayer==="synth"?"rgba(168,197,160,0.6)":"rgba(196,150,122,0.6)"):"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="pattern"?(activeLayer==="synth"?"rgba(168,197,160,0.08)":"rgba(196,150,122,0.08)"):"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="pattern"?null:"pattern")}>
                 <span style={{fontSize:12,fontWeight:700,color:activeLayer==="synth"?"#a8c5a0":"#c4967a",lineHeight:1.1}}>
@@ -2882,7 +2958,7 @@ export default function Tabula(){
           {activeSheet&&(
             <>
               {/* Backdrop */}
-              <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
+              <div style={{position:"fixed",top:120,left:0,right:0,bottom:60,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
               <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
                 {/* TEMPO sheet */}
@@ -2906,200 +2982,17 @@ export default function Tabula(){
                   </div>
                 )}
 
-                {/* PATTERN sheet — drag-and-drop sequencing */}
-                {activeSheet==="pattern"&&(()=>{
-                  const isSynth=activeLayer==="synth";
-                  const col=isSynth?"#a8c5a0":"#c4967a";
-                  const colFaint=isSynth?"rgba(168,197,160,":"rgba(196,150,122,";
-                  const sources=isSynth?pats:drumPats;
-                  const activePatId=isSynth?activeId:activeDrumId;
-                  const theChain=isSynth?chain:drumChain;
-                  const setTheChain=isSynth?setChain:setDrumChain;
-                  const playingIdx=isSynth?(playing&&!loopMode?cpos:-1):(playing?drumCpos%Math.max(1,drumChain.length):-1);
-
-                  // Seq drag helpers
-                  const getInsertIdx=(clientX)=>{
-                    if(!seqTrackRef.current)return theChain.length;
-                    const rect=seqTrackRef.current.getBoundingClientRect();
-                    const slotW=rect.width/Math.max(1,theChain.length+1);
-                    return Math.max(0,Math.min(theChain.length,Math.round((clientX-rect.left)/slotW)));
-                  };
-                  const isOverTrack=(clientY)=>{
-                    if(!seqTrackRef.current)return false;
-                    const r=seqTrackRef.current.getBoundingClientRect();
-                    return clientY>=r.top-20&&clientY<=r.bottom+20;
-                  };
-                  const onSeqPointerMove=(e)=>{
-                    if(!seqDragR.current)return;
-                    const over=isOverTrack(e.clientY);
-                    const ins=over?getInsertIdx(e.clientX):seqDragR.current.insertIdx;
-                    const next={...seqDragR.current,x:e.clientX,y:e.clientY,overTrack:over,insertIdx:ins};
-                    seqDragR.current=next;
-                    setSeqDrag({...next});
-                  };
-                  const onSeqPointerUp=(e)=>{
-                    if(!seqDragR.current)return;
-                    const d=seqDragR.current;
-                    const over=isOverTrack(e.clientY);
-                    const ins=getInsertIdx(e.clientX);
-                    if(d.type==="source"&&over&&theChain.length<8){
-                      // Drop from source → insert into chain
-                      setTheChain(c=>{const n=[...c];n.splice(ins,0,d.patId);return n.slice(0,8);});
-                    } else if(d.type==="chain"&&!over){
-                      // Drag chain slot out → remove
-                      setTheChain(c=>c.filter((_,j)=>j!==d.chainIdx));
-                    } else if(d.type==="chain"&&over&&ins!==d.chainIdx&&ins!==d.chainIdx+1){
-                      // Reorder within chain
-                      setTheChain(c=>{
-                        const n=[...c];const [item]=n.splice(d.chainIdx,1);
-                        const finalIns=ins>d.chainIdx?ins-1:ins;
-                        n.splice(finalIns,0,item);return n;
-                      });
-                    }
-                    document.removeEventListener("pointermove",onSeqPointerMove);
-                    document.removeEventListener("pointerup",onSeqPointerUp);
-                    seqDragR.current=null;setSeqDrag(null);
-                  };
-                  const startSourceDrag=(e,patId)=>{
-                    e.stopPropagation();
-                    const startX=e.clientX,startY=e.clientY;
-                    let dragging=false;
-                    const cleanup=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);};
-                    const onMove=(ev)=>{
-                      if(!dragging){
-                        if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                        dragging=true;
-                        const d={type:"source",patId,chainIdx:-1,x:ev.clientX,y:ev.clientY,overTrack:false,insertIdx:theChain.length};
-                        seqDragR.current=d;setSeqDrag(d);
-                      }
-                      onSeqPointerMove(ev);
-                    };
-                    const onUp=(ev)=>{
-                      cleanup();
-                      if(!dragging){
-                        isSynth?setActiveId(patId):setActiveDrumId(patId);
-                      } else {
-                        onSeqPointerUp(ev);
-                      }
-                    };
-                    document.addEventListener("pointermove",onMove);
-                    document.addEventListener("pointerup",onUp);
-                    document.addEventListener("pointercancel",onUp);
-                  };
-                  const startChainDrag=(e,chainIdx)=>{
-                    e.stopPropagation();
-                    const startX=e.clientX,startY=e.clientY;
-                    let dragging=false;
-                    const cleanup=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);};
-                    const onMove=(ev)=>{
-                      if(!dragging){
-                        if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                        dragging=true;
-                        const d={type:"chain",patId:theChain[chainIdx],chainIdx,x:ev.clientX,y:ev.clientY,overTrack:true,insertIdx:chainIdx};
-                        seqDragR.current=d;setSeqDrag(d);
-                      }
-                      onSeqPointerMove(ev);
-                    };
-                    const onUp=(ev)=>{
-                      cleanup();
-                      if(!dragging){
-                        const p=sources.find(x=>x.id===theChain[chainIdx]);
-                        if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}
-                      } else {
-                        onSeqPointerUp(ev);
-                      }
-                    };
-                    document.addEventListener("pointermove",onMove);
-                    document.addEventListener("pointerup",onUp);
-                    document.addEventListener("pointercancel",onUp);
-                  };
-
-                  const dragPat=seqDrag?sources.find(p=>p.id===seqDrag.patId):null;
-
-                  return(
-                  <div style={{touchAction:"none"}}>
-                    {/* PATTERN | STEP nav (synth only) */}
-                    {activeLayer==="synth"&&(
-                      <div style={{display:"flex",gap:4,marginBottom:14}}>
-                        {[["edit","PATTERN"],["step","STEP"]].map(([p,lbl])=>(
-                          <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Pattern management buttons — hidden on STEP page */}
-                    {page!=="step"&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:14}}>
-                      {isSynth
-                        ?[["RAND",()=>randPatId(activeId)],["CLR",()=>clearPatId(activeId)],["DUP",()=>dupPatId(activeId),pats.length>=8],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId)],["PST",()=>pastePatId(activeId),!clipboard],["MONO",toggleMono,false,false,monoMode],["MUT8",mutatePat1]].map(([l,f,d,danger,active])=>(
-                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":active?"0.5":"0.14")+")",borderRadius:7,background:active?"rgba(168,197,160,0.1)":"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":active?"#a8c5a0":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))
-                        :[["RAND",randDrumVel],["CLR",clearDrums],["DUP",dupDrumPat,drumPats.length>=8],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn],["PST",pasteDrumPatFn,!drumClipboard]].map(([l,f,d,danger])=>(
-                          <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.14")+")",borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":"rgba(200,185,165,0.7)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
-                        ))
-                      }
-                    </div>}
-
-{page!=="step"&&<>
-                    {/* Source chips — tap to select, drag down to sequence */}
-                    <div style={{marginBottom:6}}>
-                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>PATTERNS — drag to sequence</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                        {sources.map(p=>{
-                          const isA=p.id===activePatId;
-                          const isP=playing&&(isSynth?playId===p.id:(drumChain[drumCpos%Math.max(1,drumChain.length)]===p.id));
-                          const isDragging=seqDrag?.type==="source"&&seqDrag.patId===p.id;
-                          return(<div key={p.id}
-                            style={{padding:"6px 16px",borderRadius:20,border:"1.5px solid "+col,background:isA?col:isDragging?"rgba(255,255,255,0.06)":"transparent",color:isA?"#1a1814":isDragging?col+"99":col,fontSize:12,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:3,opacity:isDragging?0.4:1,transition:"opacity .1s"}}
-                            onClick={()=>{isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}
-                            onPointerDown={e=>startSourceDrag(e,p.id)}>
-                            {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                          </div>);
-                        })}
-                        {sources.length<8&&<button style={{padding:"6px 12px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
-                          onClick={()=>{isSynth?addPat():addDrumPat();}}>＋</button>}
-                      </div>
+                {/* SEQUENCE sheet — single page, all four levels */}
+                {activeSheet==="pattern"&&(
+                  <div style={{paddingBottom:8}}>
+                    {/* SEQUENCE | STEP pills */}
+                    <div style={{display:"flex",gap:4,marginBottom:14}}>
+                      {[["sequence","SEQUENCE"],["step","STEP"]].map(([p,lbl])=>(
+                        <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},seqPage===p?S.tabOn:{})} onClick={()=>setSeqPage(p)}>{lbl}</button>
+                      ))}
                     </div>
-
-                    {/* Sequence track — drag source chips in, drag chain chips out */}
-                    <div style={{marginTop:16}}>
-                      <div style={{fontSize:7,letterSpacing:1.5,color:colFaint+"0.45)",fontWeight:600,marginBottom:7}}>SEQUENCE — drag out to remove</div>
-                      <div ref={seqTrackRef} style={{minHeight:52,background:"rgba(220,200,180,0.04)",border:"1px solid "+(seqDrag?.overTrack?col+"66":"rgba(220,200,180,0.1)"),borderRadius:10,padding:"8px 8px",display:"flex",gap:5,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",transition:"border-color .12s",position:"relative"}}>
-                        {theChain.length===0&&!seqDrag&&<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",padding:"0 4px"}}>drag patterns here to build a sequence</span>}
-                        {theChain.map((pid,i)=>{
-                          const p=sources.find(x=>x.id===pid);
-                          const here=i===playingIdx;
-                          const isDragging=seqDrag?.type==="chain"&&seqDrag.chainIdx===i;
-                          const showInsert=seqDrag?.overTrack&&seqDrag.insertIdx===i;
-                          return(<React.Fragment key={i}>
-                            {showInsert&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
-                            <div style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid "+col,background:here?col:isDragging?"rgba(255,255,255,0.04)":"rgba(220,200,180,0.06)",color:here?"#1a1814":col,fontSize:11,fontWeight:700,letterSpacing:1,cursor:"grab",userSelect:"none",flexShrink:0,opacity:isDragging?0.3:1,display:"flex",alignItems:"center",gap:2,transition:"opacity .1s"}}
-                              onClick={()=>{if(p){isSynth?setActiveId(p.id):setActiveDrumId(p.id);}}}
-                              onPointerDown={e=>startChainDrag(e,i)}>
-                              {here&&<span style={{fontSize:6}}>●</span>}{p?.name||"?"}
-                            </div>
-                          </React.Fragment>);
-                        })}
-                        {seqDrag?.overTrack&&seqDrag.insertIdx>=theChain.length&&<div style={{width:3,height:36,background:col,borderRadius:2,flexShrink:0,boxShadow:"0 0 6px "+col}}/>}
-                        {!seqDrag&&theChain.length<8&&<button style={{padding:"5px 10px",borderRadius:20,border:"1px dashed "+colFaint+"0.3)",background:"transparent",color:colFaint+"0.4)",fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0}} onClick={()=>setTheChain(c=>c.length<8?[...c,activePatId]:c)}>＋</button>}
-                      </div>
-                      {/* Drop-to-delete hint when dragging chain slot */}
-                      {seqDrag?.type==="chain"&&!seqDrag.overTrack&&(
-                        <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,border:"1px dashed rgba(196,122,122,0.4)",background:"rgba(196,122,122,0.06)",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-                          <span style={{fontSize:9,color:"rgba(196,122,122,0.7)",letterSpacing:1}}>release to remove from sequence</span>
-                        </div>
-                      )}
-                    </div>
-
-</>
-}                    {/* Drag ghost chip */}
-                    {seqDrag&&dragPat&&(
-                      <div style={{position:"fixed",left:seqDrag.x-24,top:seqDrag.y-18,zIndex:9999,pointerEvents:"none",padding:"5px 14px",borderRadius:20,border:"1.5px solid "+col,background:col,color:"#1a1814",fontSize:11,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:0.9}}>
-                        {dragPat.name}
-                      </div>
-                    )}
-
-                    {/* Synth STEP */}
-                    {activeLayer==="synth"&&page==="step"&&(
+                    {/* STEP page */}
+                    {seqPage==="step"&&activeLayer==="synth"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
                         {/* Pattern selector pills */}
                         <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",flexShrink:0,marginBottom:10}}>
@@ -3136,61 +3029,115 @@ export default function Tabula(){
                         })}
                       </div>
                     )}
-                    {/* Synth SOUND */}
-                    {activeLayer==="synth"&&page==="sound"&&(
-                      <div style={{overflowY:"auto"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                          <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                            <div style={{display:"flex",gap:10,padding:"6px 12px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
-                              <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
-                              <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
-                                {WAVEFORMS.map((w,i)=>(
-                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
-                                ))}
-                              </div>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="ENV" accent={C_ENV}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
-                              <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
-                              <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
-                              <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="FILTER" accent={C_FILT}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
-                              <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
-                              <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
-                              <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
-                            </div>
-                          </SynthSection>
-                          <SynthSection title="DELAY" accent={C_DLY}>
-                            <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                              <KnobSlider label="SEND" value={dlyWetPct} min={0} max={100}                onChange={setDlyWetPct} display={dlyWetPct+"%"}            accent={C_DLY}/>
-                              <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                              <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                              <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
-                            </div>
-                          </SynthSection>
+                    {/* SEQUENCE page */}
+                    {seqPage==="sequence"&&(()=>{
+                      const isSynth=activeLayer==="synth";
+                      const col=isSynth?"#a8c5a0":"#c4967a";
+                      const colF=isSynth?"rgba(168,197,160,":"rgba(196,150,122,";
+                      const sources=isSynth?pats:drumPats;
+                      const phrases=isSynth?synthPhrases:drumPhrases;
+                      const setPhrases=isSynth?setSynthPhrases:setDrumPhrases;
+                      const activePhId=isSynth?activeSynthPhraseId:activeDrumPhraseId;
+                      const setActivePhId=isSynth?setActiveSynthPhraseId:setActiveDrumPhraseId;
+                      const activePh=phrases.find(p=>p.id===activePhId)||phrases[0];
+                      const activePhChain=activePh?.chain||[];
+                      const setActivePhChain=ch=>setPhrases(ps=>ps.map(p=>p.id===(activePh?.id)?{...p,chain:ch}:p));
+                      const activeSection=sections.find(s=>s.id===activeSectionId)||sections[0];
+
+                      const startDrag=(e,type,id)=>{
+                        e.stopPropagation();
+                        const startX=e.clientX,startY=e.clientY;
+                        let dragging=false;
+                        const onMove=(ev)=>{
+                          if(!dragging){if(Math.abs(ev.clientX-startX)<5&&Math.abs(ev.clientY-startY)<5)return;dragging=true;}
+                          [phraseDropRef,sectionDropRef,seqDropRef].forEach(r=>{
+                            if(!r.current)return;
+                            const rect=r.current.getBoundingClientRect();
+                            const over=ev.clientY>=rect.top&&ev.clientY<=rect.bottom;
+                            r.current.style.boxShadow=over?"inset 0 0 0 2px "+col:"none";
+                          });
+                        };
+                        const onUp=(ev)=>{
+                          document.removeEventListener("pointermove",onMove);
+                          document.removeEventListener("pointerup",onUp);
+                          document.removeEventListener("pointercancel",onUp);
+                          [phraseDropRef,sectionDropRef,seqDropRef].forEach(r=>{if(r.current)r.current.style.boxShadow="none";});
+                          if(!dragging){
+                            if(type==="pattern"){isSynth?setActiveId(id):setActiveDrumId(id);}
+                            else if(type==="phrase"){setActivePhId(id);}
+                            else if(type==="section"){setActiveSectionId(id);}
+                            return;
+                          }
+                          if(type==="pattern"&&phraseDropRef.current){
+                            const rect=phraseDropRef.current.getBoundingClientRect();
+                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){setActivePhChain([...activePhChain,id]);return;}
+                          }
+                          if(type==="phrase"&&sectionDropRef.current){
+                            const rect=sectionDropRef.current.getBoundingClientRect();
+                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){
+                              setSections(ss=>ss.map(s=>{if(s.id!==activeSectionId)return s;const key=isSynth?"synthPhraseIds":"drumPhraseIds";return{...s,[key]:[...(s[key]||[]),id]};}));
+                              return;
+                            }
+                          }
+                          if(type==="section"&&seqDropRef.current){
+                            const rect=seqDropRef.current.getBoundingClientRect();
+                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){setChain(ch=>[...ch,id]);return;}
+                          }
+                        };
+                        document.addEventListener("pointermove",onMove);
+                        document.addEventListener("pointerup",onUp);
+                        document.addEventListener("pointercancel",onUp);
+                      };
+
+                      const chipStyle=(isA,accent)=>({padding:"4px 12px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",touchAction:"none"});
+
+                      return(<div>
+                        {/* PHRASES */}
+                        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}><span style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PHRASES</span><span style={{fontSize:7,color:"rgba(210,195,175,0.25)",letterSpacing:1}}>tap to select · drag to section</span></div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
+                          {phrases.map(ph=>{const isA=ph.id===activePhId;return(
+                            <div key={ph.id} style={{...chipStyle(false,col),background:isA?col+"22":"transparent",boxShadow:isA?"inset 0 0 0 1.5px "+col:"none"}} onPointerDown={e=>startDrag(e,"phrase",ph.id)}>{ph.name}</div>);})}
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed "+colF+"0.3)",color:colF+"0.35)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();const id=(isSynth?"SP":"DP")+Date.now();setPhrases(ps=>[...ps,{id,name:String(phrases.length+1),chain:[]}]);setActivePhId(id);}}>＋</div>
                         </div>
-                      </div>
-                    )}
+                        <div ref={phraseDropRef} style={{minHeight:36,background:patternDrag&&patternDrag.overDrop?col+"22":"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid "+(patternDrag&&patternDrag.overDrop?col:"rgba(220,200,180,0.07)"),padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"all 0.1s",boxShadow:patternDrag&&patternDrag.overDrop?"inset 0 0 0 2px "+col:"none"}}>
+                          {activePhChain.length===0
+                            ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag patterns here</span>
+                            :activePhChain.map((pid,ci)=>{const pp=sources.find(x=>x.id===pid);if(!pp)return null;return(
+                              <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid "+col+"88",background:col+"15",color:col,fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                                {pp.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setActivePhChain(activePhChain.filter((_,i)=>i!==ci));}}>×</span>
+                              </div>);})}
+                        </div>
 
-                    {/* ── SPEED MULTIPLIERS ── */}
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
-                      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",fontWeight:600,marginBottom:10}}>SPEED</div>
-                      <div style={{display:"flex",gap:6}}>
-                        {SPEED_OPTS.map(({label,mult})=>(
-                          <button key={label} style={Object.assign({},S.speedBtn,{flex:1,padding:"8px 0",fontSize:10},speedMult===mult?S.speedBtnOn:{})} onClick={()=>setSpeedMult(mult)}>{label}</button>
-                        ))}
-                      </div>
-                    </div>
+                        {/* SECTIONS */}
+                        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}><span style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>SECTIONS</span><span style={{fontSize:7,color:"rgba(210,195,175,0.25)",letterSpacing:1}}>tap to select · drag to sequence</span></div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
+                          {sections.map(sc=>{const isA=sc.id===activeSectionId;return(
+                            <div key={sc.id} style={chipStyle(isA,"rgba(210,195,175,0.6)")} onPointerDown={e=>startDrag(e,"section",sc.id)}>{sc.name}</div>);})}
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed rgba(210,195,175,0.2)",color:"rgba(210,195,175,0.25)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();const id="SC"+Date.now();setSections(ss=>[...ss,{id,name:String(sections.length+1),synthPhraseIds:[],drumPhraseIds:[]}]);setActiveSectionId(id);}}>＋</div>
+                        </div>
+                        <div ref={sectionDropRef} style={{minHeight:36,background:"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid rgba(220,200,180,0.07)",padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"box-shadow 0.1s"}}>
+                          {(()=>{const key=isSynth?"synthPhraseIds":"drumPhraseIds";const ids=activeSection?.[key]||[];
+                          if(ids.length===0)return[<span key="empty" style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag phrases here</span>];
+                          return ids.map((pid,ci)=>{const ph=phrases.find(x=>x.id===pid);if(!ph)return null;return(
+                            <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                              {ph.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setSections(ss=>ss.map(s=>s.id!==activeSectionId?s:{...s,[key]:s[key].filter((_,i)=>i!==ci)}));}}>×</span>
+                            </div>);});})()}
+                        </div>
 
+                        {/* SEQUENCE */}
+                        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}><span style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>SEQUENCE</span><span style={{fontSize:7,color:"rgba(210,195,175,0.25)",letterSpacing:1}}>drag sections here</span></div>
+                        <div ref={seqDropRef} style={{minHeight:36,background:"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid rgba(220,200,180,0.07)",padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"box-shadow 0.1s"}}>
+                          {chain.filter(id=>sections.find(s=>s.id===id)).length===0
+                            ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag sections here</span>
+                            :chain.map((sid,ci)=>{const sc=sections.find(x=>x.id===sid);if(!sc)return null;return(
+                              <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                                {sc.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();setChain(ch=>ch.filter((_,i)=>i!==ci));}}>×</span>
+                              </div>);})}
+                        </div>
+                      </div>);
+                    })()}
                   </div>
-                  );
-                })()}
-
+                )}
                 {activeSheet==="sound"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
