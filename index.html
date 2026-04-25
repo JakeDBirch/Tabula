@@ -6744,6 +6744,64 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
+      display: "flex",
+      gap: 5,
+      overflowX: "auto",
+      scrollbarWidth: "none",
+      WebkitOverflowScrolling: "touch",
+      flexShrink: 0,
+      marginBottom: 6,
+      width: "min(100%,calc(100dvh - 108px))"
+    }
+  }, pats.map(function (p) {
+    var isA = p.id === activeId;
+    var isP = playing && playId === p.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      style: {
+        padding: "4px 12px",
+        borderRadius: 20,
+        border: "1.5px solid #a8c5a0",
+        background: isA ? "#a8c5a0" : "transparent",
+        color: isA ? "#1a1814" : "#a8c5a0",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 1,
+        cursor: "pointer",
+        flexShrink: 0,
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        WebkitUserSelect: "none"
+      },
+      onPointerDown: function onPointerDown(e) {
+        e.stopPropagation();
+        setActiveId(p.id);
+      }
+    }, isP && !isA && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 6,
+        opacity: 0.7
+      }
+    }, "\u25CF"), p.name);
+  }), pats.length < 8 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "4px 10px",
+      borderRadius: 20,
+      border: "1px dashed rgba(168,197,160,0.35)",
+      color: "rgba(168,197,160,0.45)",
+      fontSize: 12,
+      cursor: "pointer",
+      flexShrink: 0,
+      userSelect: "none"
+    },
+    onPointerDown: function onPointerDown(e) {
+      e.stopPropagation();
+      addPat();
+    }
+  }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
+    style: {
       width: "min(100%,calc(100dvh - 108px))",
       aspectRatio: "1",
       display: "flex",
