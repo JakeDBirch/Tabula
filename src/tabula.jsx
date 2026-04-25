@@ -706,7 +706,7 @@ export default function Tabula(){
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
-  const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"function"
+  const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
   const [seqDrag,       setSeqDrag]       = useState(null); // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
   const seqDragR=useRef(null);
   const seqTrackRef=useRef(null);
@@ -731,6 +731,7 @@ export default function Tabula(){
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   const longPressR   = useRef(null); // setTimeout id
+  const varyLongPressR = useRef(null);
   const pointerCountR= useRef(0);    // active pointers on grid
   const [chainDrag, setChainDrag] = useState(null); // {type,id,fromIdx,x,y}
   const chainStripRef = useRef(null);
@@ -2855,15 +2856,19 @@ export default function Tabula(){
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SOUND</span>
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="function"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="function"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
-                onClick={()=>{setActiveSheet(s=>s==="function"?null:"function");setPage("vary");}}>
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
                 <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>FUNCTION</span>
+                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>PROJECT</span>
               </button>
             </div>
             {/* Row 2: persistent transport */}
             <div style={{display:"flex",alignItems:"center",padding:"0 10px 10px",gap:5}}>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},varyMode||activeSheet==="vary"?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})}
+                  onPointerDown={e=>{e.stopPropagation();varyLongPressR.current=setTimeout(()=>{varyLongPressR.current=null;setActiveSheet(s=>s==="vary"?null:"vary");},400);}}
+                  onPointerUp={e=>{if(varyLongPressR.current){clearTimeout(varyLongPressR.current);varyLongPressR.current=null;setVaryMode(v=>!v);}}}
+                  onPointerCancel={e=>{if(varyLongPressR.current){clearTimeout(varyLongPressR.current);varyLongPressR.current=null;}}}
+                >VARY</button>
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},recMode?{border:"1px solid #c47a7a",color:"#c47a7a",background:"rgba(196,122,122,0.15)"}:{border:"1px solid rgba(255,77,77,0.3)",color:"rgba(196,122,122,0.5)"})} onClick={()=>setRecMode(r=>!r)}>{recMode?"■ REC":"● REC"}</button>
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
@@ -3260,21 +3265,10 @@ export default function Tabula(){
                     })()}
                   </div>
                 )}
-                {/* FUNCTION sheet — PROJECT + VARY pills */}
-                {activeSheet==="function"&&(
+                {/* PROJECT sheet */}
+                {activeSheet==="project"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>FUNCTION</div>
-                    {/* PROJECT | VARY pills */}
-                    <div style={{display:"flex",gap:4,marginBottom:16}}>
-                      {[["vary","VARY"],["project","PROJECT"]].map(([p,lbl])=>(
-                        <button key={p} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",fontSize:9},page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
-                      ))}
-                    </div>
-                    {/* PROJECT page */}
-                    {page==="project"&&(
-                      <div>
-
-                    <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16}}>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
                     {flash&&<div style={S.menuFlash}>{flash}</div>}
                     {confirmAction&&(
                       <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:8}}>
@@ -3300,21 +3294,19 @@ export default function Tabula(){
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
                     </div>
                     <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
-                    </div>
-                      </div>
-                    )}
-                    {/* VARY page */}
-                    {page==="vary"&&activeLayer==="synth"&&(
+                  </div>
+                )}
+                {/* VARY sheet */}
+                {activeSheet==="vary"&&(
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>VARY</div>
+                    {activeLayer==="synth"&&(
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
                           <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
                         </div>
                         <div style={{fontSize:8,letterSpacing:1.5,color:"#c4967a",fontWeight:600,marginBottom:8}}>RHYTHM</div>
-                        {[
-                          ["DROP",vDropRate,setVDropRate,60],
-                          ["SHIFT",vShiftRate,setVShiftRate,60],
-                          ["RANGE",vShiftRange,setVShiftRange,8,"st"],
-                        ].map(([label,val,setter,max,unit])=>(
+                        {[["DROP",vDropRate,setVDropRate,60],["SHIFT",vShiftRate,setVShiftRate,60],["RANGE",vShiftRange,setVShiftRange,8,"st"]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
                               <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
@@ -3328,11 +3320,7 @@ export default function Tabula(){
                           </div>
                         ))}
                         <div style={{fontSize:8,letterSpacing:1.5,color:"#b5a0c4",fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
-                        {[
-                          ["PITCH",vPitchRate,setVPitchRate,60],
-                          ["RANGE",vPitchRange,setVPitchRange,12,"st"],
-                          ["GHOST",vGhostRate,setVGhostRate,60],
-                        ].map(([label,val,setter,max,unit])=>(
+                        {[["PITCH",vPitchRate,setVPitchRate,60],["RANGE",vPitchRange,setVPitchRange,12,"st"],["GHOST",vGhostRate,setVGhostRate,60]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
                               <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
@@ -3346,15 +3334,7 @@ export default function Tabula(){
                           </div>
                         ))}
                         <div style={{fontSize:8,letterSpacing:1.5,color:"#9fb4c7",fontWeight:600,marginBottom:8,marginTop:14}}>STEP</div>
-                        {[
-                          ["VEL",vVelJitter,setVVelJitter],
-                          ["FLT",vFltJitter,setVFltJitter],
-                          ["DLY",vDlyJitter,setVDlyJitter],
-                          ["RHY",vRhyJitter,setVRhyJitter],
-                          ["OCT",vOctJitter,setVOctJitter],
-                          ["GLIDE",vGlideJitter,setVGlideJitter],
-                          ["DUR",vDurJitter,setVDurJitter],
-                        ].map(([label,val,setter])=>(
+                        {[["VEL",vVelJitter,setVVelJitter],["FLT",vFltJitter,setVFltJitter],["DLY",vDlyJitter,setVDlyJitter],["RHY",vRhyJitter,setVRhyJitter],["OCT",vOctJitter,setVOctJitter],["GLIDE",vGlideJitter,setVGlideJitter],["DUR",vDurJitter,setVDurJitter]].map(([label,val,setter])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
                               <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
