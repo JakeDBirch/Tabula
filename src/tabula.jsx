@@ -1643,6 +1643,8 @@ export default function Tabula(){
             let nextBar=songCurBar+1;
             if(nextBar>songLastBar)nextBar=songFirstBar;
             songBarR.current=nextBar;setSongBar(nextBar);
+            // Sync mode: all four cursors track songBar
+            setSongBarLayer({synth:nextBar,lead:nextBar,bass:nextBar,drums:nextBar});
           }
           // Non-song mode: single pat loops on its own — nothing to advance.
         }
