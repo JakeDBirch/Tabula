@@ -27,6 +27,17 @@ const DLY_NOTES = [
   {label:"1/2",  mult:2},  {label:"1/2·", mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
+// Single shared pool of 16 abstract, structurally-distinct glyphs.
+// Each field type picks from the pool with its own start offset and stride
+// (strides 5, 11, 3 are all coprime with 16, so each field visits every
+// symbol in a different order before wrapping). Result: same symbol palette
+// across patterns/phrases/sections, but each field defaults to a different
+// glyph and progresses through them in a different order.
+const SYM_POOL=["☉","☾","☿","♀","♂","♃","♄","♅","♆","♇","⚳","⚴","⚵","⚶","⚷","⚸"];
+const _N=SYM_POOL.length;
+const symPat=i=>SYM_POOL[(0  + i*5)  %_N];
+const symPhr=i=>SYM_POOL[(7  + i*11) %_N];
+const symSec=i=>SYM_POOL[(11 + i*3)  %_N];
 // Device detection — multiple signals for reliability across browsers and iframe contexts
 const IS_MOBILE = (()=>{
   try {
@@ -673,7 +684,7 @@ function SynthSection({title,accent,children}){
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function Tabula(){
   const [pats,setPats]=useState(()=>{
-    const a=mkPat("A");
+    const a=mkPat(symPat(0));
     return[a];
   });
   const [activeId,  setActiveId]  = useState(1);
@@ -710,6 +721,7 @@ export default function Tabula(){
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
   const [seqDrag,       setSeqDrag]       = useState(null); // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+  const [sheetDrag,     setSheetDrag]     = useState(null); // mobile sequence drawer drag: {type, id, name, color, x, y}
   const seqDragR=useRef(null);
   const seqTrackRef=useRef(null);
   const [shareFlash,setShareFlash]= useState("");
@@ -784,9 +796,9 @@ export default function Tabula(){
   const [drumCpos,    setDrumCpos]    = useState(0);
   const [drumClipboard,setDrumClipboard]=useState(null);
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  const [synthPhrases,  setSynthPhrases]  = useState([{id:"SP1",name:"1",chain:["A"]}]);
-  const [drumPhrases,   setDrumPhrases]   = useState([{id:"DP1",name:"1",chain:[initDrum.id]}]);
-  const [sections,      setSections]      = useState([{id:"SC1",name:"1",synthPhraseId:"SP1",drumPhraseId:"DP1"}]);
+  const [synthPhrases,  setSynthPhrases]  = useState([{id:"SP1",name:symPhr(0),chain:["A"]}]);
+  const [drumPhrases,   setDrumPhrases]   = useState([{id:"DP1",name:symPhr(0),chain:[initDrum.id]}]);
+  const [sections,      setSections]      = useState([{id:"SC1",name:symSec(0),synthPhraseIds:[],drumPhraseIds:[]}]);
   const [activeSynthPhraseId, setActiveSynthPhraseId] = useState("SP1");
   const [activeDrumPhraseId,  setActiveDrumPhraseId]  = useState("DP1");
   const [activeSectionId,     setActiveSectionId]     = useState("SC1");
@@ -795,12 +807,12 @@ export default function Tabula(){
   // Synth-type layers (synth, lead, bass) share the editing UI by swapping
   // their data in/out of the live state on layer switch. Each layer has its
   // own pats array, active pattern, phrases, and active phrase.
-  const _initLeadPat = mkPat("A");
-  const _initBassPat = mkPat("A");
+  const _initLeadPat = mkPat(symPat(0));
+  const _initBassPat = mkPat(symPat(0));
   const layerStoreR = useRef({
     synth: null, // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
-    lead:  { pats:[_initLeadPat], activeId:_initLeadPat.id, phrases:[{id:"LP1",name:"1",chain:[_initLeadPat.id]}], activePhraseId:"LP1" },
-    bass:  { pats:[_initBassPat], activeId:_initBassPat.id, phrases:[{id:"BP1",name:"1",chain:[_initBassPat.id]}], activePhraseId:"BP1" }
+    lead:  { pats:[_initLeadPat], activeId:_initLeadPat.id, phrases:[{id:"LP1",name:symPhr(0),chain:[_initLeadPat.id]}], activePhraseId:"LP1" },
+    bass:  { pats:[_initBassPat], activeId:_initBassPat.id, phrases:[{id:"BP1",name:symPhr(0),chain:[_initBassPat.id]}], activePhraseId:"BP1" }
   });
   const activeLayerR = useRef("synth");
   useEffect(()=>{activeLayerR.current=activeLayer;},[activeLayer]);
@@ -843,6 +855,17 @@ export default function Tabula(){
   const drumChainR=useRef([initDrum.id]);
   const drumCposR=useRef(0);
   useEffect(()=>{drumChainR.current=drumChain;},[drumChain]);
+
+  // Sync legacy chain ← active phrase chain so the scheduler plays whatever is in the phrase box.
+  // For synth-type layers (synth/lead/bass), `synthPhrases` holds the active layer's phrases.
+  useEffect(()=>{
+    const ph=synthPhrases.find(p=>p.id===activeSynthPhraseId);
+    if(ph&&ph.chain&&ph.chain.length)setChain(ph.chain);
+  },[synthPhrases,activeSynthPhraseId]);
+  useEffect(()=>{
+    const ph=drumPhrases.find(p=>p.id===activeDrumPhraseId);
+    if(ph&&ph.chain&&ph.chain.length)setDrumChain(ph.chain);
+  },[drumPhrases,activeDrumPhraseId]);
   useEffect(()=>{drumCposR.current=drumCpos;},[drumCpos]);
   const stepR=useRef(0),cposR=useRef(0),tmrR=useRef(null),nextNoteR=useRef(0);
   const patsR=useRef(pats),chainR=useRef(chain);
@@ -1170,7 +1193,7 @@ export default function Tabula(){
             const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
             let rvg=genVariation(src.grid,vp);
             const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
-            const newPat={id:++_id,name:"ABCDEFGH"[patsR.current.length],grid:rvg,params:newParams,gridLen:src.gridLen??16};
+            const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,params:newParams,gridLen:src.gridLen??16};
             setPats(ps=>{
               if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
               return [...ps,newPat];
@@ -1933,15 +1956,15 @@ export default function Tabula(){
 
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
-  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat("ABCDEFGH"[pats.length]);setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(symPat(pats.length));setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat("ABCDEFGH"[pats.length]),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
@@ -1998,7 +2021,7 @@ export default function Tabula(){
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-    const d=Object.assign({},mkDrumPat("ABCDEFGH"[drumPats.length]),{
+    const d=Object.assign({},mkDrumPat(symPat(drumPats.length)),{
       grid:src.grid.map(r=>[...r]),vel:[...src.vel],gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       vRhythm:src.vRhythm,vVelocity:src.vVelocity
@@ -2030,7 +2053,7 @@ export default function Tabula(){
   const setDrumVary=(key,val)=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{[key]:val})));
   const addDrumPat=()=>{pushHistory();
     if(drumPats.length>=8)return;
-    const d=mkDrumPat("ABCDEFGH"[drumPats.length]);
+    const d=mkDrumPat(symPat(drumPats.length));
     setDrumPats(ps=>[...ps,d]);
     setActiveDrumId(d.id);
   };
@@ -3006,7 +3029,7 @@ export default function Tabula(){
               const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#b5a0c4":activeLayer==="bass"?"#d4a574":"#c4967a";
               const isDragging=patternDrag&&patternDrag.patId===p.id;
               return(
-                <div key={p.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",WebkitUserSelect:"none",touchAction:"none",display:"flex",alignItems:"center",gap:2,opacity:isDragging?0.4:1}}
+                <div key={p.id} style={{padding:"6px 14px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",WebkitUserSelect:"none",touchAction:"none",display:"flex",alignItems:"center",gap:2,opacity:isDragging?0.4:1,lineHeight:1}}
                   onPointerDown={e=>{
                     e.stopPropagation();
                     const startX=e.clientX,startY=e.clientY;
@@ -3059,8 +3082,14 @@ export default function Tabula(){
           </div>
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
-            <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:10,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+            <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
               {patternDrag.name}
+            </div>
+          )}
+          {/* ── SEQUENCE-SHEET DRAG GHOST — phrases / sections being dragged within drawer ── */}
+          {sheetDrag&&(
+            <div style={{position:"fixed",left:sheetDrag.x-24,top:sheetDrag.y-14,zIndex:10000,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+sheetDrag.color,background:sheetDrag.willDelete?"transparent":sheetDrag.color,color:sheetDrag.willDelete?sheetDrag.color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,lineHeight:1,boxShadow:sheetDrag.willDelete?"0 0 12px rgba(196,122,122,0.4)":"0 4px 20px rgba(0,0,0,0.5)",transform:sheetDrag.willDelete?"scale(0.92)":"scale(1.1)",transition:"transform 0.1s",opacity:sheetDrag.willDelete?0.7:1,textDecoration:sheetDrag.willDelete?"line-through":"none"}}>
+              {sheetDrag.willDelete?"× ":""}{sheetDrag.name}
             </div>
           )}
           {/* ── CONTENT AREA — full height grid ── */}
@@ -3254,6 +3283,22 @@ export default function Tabula(){
                 {/* SEQUENCE sheet — single page, all four levels */}
                 {activeSheet==="pattern"&&(
                   <div style={{paddingBottom:8}}>
+                    {/* Pattern ops — operate on the active pattern of the active layer */}
+                    {(()=>{
+                      const isDrum=activeLayer==="drums";
+                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#b5a0c4":activeLayer==="bass"?"#d4a574":"#c4967a";
+                      const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(181,160,196,":activeLayer==="bass"?"rgba(212,165,116,":"rgba(196,150,122,";
+                      const ops=isDrum
+                        ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",null,true,false]]
+                        :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
+                      return(
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:12}}>
+                          {ops.map(([l,f,d,danger])=>(
+                            <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid "+(d?"rgba(200,185,165,0.06)":accentF+"0.3)"),borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":accent,fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600}} onClick={d?undefined:f}>{l}</button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {/* SEQUENCE | STEP pills */}
                     <div style={{display:"flex",gap:4,marginBottom:14}}>
                       {[["sequence","SEQUENCE"],["step","STEP"]].map(([p,lbl])=>(
@@ -3266,7 +3311,7 @@ export default function Tabula(){
                         {/* Pattern selector pills */}
                         <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",flexShrink:0,marginBottom:10}}>
                           {pats.map(p=>{const isA=p.id===activeId;return(
-                            <div key={p.id} style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none"}}
+                            <div key={p.id} style={{padding:"6px 14px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",lineHeight:1}}
                               onPointerDown={e=>{e.stopPropagation();setActiveId(p.id);}}>
                               {p.name}
                             </div>);})}
@@ -3313,12 +3358,13 @@ export default function Tabula(){
                       const setActivePhChain=ch=>setPhrases(ps=>ps.map(p=>p.id===(activePh?.id)?{...p,chain:ch}:p));
                       const activeSection=sections.find(s=>s.id===activeSectionId)||sections[0];
 
-                      const startDrag=(e,type,id)=>{
+                      const startDrag=(e,type,id,name)=>{
                         e.stopPropagation();
                         const startX=e.clientX,startY=e.clientY;
                         let dragging=false;
                         const onMove=(ev)=>{
-                          if(!dragging){if(Math.abs(ev.clientX-startX)<5&&Math.abs(ev.clientY-startY)<5)return;dragging=true;}
+                          if(!dragging){if(Math.abs(ev.clientX-startX)<5&&Math.abs(ev.clientY-startY)<5)return;dragging=true;setSheetDrag({type,id,name,color:col,x:ev.clientX,y:ev.clientY});}
+                          else setSheetDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY}:d);
                           [phraseDropRef,sectionDropRef,seqDropRef].forEach(r=>{
                             if(!r.current)return;
                             const rect=r.current.getBoundingClientRect();
@@ -3331,6 +3377,7 @@ export default function Tabula(){
                           document.removeEventListener("pointerup",onUp);
                           document.removeEventListener("pointercancel",onUp);
                           [phraseDropRef,sectionDropRef,seqDropRef].forEach(r=>{if(r.current)r.current.style.boxShadow="none";});
+                          setSheetDrag(null);
                           if(!dragging){
                             if(type==="pattern"){isSynth?setActiveId(id):setActiveDrumId(id);}
                             else if(type==="phrase"){setActivePhId(id);}
@@ -3339,18 +3386,19 @@ export default function Tabula(){
                           }
                           if(type==="pattern"&&phraseDropRef.current){
                             const rect=phraseDropRef.current.getBoundingClientRect();
-                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){setActivePhChain([...activePhChain,id]);return;}
+                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){pushHistory();setActivePhChain([...activePhChain,id]);return;}
                           }
                           if(type==="phrase"&&sectionDropRef.current){
                             const rect=sectionDropRef.current.getBoundingClientRect();
                             if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){
+                              pushHistory();
                               setSections(ss=>ss.map(s=>{if(s.id!==activeSectionId)return s;const key=isSynth?"synthPhraseIds":"drumPhraseIds";return{...s,[key]:[...(s[key]||[]),id]};}));
                               return;
                             }
                           }
                           if(type==="section"&&seqDropRef.current){
                             const rect=seqDropRef.current.getBoundingClientRect();
-                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){setChain(ch=>[...ch,id]);return;}
+                            if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom){pushHistory();setChain(ch=>[...ch,id]);return;}
                           }
                         };
                         document.addEventListener("pointermove",onMove);
@@ -3358,21 +3406,66 @@ export default function Tabula(){
                         document.addEventListener("pointercancel",onUp);
                       };
 
-                      const chipStyle=(isA,accent)=>({padding:"4px 12px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",touchAction:"none"});
+                      const chipStyle=(isA,accent)=>({padding:"6px 14px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",touchAction:"none",lineHeight:1});
+
+                      // Drag chain item to reorder (within zone) or delete (outside zone)
+                      const startChainItemDrag=(e,opts)=>{
+                        e.stopPropagation();
+                        const startX=e.clientX,startY=e.clientY;
+                        let dragging=false;
+                        const isOver=(ev)=>{const r=opts.dropRef.current?.getBoundingClientRect();return r&&ev.clientX>=r.left&&ev.clientX<=r.right&&ev.clientY>=r.top&&ev.clientY<=r.bottom;};
+                        const onMove=(ev)=>{
+                          if(!dragging){if(Math.abs(ev.clientX-startX)<5&&Math.abs(ev.clientY-startY)<5)return;dragging=true;}
+                          const overZone=isOver(ev);
+                          const willDelete=!overZone;
+                          setSheetDrag({type:"chain-item",name:opts.name,color:willDelete?"#c47a7a":opts.color,x:ev.clientX,y:ev.clientY,willDelete});
+                          if(opts.dropRef.current)opts.dropRef.current.style.boxShadow=overZone?"inset 0 0 0 2px "+opts.color:"none";
+                        };
+                        const onUp=(ev)=>{
+                          document.removeEventListener("pointermove",onMove);
+                          document.removeEventListener("pointerup",onUp);
+                          document.removeEventListener("pointercancel",onUp);
+                          if(opts.dropRef.current)opts.dropRef.current.style.boxShadow="none";
+                          setSheetDrag(null);
+                          if(!dragging)return;
+                          if(!isOver(ev)){
+                            pushHistory();opts.removeAt(opts.idx);return;
+                          }
+                          // Find insertion target by walking chain item rects
+                          const items=Array.from(opts.dropRef.current.querySelectorAll('[data-chain-item="true"]'));
+                          let insertAt=items.length;
+                          for(let i=0;i<items.length;i++){
+                            const r=items[i].getBoundingClientRect();
+                            const cx=(r.left+r.right)/2;
+                            if(ev.clientY<r.bottom&&(ev.clientY<r.top||ev.clientX<cx)){insertAt=i;break;}
+                          }
+                          let targetIdx=insertAt;
+                          if(targetIdx>opts.idx)targetIdx--;
+                          if(targetIdx!==opts.idx){pushHistory();opts.moveTo(opts.idx,targetIdx);}
+                        };
+                        document.addEventListener("pointermove",onMove);
+                        document.addEventListener("pointerup",onUp);
+                        document.addEventListener("pointercancel",onUp);
+                      };
 
                       return(<div>
                         {/* PHRASES */}
                         <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}><span style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PHRASES</span><span style={{fontSize:7,color:"rgba(210,195,175,0.25)",letterSpacing:1}}>tap to select · drag to section</span></div>
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
                           {phrases.map(ph=>{const isA=ph.id===activePhId;return(
-                            <div key={ph.id} style={{...chipStyle(false,col),background:isA?col+"22":"transparent",boxShadow:isA?"inset 0 0 0 1.5px "+col:"none"}} onPointerDown={e=>startDrag(e,"phrase",ph.id)}>{ph.name}</div>);})}
-                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed "+colF+"0.3)",color:colF+"0.35)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id=(isSynth?"SP":"DP")+Date.now();setPhrases(ps=>[...ps,{id,name:String(phrases.length+1),chain:[]}]);setActivePhId(id);}}>＋</div>
+                            <div key={ph.id} style={{...chipStyle(false,col),background:isA?col+"22":"transparent",boxShadow:isA?"inset 0 0 0 1.5px "+col:"none"}} onPointerDown={e=>startDrag(e,"phrase",ph.id,ph.name)}>{ph.name}</div>);})}
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed "+colF+"0.3)",color:colF+"0.35)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id=(isSynth?"SP":"DP")+Date.now();setPhrases(ps=>[...ps,{id,name:symPhr(phrases.length),chain:[]}]);setActivePhId(id);}}>＋</div>
                         </div>
                         <div ref={phraseDropRef} style={{minHeight:36,background:patternDrag&&patternDrag.overDrop?col+"22":"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid "+(patternDrag&&patternDrag.overDrop?col:"rgba(220,200,180,0.07)"),padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"all 0.1s",boxShadow:patternDrag&&patternDrag.overDrop?"inset 0 0 0 2px "+col:"none"}}>
                           {activePhChain.length===0
                             ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag patterns here</span>
                             :activePhChain.map((pid,ci)=>{const pp=sources.find(x=>x.id===pid);if(!pp)return null;return(
-                              <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid "+col+"88",background:col+"15",color:col,fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                              <div key={ci} data-chain-item="true" style={{padding:"5px 10px 5px 12px",borderRadius:20,border:"1px solid "+col+"88",background:col+"15",color:col,fontSize:13,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:5,userSelect:"none",touchAction:"none",lineHeight:1}}
+                                onPointerDown={e=>startChainItemDrag(e,{
+                                  idx:ci,name:pp.name,color:col,dropRef:phraseDropRef,
+                                  removeAt:i=>setActivePhChain(activePhChain.filter((_,j)=>j!==i)),
+                                  moveTo:(from,to)=>{const arr=[...activePhChain];const[item]=arr.splice(from,1);arr.splice(to,0,item);setActivePhChain(arr);}
+                                })}>
                                 {pp.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setActivePhChain(activePhChain.filter((_,i)=>i!==ci));}}>×</span>
                               </div>);})}
                         </div>
@@ -3381,14 +3474,19 @@ export default function Tabula(){
                         <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}><span style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>SECTIONS</span><span style={{fontSize:7,color:"rgba(210,195,175,0.25)",letterSpacing:1}}>tap to select · drag to sequence</span></div>
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
                           {sections.map(sc=>{const isA=sc.id===activeSectionId;return(
-                            <div key={sc.id} style={chipStyle(isA,"rgba(210,195,175,0.6)")} onPointerDown={e=>startDrag(e,"section",sc.id)}>{sc.name}</div>);})}
-                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed rgba(210,195,175,0.2)",color:"rgba(210,195,175,0.25)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id="SC"+Date.now();setSections(ss=>[...ss,{id,name:String(sections.length+1),synthPhraseIds:[],drumPhraseIds:[]}]);setActiveSectionId(id);}}>＋</div>
+                            <div key={sc.id} style={chipStyle(isA,"rgba(210,195,175,0.6)")} onPointerDown={e=>startDrag(e,"section",sc.id,sc.name)}>{sc.name}</div>);})}
+                          <div style={{padding:"4px 8px",borderRadius:20,border:"1px dashed rgba(210,195,175,0.2)",color:"rgba(210,195,175,0.25)",fontSize:12,cursor:"pointer",touchAction:"none"}} onPointerDown={e=>{e.stopPropagation();pushHistory();const id="SC"+Date.now();setSections(ss=>[...ss,{id,name:symSec(sections.length),synthPhraseIds:[],drumPhraseIds:[]}]);setActiveSectionId(id);}}>＋</div>
                         </div>
                         <div ref={sectionDropRef} style={{minHeight:36,background:"rgba(220,200,180,0.03)",borderRadius:8,border:"1px solid rgba(220,200,180,0.07)",padding:"5px 8px",display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",marginBottom:12,transition:"box-shadow 0.1s"}}>
                           {(()=>{const key=isSynth?"synthPhraseIds":"drumPhraseIds";const ids=activeSection?.[key]||[];
                           if(ids.length===0)return[<span key="empty" style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag phrases here</span>];
                           return ids.map((pid,ci)=>{const ph=phrases.find(x=>x.id===pid);if(!ph)return null;return(
-                            <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                            <div key={ci} data-chain-item="true" style={{padding:"5px 10px 5px 12px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:13,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:5,userSelect:"none",touchAction:"none",lineHeight:1}}
+                              onPointerDown={e=>startChainItemDrag(e,{
+                                idx:ci,name:ph.name,color:"rgba(210,195,175,0.7)",dropRef:sectionDropRef,
+                                removeAt:i=>setSections(ss=>ss.map(s=>s.id!==activeSectionId?s:{...s,[key]:s[key].filter((_,j)=>j!==i)})),
+                                moveTo:(from,to)=>setSections(ss=>ss.map(s=>{if(s.id!==activeSectionId)return s;const arr=[...(s[key]||[])];const[item]=arr.splice(from,1);arr.splice(to,0,item);return{...s,[key]:arr};})),
+                              })}>
                               {ph.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setSections(ss=>ss.map(s=>s.id!==activeSectionId?s:{...s,[key]:s[key].filter((_,i)=>i!==ci)}));}}>×</span>
                             </div>);});})()}
                         </div>
@@ -3399,7 +3497,12 @@ export default function Tabula(){
                           {chain.filter(id=>sections.find(s=>s.id===id)).length===0
                             ?<span style={{fontSize:8,color:"rgba(210,195,175,0.2)",letterSpacing:1}}>drag sections here</span>
                             :chain.map((sid,ci)=>{const sc=sections.find(x=>x.id===sid);if(!sc)return null;return(
-                              <div key={ci} style={{padding:"3px 8px 3px 10px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:9,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:4,userSelect:"none"}}>
+                              <div key={ci} data-chain-item="true" style={{padding:"5px 10px 5px 12px",borderRadius:20,border:"1px solid rgba(210,195,175,0.3)",background:"rgba(210,195,175,0.07)",color:"rgba(210,195,175,0.7)",fontSize:13,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",gap:5,userSelect:"none",touchAction:"none",lineHeight:1}}
+                                onPointerDown={e=>startChainItemDrag(e,{
+                                  idx:ci,name:sc.name,color:"rgba(210,195,175,0.7)",dropRef:seqDropRef,
+                                  removeAt:i=>setChain(ch=>ch.filter((_,j)=>j!==i)),
+                                  moveTo:(from,to)=>setChain(ch=>{const arr=[...ch];const[item]=arr.splice(from,1);arr.splice(to,0,item);return arr;}),
+                                })}>
                                 {sc.name}<span style={{fontSize:8,opacity:0.5,cursor:"pointer"}} onPointerDown={e=>{e.stopPropagation();pushHistory();setChain(ch=>ch.filter((_,i)=>i!==ci));}}>×</span>
                               </div>);})}
                         </div>
