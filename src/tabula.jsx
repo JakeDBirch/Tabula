@@ -885,6 +885,10 @@ export default function Tabula(){
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,bass:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
+  // Separate ref: matrix drives playback for this play session. Latched at play-start
+  // (true if songMode was on when ▶ pressed; false otherwise) and preserved across
+  // view toggles. Loop mode in transport still overrides everything.
+  const songPlaybackR = useRef(false);
   const songSyncR   = useRef(true);
   const songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
@@ -1347,7 +1351,7 @@ export default function Tabula(){
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if(songModeR.current && !songSyncR.current){
+    if(songPlaybackR.current && !loopR.current && !songSyncR.current){
       const sm=songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       const ranges={};
@@ -1415,7 +1419,9 @@ export default function Tabula(){
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      const inSong = songModeR.current;
+      // Sync mode uses songPlaybackR (latched at play-start, preserved across view toggles).
+      // Loop in transport takes precedence — solo the active pat regardless of matrix.
+      const inSong = songPlaybackR.current && !loopR.current;
       let songSyn=null, songLead=null, songBass=null, songDrum=null;
       let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
       if(inSong){
@@ -1649,6 +1655,7 @@ export default function Tabula(){
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
+      songPlaybackR.current=false;
       prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
       setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
@@ -1680,6 +1687,7 @@ export default function Tabula(){
       }catch(e){}
     }
     stepR.current=0;cposR.current=0;
+    songPlaybackR.current = songMode; // latch — UI view toggle won't change this mid-play
     if(songMode){
       const sm=songMatrix;
       // Per-layer first populated bar — used for free mode init

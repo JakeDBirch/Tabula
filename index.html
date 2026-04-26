@@ -2103,6 +2103,10 @@ function Tabula() {
     setSongBarLayer = _useState144[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
+  // Separate ref: matrix drives playback for this play session. Latched at play-start
+  // (true if songMode was on when ▶ pressed; false otherwise) and preserved across
+  // view toggles. Loop mode in transport still overrides everything.
+  var songPlaybackR = useRef(false);
   var songSyncR = useRef(true);
   var songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
@@ -3023,7 +3027,7 @@ function Tabula() {
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if (songModeR.current && !songSyncR.current) {
+    if (songPlaybackR.current && !loopR.current && !songSyncR.current) {
       var sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
@@ -3117,7 +3121,9 @@ function Tabula() {
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      var inSong = songModeR.current;
+      // Sync mode uses songPlaybackR (latched at play-start, preserved across view toggles).
+      // Loop in transport takes precedence — solo the active pat regardless of matrix.
+      var inSong = songPlaybackR.current && !loopR.current;
       var songSyn = null,
         songLead = null,
         songBass = null,
@@ -3482,6 +3488,7 @@ function Tabula() {
               bass: -1,
               drums: -1
             });
+            songPlaybackR.current = false;
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
@@ -3560,6 +3567,7 @@ function Tabula() {
             }
             stepR.current = 0;
             cposR.current = 0;
+            songPlaybackR.current = songMode; // latch — UI view toggle won't change this mid-play
             if (!songMode) {
               _context9.n = 20;
               break;
