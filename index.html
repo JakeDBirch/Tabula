@@ -2059,6 +2059,22 @@ function Tabula() {
     _useState154 = _slicedToArray(_useState153, 2),
     songMatrix = _useState154[0],
     setSongMatrix = _useState154[1];
+  var _useState155 = useState(-1),
+    _useState156 = _slicedToArray(_useState155, 2),
+    songBar = _useState156[0],
+    setSongBar = _useState156[1]; // current playback bar in matrix; -1 when stopped
+  var songBarR = useRef(-1);
+  var songModeR = useRef(false);
+  var songMatrixR = useRef(songMatrix);
+  useEffect(function () {
+    songBarR.current = songBar;
+  }, [songBar]);
+  useEffect(function () {
+    songModeR.current = songMode;
+  }, [songMode]);
+  useEffect(function () {
+    songMatrixR.current = songMatrix;
+  }, [songMatrix]);
   var drumPatsR = useRef([initDrum]);
   var activeDrumIdR = useRef(initDrum.id);
   useEffect(function () {
@@ -2647,14 +2663,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState155 = useState(null),
-    _useState156 = _slicedToArray(_useState155, 2),
-    gridPx = _useState156[0],
-    setGridPx = _useState156[1];
   var _useState157 = useState(null),
     _useState158 = _slicedToArray(_useState157, 2),
-    editOuter = _useState158[0],
-    setEditOuter = _useState158[1];
+    gridPx = _useState158[0],
+    setGridPx = _useState158[1];
+  var _useState159 = useState(null),
+    _useState160 = _slicedToArray(_useState159, 2),
+    editOuter = _useState160[0],
+    setEditOuter = _useState160[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -2839,16 +2855,96 @@ function Tabula() {
       var s_ = stepR.current;
       var swingOffset = s_ % 2 === 1 ? stepDur * (swingR.current / 100) * 0.33 : 0;
       var at = nextNoteR.current + swingOffset;
+
+      // ── Song-mode pat resolution ─────────────────────────────────────────
+      // When songMode is on, all four layers advance together through songMatrix.
+      // Bar duration = min(gridLen) of populated pats this bar, default 16.
+      // Loops between firstPopulatedBar..lastPopulatedBar (option B).
+      // Empty matrix → falls back to looping the active synth pattern at bar 0.
+      var inSong = songModeR.current;
+      var songSyn = null,
+        songLead = null,
+        songBass = null,
+        songDrum = null;
+      var songBarLen = 16,
+        songFirstBar = 0,
+        songLastBar = 0,
+        songCurBar = 0;
+      if (inSong) {
+        var _songSyn$gridLen, _songLead$gridLen, _songBass$gridLen, _songDrum$gridLen;
+        var sm = songMatrixR.current;
+        var firstBar = -1,
+          lastBar = -1;
+        for (var i = 0; i < 64; i++) {
+          if (sm.synth[i] != null || sm.lead[i] != null || sm.bass[i] != null || sm.drums[i] != null) {
+            if (firstBar === -1) firstBar = i;
+            lastBar = i;
+          }
+        }
+        var empty = firstBar === -1;
+        if (empty) {
+          firstBar = 0;
+          lastBar = 0;
+        }
+        var bar = songBarR.current;
+        if (bar < firstBar || bar > lastBar) bar = firstBar;
+        songFirstBar = firstBar;
+        songLastBar = lastBar;
+        songCurBar = bar;
+        var sId = sm.synth[bar],
+          lId = sm.lead[bar],
+          bId = sm.bass[bar],
+          dId = sm.drums[bar];
+        var sIdEff = sId != null ? sId : empty ? activeIdR.current : null;
+        songSyn = sIdEff != null ? patsR.current.find(function (x) {
+          return x.id === sIdEff;
+        }) : null;
+        var leadData = activeLayerR.current === "lead" ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current.lead;
+        var bassData = activeLayerR.current === "bass" ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current.bass;
+        songLead = lId != null && leadData ? leadData.pats.find(function (x) {
+          return x.id === lId;
+        }) : null;
+        songBass = bId != null && bassData ? bassData.pats.find(function (x) {
+          return x.id === bId;
+        }) : null;
+        songDrum = dId != null ? drumPatsR.current.find(function (x) {
+          return x.id === dId;
+        }) : null;
+        var lens = [];
+        if (songSyn) lens.push((_songSyn$gridLen = songSyn.gridLen) !== null && _songSyn$gridLen !== void 0 ? _songSyn$gridLen : 16);
+        if (songLead) lens.push((_songLead$gridLen = songLead.gridLen) !== null && _songLead$gridLen !== void 0 ? _songLead$gridLen : 16);
+        if (songBass) lens.push((_songBass$gridLen = songBass.gridLen) !== null && _songBass$gridLen !== void 0 ? _songBass$gridLen : 16);
+        if (songDrum) lens.push((_songDrum$gridLen = songDrum.gridLen) !== null && _songDrum$gridLen !== void 0 ? _songDrum$gridLen : 16);
+        songBarLen = lens.length ? Math.min.apply(Math, lens) : 16;
+        if (songCurBar !== songBarR.current) {
+          songBarR.current = songCurBar;
+          setSongBar(songCurBar);
+        }
+      }
       var ch = loopR.current ? [activeIdR.current] : chainR.current;
-      if (ch.length) {
-        var _p$gridLen, _sp$rhy;
+      if (ch.length || inSong) {
+        var _sp$rhy;
         var cp = cposR.current,
-          s = s_,
+          s = s_;
+        var pid, p, activeLen;
+        if (inSong) {
+          p = songSyn;
+          pid = p ? p.id : -1;
+          activeLen = songBarLen;
+        } else {
+          var _p$gridLen;
           pid = ch[cp];
-        var p = patsR.current.find(function (x) {
-          return x.id === pid;
-        });
-        var activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
+          p = patsR.current.find(function (x) {
+            return x.id === pid;
+          });
+          activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
+        }
         if (s === 0 && varyModeR.current && p) {
           var vg = genVariation(p.grid, varyParamsR.current);
           variedGrids.current.set(pid, vg);
@@ -2927,18 +3023,26 @@ function Tabula() {
         }
         // Lead & Bass — play their currently-active pattern through the same Bell
         var _loop2 = function _loop2() {
-            var _lp$gridLen, _lSp$rhy;
+            var _lSp$rhy;
             var layer = _arr[_i3];
-            var lData = activeLayerR.current === layer ? {
-              pats: patsR.current,
-              activeId: activeIdR.current
-            } : layerStoreR.current[layer];
-            if (!lData) return 0; // continue
-            var lp = lData.pats.find(function (x) {
-              return x.id === lData.activeId;
-            });
-            if (!lp || !lp.grid) return 0; // continue
-            var lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
+            var lp, lLen;
+            if (inSong) {
+              lp = layer === "lead" ? songLead : songBass;
+              if (!lp || !lp.grid) return 0; // continue
+              lLen = songBarLen;
+            } else {
+              var _lp$gridLen;
+              var lData = activeLayerR.current === layer ? {
+                pats: patsR.current,
+                activeId: activeIdR.current
+              } : layerStoreR.current[layer];
+              if (!lData) return 0; // continue
+              lp = lData.pats.find(function (x) {
+                return x.id === lData.activeId;
+              });
+              if (!lp || !lp.grid) return 0; // continue
+              lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
+            }
             var ls = s % lLen;
             var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
             var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
@@ -2975,20 +3079,35 @@ function Tabula() {
           _ret = _loop2();
           if (_ret === 0) continue;
         }
-        // Drum layer — uses drumChain for sequencing
+        // Drum layer — uses drumChain for sequencing (or song matrix in song mode)
         if (drumEngine.current.ready) {
-          var dChain = drumChainR.current;
-          var dcp = drumCposR.current;
-          var dPatId = dChain.length ? dChain[dcp % dChain.length] : activeDrumIdR.current;
-          var dPat = drumPatsR.current.find(function (x) {
-            return x.id === dPatId;
-          }) || drumPatsR.current[0];
+          var dPat,
+            dLen,
+            ds,
+            dChain = null,
+            dcp = 0;
+          if (inSong) {
+            dPat = songDrum;
+            if (dPat) {
+              dLen = songBarLen;
+              ds = s % dLen;
+            }
+          } else {
+            dChain = drumChainR.current;
+            dcp = drumCposR.current;
+            var dPatId = dChain.length ? dChain[dcp % dChain.length] : activeDrumIdR.current;
+            dPat = drumPatsR.current.find(function (x) {
+              return x.id === dPatId;
+            }) || drumPatsR.current[0];
+            if (dPat) {
+              var _dPat$gridLen;
+              dLen = (_dPat$gridLen = dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
+              ds = s % dLen;
+            }
+          }
           if (dPat) {
-            var _dPat$gridLen;
-            var dLen = (_dPat$gridLen = dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
-            var ds = s % dLen;
-            // Advance drum chain position at loop boundary
-            if (ds === dLen - 1 && dChain.length > 1) {
+            // Advance drum chain position at loop boundary (skip in song mode)
+            if (!inSong && ds === dLen - 1 && dChain && dChain.length > 1) {
               var next = (dcp + 1) % dChain.length;
               drumCposR.current = next;
               setDrumCpos(next);
@@ -3034,7 +3153,16 @@ function Tabula() {
         setPlayId(pid);
         var ns = (s + 1) % activeLen;
         stepR.current = ns;
-        if (ns === 0) cposR.current = (cp + 1) % ch.length;
+        if (ns === 0) {
+          if (inSong) {
+            var nextBar = songCurBar + 1;
+            if (nextBar > songLastBar) nextBar = songFirstBar;
+            songBarR.current = nextBar;
+            setSongBar(nextBar);
+          } else {
+            cposR.current = (cp + 1) % ch.length;
+          }
+        }
       }
       nextNoteR.current += stepDur;
     };
@@ -3044,7 +3172,7 @@ function Tabula() {
   }, []);
   var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, _t4;
+      var dlyT, sm, firstBar, i, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -3057,6 +3185,8 @@ function Tabula() {
             setStep(-1);
             setPlayId(null);
             setDrumStep(-1);
+            setSongBar(-1);
+            songBarR.current = -1;
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
@@ -3139,10 +3269,37 @@ function Tabula() {
             }
             stepR.current = 0;
             cposR.current = 0;
+            if (!songMode) {
+              _context9.n = 14;
+              break;
+            }
+            sm = songMatrix;
+            firstBar = -1;
+            i = 0;
+          case 11:
+            if (!(i < 64)) {
+              _context9.n = 13;
+              break;
+            }
+            if (!(sm.synth[i] != null || sm.lead[i] != null || sm.bass[i] != null || sm.drums[i] != null)) {
+              _context9.n = 12;
+              break;
+            }
+            firstBar = i;
+            return _context9.a(3, 13);
+          case 12:
+            i++;
+            _context9.n = 11;
+            break;
+          case 13:
+            if (firstBar === -1) firstBar = 0;
+            songBarR.current = firstBar;
+            setSongBar(firstBar);
+          case 14:
             nextNoteR.current = bell.current.ctx.currentTime + 0.05; // small initial offset
             tmrR.current = setInterval(scheduler, 25);
             setPlaying(true);
-          case 11:
+          case 15:
             return _context9.a(2);
         }
       }, _callee9, null, [[6, 8]]);
@@ -4758,10 +4915,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState159 = useState(false),
-    _useState160 = _slicedToArray(_useState159, 2),
-    bpmDragging = _useState160[0],
-    setBpmDragging = _useState160[1];
+  var _useState161 = useState(false),
+    _useState162 = _slicedToArray(_useState161, 2),
+    bpmDragging = _useState162[0],
+    setBpmDragging = _useState162[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -4790,10 +4947,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState161 = useState(false),
-    _useState162 = _slicedToArray(_useState161, 2),
-    stDragging = _useState162[0],
-    setStDragging = _useState162[1];
+  var _useState163 = useState(false),
+    _useState164 = _slicedToArray(_useState163, 2),
+    stDragging = _useState164[0],
+    setStDragging = _useState164[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -4822,10 +4979,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState163 = useState(false),
-    _useState164 = _slicedToArray(_useState163, 2),
-    swingDragging = _useState164[0],
-    setSwingDragging = _useState164[1];
+  var _useState165 = useState(false),
+    _useState166 = _slicedToArray(_useState165, 2),
+    swingDragging = _useState166[0],
+    setSwingDragging = _useState166[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -7767,6 +7924,8 @@ function Tabula() {
         }) : null;
         var isQ = col % 4 === 0;
         var isHoverTarget = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overSongCell) && patternDrag.overSongCell.layer === layer && patternDrag.overSongCell.barIdx === barIdx;
+        var isDragSource = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.sourceCell) && patternDrag.sourceCell.layer === layer && patternDrag.sourceCell.barIdx === barIdx;
+        var isCursor = playing && songMode && songBar === barIdx;
         return /*#__PURE__*/React.createElement("div", {
           key: col,
           "data-song-cell": "1",
@@ -7775,8 +7934,8 @@ function Tabula() {
           style: {
             flex: 1,
             aspectRatio: "1",
-            background: pat ? accent : isQ ? "rgba(".concat(accentRgb, ",0.10)") : "rgba(".concat(accentRgb, ",0.04)"),
-            outline: isHoverTarget ? "2px solid ".concat(accent) : !pat && isQ ? "1px solid rgba(".concat(accentRgb, ",0.18)") : "none",
+            background: pat ? accent : isCursor ? "rgba(".concat(accentRgb, ",0.35)") : "rgba(".concat(accentRgb, ",0.06)"),
+            outline: isHoverTarget ? "2px solid ".concat(accent) : isCursor ? "2.5px solid #ffffff" : "none",
             outlineOffset: "-1px",
             borderRadius: 2,
             display: "flex",
@@ -7785,41 +7944,98 @@ function Tabula() {
             color: pat ? "#1a1814" : "transparent",
             fontSize: 11,
             fontWeight: 700,
-            transform: isHoverTarget ? "scale(1.08)" : "scale(1)",
-            transition: "transform 0.08s, outline 0.08s",
+            opacity: isDragSource ? 0.3 : 1,
+            boxShadow: isCursor ? "0 0 8px rgba(255,255,255,0.55)".concat(pat ? ", 0 0 0 2px rgba(255,255,255,0.95) inset" : "") : "none",
+            zIndex: isCursor ? 2 : 1,
+            transform: isHoverTarget ? "scale(1.08)" : isCursor ? "scale(1.04)" : "scale(1)",
+            transition: "transform 0.08s, outline 0.08s, opacity 0.08s",
             touchAction: "none",
             cursor: "pointer",
             userSelect: "none"
           },
           onPointerDown: function onPointerDown(e) {
             e.stopPropagation();
-            // Tap-to-clear filled cells only. Filling happens via drag from
-            // the persistent pattern row above (handled by that row's drag handler).
+            // Empty cell — no action. (Filling happens via drag from the
+            // persistent pattern row above.)
             if (patId == null) return;
+            var pointerId = e.pointerId;
             var startX = e.clientX,
               startY = e.clientY;
-            var moved = false;
-            var _onUp3 = function onUp() {
-              document.removeEventListener("pointerup", _onUp3);
-              document.removeEventListener("pointercancel", _onUp3);
-              document.removeEventListener("pointermove", _onMove);
-              if (moved) return;
-              pushHistory();
-              setSongMatrix(function (m) {
-                var r = _toConsumableArray(m[layer]);
-                r[barIdx] = null;
-                return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+            var draggedPat = pat;
+            var dragging = false;
+            var onMove = function onMove(ev) {
+              if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
+              if (!dragging) {
+                if (Math.abs(ev.clientX - startX) < 6 && Math.abs(ev.clientY - startY) < 6) return;
+                dragging = true;
+                setPatternDrag({
+                  patId: patId,
+                  name: draggedPat.name,
+                  accent: accent,
+                  x: ev.clientX,
+                  y: ev.clientY,
+                  overDrop: false,
+                  overSongCell: null,
+                  sourceCell: {
+                    layer: layer,
+                    barIdx: barIdx
+                  }
+                });
+              }
+              // hit-test other cells, exclude source
+              var overSongCell = null;
+              var el = document.elementFromPoint(ev.clientX, ev.clientY);
+              var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
+              if (targetCell && targetCell.dataset.songLayer === layer) {
+                var tBar = parseInt(targetCell.dataset.songBar, 10);
+                if (tBar !== barIdx) overSongCell = {
+                  layer: layer,
+                  barIdx: tBar
+                };
+              }
+              setPatternDrag(function (d) {
+                return d ? _objectSpread(_objectSpread({}, d), {}, {
+                  x: ev.clientX,
+                  y: ev.clientY,
+                  overSongCell: overSongCell
+                }) : null;
               });
             };
-            var _onMove = function onMove(ev) {
-              if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) {
-                moved = true;
-                document.removeEventListener("pointermove", _onMove);
+            var _onUp3 = function onUp(ev) {
+              if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
+              document.removeEventListener("pointerup", _onUp3);
+              document.removeEventListener("pointercancel", _onUp3);
+              document.removeEventListener("pointermove", onMove);
+              if (!dragging) {
+                // tap on filled cell → clear
+                pushHistory();
+                setSongMatrix(function (m) {
+                  var r = _toConsumableArray(m[layer]);
+                  r[barIdx] = null;
+                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                });
+                return;
               }
+              // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+              var el = document.elementFromPoint(ev.clientX, ev.clientY);
+              var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
+              if (targetCell && targetCell.dataset.songLayer === layer) {
+                var tBar = parseInt(targetCell.dataset.songBar, 10);
+                if (tBar !== barIdx) {
+                  pushHistory();
+                  setSongMatrix(function (m) {
+                    var r = _toConsumableArray(m[layer]);
+                    r[tBar] = patId;
+                    r[barIdx] = null;
+                    return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                  });
+                }
+              }
+              setPatternDrag(null);
             };
+            document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", _onUp3);
             document.addEventListener("pointercancel", _onUp3);
-            document.addEventListener("pointermove", _onMove);
           }
         }, pat ? pat.name : "");
       }));
@@ -8714,35 +8930,41 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 5,
-      overflowX: "auto",
-      scrollbarWidth: "none",
-      flexShrink: 0,
-      marginBottom: 10
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 12,
+      flexShrink: 0
     }
-  }, pats.map(function (p) {
-    var isA = p.id === activeId;
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 8,
+      letterSpacing: 2,
+      color: "rgba(210,195,175,0.5)",
+      fontWeight: 600,
+      marginRight: 4
+    }
+  }, "SPEED"), SPEED_OPTS.map(function (opt) {
+    var sel = Math.abs(speedMult - opt.mult) < 0.001;
     return /*#__PURE__*/React.createElement("div", {
-      key: p.id,
-      style: {
-        padding: "6px 14px",
-        borderRadius: 20,
-        border: "1.5px solid #a8c5a0",
-        background: isA ? "#a8c5a0" : "transparent",
-        color: isA ? "#1a1814" : "#a8c5a0",
-        fontSize: 14,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: "pointer",
-        flexShrink: 0,
-        userSelect: "none",
-        lineHeight: 1
-      },
+      key: opt.label,
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
-        setActiveId(p.id);
+        setSpeedMult(opt.mult);
+      },
+      style: {
+        padding: "5px 10px",
+        borderRadius: 6,
+        border: "1px solid " + (sel ? "rgba(168,197,160,0.7)" : "rgba(168,197,160,0.18)"),
+        background: sel ? "rgba(168,197,160,0.15)" : "transparent",
+        color: sel ? "#a8c5a0" : "rgba(210,195,175,0.5)",
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        userSelect: "none",
+        lineHeight: 1,
+        flexShrink: 0
       }
-    }, p.name);
+    }, opt.label);
   })), /*#__PURE__*/React.createElement("div", {
     style: S.stepPageHdr
   }, /*#__PURE__*/React.createElement("div", {

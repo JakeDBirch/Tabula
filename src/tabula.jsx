@@ -856,6 +856,13 @@ export default function Tabula(){
     bass:  Array(64).fill(null),
     drums: Array(64).fill(null)
   });
+  const [songBar,      setSongBar]      = useState(-1); // current playback bar in matrix; -1 when stopped
+  const songBarR    = useRef(-1);
+  const songModeR   = useRef(false);
+  const songMatrixR = useRef(songMatrix);
+  useEffect(()=>{songBarR.current=songBar;},[songBar]);
+  useEffect(()=>{songModeR.current=songMode;},[songMode]);
+  useEffect(()=>{songMatrixR.current=songMatrix;},[songMatrix]);
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
   useEffect(()=>{drumPatsR.current=drumPats;},[drumPats]);
@@ -1212,11 +1219,55 @@ export default function Tabula(){
       const s_=stepR.current;
       const swingOffset = (s_%2===1) ? stepDur*(swingR.current/100)*0.33 : 0;
       const at=nextNoteR.current + swingOffset;
+
+      // ── Song-mode pat resolution ─────────────────────────────────────────
+      // When songMode is on, all four layers advance together through songMatrix.
+      // Bar duration = min(gridLen) of populated pats this bar, default 16.
+      // Loops between firstPopulatedBar..lastPopulatedBar (option B).
+      // Empty matrix → falls back to looping the active synth pattern at bar 0.
+      const inSong = songModeR.current;
+      let songSyn=null, songLead=null, songBass=null, songDrum=null;
+      let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
+      if(inSong){
+        const sm=songMatrixR.current;
+        let firstBar=-1, lastBar=-1;
+        for(let i=0;i<64;i++){
+          if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null){
+            if(firstBar===-1)firstBar=i;
+            lastBar=i;
+          }
+        }
+        const empty=firstBar===-1;
+        if(empty){firstBar=0;lastBar=0;}
+        let bar=songBarR.current;
+        if(bar<firstBar||bar>lastBar)bar=firstBar;
+        songFirstBar=firstBar; songLastBar=lastBar; songCurBar=bar;
+        const sId=sm.synth[bar], lId=sm.lead[bar], bId=sm.bass[bar], dId=sm.drums[bar];
+        const sIdEff = sId!=null ? sId : (empty ? activeIdR.current : null);
+        songSyn = sIdEff!=null ? patsR.current.find(x=>x.id===sIdEff) : null;
+        const leadData = activeLayerR.current==="lead" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
+        const bassData = activeLayerR.current==="bass" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.bass;
+        songLead = lId!=null && leadData ? leadData.pats.find(x=>x.id===lId) : null;
+        songBass = bId!=null && bassData ? bassData.pats.find(x=>x.id===bId) : null;
+        songDrum = dId!=null ? drumPatsR.current.find(x=>x.id===dId) : null;
+        const lens=[];
+        if(songSyn) lens.push(songSyn.gridLen??16);
+        if(songLead) lens.push(songLead.gridLen??16);
+        if(songBass) lens.push(songBass.gridLen??16);
+        if(songDrum) lens.push(songDrum.gridLen??16);
+        songBarLen = lens.length ? Math.min(...lens) : 16;
+        if(songCurBar!==songBarR.current){songBarR.current=songCurBar;setSongBar(songCurBar);}
+      }
+
       const ch=loopR.current?[activeIdR.current]:chainR.current;
-      if(ch.length){
-        const cp=cposR.current,s=s_,pid=ch[cp];
-        const p=patsR.current.find(x=>x.id===pid);
-        const activeLen=p?(p.gridLen??16):16;
+      if(ch.length||inSong){
+        const cp=cposR.current,s=s_;
+        let pid, p, activeLen;
+        if(inSong){
+          p = songSyn; pid = p?p.id:-1; activeLen = songBarLen;
+        } else {
+          pid=ch[cp]; p=patsR.current.find(x=>x.id===pid); activeLen=p?(p.gridLen??16):16;
+        }
         if(s===0&&varyModeR.current&&p){
           let vg=genVariation(p.grid,varyParamsR.current);
           variedGrids.current.set(pid,vg);
@@ -1275,13 +1326,20 @@ export default function Tabula(){
         }
         // Lead & Bass — play their currently-active pattern through the same Bell
         for(const layer of ["lead","bass"]){
-          const lData=activeLayerR.current===layer
-            ?{pats:patsR.current,activeId:activeIdR.current}
-            :layerStoreR.current[layer];
-          if(!lData)continue;
-          const lp=lData.pats.find(x=>x.id===lData.activeId);
-          if(!lp||!lp.grid)continue;
-          const lLen=lp.gridLen??16;
+          let lp, lLen;
+          if(inSong){
+            lp = layer==="lead" ? songLead : songBass;
+            if(!lp||!lp.grid)continue;
+            lLen = songBarLen;
+          } else {
+            const lData=activeLayerR.current===layer
+              ?{pats:patsR.current,activeId:activeIdR.current}
+              :layerStoreR.current[layer];
+            if(!lData)continue;
+            lp=lData.pats.find(x=>x.id===lData.activeId);
+            if(!lp||!lp.grid)continue;
+            lLen=lp.gridLen??16;
+          }
           const ls=s%lLen;
           const lRawSp=(lp.params&&lp.params[ls])?lp.params[ls]:null;
           const lSp=varyModeR.current&&lRawSp?jitterStepParam(lRawSp,varyParamsR.current):lRawSp;
@@ -1308,17 +1366,22 @@ export default function Tabula(){
             }
           }
         }
-        // Drum layer — uses drumChain for sequencing
+        // Drum layer — uses drumChain for sequencing (or song matrix in song mode)
         if(drumEngine.current.ready){
-          const dChain=drumChainR.current;
-          const dcp=drumCposR.current;
-          const dPatId=dChain.length?dChain[dcp%dChain.length]:activeDrumIdR.current;
-          const dPat=drumPatsR.current.find(x=>x.id===dPatId)||drumPatsR.current[0];
+          let dPat, dLen, ds, dChain=null, dcp=0;
+          if(inSong){
+            dPat = songDrum;
+            if(dPat){ dLen=songBarLen; ds=s%dLen; }
+          } else {
+            dChain=drumChainR.current;
+            dcp=drumCposR.current;
+            const dPatId=dChain.length?dChain[dcp%dChain.length]:activeDrumIdR.current;
+            dPat=drumPatsR.current.find(x=>x.id===dPatId)||drumPatsR.current[0];
+            if(dPat){ dLen=dPat.gridLen??16; ds=s%dLen; }
+          }
           if(dPat){
-            const dLen=dPat.gridLen??16;
-            const ds=s%dLen;
-            // Advance drum chain position at loop boundary
-            if(ds===dLen-1&&dChain.length>1){
+            // Advance drum chain position at loop boundary (skip in song mode)
+            if(!inSong && ds===dLen-1 && dChain && dChain.length>1){
               const next=(dcp+1)%dChain.length;
               drumCposR.current=next;setDrumCpos(next);
             }
@@ -1354,7 +1417,15 @@ export default function Tabula(){
         }
         setStep(s);setCpos(cp);setPlayId(pid);
         const ns=(s+1)%activeLen;stepR.current=ns;
-        if(ns===0)cposR.current=(cp+1)%ch.length;
+        if(ns===0){
+          if(inSong){
+            let nextBar=songCurBar+1;
+            if(nextBar>songLastBar)nextBar=songFirstBar;
+            songBarR.current=nextBar;setSongBar(nextBar);
+          } else {
+            cposR.current=(cp+1)%ch.length;
+          }
+        }
       }
       nextNoteR.current+=stepDur;
     }
@@ -1364,6 +1435,7 @@ export default function Tabula(){
     if(playing){
       clearInterval(tmrR.current);
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
+      setSongBar(-1);songBarR.current=-1;
       prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
       setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
@@ -1396,6 +1468,15 @@ export default function Tabula(){
       }catch(e){}
     }
     stepR.current=0;cposR.current=0;
+    if(songMode){
+      const sm=songMatrix;
+      let firstBar=-1;
+      for(let i=0;i<64;i++){
+        if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null){firstBar=i;break;}
+      }
+      if(firstBar===-1)firstBar=0;
+      songBarR.current=firstBar;setSongBar(firstBar);
+    }
     nextNoteR.current=bell.current.ctx.currentTime+0.05; // small initial offset
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
   };
@@ -3188,46 +3269,79 @@ export default function Tabula(){
                               const pat = patId!=null ? patSet.find(p=>p.id===patId) : null;
                               const isQ = col%4===0;
                               const isHoverTarget = patternDrag?.overSongCell&&patternDrag.overSongCell.layer===layer&&patternDrag.overSongCell.barIdx===barIdx;
+                              const isDragSource = patternDrag?.sourceCell&&patternDrag.sourceCell.layer===layer&&patternDrag.sourceCell.barIdx===barIdx;
+                              const isCursor = playing&&songMode&&songBar===barIdx;
                               return (
                                 <div key={col}
                                      data-song-cell="1"
                                      data-song-layer={layer}
                                      data-song-bar={barIdx}
                                      style={{flex:1,aspectRatio:"1",
-                                             background: pat ? accent : (isQ ? `rgba(${accentRgb},0.10)` : `rgba(${accentRgb},0.04)`),
-                                             outline: isHoverTarget ? `2px solid ${accent}` : (!pat&&isQ ? `1px solid rgba(${accentRgb},0.18)` : "none"),
+                                             background: pat ? accent : (isCursor ? `rgba(${accentRgb},0.35)` : `rgba(${accentRgb},0.06)`),
+                                             outline: isHoverTarget ? `2px solid ${accent}` : (isCursor ? `2.5px solid #ffffff` : "none"),
                                              outlineOffset:"-1px",
                                              borderRadius:2,
                                              display:"flex",alignItems:"center",justifyContent:"center",
                                              color: pat ? "#1a1814" : "transparent",
                                              fontSize:11,fontWeight:700,
-                                             transform: isHoverTarget ? "scale(1.08)" : "scale(1)",
-                                             transition:"transform 0.08s, outline 0.08s",
+                                             opacity: isDragSource ? 0.3 : 1,
+                                             boxShadow: isCursor ? `0 0 8px rgba(255,255,255,0.55)${pat?", 0 0 0 2px rgba(255,255,255,0.95) inset":""}` : "none",
+                                             zIndex: isCursor ? 2 : 1,
+                                             transform: isHoverTarget ? "scale(1.08)" : (isCursor ? "scale(1.04)" : "scale(1)"),
+                                             transition:"transform 0.08s, outline 0.08s, opacity 0.08s",
                                              touchAction:"none",cursor:"pointer",userSelect:"none"}}
                                      onPointerDown={(e)=>{
                                        e.stopPropagation();
-                                       // Tap-to-clear filled cells only. Filling happens via drag from
-                                       // the persistent pattern row above (handled by that row's drag handler).
+                                       // Empty cell — no action. (Filling happens via drag from the
+                                       // persistent pattern row above.)
                                        if(patId==null) return;
+                                       const pointerId=e.pointerId;
                                        const startX=e.clientX, startY=e.clientY;
-                                       let moved=false;
-                                       const onUp=()=>{
+                                       const draggedPat=pat;
+                                       let dragging=false;
+                                       const onMove=(ev)=>{
+                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                                         if(!dragging){
+                                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                                           dragging=true;
+                                           setPatternDrag({patId,name:draggedPat.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{layer,barIdx}});
+                                         }
+                                         // hit-test other cells, exclude source
+                                         let overSongCell=null;
+                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                         if(targetCell&&targetCell.dataset.songLayer===layer){
+                                           const tBar=parseInt(targetCell.dataset.songBar,10);
+                                           if(tBar!==barIdx) overSongCell={layer,barIdx:tBar};
+                                         }
+                                         setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
+                                       };
+                                       const onUp=(ev)=>{
+                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
                                          document.removeEventListener("pointerup",onUp);
                                          document.removeEventListener("pointercancel",onUp);
                                          document.removeEventListener("pointermove",onMove);
-                                         if(moved)return;
-                                         pushHistory();
-                                         setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
-                                       };
-                                       const onMove=(ev)=>{
-                                         if(Math.abs(ev.clientX-startX)>6||Math.abs(ev.clientY-startY)>6){
-                                           moved=true;
-                                           document.removeEventListener("pointermove",onMove);
+                                         if(!dragging){
+                                           // tap on filled cell → clear
+                                           pushHistory();
+                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
+                                           return;
                                          }
+                                         // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                         if(targetCell&&targetCell.dataset.songLayer===layer){
+                                           const tBar=parseInt(targetCell.dataset.songBar,10);
+                                           if(tBar!==barIdx){
+                                             pushHistory();
+                                             setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
+                                           }
+                                         }
+                                         setPatternDrag(null);
                                        };
+                                       document.addEventListener("pointermove",onMove);
                                        document.addEventListener("pointerup",onUp);
                                        document.addEventListener("pointercancel",onUp);
-                                       document.addEventListener("pointermove",onMove);
                                      }}>
                                   {pat?pat.name:""}
                                 </div>
@@ -3440,13 +3554,18 @@ export default function Tabula(){
                     {/* STEP page (only page now — sequence/phrase chains are replaced by SONG matrix) */}
                     {activeLayer!=="drums"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
-                        {/* Pattern selector pills */}
-                        <div style={{display:"flex",gap:5,overflowX:"auto",scrollbarWidth:"none",flexShrink:0,marginBottom:10}}>
-                          {pats.map(p=>{const isA=p.id===activeId;return(
-                            <div key={p.id} style={{padding:"6px 14px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",lineHeight:1}}
-                              onPointerDown={e=>{e.stopPropagation();setActiveId(p.id);}}>
-                              {p.name}
-                            </div>);})}
+                        {/* Playback speed */}
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,flexShrink:0}}>
+                          <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginRight:4}}>SPEED</div>
+                          {SPEED_OPTS.map(opt=>{
+                            const sel=Math.abs(speedMult-opt.mult)<0.001;
+                            return(
+                              <div key={opt.label} onPointerDown={e=>{e.stopPropagation();setSpeedMult(opt.mult);}}
+                                style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+(sel?"rgba(168,197,160,0.7)":"rgba(168,197,160,0.18)"),background:sel?"rgba(168,197,160,0.15)":"transparent",color:sel?"#a8c5a0":"rgba(210,195,175,0.5)",fontSize:11,fontWeight:600,cursor:"pointer",userSelect:"none",lineHeight:1,flexShrink:0}}>
+                                {opt.label}
+                              </div>
+                            );
+                          })}
                         </div>
                         <div style={S.stepPageHdr}>
                           <div style={S.stepPagePat}>{activePat?.name||""}</div>
