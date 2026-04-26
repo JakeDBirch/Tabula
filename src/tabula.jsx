@@ -796,7 +796,7 @@ export default function Tabula(){
   const [drumCpos,    setDrumCpos]    = useState(0);
   const [drumClipboard,setDrumClipboard]=useState(null);
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  const [synthPhrases,  setSynthPhrases]  = useState([{id:"SP1",name:symPhr(0),chain:["A"]}]);
+  const [synthPhrases,  setSynthPhrases]  = useState([{id:"SP1",name:symPhr(0),chain:[1]}]);
   const [drumPhrases,   setDrumPhrases]   = useState([{id:"DP1",name:symPhr(0),chain:[initDrum.id]}]);
   const [sections,      setSections]      = useState([{id:"SC1",name:symSec(0),synthPhraseIds:[],drumPhraseIds:[]}]);
   const [activeSynthPhraseId, setActiveSynthPhraseId] = useState("SP1");
