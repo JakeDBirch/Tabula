@@ -3464,15 +3464,22 @@ export default function Tabula(){
                       document.removeEventListener("pointercancel",onUp);
                       try{target.releasePointerCapture(pointerId);}catch(_){}
                       if(!dragging){
-                        // Tap-active-to-step-in: tap inactive pattern = activate it.
-                        // Tap an already-active pattern = open the drawer (same rule
-                        // applies in song mode and outside song mode).
                         const wasActive = isSynth ? activeId===p.id : activeDrumId===p.id;
-                        if(wasActive){
+                        if(songMode){
+                          // Song mode: tap = leave song mode and show this pattern's grid for editing.
+                          // If we're already showing this pattern's grid (i.e. song mode is off and
+                          // it's already active — caught by the else branch), tap opens drawer.
+                          if(!wasActive) isSynth?setActiveId(p.id):setActiveDrumId(p.id);
+                          setSongMode(false);
+                          setActiveSheet(null);
+                        }else if(wasActive){
+                          // Outside song mode, on the pattern's own grid: tap opens drawer
                           setSeqPage("step");
                           setActiveSheet(s=>s==="pattern"?null:"pattern");
                         }else{
+                          // Outside song mode, different pattern: just activate it
                           isSynth?setActiveId(p.id):setActiveDrumId(p.id);
+                          setActiveSheet(null);
                         }
                         return;
                       }
