@@ -789,7 +789,7 @@ export default function Tabula(){
   const silentLoopR=useRef(null);
   const wakeLockR=useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
-  const initDrum=mkDrumPat("A");
+  const initDrum=mkDrumPat(symPat(0));
   const [drumPats,    setDrumPats]    = useState([initDrum]);
   const [activeDrumId,setActiveDrumId]= useState(initDrum.id);
   const [drumChain,   setDrumChain]   = useState([initDrum.id]);
@@ -1274,10 +1274,11 @@ export default function Tabula(){
         if(bar<firstBar||bar>lastBar)bar=firstBar;
         songFirstBar=firstBar; songLastBar=lastBar; songCurBar=bar;
         const sId=sm.synth[bar], lId=sm.lead[bar], bId=sm.bass[bar], dId=sm.drums[bar];
-        const sIdEff = sId!=null ? sId : (empty ? activeIdR.current : null);
-        songSyn = sIdEff!=null ? patsR.current.find(x=>x.id===sIdEff) : null;
-        const leadData = activeLayerR.current==="lead" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
-        const bassData = activeLayerR.current==="bass" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.bass;
+        const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
+        const leadData  = activeLayerR.current==="lead"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
+        const bassData  = activeLayerR.current==="bass"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.bass;
+        const sIdEff = sId!=null ? sId : (empty ? (synthData?.activeId ?? null) : null);
+        songSyn  = sIdEff!=null && synthData ? synthData.pats.find(x=>x.id===sIdEff) : null;
         songLead = lId!=null && leadData ? leadData.pats.find(x=>x.id===lId) : null;
         songBass = bId!=null && bassData ? bassData.pats.find(x=>x.id===bId) : null;
         songDrum = dId!=null ? drumPatsR.current.find(x=>x.id===dId) : null;
@@ -1297,7 +1298,17 @@ export default function Tabula(){
         if(inSong){
           p = songSyn; pid = p?p.id:-1; activeLen = songBarLen;
         } else {
-          pid=ch[cp]; p=patsR.current.find(x=>x.id===pid); activeLen=p?(p.gridLen??16):16;
+          pid=ch[cp];
+          if(loopR.current){
+            // Loop mode: solo the active layer's active pattern (existing behavior)
+            p=patsR.current.find(x=>x.id===pid);
+          } else {
+            // Non-loop: chain holds synth-layer pat IDs. Look up in synth's library so
+            // the synth track plays regardless of which layer is being edited.
+            const synthData = activeLayerR.current==="synth" ? {pats:patsR.current} : layerStoreR.current.synth;
+            p = synthData ? synthData.pats.find(x=>x.id===pid) : null;
+          }
+          activeLen=p?(p.gridLen??16):16;
         }
         if(s===0&&varyModeR.current&&p){
           let vg=genVariation(p.grid,varyParamsR.current);

@@ -1915,7 +1915,7 @@ function Tabula() {
   var silentLoopR = useRef(null);
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
-  var initDrum = mkDrumPat("A");
+  var initDrum = mkDrumPat(symPat(0));
   var _useState125 = useState([initDrum]),
     _useState126 = _slicedToArray(_useState125, 2),
     drumPats = _useState126[0],
@@ -2930,7 +2930,7 @@ function Tabula() {
         songLastBar = 0,
         songCurBar = 0;
       if (inSong) {
-        var _songSyn$gridLen, _songLead$gridLen, _songBass$gridLen, _songDrum$gridLen;
+        var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songBass$gridLen, _songDrum$gridLen;
         var sm = songMatrixR.current;
         var firstBar = -1,
           lastBar = -1;
@@ -2954,10 +2954,10 @@ function Tabula() {
           lId = sm.lead[bar],
           bId = sm.bass[bar],
           dId = sm.drums[bar];
-        var sIdEff = sId != null ? sId : empty ? activeIdR.current : null;
-        songSyn = sIdEff != null ? patsR.current.find(function (x) {
-          return x.id === sIdEff;
-        }) : null;
+        var synthData = activeLayerR.current === "synth" ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current.synth;
         var leadData = activeLayerR.current === "lead" ? {
           pats: patsR.current,
           activeId: activeIdR.current
@@ -2966,6 +2966,10 @@ function Tabula() {
           pats: patsR.current,
           activeId: activeIdR.current
         } : layerStoreR.current.bass;
+        var sIdEff = sId != null ? sId : empty ? (_synthData$activeId = synthData === null || synthData === void 0 ? void 0 : synthData.activeId) !== null && _synthData$activeId !== void 0 ? _synthData$activeId : null : null;
+        songSyn = sIdEff != null && synthData ? synthData.pats.find(function (x) {
+          return x.id === sIdEff;
+        }) : null;
         songLead = lId != null && leadData ? leadData.pats.find(function (x) {
           return x.id === lId;
         }) : null;
@@ -2999,9 +3003,21 @@ function Tabula() {
         } else {
           var _p$gridLen;
           pid = ch[cp];
-          p = patsR.current.find(function (x) {
-            return x.id === pid;
-          });
+          if (loopR.current) {
+            // Loop mode: solo the active layer's active pattern (existing behavior)
+            p = patsR.current.find(function (x) {
+              return x.id === pid;
+            });
+          } else {
+            // Non-loop: chain holds synth-layer pat IDs. Look up in synth's library so
+            // the synth track plays regardless of which layer is being edited.
+            var _synthData = activeLayerR.current === "synth" ? {
+              pats: patsR.current
+            } : layerStoreR.current.synth;
+            p = _synthData ? _synthData.pats.find(function (x) {
+              return x.id === pid;
+            }) : null;
+          }
           activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
         }
         if (s === 0 && varyModeR.current && p) {
