@@ -1023,16 +1023,38 @@ export default function Tabula(){
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
+  // ── Load-time sanitizers ──────────────────────────────────────────────────
+  // Saved projects can contain stale chain entries: legacy name strings ("A","B")
+  // from before chains were id-keyed, or ids referencing patterns that no longer
+  // exist. Filter to valid ids only, with a name→id migration pass for legacy
+  // saves where pats still carry their old name field.
+  const sanitizeChain=(chain,pats)=>{
+    if(!Array.isArray(chain))return[];
+    const idSet=new Set(pats.map(p=>p.id));
+    const nameToId=new Map(pats.map(p=>[p.name,p.id]));
+    return chain
+      .map(e=>idSet.has(e)?e:(typeof e==="string"&&nameToId.has(e)?nameToId.get(e):null))
+      .filter(x=>x!=null);
+  };
+  const sanitizePhrases=(phrases,pats)=>{
+    if(!Array.isArray(phrases))return phrases;
+    return phrases.map(ph=>Object.assign({},ph,{chain:sanitizeChain(ph.chain||[],pats)}));
+  };
   const doLoad=slot=>{
     const s=slotData[slot];if(!s)return;
     if(s.layerStore){
       for(const layer of SYNTH_LAYERS){
-        if(s.layerStore[layer])layerStoreR.current[layer]=JSON.parse(JSON.stringify(s.layerStore[layer]));
+        if(s.layerStore[layer]){
+          const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
+          layerStoreR.current[layer]=ld;
+        }
       }
     }
     if(s.activeLayer)setActiveLayer(s.activeLayer);
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
-    setPats(s.pats);setChain(s.chain);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
+    const cleanChain=sanitizeChain(s.chain,s.pats);
+    setPats(s.pats);setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
     if(s.waveform)setWaveform(s.waveform);
     [["detune",setDetune],["attack",setAttack],["decay",setDecay],["sustain",setSustain],
      ["vcfCutoff",setVcfCutoff],["vcfRes",setVcfRes],["filterEnvAmt",setFilterEnvAmt],
@@ -1046,9 +1068,9 @@ export default function Tabula(){
     if(s.varyMode!=null)setVaryMode(s.varyMode);
     if(s.drumPats)setDrumPats(s.drumPats);
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
-    if(s.drumChain)setDrumChain(s.drumChain);
-    if(s.synthPhrases)setSynthPhrases(s.synthPhrases);
-    if(s.drumPhrases)setDrumPhrases(s.drumPhrases);
+    if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
+    if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats));
+    if(s.drumPhrases)setDrumPhrases(sanitizePhrases(s.drumPhrases,s.drumPats||[]));
     if(s.sections)setSections(s.sections);
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
@@ -1106,7 +1128,7 @@ export default function Tabula(){
     if(!s)return;
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     if(s.pats)setPats(s.pats);
-    if(s.chain)setChain(s.chain);
+    if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     if(s.bpm)setBpm(s.bpm);
     if(s.scale)setScale(s.scale);
     if(s.transpose!=null)setTranspose(s.transpose);
@@ -1119,9 +1141,9 @@ export default function Tabula(){
     if(s.varyMode!=null)setVaryMode(s.varyMode);
     if(s.drumPats)setDrumPats(s.drumPats);
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
-    if(s.drumChain)setDrumChain(s.drumChain);
-    if(s.synthPhrases)setSynthPhrases(s.synthPhrases);
-    if(s.drumPhrases)setDrumPhrases(s.drumPhrases);
+    if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
+    if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats||[]));
+    if(s.drumPhrases)setDrumPhrases(sanitizePhrases(s.drumPhrases,s.drumPats||[]));
     if(s.sections)setSections(s.sections);
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);

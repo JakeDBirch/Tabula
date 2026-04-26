@@ -2503,13 +2503,44 @@ function Tabula() {
       return _ref8.apply(this, arguments);
     };
   }();
+  // ── Load-time sanitizers ──────────────────────────────────────────────────
+  // Saved projects can contain stale chain entries: legacy name strings ("A","B")
+  // from before chains were id-keyed, or ids referencing patterns that no longer
+  // exist. Filter to valid ids only, with a name→id migration pass for legacy
+  // saves where pats still carry their old name field.
+  var sanitizeChain = function sanitizeChain(chain, pats) {
+    if (!Array.isArray(chain)) return [];
+    var idSet = new Set(pats.map(function (p) {
+      return p.id;
+    }));
+    var nameToId = new Map(pats.map(function (p) {
+      return [p.name, p.id];
+    }));
+    return chain.map(function (e) {
+      return idSet.has(e) ? e : typeof e === "string" && nameToId.has(e) ? nameToId.get(e) : null;
+    }).filter(function (x) {
+      return x != null;
+    });
+  };
+  var sanitizePhrases = function sanitizePhrases(phrases, pats) {
+    if (!Array.isArray(phrases)) return phrases;
+    return phrases.map(function (ph) {
+      return Object.assign({}, ph, {
+        chain: sanitizeChain(ph.chain || [], pats)
+      });
+    });
+  };
   var doLoad = function doLoad(slot) {
     var s = slotData[slot];
     if (!s) return;
     if (s.layerStore) {
       for (var _i2 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS2.length; _i2++) {
         var layer = _SYNTH_LAYERS2[_i2];
-        if (s.layerStore[layer]) layerStoreR.current[layer] = JSON.parse(JSON.stringify(s.layerStore[layer]));
+        if (s.layerStore[layer]) {
+          var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
+          layerStoreR.current[layer] = ld;
+        }
       }
     }
     if (s.activeLayer) setActiveLayer(s.activeLayer);
@@ -2517,8 +2548,9 @@ function Tabula() {
       return p.id;
     }))));
     if (maxId >= _id) _id = maxId + 1;
+    var cleanChain = sanitizeChain(s.chain, s.pats);
     setPats(s.pats);
-    setChain(s.chain);
+    setChain(cleanChain.length ? cleanChain : [s.activeId || s.pats[0].id]);
     setBpm(s.bpm);
     setScale(s.scale);
     setTranspose(s.transpose || 0);
@@ -2536,9 +2568,9 @@ function Tabula() {
     if (s.varyMode != null) setVaryMode(s.varyMode);
     if (s.drumPats) setDrumPats(s.drumPats);
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
-    if (s.drumChain) setDrumChain(s.drumChain);
-    if (s.synthPhrases) setSynthPhrases(s.synthPhrases);
-    if (s.drumPhrases) setDrumPhrases(s.drumPhrases);
+    if (s.drumChain) setDrumChain(sanitizeChain(s.drumChain, s.drumPats || []));
+    if (s.synthPhrases) setSynthPhrases(sanitizePhrases(s.synthPhrases, s.pats));
+    if (s.drumPhrases) setDrumPhrases(sanitizePhrases(s.drumPhrases, s.drumPats || []));
     if (s.sections) setSections(s.sections);
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
@@ -2680,7 +2712,10 @@ function Tabula() {
     }))));
     if (maxId >= _id) _id = maxId + 1;
     if (s.pats) setPats(s.pats);
-    if (s.chain) setChain(s.chain);
+    if (s.chain) {
+      var cc = sanitizeChain(s.chain, s.pats || []);
+      setChain(cc.length ? cc : [s.activeId || s.pats && s.pats[0] && s.pats[0].id || 1]);
+    }
     if (s.bpm) setBpm(s.bpm);
     if (s.scale) setScale(s.scale);
     if (s.transpose != null) setTranspose(s.transpose);
@@ -2693,9 +2728,9 @@ function Tabula() {
     if (s.varyMode != null) setVaryMode(s.varyMode);
     if (s.drumPats) setDrumPats(s.drumPats);
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
-    if (s.drumChain) setDrumChain(s.drumChain);
-    if (s.synthPhrases) setSynthPhrases(s.synthPhrases);
-    if (s.drumPhrases) setDrumPhrases(s.drumPhrases);
+    if (s.drumChain) setDrumChain(sanitizeChain(s.drumChain, s.drumPats || []));
+    if (s.synthPhrases) setSynthPhrases(sanitizePhrases(s.synthPhrases, s.pats || []));
+    if (s.drumPhrases) setDrumPhrases(sanitizePhrases(s.drumPhrases, s.drumPats || []));
     if (s.sections) setSections(s.sections);
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
