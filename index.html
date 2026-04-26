@@ -1611,7 +1611,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _activePat$gridLen, _pats$find, _drumPats$find2;
+  var _activePat$gridLen;
   var _useState = useState(function () {
       var a = mkPat(symPat(0));
       return [a];
@@ -2042,6 +2042,23 @@ function Tabula() {
     _useState150 = _slicedToArray(_useState149, 2),
     seqPage = _useState150[0],
     setSeqPage = _useState150[1]; // "sequence"|"step"
+
+  // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
+  // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
+  // Each cell = pattern ID for that layer at that bar, or null = silence.
+  var _useState151 = useState(false),
+    _useState152 = _slicedToArray(_useState151, 2),
+    songMode = _useState152[0],
+    setSongMode = _useState152[1];
+  var _useState153 = useState({
+      synth: Array(64).fill(null),
+      lead: Array(64).fill(null),
+      bass: Array(64).fill(null),
+      drums: Array(64).fill(null)
+    }),
+    _useState154 = _slicedToArray(_useState153, 2),
+    songMatrix = _useState154[0],
+    setSongMatrix = _useState154[1];
   var drumPatsR = useRef([initDrum]);
   var activeDrumIdR = useRef(initDrum.id);
   useEffect(function () {
@@ -2630,14 +2647,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState151 = useState(null),
-    _useState152 = _slicedToArray(_useState151, 2),
-    gridPx = _useState152[0],
-    setGridPx = _useState152[1];
-  var _useState153 = useState(null),
-    _useState154 = _slicedToArray(_useState153, 2),
-    editOuter = _useState154[0],
-    setEditOuter = _useState154[1];
+  var _useState155 = useState(null),
+    _useState156 = _slicedToArray(_useState155, 2),
+    gridPx = _useState156[0],
+    setGridPx = _useState156[1];
+  var _useState157 = useState(null),
+    _useState158 = _slicedToArray(_useState157, 2),
+    editOuter = _useState158[0],
+    setEditOuter = _useState158[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4741,10 +4758,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState155 = useState(false),
-    _useState156 = _slicedToArray(_useState155, 2),
-    bpmDragging = _useState156[0],
-    setBpmDragging = _useState156[1];
+  var _useState159 = useState(false),
+    _useState160 = _slicedToArray(_useState159, 2),
+    bpmDragging = _useState160[0],
+    setBpmDragging = _useState160[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -4773,10 +4790,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState157 = useState(false),
-    _useState158 = _slicedToArray(_useState157, 2),
-    stDragging = _useState158[0],
-    setStDragging = _useState158[1];
+  var _useState161 = useState(false),
+    _useState162 = _slicedToArray(_useState161, 2),
+    stDragging = _useState162[0],
+    setStDragging = _useState162[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -4805,10 +4822,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState159 = useState(false),
-    _useState160 = _slicedToArray(_useState159, 2),
-    swingDragging = _useState160[0],
-    setSwingDragging = _useState160[1];
+  var _useState163 = useState(false),
+    _useState164 = _slicedToArray(_useState163, 2),
+    swingDragging = _useState164[0],
+    setSwingDragging = _useState164[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -7461,8 +7478,15 @@ function Tabula() {
         fontFamily: "inherit"
       },
       onClick: function onClick() {
-        switchLayer(lyr);
-        if (page === "step" && lyr === "drums") setPage("edit");
+        if (activeLayer === lyr) {
+          // already on this layer — step into its sound page
+          setActiveSheet(function (s) {
+            return s === "sound" ? null : "sound";
+          });
+        } else {
+          switchLayer(lyr);
+          if (page === "step" && lyr === "drums") setPage("edit");
+        }
       }
     }, lbl);
   })), /*#__PURE__*/React.createElement("div", {
@@ -7511,6 +7535,7 @@ function Tabula() {
         var pointerId = e.pointerId;
         var target = e.currentTarget;
         var dragging = false;
+        var dragLayer = activeLayer; // captured at drag start; song cell must match this layer
         var onMove = function onMove(ev) {
           if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
           if (!dragging) {
@@ -7525,7 +7550,8 @@ function Tabula() {
               accent: accent,
               x: ev.clientX,
               y: ev.clientY,
-              overDrop: false
+              overDrop: false,
+              overSongCell: null
             });
           }
           var overDrop = false;
@@ -7533,11 +7559,24 @@ function Tabula() {
             var rect = phraseDropRef.current.getBoundingClientRect();
             overDrop = ev.clientY >= rect.top && ev.clientY <= rect.bottom && ev.clientX >= rect.left && ev.clientX <= rect.right;
           }
+          // hit-test song-matrix cells (only valid if cell.layer === dragLayer)
+          var overSongCell = null;
+          if (songMode) {
+            var el = document.elementFromPoint(ev.clientX, ev.clientY);
+            var cell = el && el.closest && el.closest('[data-song-cell="1"]');
+            if (cell && cell.dataset.songLayer === dragLayer) {
+              overSongCell = {
+                layer: cell.dataset.songLayer,
+                barIdx: parseInt(cell.dataset.songBar, 10)
+              };
+            }
+          }
           setPatternDrag(function (d) {
             return d ? _objectSpread(_objectSpread({}, d), {}, {
               x: ev.clientX,
               y: ev.clientY,
-              overDrop: overDrop
+              overDrop: overDrop,
+              overSongCell: overSongCell
             }) : null;
           });
         };
@@ -7550,8 +7589,34 @@ function Tabula() {
             target.releasePointerCapture(pointerId);
           } catch (_) {}
           if (!dragging) {
-            isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
+            // Tap behavior: if pattern is already active, step into its drawer (pattern editing).
+            // Otherwise just make it active.
+            var wasActive = isSynth ? activeId === p.id : activeDrumId === p.id;
+            if (wasActive) {
+              setSeqPage("step");
+              setActiveSheet(function (s) {
+                return s === "pattern" ? null : "pattern";
+              });
+            } else {
+              isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
+            }
             return;
+          }
+          // Drop on song-matrix cell — same-layer only
+          if (songMode) {
+            var el = document.elementFromPoint(ev.clientX, ev.clientY);
+            var cell = el && el.closest && el.closest('[data-song-cell="1"]');
+            if (cell && cell.dataset.songLayer === dragLayer) {
+              var barIdx = parseInt(cell.dataset.songBar, 10);
+              pushHistory();
+              setSongMatrix(function (m) {
+                var r = _toConsumableArray(m[dragLayer]);
+                r[barIdx] = p.id;
+                return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, dragLayer, r));
+              });
+              setPatternDrag(null);
+              return;
+            }
           }
           if (phraseDropRef.current) {
             var rect = phraseDropRef.current.getBoundingClientRect();
@@ -7649,7 +7714,117 @@ function Tabula() {
       overflow: "hidden",
       position: "relative"
     }
-  }, activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
+  }, songMode && /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "6px 10px",
+      boxSizing: "border-box"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "min(100%,calc(100dvh - 150px))",
+      aspectRatio: "1",
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0,
+      gap: 3
+    }
+  }, Array.from({
+    length: 4
+  }, function (_, group) {
+    return /*#__PURE__*/React.createElement("div", {
+      key: group,
+      style: {
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1
+      }
+    }, ["synth", "lead", "bass", "drums"].map(function (layer) {
+      var _layerStoreR$current$;
+      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#b5a0c4" : layer === "bass" ? "#d4a574" : "#c4967a";
+      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "181,160,196" : layer === "bass" ? "212,165,116" : "196,150,122";
+      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || (layer === "synth" ? pats : []);
+      return /*#__PURE__*/React.createElement("div", {
+        key: layer,
+        style: {
+          flex: 1,
+          display: "flex",
+          gap: 1
+        }
+      }, Array.from({
+        length: 16
+      }, function (_, col) {
+        var barIdx = group * 16 + col;
+        var patId = songMatrix[layer][barIdx];
+        var pat = patId != null ? patSet.find(function (p) {
+          return p.id === patId;
+        }) : null;
+        var isQ = col % 4 === 0;
+        var isHoverTarget = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overSongCell) && patternDrag.overSongCell.layer === layer && patternDrag.overSongCell.barIdx === barIdx;
+        return /*#__PURE__*/React.createElement("div", {
+          key: col,
+          "data-song-cell": "1",
+          "data-song-layer": layer,
+          "data-song-bar": barIdx,
+          style: {
+            flex: 1,
+            aspectRatio: "1",
+            background: pat ? accent : isQ ? "rgba(".concat(accentRgb, ",0.10)") : "rgba(".concat(accentRgb, ",0.04)"),
+            outline: isHoverTarget ? "2px solid ".concat(accent) : !pat && isQ ? "1px solid rgba(".concat(accentRgb, ",0.18)") : "none",
+            outlineOffset: "-1px",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: pat ? "#1a1814" : "transparent",
+            fontSize: 11,
+            fontWeight: 700,
+            transform: isHoverTarget ? "scale(1.08)" : "scale(1)",
+            transition: "transform 0.08s, outline 0.08s",
+            touchAction: "none",
+            cursor: "pointer",
+            userSelect: "none"
+          },
+          onPointerDown: function onPointerDown(e) {
+            e.stopPropagation();
+            // Tap-to-clear filled cells only. Filling happens via drag from
+            // the persistent pattern row above (handled by that row's drag handler).
+            if (patId == null) return;
+            var startX = e.clientX,
+              startY = e.clientY;
+            var moved = false;
+            var _onUp3 = function onUp() {
+              document.removeEventListener("pointerup", _onUp3);
+              document.removeEventListener("pointercancel", _onUp3);
+              document.removeEventListener("pointermove", _onMove);
+              if (moved) return;
+              pushHistory();
+              setSongMatrix(function (m) {
+                var r = _toConsumableArray(m[layer]);
+                r[barIdx] = null;
+                return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+              });
+            };
+            var _onMove = function onMove(ev) {
+              if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) {
+                moved = true;
+                document.removeEventListener("pointermove", _onMove);
+              }
+            };
+            document.addEventListener("pointerup", _onUp3);
+            document.addEventListener("pointercancel", _onUp3);
+            document.addEventListener("pointermove", _onMove);
+          }
+        }, pat ? pat.name : "");
+      }));
+    }));
+  }))), !songMode && activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -7923,7 +8098,7 @@ function Tabula() {
       color: "rgba(210,195,175,0.3)",
       pointerEvents: "none"
     }
-  }, gridLen)))), activeLayer === "drums" && /*#__PURE__*/React.createElement("div", {
+  }, gridLen)))), !songMode && activeLayer === "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -8205,76 +8380,34 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "pattern" ? activeLayer === "synth" ? "rgba(168,197,160,0.6)" : "rgba(196,150,122,0.6)" : "rgba(200,185,165,0.1)"),
+      border: "1px solid " + (songMode ? "rgba(210,195,175,0.5)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
-      background: activeSheet === "pattern" ? activeLayer === "synth" ? "rgba(168,197,160,0.08)" : "rgba(196,150,122,0.08)" : "transparent",
+      background: songMode ? "rgba(210,195,175,0.06)" : "transparent",
       cursor: "pointer",
       gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
     onClick: function onClick() {
-      return setActiveSheet(function (s) {
-        return s === "pattern" ? null : "pattern";
+      setSongMode(function (s) {
+        return !s;
       });
+      setActiveSheet(null);
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
-      color: activeLayer === "synth" ? "#a8c5a0" : "#c4967a",
+      color: songMode ? "rgba(210,195,175,0.9)" : "rgba(210,195,175,0.5)",
       lineHeight: 1.1
     }
-  }, activeLayer === "synth" ? ((_pats$find = pats.find(function (p) {
-    return p.id === activeId;
-  })) === null || _pats$find === void 0 ? void 0 : _pats$find.name) || "A" : ((_drumPats$find2 = drumPats.find(function (p) {
-    return p.id === activeDrumId;
-  })) === null || _drumPats$find2 === void 0 ? void 0 : _drumPats$find2.name) || "A", playing && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 5,
-      marginLeft: 2,
-      opacity: 0.7
-    }
-  }, "\u25CF")), /*#__PURE__*/React.createElement("span", {
+  }, "\u25A6"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 5,
       letterSpacing: 1.5,
       color: "rgba(210,195,175,0.35)"
     }
-  }, activeLayer === "synth" ? "SYNTH" : "DRUMS")), /*#__PURE__*/React.createElement("button", {
-    style: {
-      flex: 1,
-      height: 34,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      border: "1px solid " + (activeSheet === "sound" ? "rgba(139,191,159,0.5)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
-      background: activeSheet === "sound" ? "rgba(139,191,159,0.07)" : "transparent",
-      cursor: "pointer",
-      gap: 0,
-      fontFamily: "inherit",
-      padding: 0
-    },
-    onClick: function onClick() {
-      return setActiveSheet(function (s) {
-        return s === "sound" ? null : "sound";
-      });
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      lineHeight: 1.1,
-      color: activeSheet === "sound" ? "rgba(139,191,159,0.9)" : "rgba(210,195,175,0.5)"
-    }
-  }, "\u2669"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 5,
-      letterSpacing: 1.5,
-      color: "rgba(210,195,175,0.35)"
-    }
-  }, "SOUND")), /*#__PURE__*/React.createElement("button", {
+  }, "SONG")), /*#__PURE__*/React.createElement("button", {
     style: {
       flex: 1,
       height: 34,
@@ -8570,28 +8703,7 @@ function Tabula() {
         onClick: d ? undefined : f
       }, l);
     }));
-  }(), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 4,
-      marginBottom: 14
-    }
-  }, [["sequence", "SEQUENCE"], ["step", "STEP"]].map(function (_ref40) {
-    var _ref41 = _slicedToArray(_ref40, 2),
-      p = _ref41[0],
-      lbl = _ref41[1];
-    return /*#__PURE__*/React.createElement("button", {
-      key: p,
-      style: Object.assign({}, S.tab, {
-        flex: 1,
-        padding: "7px 0",
-        fontSize: 9
-      }, seqPage === p ? S.tabOn : {}),
-      onClick: function onClick() {
-        return setSeqPage(p);
-      }
-    }, lbl);
-  })), seqPage === "step" && activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
+  }(), activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.stepPage), {}, {
       minHeight: 0,
       overflowY: "scroll",
@@ -8699,609 +8811,7 @@ function Tabula() {
       onDragStart: pushHistory,
       tall: true
     }));
-  })), seqPage === "sequence" && function () {
-    var isSynth = activeLayer !== "drums"; // any synth-type layer
-    var col = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#b5a0c4" : activeLayer === "bass" ? "#d4a574" : "#c4967a";
-    var colF = activeLayer === "synth" ? "rgba(168,197,160," : activeLayer === "lead" ? "rgba(181,160,196," : activeLayer === "bass" ? "rgba(212,165,116," : "rgba(196,150,122,";
-    var sources = isSynth ? pats : drumPats;
-    var phrases = isSynth ? synthPhrases : drumPhrases;
-    var setPhrases = isSynth ? setSynthPhrases : setDrumPhrases;
-    var activePhId = isSynth ? activeSynthPhraseId : activeDrumPhraseId;
-    var setActivePhId = isSynth ? setActiveSynthPhraseId : setActiveDrumPhraseId;
-    var activePh = phrases.find(function (p) {
-      return p.id === activePhId;
-    }) || phrases[0];
-    var activePhChain = (activePh === null || activePh === void 0 ? void 0 : activePh.chain) || [];
-    var setActivePhChain = function setActivePhChain(ch) {
-      return setPhrases(function (ps) {
-        return ps.map(function (p) {
-          return p.id === (activePh === null || activePh === void 0 ? void 0 : activePh.id) ? _objectSpread(_objectSpread({}, p), {}, {
-            chain: ch
-          }) : p;
-        });
-      });
-    };
-    var activeSection = sections.find(function (s) {
-      return s.id === activeSectionId;
-    }) || sections[0];
-    var startDrag = function startDrag(e, type, id, name) {
-      e.stopPropagation();
-      var startX = e.clientX,
-        startY = e.clientY;
-      var dragging = false;
-      var onMove = function onMove(ev) {
-        if (!dragging) {
-          if (Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return;
-          dragging = true;
-          setSheetDrag({
-            type: type,
-            id: id,
-            name: name,
-            color: col,
-            x: ev.clientX,
-            y: ev.clientY
-          });
-        } else setSheetDrag(function (d) {
-          return d ? _objectSpread(_objectSpread({}, d), {}, {
-            x: ev.clientX,
-            y: ev.clientY
-          }) : d;
-        });
-        [phraseDropRef, sectionDropRef, seqDropRef].forEach(function (r) {
-          if (!r.current) return;
-          var rect = r.current.getBoundingClientRect();
-          var over = ev.clientY >= rect.top && ev.clientY <= rect.bottom;
-          r.current.style.boxShadow = over ? "inset 0 0 0 2px " + col : "none";
-        });
-      };
-      var _onUp3 = function onUp(ev) {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", _onUp3);
-        document.removeEventListener("pointercancel", _onUp3);
-        [phraseDropRef, sectionDropRef, seqDropRef].forEach(function (r) {
-          if (r.current) r.current.style.boxShadow = "none";
-        });
-        setSheetDrag(null);
-        if (!dragging) {
-          if (type === "pattern") {
-            isSynth ? setActiveId(id) : setActiveDrumId(id);
-          } else if (type === "phrase") {
-            setActivePhId(id);
-          } else if (type === "section") {
-            setActiveSectionId(id);
-          }
-          return;
-        }
-        if (type === "pattern" && phraseDropRef.current) {
-          var rect = phraseDropRef.current.getBoundingClientRect();
-          if (ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-            pushHistory();
-            setActivePhChain([].concat(_toConsumableArray(activePhChain), [id]));
-            return;
-          }
-        }
-        if (type === "phrase" && sectionDropRef.current) {
-          var _rect3 = sectionDropRef.current.getBoundingClientRect();
-          if (ev.clientY >= _rect3.top && ev.clientY <= _rect3.bottom) {
-            pushHistory();
-            setSections(function (ss) {
-              return ss.map(function (s) {
-                if (s.id !== activeSectionId) return s;
-                var key = isSynth ? "synthPhraseIds" : "drumPhraseIds";
-                return _objectSpread(_objectSpread({}, s), {}, _defineProperty({}, key, [].concat(_toConsumableArray(s[key] || []), [id])));
-              });
-            });
-            return;
-          }
-        }
-        if (type === "section" && seqDropRef.current) {
-          var _rect4 = seqDropRef.current.getBoundingClientRect();
-          if (ev.clientY >= _rect4.top && ev.clientY <= _rect4.bottom) {
-            pushHistory();
-            setChain(function (ch) {
-              return [].concat(_toConsumableArray(ch), [id]);
-            });
-            return;
-          }
-        }
-      };
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", _onUp3);
-      document.addEventListener("pointercancel", _onUp3);
-    };
-    var chipStyle = function chipStyle(isA, accent) {
-      return {
-        padding: "6px 14px",
-        borderRadius: 20,
-        border: "1.5px solid " + accent,
-        background: isA ? accent : "transparent",
-        color: isA ? "#1a1814" : accent,
-        fontSize: 14,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: "pointer",
-        userSelect: "none",
-        touchAction: "none",
-        lineHeight: 1
-      };
-    };
-
-    // Drag chain item to reorder (within zone) or delete (outside zone)
-    var startChainItemDrag = function startChainItemDrag(e, opts) {
-      e.stopPropagation();
-      var startX = e.clientX,
-        startY = e.clientY;
-      var dragging = false;
-      var isOver = function isOver(ev) {
-        var _opts$dropRef$current;
-        var r = (_opts$dropRef$current = opts.dropRef.current) === null || _opts$dropRef$current === void 0 ? void 0 : _opts$dropRef$current.getBoundingClientRect();
-        return r && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
-      };
-      var onMove = function onMove(ev) {
-        if (!dragging) {
-          if (Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return;
-          dragging = true;
-        }
-        var overZone = isOver(ev);
-        var willDelete = !overZone;
-        setSheetDrag({
-          type: "chain-item",
-          name: opts.name,
-          color: willDelete ? "#c47a7a" : opts.color,
-          x: ev.clientX,
-          y: ev.clientY,
-          willDelete: willDelete
-        });
-        if (opts.dropRef.current) opts.dropRef.current.style.boxShadow = overZone ? "inset 0 0 0 2px " + opts.color : "none";
-      };
-      var _onUp4 = function onUp(ev) {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", _onUp4);
-        document.removeEventListener("pointercancel", _onUp4);
-        if (opts.dropRef.current) opts.dropRef.current.style.boxShadow = "none";
-        setSheetDrag(null);
-        if (!dragging) return;
-        if (!isOver(ev)) {
-          pushHistory();
-          opts.removeAt(opts.idx);
-          return;
-        }
-        // Find insertion target by walking chain item rects
-        var items = Array.from(opts.dropRef.current.querySelectorAll('[data-chain-item="true"]'));
-        var insertAt = items.length;
-        for (var i = 0; i < items.length; i++) {
-          var r = items[i].getBoundingClientRect();
-          var cx = (r.left + r.right) / 2;
-          if (ev.clientY < r.bottom && (ev.clientY < r.top || ev.clientX < cx)) {
-            insertAt = i;
-            break;
-          }
-        }
-        var targetIdx = insertAt;
-        if (targetIdx > opts.idx) targetIdx--;
-        if (targetIdx !== opts.idx) {
-          pushHistory();
-          opts.moveTo(opts.idx, targetIdx);
-        }
-      };
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", _onUp4);
-      document.addEventListener("pointercancel", _onUp4);
-    };
-    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "baseline",
-        gap: 6,
-        marginBottom: 5
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        letterSpacing: 2,
-        color: "rgba(210,195,175,0.5)",
-        fontWeight: 600
-      }
-    }, "PHRASES"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        color: "rgba(210,195,175,0.25)",
-        letterSpacing: 1
-      }
-    }, "tap to select \xB7 drag to section")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5,
-        marginBottom: 6
-      }
-    }, phrases.map(function (ph) {
-      var isA = ph.id === activePhId;
-      return /*#__PURE__*/React.createElement("div", {
-        key: ph.id,
-        style: _objectSpread(_objectSpread({}, chipStyle(false, col)), {}, {
-          background: isA ? col + "22" : "transparent",
-          boxShadow: isA ? "inset 0 0 0 1.5px " + col : "none"
-        }),
-        onPointerDown: function onPointerDown(e) {
-          return startDrag(e, "phrase", ph.id, ph.name);
-        }
-      }, ph.name);
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        padding: "4px 8px",
-        borderRadius: 20,
-        border: "1px dashed " + colF + "0.3)",
-        color: colF + "0.35)",
-        fontSize: 12,
-        cursor: "pointer",
-        touchAction: "none"
-      },
-      onPointerDown: function onPointerDown(e) {
-        e.stopPropagation();
-        pushHistory();
-        var id = (isSynth ? "SP" : "DP") + Date.now();
-        setPhrases(function (ps) {
-          return [].concat(_toConsumableArray(ps), [{
-            id: id,
-            name: symPhr(phrases.length),
-            chain: []
-          }]);
-        });
-        setActivePhId(id);
-      }
-    }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
-      ref: phraseDropRef,
-      style: {
-        minHeight: 36,
-        background: patternDrag && patternDrag.overDrop ? col + "22" : "rgba(220,200,180,0.03)",
-        borderRadius: 8,
-        border: "1px solid " + (patternDrag && patternDrag.overDrop ? col : "rgba(220,200,180,0.07)"),
-        padding: "5px 8px",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5,
-        alignItems: "center",
-        marginBottom: 12,
-        transition: "all 0.1s",
-        boxShadow: patternDrag && patternDrag.overDrop ? "inset 0 0 0 2px " + col : "none"
-      }
-    }, activePhChain.length === 0 ? /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        color: "rgba(210,195,175,0.2)",
-        letterSpacing: 1
-      }
-    }, "drag patterns here") : activePhChain.map(function (pid, ci) {
-      var pp = sources.find(function (x) {
-        return x.id === pid;
-      });
-      if (!pp) return null;
-      return /*#__PURE__*/React.createElement("div", {
-        key: ci,
-        "data-chain-item": "true",
-        style: {
-          padding: "5px 10px 5px 12px",
-          borderRadius: 20,
-          border: "1px solid " + col + "88",
-          background: col + "15",
-          color: col,
-          fontSize: 13,
-          fontWeight: 700,
-          letterSpacing: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          userSelect: "none",
-          touchAction: "none",
-          lineHeight: 1
-        },
-        onPointerDown: function onPointerDown(e) {
-          return startChainItemDrag(e, {
-            idx: ci,
-            name: pp.name,
-            color: col,
-            dropRef: phraseDropRef,
-            removeAt: function removeAt(i) {
-              return setActivePhChain(activePhChain.filter(function (_, j) {
-                return j !== i;
-              }));
-            },
-            moveTo: function moveTo(from, to) {
-              var arr = _toConsumableArray(activePhChain);
-              var _arr$splice = arr.splice(from, 1),
-                _arr$splice2 = _slicedToArray(_arr$splice, 1),
-                item = _arr$splice2[0];
-              arr.splice(to, 0, item);
-              setActivePhChain(arr);
-            }
-          });
-        }
-      }, pp.name, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 8,
-          opacity: 0.5,
-          cursor: "pointer"
-        },
-        onPointerDown: function onPointerDown(e) {
-          e.stopPropagation();
-          pushHistory();
-          setActivePhChain(activePhChain.filter(function (_, i) {
-            return i !== ci;
-          }));
-        }
-      }, "\xD7"));
-    })), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "baseline",
-        gap: 6,
-        marginBottom: 5
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        letterSpacing: 2,
-        color: "rgba(210,195,175,0.5)",
-        fontWeight: 600
-      }
-    }, "SECTIONS"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        color: "rgba(210,195,175,0.25)",
-        letterSpacing: 1
-      }
-    }, "tap to select \xB7 drag to sequence")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5,
-        marginBottom: 6
-      }
-    }, sections.map(function (sc) {
-      var isA = sc.id === activeSectionId;
-      return /*#__PURE__*/React.createElement("div", {
-        key: sc.id,
-        style: chipStyle(isA, "rgba(210,195,175,0.6)"),
-        onPointerDown: function onPointerDown(e) {
-          return startDrag(e, "section", sc.id, sc.name);
-        }
-      }, sc.name);
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        padding: "4px 8px",
-        borderRadius: 20,
-        border: "1px dashed rgba(210,195,175,0.2)",
-        color: "rgba(210,195,175,0.25)",
-        fontSize: 12,
-        cursor: "pointer",
-        touchAction: "none"
-      },
-      onPointerDown: function onPointerDown(e) {
-        e.stopPropagation();
-        pushHistory();
-        var id = "SC" + Date.now();
-        setSections(function (ss) {
-          return [].concat(_toConsumableArray(ss), [{
-            id: id,
-            name: symSec(sections.length),
-            synthPhraseIds: [],
-            drumPhraseIds: []
-          }]);
-        });
-        setActiveSectionId(id);
-      }
-    }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
-      ref: sectionDropRef,
-      style: {
-        minHeight: 36,
-        background: "rgba(220,200,180,0.03)",
-        borderRadius: 8,
-        border: "1px solid rgba(220,200,180,0.07)",
-        padding: "5px 8px",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5,
-        alignItems: "center",
-        marginBottom: 12,
-        transition: "box-shadow 0.1s"
-      }
-    }, function () {
-      var key = isSynth ? "synthPhraseIds" : "drumPhraseIds";
-      var ids = (activeSection === null || activeSection === void 0 ? void 0 : activeSection[key]) || [];
-      if (ids.length === 0) return [/*#__PURE__*/React.createElement("span", {
-        key: "empty",
-        style: {
-          fontSize: 8,
-          color: "rgba(210,195,175,0.2)",
-          letterSpacing: 1
-        }
-      }, "drag phrases here")];
-      return ids.map(function (pid, ci) {
-        var ph = phrases.find(function (x) {
-          return x.id === pid;
-        });
-        if (!ph) return null;
-        return /*#__PURE__*/React.createElement("div", {
-          key: ci,
-          "data-chain-item": "true",
-          style: {
-            padding: "5px 10px 5px 12px",
-            borderRadius: 20,
-            border: "1px solid rgba(210,195,175,0.3)",
-            background: "rgba(210,195,175,0.07)",
-            color: "rgba(210,195,175,0.7)",
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            userSelect: "none",
-            touchAction: "none",
-            lineHeight: 1
-          },
-          onPointerDown: function onPointerDown(e) {
-            return startChainItemDrag(e, {
-              idx: ci,
-              name: ph.name,
-              color: "rgba(210,195,175,0.7)",
-              dropRef: sectionDropRef,
-              removeAt: function removeAt(i) {
-                return setSections(function (ss) {
-                  return ss.map(function (s) {
-                    return s.id !== activeSectionId ? s : _objectSpread(_objectSpread({}, s), {}, _defineProperty({}, key, s[key].filter(function (_, j) {
-                      return j !== i;
-                    })));
-                  });
-                });
-              },
-              moveTo: function moveTo(from, to) {
-                return setSections(function (ss) {
-                  return ss.map(function (s) {
-                    if (s.id !== activeSectionId) return s;
-                    var arr = _toConsumableArray(s[key] || []);
-                    var _arr$splice3 = arr.splice(from, 1),
-                      _arr$splice4 = _slicedToArray(_arr$splice3, 1),
-                      item = _arr$splice4[0];
-                    arr.splice(to, 0, item);
-                    return _objectSpread(_objectSpread({}, s), {}, _defineProperty({}, key, arr));
-                  });
-                });
-              }
-            });
-          }
-        }, ph.name, /*#__PURE__*/React.createElement("span", {
-          style: {
-            fontSize: 8,
-            opacity: 0.5,
-            cursor: "pointer"
-          },
-          onPointerDown: function onPointerDown(e) {
-            e.stopPropagation();
-            pushHistory();
-            setSections(function (ss) {
-              return ss.map(function (s) {
-                return s.id !== activeSectionId ? s : _objectSpread(_objectSpread({}, s), {}, _defineProperty({}, key, s[key].filter(function (_, i) {
-                  return i !== ci;
-                })));
-              });
-            });
-          }
-        }, "\xD7"));
-      });
-    }()), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "baseline",
-        gap: 6,
-        marginBottom: 5
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        letterSpacing: 2,
-        color: "rgba(210,195,175,0.5)",
-        fontWeight: 600
-      }
-    }, "SEQUENCE"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        color: "rgba(210,195,175,0.25)",
-        letterSpacing: 1
-      }
-    }, "drag sections here")), /*#__PURE__*/React.createElement("div", {
-      ref: seqDropRef,
-      style: {
-        minHeight: 36,
-        background: "rgba(220,200,180,0.03)",
-        borderRadius: 8,
-        border: "1px solid rgba(220,200,180,0.07)",
-        padding: "5px 8px",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5,
-        alignItems: "center",
-        marginBottom: 12,
-        transition: "box-shadow 0.1s"
-      }
-    }, chain.filter(function (id) {
-      return sections.find(function (s) {
-        return s.id === id;
-      });
-    }).length === 0 ? /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        color: "rgba(210,195,175,0.2)",
-        letterSpacing: 1
-      }
-    }, "drag sections here") : chain.map(function (sid, ci) {
-      var sc = sections.find(function (x) {
-        return x.id === sid;
-      });
-      if (!sc) return null;
-      return /*#__PURE__*/React.createElement("div", {
-        key: ci,
-        "data-chain-item": "true",
-        style: {
-          padding: "5px 10px 5px 12px",
-          borderRadius: 20,
-          border: "1px solid rgba(210,195,175,0.3)",
-          background: "rgba(210,195,175,0.07)",
-          color: "rgba(210,195,175,0.7)",
-          fontSize: 13,
-          fontWeight: 700,
-          letterSpacing: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          userSelect: "none",
-          touchAction: "none",
-          lineHeight: 1
-        },
-        onPointerDown: function onPointerDown(e) {
-          return startChainItemDrag(e, {
-            idx: ci,
-            name: sc.name,
-            color: "rgba(210,195,175,0.7)",
-            dropRef: seqDropRef,
-            removeAt: function removeAt(i) {
-              return setChain(function (ch) {
-                return ch.filter(function (_, j) {
-                  return j !== i;
-                });
-              });
-            },
-            moveTo: function moveTo(from, to) {
-              return setChain(function (ch) {
-                var arr = _toConsumableArray(ch);
-                var _arr$splice5 = arr.splice(from, 1),
-                  _arr$splice6 = _slicedToArray(_arr$splice5, 1),
-                  item = _arr$splice6[0];
-                arr.splice(to, 0, item);
-                return arr;
-              });
-            }
-          });
-        }
-      }, sc.name, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 8,
-          opacity: 0.5,
-          cursor: "pointer"
-        },
-        onPointerDown: function onPointerDown(e) {
-          e.stopPropagation();
-          pushHistory();
-          setChain(function (ch) {
-            return ch.filter(function (_, i) {
-              return i !== ci;
-            });
-          });
-        }
-      }, "\xD7"));
-    })));
-  }()), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }))), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
       letterSpacing: 2,
@@ -9825,13 +9335,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref42) {
-    var _ref43 = _slicedToArray(_ref42, 5),
-      label = _ref43[0],
-      val = _ref43[1],
-      setter = _ref43[2],
-      max = _ref43[3],
-      unit = _ref43[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref40) {
+    var _ref41 = _slicedToArray(_ref40, 5),
+      label = _ref41[0],
+      val = _ref41[1],
+      setter = _ref41[2],
+      max = _ref41[3],
+      unit = _ref41[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -9916,13 +9426,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 5),
-      label = _ref45[0],
-      val = _ref45[1],
-      setter = _ref45[2],
-      max = _ref45[3],
-      unit = _ref45[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref42) {
+    var _ref43 = _slicedToArray(_ref42, 5),
+      label = _ref43[0],
+      val = _ref43[1],
+      setter = _ref43[2],
+      max = _ref43[3],
+      unit = _ref43[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10007,11 +9517,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref46) {
-    var _ref47 = _slicedToArray(_ref46, 3),
-      label = _ref47[0],
-      val = _ref47[1],
-      setter = _ref47[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref44) {
+    var _ref45 = _slicedToArray(_ref44, 3),
+      label = _ref45[0],
+      val = _ref45[1],
+      setter = _ref45[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10167,12 +9677,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref48) {
-      var _ref49 = _slicedToArray(_ref48, 4),
-        label = _ref49[0],
-        fn = _ref49[1],
-        disabled = _ref49[2],
-        danger = _ref49[3];
+    }, isOnlyPat, true]].map(function (_ref46) {
+      var _ref47 = _slicedToArray(_ref46, 4),
+        label = _ref47[0],
+        fn = _ref47[1],
+        disabled = _ref47[2],
+        danger = _ref47[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -10256,12 +9766,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref50) {
-      var _ref51 = _slicedToArray(_ref50, 4),
-        label = _ref51[0],
-        fn = _ref51[1],
-        disabled = _ref51[2],
-        danger = _ref51[3];
+    }, isOnly, true]].map(function (_ref48) {
+      var _ref49 = _slicedToArray(_ref48, 4),
+        label = _ref49[0],
+        fn = _ref49[1],
+        disabled = _ref49[2],
+        danger = _ref49[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
