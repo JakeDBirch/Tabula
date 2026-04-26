@@ -2074,28 +2074,70 @@ function Tabula() {
     _useState136 = _slicedToArray(_useState135, 2),
     songMode = _useState136[0],
     setSongMode = _useState136[1];
-  var _useState137 = useState({
+  var _useState137 = useState(true),
+    _useState138 = _slicedToArray(_useState137, 2),
+    songSyncMode = _useState138[0],
+    setSongSyncMode = _useState138[1]; // true = sync (single cursor), false = free (4 cursors)
+  var _useState139 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       bass: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState138 = _slicedToArray(_useState137, 2),
-    songMatrix = _useState138[0],
-    setSongMatrix = _useState138[1];
-  var _useState139 = useState(-1),
     _useState140 = _slicedToArray(_useState139, 2),
-    songBar = _useState140[0],
-    setSongBar = _useState140[1]; // current playback bar in matrix; -1 when stopped
+    songMatrix = _useState140[0],
+    setSongMatrix = _useState140[1];
+  var _useState141 = useState(-1),
+    _useState142 = _slicedToArray(_useState141, 2),
+    songBar = _useState142[0],
+    setSongBar = _useState142[1]; // sync mode current bar; -1 when stopped
+  // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
+  var _useState143 = useState({
+      synth: -1,
+      lead: -1,
+      bass: -1,
+      drums: -1
+    }),
+    _useState144 = _slicedToArray(_useState143, 2),
+    songBarLayer = _useState144[0],
+    setSongBarLayer = _useState144[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
+  var songSyncR = useRef(true);
   var songMatrixR = useRef(songMatrix);
+  // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
+  // so layers can drift apart by gridLen. In sync mode these are unused.
+  var freeR = useRef({
+    synth: {
+      step: 0,
+      nextAt: 0,
+      bar: 0
+    },
+    lead: {
+      step: 0,
+      nextAt: 0,
+      bar: 0
+    },
+    bass: {
+      step: 0,
+      nextAt: 0,
+      bar: 0
+    },
+    drums: {
+      step: 0,
+      nextAt: 0,
+      bar: 0
+    }
+  });
   useEffect(function () {
     songBarR.current = songBar;
   }, [songBar]);
   useEffect(function () {
     songModeR.current = songMode;
   }, [songMode]);
+  useEffect(function () {
+    songSyncR.current = songSyncMode;
+  }, [songSyncMode]);
   useEffect(function () {
     songMatrixR.current = songMatrix;
   }, [songMatrix]);
@@ -2488,7 +2530,8 @@ function Tabula() {
               activeDrumPhraseId: activeDrumPhraseId,
               activeSectionId: activeSectionId,
               songMatrix: songMatrix,
-              songMode: songMode
+              songMode: songMode,
+              songSyncMode: songSyncMode
             };
             next = Object.assign({}, slotData, _defineProperty({}, slot, snap));
             setSlotData(next);
@@ -2634,6 +2677,7 @@ function Tabula() {
       });
     }
     if (s.songMode != null) setSongMode(s.songMode);
+    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
     showFlash("LOADED " + slot);
   };
   var saveSlot = function saveSlot(slot) {
@@ -2689,14 +2733,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState141 = useState(null),
-    _useState142 = _slicedToArray(_useState141, 2),
-    gridPx = _useState142[0],
-    setGridPx = _useState142[1];
-  var _useState143 = useState(null),
-    _useState144 = _slicedToArray(_useState143, 2),
-    editOuter = _useState144[0],
-    setEditOuter = _useState144[1];
+  var _useState145 = useState(null),
+    _useState146 = _slicedToArray(_useState145, 2),
+    gridPx = _useState146[0],
+    setGridPx = _useState146[1];
+  var _useState147 = useState(null),
+    _useState148 = _slicedToArray(_useState147, 2),
+    editOuter = _useState148[0],
+    setEditOuter = _useState148[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -2756,6 +2800,7 @@ function Tabula() {
       activeSectionId: activeSectionId,
       songMatrix: songMatrix,
       songMode: songMode,
+      songSyncMode: songSyncMode,
       layerStore: layerStoreR.current
     };
   };
@@ -2843,6 +2888,7 @@ function Tabula() {
       });
     }
     if (s.songMode != null) setSongMode(s.songMode);
+    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
   };
   var encodeState = function encodeState(s) {
     try {
@@ -2915,11 +2961,152 @@ function Tabula() {
 
   // Lookahead scheduler — runs every 25ms, schedules notes 100ms ahead.
   // Decouples JS timer jitter from audio precision so delay stays locked to grid.
+  // ── Per-layer playback helpers (used by free-mode scheduler) ────────────
+  // Plays one step of a single synth-type layer (synth/lead/bass) through Bell.
+  // Caller passes the resolved pat, step index, audio-context start time, and stepDur.
+  var playSynthLayerStep = function playSynthLayerStep(layer, pat, s, at, stepDur) {
+    var _sp$rhy;
+    if (!pat || !pat.grid) return;
+    var layerLP = layerParamsR.current[layer];
+    var freqs = SCALES[scaleR.current].freqs;
+    var ratio = stR(transpR.current);
+    var rawSp = pat.params && pat.params[s] ? pat.params[s] : null;
+    var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
+    var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
+    var ratch = rhy;
+    var subDur = stepDur / ratch;
+    var noteDur = stepDur;
+    if (pat.params) {
+      var ts = (s + 1) % COLS,
+        count = 0;
+      while (count < COLS - 1 && pat.params[ts] && Math.round((_pat$params$ts$rhy = pat.params[ts].rhy) !== null && _pat$params$ts$rhy !== void 0 ? _pat$params$ts$rhy : 1) === 0) {
+        var _pat$params$ts$rhy;
+        noteDur += stepDur;
+        ts = (ts + 1) % COLS;
+        count++;
+      }
+    }
+    for (var r = 0; r < ROWS; r++) {
+      if (!pat.grid[r][s]) continue;
+      var f = freqs[r] * ratio;
+      if (ratch > 1) {
+        for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, layerLP.dlySend, null, 0, layerLP);
+      } else {
+        bell.current.play(f, at, sp, noteDur, layerLP.dlySend, null, 0, layerLP);
+      }
+    }
+  };
+  // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
+  var playDrumStep = function playDrumStep(pat, s, at) {
+    if (!pat || !pat.grid || !drumEngine.current.ready) return;
+    var useGrid = varyModeR.current ? variedDrumGrids.current.get(pat.id) || pat.grid : pat.grid;
+    var useVel = varyModeR.current ? variedDrumVels.current.get(pat.id) || pat.vel : pat.vel;
+    for (var r = 0; r < DRUM_ROWS; r++) {
+      if (useGrid[r] && useGrid[r][s]) {
+        var _useVel$s;
+        var dVel = (_useVel$s = useVel === null || useVel === void 0 ? void 0 : useVel[s]) !== null && _useVel$s !== void 0 ? _useVel$s : 100;
+        var dMix = (pat.mix || defaultDrumMix())[r] || {
+          level: 100,
+          pan: 0
+        };
+        drumEngine.current.play(DRUM_VOICES[r].key, at, dVel, dMix.level, dMix.pan);
+      }
+    }
+  };
   var scheduler = useCallback(function () {
     if (!bell.current.ready) return;
     var ctx = bell.current.ctx;
     var LOOKAHEAD = 0.1; // seconds ahead to schedule
     var stepDur = 60 / bpmR.current / 4 * speedMultR.current;
+
+    // ── Free song mode: each layer has its own (step, nextAt, bar) timeline ──────
+    // Layers all start aligned at t=0 but drift apart by gridLen differences. This
+    // path is taken only in song mode + free sync mode; otherwise falls through to
+    // the unified sync scheduler below.
+    if (songModeR.current && !songSyncR.current) {
+      var sm = songMatrixR.current;
+      // Per-layer firstBar/lastBar (loops within that layer's populated range)
+      var ranges = {};
+      for (var _i3 = 0, _arr = ["synth", "lead", "bass", "drums"]; _i3 < _arr.length; _i3++) {
+        var layer = _arr[_i3];
+        var first = -1,
+          last = -1;
+        for (var i = 0; i < 64; i++) {
+          if (sm[layer][i] != null) {
+            if (first === -1) first = i;
+            last = i;
+          }
+        }
+        ranges[layer] = {
+          first: first,
+          last: last,
+          empty: first === -1
+        };
+      }
+      var allEmpty = ranges.synth.empty && ranges.lead.empty && ranges.bass.empty && ranges.drums.empty;
+      // Helper: resolve pat for a given layer at a given bar
+      var resolvePat = function resolvePat(layer, bar) {
+        var id = sm[layer][bar];
+        if (layer === "drums") {
+          return id != null ? drumPatsR.current.find(function (x) {
+            return x.id === id;
+          }) : null;
+        }
+        var layerData = activeLayerR.current === layer ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current[layer];
+        if (!layerData) return null;
+        // Synth fallback: empty matrix everywhere → loop synth's active pat at bar 0
+        if (layer === "synth" && allEmpty && bar === 0) {
+          return layerData.pats.find(function (x) {
+            return x.id === layerData.activeId;
+          });
+        }
+        return id != null ? layerData.pats.find(function (x) {
+          return x.id === id;
+        }) : null;
+      };
+      var newCursor = _objectSpread({}, songBarLayer);
+      var cursorChanged = false;
+      for (var _i4 = 0, _arr2 = ["synth", "lead", "bass", "drums"]; _i4 < _arr2.length; _i4++) {
+        var _layer = _arr2[_i4];
+        var r = ranges[_layer];
+        // Skip silent layers (no pats at all in their lane, except synth which has fallback)
+        if (r.empty && !(_layer === "synth" && allEmpty)) continue;
+        var lf = freeR.current[_layer];
+        // Initialize bar at first populated cell
+        if (lf.bar < r.first || lf.bar > r.last) {
+          lf.bar = r.empty ? 0 : r.first;
+          lf.step = 0;
+        }
+        while (lf.nextAt < ctx.currentTime + LOOKAHEAD) {
+          var _pat$gridLen;
+          var pat = resolvePat(_layer, lf.bar);
+          var len = pat ? (_pat$gridLen = pat.gridLen) !== null && _pat$gridLen !== void 0 ? _pat$gridLen : 16 : 16;
+          var s = lf.step % len;
+          var at = lf.nextAt;
+          if (pat) {
+            if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, stepDur);
+          }
+          // Advance step; on bar boundary advance bar within layer's range
+          var ns = (s + 1) % len;
+          lf.step = ns;
+          lf.nextAt += stepDur;
+          if (ns === 0) {
+            var nb = lf.bar + 1;
+            if (nb > r.last) nb = r.empty ? 0 : r.first;
+            lf.bar = nb;
+          }
+        }
+        if (newCursor[_layer] !== lf.bar) {
+          newCursor[_layer] = lf.bar;
+          cursorChanged = true;
+        }
+      }
+      if (cursorChanged) setSongBarLayer(newCursor);
+      return;
+    }
     var _loop = function _loop() {
       var s_ = stepR.current;
       var swingOffset = s_ % 2 === 1 ? stepDur * (swingR.current / 100) * 0.33 : 0;
@@ -2941,13 +3128,13 @@ function Tabula() {
         songCurBar = 0;
       if (inSong) {
         var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songBass$gridLen, _songDrum$gridLen;
-        var sm = songMatrixR.current;
+        var _sm = songMatrixR.current;
         var firstBar = -1,
           lastBar = -1;
-        for (var i = 0; i < 64; i++) {
-          if (sm.synth[i] != null || sm.lead[i] != null || sm.bass[i] != null || sm.drums[i] != null) {
-            if (firstBar === -1) firstBar = i;
-            lastBar = i;
+        for (var _i5 = 0; _i5 < 64; _i5++) {
+          if (_sm.synth[_i5] != null || _sm.lead[_i5] != null || _sm.bass[_i5] != null || _sm.drums[_i5] != null) {
+            if (firstBar === -1) firstBar = _i5;
+            lastBar = _i5;
           }
         }
         var empty = firstBar === -1;
@@ -2960,10 +3147,10 @@ function Tabula() {
         songFirstBar = firstBar;
         songLastBar = lastBar;
         songCurBar = bar;
-        var sId = sm.synth[bar],
-          lId = sm.lead[bar],
-          bId = sm.bass[bar],
-          dId = sm.drums[bar];
+        var sId = _sm.synth[bar],
+          lId = _sm.lead[bar],
+          bId = _sm.bass[bar],
+          dId = _sm.drums[bar];
         var synthData = activeLayerR.current === "synth" ? {
           pats: patsR.current,
           activeId: activeIdR.current
@@ -2998,6 +3185,13 @@ function Tabula() {
         if (songCurBar !== songBarR.current) {
           songBarR.current = songCurBar;
           setSongBar(songCurBar);
+          // Sync mode: all four cursors equal songBar
+          setSongBarLayer({
+            synth: songCurBar,
+            lead: songCurBar,
+            bass: songCurBar,
+            drums: songCurBar
+          });
         }
       }
 
@@ -3034,10 +3228,10 @@ function Tabula() {
       }
       // Run the scheduler unconditionally — lead/bass/drums may have content even if synth pat is missing.
       {
-        var _sp$rhy;
+        var _sp$rhy2;
         var cp = cposR.current,
-          s = s_;
-        if (s === 0 && varyModeR.current && p) {
+          _s = s_;
+        if (_s === 0 && varyModeR.current && p) {
           var vg = genVariation(p.grid, varyParamsR.current);
           variedGrids.current.set(pid, vg);
           // Self-record: always vary the original source pattern, not the current playing one
@@ -3074,9 +3268,9 @@ function Tabula() {
         var grid = varyModeR.current ? variedGrids.current.get(pid) || p && p.grid : p && p.grid;
         var freqs = SCALES[scaleR.current].freqs;
         var ratio = stR(transpR.current);
-        var rawSp = p && p.params && p.params[s] ? p.params[s] : null;
+        var rawSp = p && p.params && p.params[_s] ? p.params[_s] : null;
         var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
-        var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
+        var rhy = sp ? Math.max(1, Math.round((_sp$rhy2 = sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1)) : 1;
         var ratch = rhy;
         var isTie = false; // tie is done via grid only now
         var subDur = stepDur / ratch;
@@ -3084,7 +3278,7 @@ function Tabula() {
         // Non-tie step: look ahead for consecutive tied steps and extend duration
         var noteDur = stepDur;
         if (!isTie && p && p.params) {
-          var ts = (s + 1) % COLS,
+          var ts = (_s + 1) % COLS,
             count = 0;
           while (count < COLS - 1 && p.params[ts] && Math.round((_p$params$ts$rhy = p.params[ts].rhy) !== null && _p$params$ts$rhy !== void 0 ? _p$params$ts$rhy : 1) === 0) {
             var _p$params$ts$rhy;
@@ -3093,12 +3287,12 @@ function Tabula() {
             count++;
           }
         }
-        if (grid) for (var r = 0; r < ROWS; r++) {
+        if (grid) for (var _r = 0; _r < ROWS; _r++) {
           var _lastPlayedFreqR$curr;
-          if (!grid[r][s]) continue;
+          if (!grid[_r][_s]) continue;
           if (isTie) continue;
           var synthLP = layerParamsR.current.synth;
-          var f = freqs[r] * ratio;
+          var f = freqs[_r] * ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
           // both step and layer octaves; mirror that here).
           var stepOct = sp ? sp.oct - 2 : 0;
@@ -3120,7 +3314,7 @@ function Tabula() {
         // Lead & Bass — play their currently-active pattern through the same Bell
         var _loop2 = function _loop2() {
             var _lSp$rhy;
-            var layer = _arr[_i3];
+            var layer = _arr3[_i6];
             var lp, lLen;
             if (inSong) {
               lp = layer === "lead" ? songLead : songBass;
@@ -3139,7 +3333,7 @@ function Tabula() {
               if (!lp || !lp.grid) return 0; // continue
               lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
             }
-            var ls = s % lLen;
+            var ls = _s % lLen;
             var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
             var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
             var lRhy = lSp ? Math.max(1, Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1)) : 1;
@@ -3157,12 +3351,12 @@ function Tabula() {
                 _count++;
               }
             }
-            for (var _r = 0; _r < ROWS; _r++) {
-              if (!lp.grid[_r][ls]) continue;
+            for (var _r2 = 0; _r2 < ROWS; _r2++) {
+              if (!lp.grid[_r2][ls]) continue;
               var layerLP = layerParamsR.current[layer];
               // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
               // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
-              var lF = freqs[_r] * ratio;
+              var lF = freqs[_r2] * ratio;
               if (lRhy > 1) {
                 for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, null, 0, layerLP);
               } else {
@@ -3171,7 +3365,7 @@ function Tabula() {
             }
           },
           _ret;
-        for (var _i3 = 0, _arr = ["lead", "bass"]; _i3 < _arr.length; _i3++) {
+        for (var _i6 = 0, _arr3 = ["lead", "bass"]; _i6 < _arr3.length; _i6++) {
           _ret = _loop2();
           if (_ret === 0) continue;
         }
@@ -3186,7 +3380,7 @@ function Tabula() {
             dPat = songDrum;
             if (dPat) {
               dLen = songBarLen;
-              ds = s % dLen;
+              ds = _s % dLen;
             }
           } else {
             dChain = drumChainR.current;
@@ -3198,7 +3392,7 @@ function Tabula() {
             if (dPat) {
               var _dPat$gridLen;
               dLen = (_dPat$gridLen = dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
-              ds = s % dLen;
+              ds = _s % dLen;
             }
           }
           if (dPat) {
@@ -3230,26 +3424,26 @@ function Tabula() {
             }
             var useGrid = varyModeR.current ? variedDrumGrids.current.get(dPat.id) || dPat.grid : dPat.grid;
             var useVel = varyModeR.current ? variedDrumVels.current.get(dPat.id) || dPat.vel : dPat.vel;
-            for (var _r2 = 0; _r2 < DRUM_ROWS; _r2++) {
-              if (useGrid[_r2] && useGrid[_r2][ds]) {
+            for (var _r3 = 0; _r3 < DRUM_ROWS; _r3++) {
+              if (useGrid[_r3] && useGrid[_r3][ds]) {
                 var _useVel$ds;
                 var dVel = (_useVel$ds = useVel === null || useVel === void 0 ? void 0 : useVel[ds]) !== null && _useVel$ds !== void 0 ? _useVel$ds : 100;
-                var dMix = (dPat.mix || defaultDrumMix())[_r2] || {
+                var dMix = (dPat.mix || defaultDrumMix())[_r3] || {
                   level: 100,
                   pan: 0
                 };
-                drumEngine.current.play(DRUM_VOICES[_r2].key, at, dVel, dMix.level, dMix.pan);
+                drumEngine.current.play(DRUM_VOICES[_r3].key, at, dVel, dMix.level, dMix.pan);
               }
             }
             setDrumStep(ds);
           }
         }
-        setStep(s);
+        setStep(_s);
         setCpos(cp);
         setPlayId(pid);
-        var ns = (s + 1) % activeLen;
-        stepR.current = ns;
-        if (ns === 0) {
+        var _ns = (_s + 1) % activeLen;
+        stepR.current = _ns;
+        if (_ns === 0) {
           if (inSong) {
             var nextBar = songCurBar + 1;
             if (nextBar > songLastBar) nextBar = songFirstBar;
@@ -3267,7 +3461,7 @@ function Tabula() {
   }, []);
   var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, sm, firstBar, i, _t4;
+      var dlyT, sm, t0, layerFirst, _i7, _arr4, layer, f, i, firstBar, _i8, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -3282,6 +3476,12 @@ function Tabula() {
             setDrumStep(-1);
             setSongBar(-1);
             songBarR.current = -1;
+            setSongBarLayer({
+              synth: -1,
+              lead: -1,
+              bass: -1,
+              drums: -1
+            });
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
@@ -3361,36 +3561,80 @@ function Tabula() {
             stepR.current = 0;
             cposR.current = 0;
             if (!songMode) {
+              _context9.n = 20;
+              break;
+            }
+            sm = songMatrix; // Per-layer first populated bar — used for free mode init
+            t0 = bell.current.ctx.currentTime + 0.05;
+            layerFirst = {};
+            _i7 = 0, _arr4 = ["synth", "lead", "bass", "drums"];
+          case 11:
+            if (!(_i7 < _arr4.length)) {
+              _context9.n = 16;
+              break;
+            }
+            layer = _arr4[_i7];
+            f = -1;
+            i = 0;
+          case 12:
+            if (!(i < 64)) {
               _context9.n = 14;
               break;
             }
-            sm = songMatrix;
-            firstBar = -1;
-            i = 0;
-          case 11:
-            if (!(i < 64)) {
+            if (!(sm[layer][i] != null)) {
               _context9.n = 13;
               break;
             }
-            if (!(sm.synth[i] != null || sm.lead[i] != null || sm.bass[i] != null || sm.drums[i] != null)) {
-              _context9.n = 12;
-              break;
-            }
-            firstBar = i;
-            return _context9.a(3, 13);
-          case 12:
+            f = i;
+            return _context9.a(3, 14);
+          case 13:
             i++;
+            _context9.n = 12;
+            break;
+          case 14:
+            layerFirst[layer] = f === -1 ? 0 : f;
+            freeR.current[layer] = {
+              step: 0,
+              nextAt: t0,
+              bar: layerFirst[layer]
+            };
+          case 15:
+            _i7++;
             _context9.n = 11;
             break;
-          case 13:
+          case 16:
+            firstBar = -1;
+            _i8 = 0;
+          case 17:
+            if (!(_i8 < 64)) {
+              _context9.n = 19;
+              break;
+            }
+            if (!(sm.synth[_i8] != null || sm.lead[_i8] != null || sm.bass[_i8] != null || sm.drums[_i8] != null)) {
+              _context9.n = 18;
+              break;
+            }
+            firstBar = _i8;
+            return _context9.a(3, 19);
+          case 18:
+            _i8++;
+            _context9.n = 17;
+            break;
+          case 19:
             if (firstBar === -1) firstBar = 0;
             songBarR.current = firstBar;
             setSongBar(firstBar);
-          case 14:
+            setSongBarLayer({
+              synth: layerFirst.synth,
+              lead: layerFirst.lead,
+              bass: layerFirst.bass,
+              drums: layerFirst.drums
+            });
+          case 20:
             nextNoteR.current = bell.current.ctx.currentTime + 0.05; // small initial offset
             tmrR.current = setInterval(scheduler, 25);
             setPlaying(true);
-          case 15:
+          case 21:
             return _context9.a(2);
         }
       }, _callee9, null, [[6, 8]]);
@@ -3812,8 +4056,8 @@ function Tabula() {
                 _step7;
               try {
                 for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-                  var _r3 = _step7.value;
-                  newGrid[_r3][col.c] = true;
+                  var _r4 = _step7.value;
+                  newGrid[_r4][col.c] = true;
                 }
               } catch (err) {
                 _iterator7.e(err);
@@ -3847,8 +4091,8 @@ function Tabula() {
               try {
                 for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
                   var s = _step8.value;
-                  var _r4 = Math.max(0, Math.min(ROWS - 1, s));
-                  newGrid[_r4][col.c] = true;
+                  var _r5 = Math.max(0, Math.min(ROWS - 1, s));
+                  newGrid[_r5][col.c] = true;
                 }
               } catch (err) {
                 _iterator8.e(err);
@@ -3860,9 +4104,9 @@ function Tabula() {
                 _step9;
               try {
                 for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-                  var _s = _step9.value;
-                  var _r5 = _s - chosenOct * OCT;
-                  newGrid[_r5][col.c] = true;
+                  var _s2 = _step9.value;
+                  var _r6 = _s2 - chosenOct * OCT;
+                  newGrid[_r6][col.c] = true;
                 }
               } catch (err) {
                 _iterator9.e(err);
@@ -4211,8 +4455,8 @@ function Tabula() {
             return p.id === activeIdR.current;
           });
           g.preTieRhys = _snapPat && _snapPat.params ? _snapPat.params.map(function (sp) {
-            var _sp$rhy2;
-            return (_sp$rhy2 = sp === null || sp === void 0 ? void 0 : sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1;
+            var _sp$rhy3;
+            return (_sp$rhy3 = sp === null || sp === void 0 ? void 0 : sp.rhy) !== null && _sp$rhy3 !== void 0 ? _sp$rhy3 : 1;
           }) : new Array(COLS).fill(1);
           g.durStartCol = startCell.c;
           g.state = "dur-edit";
@@ -5045,10 +5289,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState145 = useState(false),
-    _useState146 = _slicedToArray(_useState145, 2),
-    bpmDragging = _useState146[0],
-    setBpmDragging = _useState146[1];
+  var _useState149 = useState(false),
+    _useState150 = _slicedToArray(_useState149, 2),
+    bpmDragging = _useState150[0],
+    setBpmDragging = _useState150[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -5077,10 +5321,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState147 = useState(false),
-    _useState148 = _slicedToArray(_useState147, 2),
-    stDragging = _useState148[0],
-    setStDragging = _useState148[1];
+  var _useState151 = useState(false),
+    _useState152 = _slicedToArray(_useState151, 2),
+    stDragging = _useState152[0],
+    setStDragging = _useState152[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -5109,10 +5353,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState149 = useState(false),
-    _useState150 = _slicedToArray(_useState149, 2),
-    swingDragging = _useState150[0],
-    setSwingDragging = _useState150[1];
+  var _useState153 = useState(false),
+    _useState154 = _slicedToArray(_useState153, 2),
+    swingDragging = _useState154[0],
+    setSwingDragging = _useState154[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -7916,15 +8160,11 @@ function Tabula() {
             target.releasePointerCapture(pointerId);
           } catch (_) {}
           if (!dragging) {
-            // Song mode: any tap opens the drawer (activate first if needed).
-            // Outside song mode: tap-active-to-step-in (tap inactive = activate;
-            // tap active = open drawer).
+            // Tap-active-to-step-in: tap inactive pattern = activate it.
+            // Tap an already-active pattern = open the drawer (same rule
+            // applies in song mode and outside song mode).
             var wasActive = isSynth ? activeId === p.id : activeDrumId === p.id;
-            if (songMode) {
-              if (!wasActive) isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
-              setSeqPage("step");
-              setActiveSheet("pattern");
-            } else if (wasActive) {
+            if (wasActive) {
               setSeqPage("step");
               setActiveSheet(function (s) {
                 return s === "pattern" ? null : "pattern";
@@ -8053,13 +8293,45 @@ function Tabula() {
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
-      justifyContent: "center",
-      padding: "6px 10px",
-      boxSizing: "border-box"
+      justifyContent: "flex-start",
+      padding: "6px 10px 6px",
+      boxSizing: "border-box",
+      gap: 6
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      width: "min(100%,calc(100dvh - 150px))",
+      display: "flex",
+      gap: 4,
+      flexShrink: 0,
+      alignSelf: "center"
+    }
+  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref35) {
+    var _ref36 = _slicedToArray(_ref35, 2),
+      val = _ref36[0],
+      lbl = _ref36[1];
+    var sel = songSyncMode === val;
+    return /*#__PURE__*/React.createElement("button", {
+      key: lbl,
+      onClick: function onClick() {
+        return setSongSyncMode(val);
+      },
+      style: {
+        padding: "4px 14px",
+        fontSize: 9,
+        letterSpacing: 2,
+        fontWeight: 600,
+        border: "1px solid " + (sel ? "rgba(220,200,180,0.5)" : "rgba(220,200,180,0.12)"),
+        background: sel ? "rgba(220,200,180,0.08)" : "transparent",
+        color: sel ? "rgba(220,200,180,0.9)" : "rgba(220,200,180,0.4)",
+        borderRadius: 4,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        lineHeight: 1
+      }
+    }, lbl);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "min(100%,calc(100dvh - 175px))",
       aspectRatio: "1",
       display: "flex",
       flexDirection: "column",
@@ -8100,7 +8372,7 @@ function Tabula() {
         var isQ = col % 4 === 0;
         var isHoverTarget = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overSongCell) && patternDrag.overSongCell.layer === layer && patternDrag.overSongCell.barIdx === barIdx;
         var isDragSource = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.sourceCell) && patternDrag.sourceCell.layer === layer && patternDrag.sourceCell.barIdx === barIdx;
-        var isCursor = playing && songMode && songBar === barIdx;
+        var isCursor = playing && songMode && songBarLayer[layer] === barIdx;
         return /*#__PURE__*/React.createElement("div", {
           key: col,
           "data-song-cell": "1",
@@ -8989,10 +9261,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref36) {
-    var _ref37 = _slicedToArray(_ref36, 2),
-      k = _ref37[0],
-      v = _ref37[1];
+  }, Object.entries(SCALES).map(function (_ref38) {
+    var _ref39 = _slicedToArray(_ref38, 2),
+      k = _ref39[0],
+      v = _ref39[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -9070,12 +9342,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref38) {
-      var _ref39 = _slicedToArray(_ref38, 4),
-        l = _ref39[0],
-        f = _ref39[1],
-        d = _ref39[2],
-        danger = _ref39[3];
+    }, ops.map(function (_ref40) {
+      var _ref41 = _slicedToArray(_ref40, 4),
+        l = _ref41[0],
+        f = _ref41[1],
+        d = _ref41[2],
+        danger = _ref41[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -9772,13 +10044,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref40) {
-    var _ref41 = _slicedToArray(_ref40, 5),
-      label = _ref41[0],
-      val = _ref41[1],
-      setter = _ref41[2],
-      max = _ref41[3],
-      unit = _ref41[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref42) {
+    var _ref43 = _slicedToArray(_ref42, 5),
+      label = _ref43[0],
+      val = _ref43[1],
+      setter = _ref43[2],
+      max = _ref43[3],
+      unit = _ref43[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -9863,13 +10135,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref42) {
-    var _ref43 = _slicedToArray(_ref42, 5),
-      label = _ref43[0],
-      val = _ref43[1],
-      setter = _ref43[2],
-      max = _ref43[3],
-      unit = _ref43[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref44) {
+    var _ref45 = _slicedToArray(_ref44, 5),
+      label = _ref45[0],
+      val = _ref45[1],
+      setter = _ref45[2],
+      max = _ref45[3],
+      unit = _ref45[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -9954,11 +10226,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 3),
-      label = _ref45[0],
-      val = _ref45[1],
-      setter = _ref45[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref46) {
+    var _ref47 = _slicedToArray(_ref46, 3),
+      label = _ref47[0],
+      val = _ref47[1],
+      setter = _ref47[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10114,12 +10386,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref46) {
-      var _ref47 = _slicedToArray(_ref46, 4),
-        label = _ref47[0],
-        fn = _ref47[1],
-        disabled = _ref47[2],
-        danger = _ref47[3];
+    }, isOnlyPat, true]].map(function (_ref48) {
+      var _ref49 = _slicedToArray(_ref48, 4),
+        label = _ref49[0],
+        fn = _ref49[1],
+        disabled = _ref49[2],
+        danger = _ref49[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -10203,12 +10475,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref48) {
-      var _ref49 = _slicedToArray(_ref48, 4),
-        label = _ref49[0],
-        fn = _ref49[1],
-        disabled = _ref49[2],
-        danger = _ref49[3];
+    }, isOnly, true]].map(function (_ref50) {
+      var _ref51 = _slicedToArray(_ref50, 4),
+        label = _ref51[0],
+        fn = _ref51[1],
+        disabled = _ref51[2],
+        danger = _ref51[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
