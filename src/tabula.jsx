@@ -961,6 +961,7 @@ export default function Tabula(){
     synthPhrases:JSON.parse(JSON.stringify(synthPhrases)),
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
+    songMatrix:JSON.parse(JSON.stringify(songMatrix)),
     activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
@@ -983,6 +984,7 @@ export default function Tabula(){
     if(s.activeLayer&&s.activeLayer!==activeLayer)setActiveLayer(s.activeLayer);
     setPats(s.pats);setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
+    if(s.songMatrix)setSongMatrix(s.songMatrix);
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
@@ -1037,7 +1039,7 @@ export default function Tabula(){
     if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
       liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
     }
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,waveform,detune,attack,decay,sustain,vcfCutoff,vcfRes,filterEnvAmt,dlyIdx,dlyFbPct,dlyWetPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -1093,6 +1095,23 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
+    if(s.songMatrix){
+      // Sanitize each lane against its layer's current pats. Drop entries
+      // referencing pat IDs that no longer exist; pad to 64.
+      const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
+      const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
+      const synthPats=s.pats||[];
+      const leadPats=s.layerStore?.lead?.pats||[];
+      const bassPats=s.layerStore?.bass?.pats||[];
+      const drumPats=s.drumPats||[];
+      setSongMatrix({
+        synth: filterIds(padTo64(s.songMatrix.synth),synthPats),
+        lead:  filterIds(padTo64(s.songMatrix.lead),leadPats),
+        bass:  filterIds(padTo64(s.songMatrix.bass),bassPats),
+        drums: filterIds(padTo64(s.songMatrix.drums),drumPats)
+      });
+    }
+    if(s.songMode!=null)setSongMode(s.songMode);
     showFlash("LOADED "+slot);
   };
   const saveSlot=slot=>{
@@ -1139,7 +1158,8 @@ export default function Tabula(){
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
-    synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId
+    synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
+    songMatrix,songMode,layerStore:layerStoreR.current
   });
 
   const applyShareState=s=>{
@@ -1174,6 +1194,17 @@ export default function Tabula(){
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
+    if(s.songMatrix){
+      const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
+      const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
+      setSongMatrix({
+        synth: filterIds(padTo64(s.songMatrix.synth),s.pats||[]),
+        lead:  filterIds(padTo64(s.songMatrix.lead),s.layerStore?.lead?.pats||[]),
+        bass:  filterIds(padTo64(s.songMatrix.bass),s.layerStore?.bass?.pats||[]),
+        drums: filterIds(padTo64(s.songMatrix.drums),s.drumPats||[])
+      });
+    }
+    if(s.songMode!=null)setSongMode(s.songMode);
   };
 
   const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};

@@ -2310,6 +2310,7 @@ function Tabula() {
       synthPhrases: JSON.parse(JSON.stringify(synthPhrases)),
       drumPhrases: JSON.parse(JSON.stringify(drumPhrases)),
       sections: JSON.parse(JSON.stringify(sections)),
+      songMatrix: JSON.parse(JSON.stringify(songMatrix)),
       activeId: activeId,
       activeDrumId: activeDrumId,
       activeSynthPhraseId: activeSynthPhraseId,
@@ -2369,6 +2370,7 @@ function Tabula() {
     setSynthPhrases(s.synthPhrases);
     setDrumPhrases(s.drumPhrases);
     setSections(s.sections);
+    if (s.songMatrix) setSongMatrix(s.songMatrix);
     setActiveId(s.activeId);
     setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);
@@ -2519,7 +2521,9 @@ function Tabula() {
               sections: sections,
               activeSynthPhraseId: activeSynthPhraseId,
               activeDrumPhraseId: activeDrumPhraseId,
-              activeSectionId: activeSectionId
+              activeSectionId: activeSectionId,
+              songMatrix: songMatrix,
+              songMode: songMode
             };
             next = Object.assign({}, slotData, _defineProperty({}, slot, snap));
             setSlotData(next);
@@ -2608,6 +2612,35 @@ function Tabula() {
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
     if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
+    if (s.songMatrix) {
+      var _s$layerStore, _s$layerStore2;
+      // Sanitize each lane against its layer's current pats. Drop entries
+      // referencing pat IDs that no longer exist; pad to 64.
+      var padTo64 = function padTo64(arr) {
+        var a = Array.isArray(arr) ? arr.slice(0, 64) : [];
+        while (a.length < 64) a.push(null);
+        return a;
+      };
+      var filterIds = function filterIds(arr, pats) {
+        var ids = new Set((pats || []).map(function (p) {
+          return p.id;
+        }));
+        return arr.map(function (v) {
+          return v != null && ids.has(v) ? v : null;
+        });
+      };
+      var synthPats = s.pats || [];
+      var leadPats = ((_s$layerStore = s.layerStore) === null || _s$layerStore === void 0 || (_s$layerStore = _s$layerStore.lead) === null || _s$layerStore === void 0 ? void 0 : _s$layerStore.pats) || [];
+      var bassPats = ((_s$layerStore2 = s.layerStore) === null || _s$layerStore2 === void 0 || (_s$layerStore2 = _s$layerStore2.bass) === null || _s$layerStore2 === void 0 ? void 0 : _s$layerStore2.pats) || [];
+      var _drumPats = s.drumPats || [];
+      setSongMatrix({
+        synth: filterIds(padTo64(s.songMatrix.synth), synthPats),
+        lead: filterIds(padTo64(s.songMatrix.lead), leadPats),
+        bass: filterIds(padTo64(s.songMatrix.bass), bassPats),
+        drums: filterIds(padTo64(s.songMatrix.drums), _drumPats)
+      });
+    }
+    if (s.songMode != null) setSongMode(s.songMode);
     showFlash("LOADED " + slot);
   };
   var saveSlot = function saveSlot(slot) {
@@ -2735,7 +2768,10 @@ function Tabula() {
       sections: sections,
       activeSynthPhraseId: activeSynthPhraseId,
       activeDrumPhraseId: activeDrumPhraseId,
-      activeSectionId: activeSectionId
+      activeSectionId: activeSectionId,
+      songMatrix: songMatrix,
+      songMode: songMode,
+      layerStore: layerStoreR.current
     };
   };
   var applyShareState = function applyShareState(s) {
@@ -2774,6 +2810,29 @@ function Tabula() {
         fn = _ref10[1];
       if (s[k] != null) fn(s[k]);
     });
+    if (s.songMatrix) {
+      var _s$layerStore3, _s$layerStore4;
+      var padTo64 = function padTo64(arr) {
+        var a = Array.isArray(arr) ? arr.slice(0, 64) : [];
+        while (a.length < 64) a.push(null);
+        return a;
+      };
+      var filterIds = function filterIds(arr, pats) {
+        var ids = new Set((pats || []).map(function (p) {
+          return p.id;
+        }));
+        return arr.map(function (v) {
+          return v != null && ids.has(v) ? v : null;
+        });
+      };
+      setSongMatrix({
+        synth: filterIds(padTo64(s.songMatrix.synth), s.pats || []),
+        lead: filterIds(padTo64(s.songMatrix.lead), ((_s$layerStore3 = s.layerStore) === null || _s$layerStore3 === void 0 || (_s$layerStore3 = _s$layerStore3.lead) === null || _s$layerStore3 === void 0 ? void 0 : _s$layerStore3.pats) || []),
+        bass: filterIds(padTo64(s.songMatrix.bass), ((_s$layerStore4 = s.layerStore) === null || _s$layerStore4 === void 0 || (_s$layerStore4 = _s$layerStore4.bass) === null || _s$layerStore4 === void 0 ? void 0 : _s$layerStore4.pats) || []),
+        drums: filterIds(padTo64(s.songMatrix.drums), s.drumPats || [])
+      });
+    }
+    if (s.songMode != null) setSongMode(s.songMode);
   };
   var encodeState = function encodeState(s) {
     try {
