@@ -872,7 +872,13 @@ export default function Tabula(){
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
+  // songMode is the persistent playback intent: when true, the song matrix drives
+  // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
   const [songMode,     setSongMode]     = useState(false);
+  // songView is the UI gate: when true, the matrix is shown; when false, the
+  // pattern grid is shown. Decoupled from songMode so tapping a pill in song
+  // view leaves the view without changing the playback source.
+  const [songView,     setSongView]     = useState(false);
   const [songSyncMode, setSongSyncMode] = useState(true); // true = sync (single cursor), false = free (4 cursors)
   const [songMatrix,   setSongMatrix]   = useState({
     synth: Array(64).fill(null),
@@ -885,10 +891,6 @@ export default function Tabula(){
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,bass:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
-  // Separate ref: matrix drives playback for this play session. Latched at play-start
-  // (true if songMode was on when ▶ pressed; false otherwise) and preserved across
-  // view toggles. Loop mode in transport still overrides everything.
-  const songPlaybackR = useRef(false);
   const songSyncR   = useRef(true);
   const songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
@@ -1064,7 +1066,7 @@ export default function Tabula(){
     if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
       liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
     }
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songSyncMode};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
   };
@@ -1153,6 +1155,7 @@ export default function Tabula(){
       });
     }
     if(s.songMode!=null)setSongMode(s.songMode);
+    if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
     if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
     showFlash("LOADED "+slot);
   };
@@ -1201,7 +1204,7 @@ export default function Tabula(){
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songSyncMode,layerStore:layerStoreR.current
+    songMatrix,songMode,songView,songSyncMode,layerStore:layerStoreR.current
   });
 
   const applyShareState=s=>{
@@ -1261,6 +1264,7 @@ export default function Tabula(){
       });
     }
     if(s.songMode!=null)setSongMode(s.songMode);
+    if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
     if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
   };
 
@@ -1351,7 +1355,7 @@ export default function Tabula(){
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if(songPlaybackR.current && !loopR.current && !songSyncR.current){
+    if(songModeR.current && !loopR.current && !songSyncR.current){
       const sm=songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       const ranges={};
@@ -1419,9 +1423,7 @@ export default function Tabula(){
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      // Sync mode uses songPlaybackR (latched at play-start, preserved across view toggles).
-      // Loop in transport takes precedence — solo the active pat regardless of matrix.
-      const inSong = songPlaybackR.current && !loopR.current;
+      const inSong = songModeR.current && !loopR.current;
       let songSyn=null, songLead=null, songBass=null, songDrum=null;
       let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
       if(inSong){
@@ -1655,7 +1657,6 @@ export default function Tabula(){
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
-      songPlaybackR.current=false;
       prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
       setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
@@ -1687,7 +1688,6 @@ export default function Tabula(){
       }catch(e){}
     }
     stepR.current=0;cposR.current=0;
-    songPlaybackR.current = songMode; // latch — UI view toggle won't change this mid-play
     if(songMode){
       const sm=songMatrix;
       // Per-layer first populated bar — used for free mode init
@@ -3456,7 +3456,7 @@ export default function Tabula(){
                       }
                       // hit-test song-matrix cells (only valid if cell.layer === dragLayer)
                       let overSongCell=null;
-                      if(songMode){
+                      if(songView){
                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
                         const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                         if(cell&&cell.dataset.songLayer===dragLayer){
@@ -3473,26 +3473,25 @@ export default function Tabula(){
                       try{target.releasePointerCapture(pointerId);}catch(_){}
                       if(!dragging){
                         const wasActive = isSynth ? activeId===p.id : activeDrumId===p.id;
-                        if(songMode){
-                          // Song mode: tap = leave song mode and show this pattern's grid for editing.
-                          // If we're already showing this pattern's grid (i.e. song mode is off and
-                          // it's already active — caught by the else branch), tap opens drawer.
+                        if(songView){
+                          // Song view: tap = leave view, show pattern's note grid.
+                          // songMode (playback source) is unchanged — matrix keeps driving playback.
                           if(!wasActive) isSynth?setActiveId(p.id):setActiveDrumId(p.id);
-                          setSongMode(false);
+                          setSongView(false);
                           setActiveSheet(null);
                         }else if(wasActive){
-                          // Outside song mode, on the pattern's own grid: tap opens drawer
+                          // Already on this pattern's grid: tap opens drawer
                           setSeqPage("step");
                           setActiveSheet(s=>s==="pattern"?null:"pattern");
                         }else{
-                          // Outside song mode, different pattern: just activate it
+                          // Different pattern: just activate it
                           isSynth?setActiveId(p.id):setActiveDrumId(p.id);
                           setActiveSheet(null);
                         }
                         return;
                       }
                       // Drop on song-matrix cell — same-layer only
-                      if(songMode){
+                      if(songView){
                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
                         const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                         if(cell&&cell.dataset.songLayer===dragLayer){
@@ -3538,7 +3537,7 @@ export default function Tabula(){
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
             {/* SONG matrix — 16×16, 4 row-groups × 4 layers (synth/lead/bass/drums) × 16 bars */}
-            {songMode&&(
+            {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
                 {/* SYNC | FREE toggle — controls per-layer cursor independence */}
                 <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
@@ -3572,7 +3571,7 @@ export default function Tabula(){
                               const isQ = col%4===0;
                               const isHoverTarget = patternDrag?.overSongCell&&patternDrag.overSongCell.layer===layer&&patternDrag.overSongCell.barIdx===barIdx;
                               const isDragSource = patternDrag?.sourceCell&&patternDrag.sourceCell.layer===layer&&patternDrag.sourceCell.barIdx===barIdx;
-                              const isCursor = playing&&songMode&&songBarLayer[layer]===barIdx;
+                              const isCursor = playing&&songView&&songBarLayer[layer]===barIdx;
                               return (
                                 <div key={col}
                                      data-song-cell="1"
@@ -3659,7 +3658,7 @@ export default function Tabula(){
             )}
 
             {/* SYNTH EDIT grid */}
-            {!songMode&&activeLayer!=="drums"&&(
+            {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
               <div style={{width:"min(100%,calc(100dvh - 150px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
@@ -3691,7 +3690,7 @@ export default function Tabula(){
             )}
 
             {/* DRUMS EDIT grid */}
-            {!songMode&&activeLayer==="drums"&&(
+            {!songView&&activeLayer==="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box",overflow:"hidden"}}>
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
@@ -3775,10 +3774,20 @@ export default function Tabula(){
                 <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
               </button>
-              {/* SONG chip — toggles song matrix view */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songMode?"rgba(210,195,175,0.5)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songMode?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
-                onClick={()=>{setSongMode(s=>!s);setActiveSheet(null);}}>
-                <span style={{fontSize:14,fontWeight:700,color:songMode?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
+              {/* SONG chip — toggles song mode (matrix-driven playback) and view together.
+                   If view was off but song mode was on (left via pill tap), re-enters view. */}
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+                onClick={()=>{
+                  if(songView){
+                    // currently in matrix view: tap exits song mode entirely
+                    setSongMode(false);setSongView(false);
+                  }else{
+                    // not in view: enter (and ensure song mode is on)
+                    setSongMode(true);setSongView(true);
+                  }
+                  setActiveSheet(null);
+                }}>
+                <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
               </button>
               {/* VARY chip */}

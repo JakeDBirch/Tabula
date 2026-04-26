@@ -2070,43 +2070,48 @@ function Tabula() {
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
+  // songMode is the persistent playback intent: when true, the song matrix drives
+  // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
   var _useState135 = useState(false),
     _useState136 = _slicedToArray(_useState135, 2),
     songMode = _useState136[0],
     setSongMode = _useState136[1];
-  var _useState137 = useState(true),
+  // songView is the UI gate: when true, the matrix is shown; when false, the
+  // pattern grid is shown. Decoupled from songMode so tapping a pill in song
+  // view leaves the view without changing the playback source.
+  var _useState137 = useState(false),
     _useState138 = _slicedToArray(_useState137, 2),
-    songSyncMode = _useState138[0],
-    setSongSyncMode = _useState138[1]; // true = sync (single cursor), false = free (4 cursors)
-  var _useState139 = useState({
+    songView = _useState138[0],
+    setSongView = _useState138[1];
+  var _useState139 = useState(true),
+    _useState140 = _slicedToArray(_useState139, 2),
+    songSyncMode = _useState140[0],
+    setSongSyncMode = _useState140[1]; // true = sync (single cursor), false = free (4 cursors)
+  var _useState141 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       bass: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState140 = _slicedToArray(_useState139, 2),
-    songMatrix = _useState140[0],
-    setSongMatrix = _useState140[1];
-  var _useState141 = useState(-1),
     _useState142 = _slicedToArray(_useState141, 2),
-    songBar = _useState142[0],
-    setSongBar = _useState142[1]; // sync mode current bar; -1 when stopped
+    songMatrix = _useState142[0],
+    setSongMatrix = _useState142[1];
+  var _useState143 = useState(-1),
+    _useState144 = _slicedToArray(_useState143, 2),
+    songBar = _useState144[0],
+    setSongBar = _useState144[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState143 = useState({
+  var _useState145 = useState({
       synth: -1,
       lead: -1,
       bass: -1,
       drums: -1
     }),
-    _useState144 = _slicedToArray(_useState143, 2),
-    songBarLayer = _useState144[0],
-    setSongBarLayer = _useState144[1];
+    _useState146 = _slicedToArray(_useState145, 2),
+    songBarLayer = _useState146[0],
+    setSongBarLayer = _useState146[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
-  // Separate ref: matrix drives playback for this play session. Latched at play-start
-  // (true if songMode was on when ▶ pressed; false otherwise) and preserved across
-  // view toggles. Loop mode in transport still overrides everything.
-  var songPlaybackR = useRef(false);
   var songSyncR = useRef(true);
   var songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
@@ -2535,6 +2540,7 @@ function Tabula() {
               activeSectionId: activeSectionId,
               songMatrix: songMatrix,
               songMode: songMode,
+              songView: songView,
               songSyncMode: songSyncMode
             };
             next = Object.assign({}, slotData, _defineProperty({}, slot, snap));
@@ -2681,6 +2687,7 @@ function Tabula() {
       });
     }
     if (s.songMode != null) setSongMode(s.songMode);
+    if (s.songView != null) setSongView(s.songView);else if (s.songMode) setSongView(true);
     if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
     showFlash("LOADED " + slot);
   };
@@ -2737,14 +2744,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState145 = useState(null),
-    _useState146 = _slicedToArray(_useState145, 2),
-    gridPx = _useState146[0],
-    setGridPx = _useState146[1];
   var _useState147 = useState(null),
     _useState148 = _slicedToArray(_useState147, 2),
-    editOuter = _useState148[0],
-    setEditOuter = _useState148[1];
+    gridPx = _useState148[0],
+    setGridPx = _useState148[1];
+  var _useState149 = useState(null),
+    _useState150 = _slicedToArray(_useState149, 2),
+    editOuter = _useState150[0],
+    setEditOuter = _useState150[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -2804,6 +2811,7 @@ function Tabula() {
       activeSectionId: activeSectionId,
       songMatrix: songMatrix,
       songMode: songMode,
+      songView: songView,
       songSyncMode: songSyncMode,
       layerStore: layerStoreR.current
     };
@@ -2892,6 +2900,7 @@ function Tabula() {
       });
     }
     if (s.songMode != null) setSongMode(s.songMode);
+    if (s.songView != null) setSongView(s.songView);else if (s.songMode) setSongView(true);
     if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
   };
   var encodeState = function encodeState(s) {
@@ -3027,7 +3036,7 @@ function Tabula() {
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if (songPlaybackR.current && !loopR.current && !songSyncR.current) {
+    if (songModeR.current && !loopR.current && !songSyncR.current) {
       var sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
@@ -3121,9 +3130,7 @@ function Tabula() {
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      // Sync mode uses songPlaybackR (latched at play-start, preserved across view toggles).
-      // Loop in transport takes precedence — solo the active pat regardless of matrix.
-      var inSong = songPlaybackR.current && !loopR.current;
+      var inSong = songModeR.current && !loopR.current;
       var songSyn = null,
         songLead = null,
         songBass = null,
@@ -3488,7 +3495,6 @@ function Tabula() {
               bass: -1,
               drums: -1
             });
-            songPlaybackR.current = false;
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
@@ -3567,7 +3573,6 @@ function Tabula() {
             }
             stepR.current = 0;
             cposR.current = 0;
-            songPlaybackR.current = songMode; // latch — UI view toggle won't change this mid-play
             if (!songMode) {
               _context9.n = 20;
               break;
@@ -5297,10 +5302,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState149 = useState(false),
-    _useState150 = _slicedToArray(_useState149, 2),
-    bpmDragging = _useState150[0],
-    setBpmDragging = _useState150[1];
+  var _useState151 = useState(false),
+    _useState152 = _slicedToArray(_useState151, 2),
+    bpmDragging = _useState152[0],
+    setBpmDragging = _useState152[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -5329,10 +5334,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState151 = useState(false),
-    _useState152 = _slicedToArray(_useState151, 2),
-    stDragging = _useState152[0],
-    setStDragging = _useState152[1];
+  var _useState153 = useState(false),
+    _useState154 = _slicedToArray(_useState153, 2),
+    stDragging = _useState154[0],
+    setStDragging = _useState154[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -5361,10 +5366,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState153 = useState(false),
-    _useState154 = _slicedToArray(_useState153, 2),
-    swingDragging = _useState154[0],
-    setSwingDragging = _useState154[1];
+  var _useState155 = useState(false),
+    _useState156 = _slicedToArray(_useState155, 2),
+    swingDragging = _useState156[0],
+    setSwingDragging = _useState156[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -8140,7 +8145,7 @@ function Tabula() {
           }
           // hit-test song-matrix cells (only valid if cell.layer === dragLayer)
           var overSongCell = null;
-          if (songMode) {
+          if (songView) {
             var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var cell = el && el.closest && el.closest('[data-song-cell="1"]');
             if (cell && cell.dataset.songLayer === dragLayer) {
@@ -8169,28 +8174,27 @@ function Tabula() {
           } catch (_) {}
           if (!dragging) {
             var wasActive = isSynth ? activeId === p.id : activeDrumId === p.id;
-            if (songMode) {
-              // Song mode: tap = leave song mode and show this pattern's grid for editing.
-              // If we're already showing this pattern's grid (i.e. song mode is off and
-              // it's already active — caught by the else branch), tap opens drawer.
+            if (songView) {
+              // Song view: tap = leave view, show pattern's note grid.
+              // songMode (playback source) is unchanged — matrix keeps driving playback.
               if (!wasActive) isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
-              setSongMode(false);
+              setSongView(false);
               setActiveSheet(null);
             } else if (wasActive) {
-              // Outside song mode, on the pattern's own grid: tap opens drawer
+              // Already on this pattern's grid: tap opens drawer
               setSeqPage("step");
               setActiveSheet(function (s) {
                 return s === "pattern" ? null : "pattern";
               });
             } else {
-              // Outside song mode, different pattern: just activate it
+              // Different pattern: just activate it
               isSynth ? setActiveId(p.id) : setActiveDrumId(p.id);
               setActiveSheet(null);
             }
             return;
           }
           // Drop on song-matrix cell — same-layer only
-          if (songMode) {
+          if (songView) {
             var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var cell = el && el.closest && el.closest('[data-song-cell="1"]');
             if (cell && cell.dataset.songLayer === dragLayer) {
@@ -8301,7 +8305,7 @@ function Tabula() {
       overflow: "hidden",
       position: "relative"
     }
-  }, songMode && /*#__PURE__*/React.createElement("div", {
+  }, songView && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -8387,7 +8391,7 @@ function Tabula() {
         var isQ = col % 4 === 0;
         var isHoverTarget = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overSongCell) && patternDrag.overSongCell.layer === layer && patternDrag.overSongCell.barIdx === barIdx;
         var isDragSource = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.sourceCell) && patternDrag.sourceCell.layer === layer && patternDrag.sourceCell.barIdx === barIdx;
-        var isCursor = playing && songMode && songBarLayer[layer] === barIdx;
+        var isCursor = playing && songView && songBarLayer[layer] === barIdx;
         return /*#__PURE__*/React.createElement("div", {
           key: col,
           "data-song-cell": "1",
@@ -8502,7 +8506,7 @@ function Tabula() {
         }, pat ? pat.name : "");
       }));
     }));
-  }))), !songMode && activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
+  }))), !songView && activeLayer !== "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -8776,7 +8780,7 @@ function Tabula() {
       color: "rgba(210,195,175,0.3)",
       pointerEvents: "none"
     }
-  }, gridLen)))), !songMode && activeLayer === "drums" && /*#__PURE__*/React.createElement("div", {
+  }, gridLen)))), !songView && activeLayer === "drums" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -9058,25 +9062,31 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (songMode ? "rgba(210,195,175,0.5)" : "rgba(200,185,165,0.1)"),
+      border: "1px solid " + (songView ? "rgba(210,195,175,0.5)" : songMode ? "rgba(210,195,175,0.25)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
-      background: songMode ? "rgba(210,195,175,0.06)" : "transparent",
+      background: songView ? "rgba(210,195,175,0.06)" : "transparent",
       cursor: "pointer",
       gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
     onClick: function onClick() {
-      setSongMode(function (s) {
-        return !s;
-      });
+      if (songView) {
+        // currently in matrix view: tap exits song mode entirely
+        setSongMode(false);
+        setSongView(false);
+      } else {
+        // not in view: enter (and ensure song mode is on)
+        setSongMode(true);
+        setSongView(true);
+      }
       setActiveSheet(null);
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 14,
       fontWeight: 700,
-      color: songMode ? "rgba(210,195,175,0.9)" : "rgba(210,195,175,0.5)",
+      color: songView ? "rgba(210,195,175,0.9)" : songMode ? "rgba(210,195,175,0.7)" : "rgba(210,195,175,0.5)",
       lineHeight: 1.1
     }
   }, "\u25A6"), /*#__PURE__*/React.createElement("span", {
