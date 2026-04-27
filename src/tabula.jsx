@@ -2963,75 +2963,8 @@ export default function Tabula(){
             </div>
           )}
 
-          {/* Chain strip + FOLLOW — layer-aware */}
-          {!IS_MOBILE&&(
-            <div style={{flex:1,minHeight:0,overflowY:"auto",scrollbarWidth:"none"}}>
-              {activeLayer==="synth"&&(()=>{
-                const overStrip = chainDrag && isOverStrip(chainDrag.y);
-                const insertIdx = chainDrag ? getChainInsertIdx(chainDrag.x) : -1;
-                return (
-                  <div>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                      <span style={{fontSize:10,letterSpacing:1,color:"rgba(200,185,165,0.25)",fontWeight:500}}>SEQ</span>
-                    </div>
-                    <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
-                      {chain.length===0&&!chainDrag&&<span style={S.chainStripEmpty}>drag patterns here</span>}
-                      {chain.map((pid,i)=>{
-                        const p=pats.find(p=>p.id===pid);
-                        const here=playing&&!loopMode&&i===cpos;
-                        const isDragging=chainDrag&&chainDrag.type==='chain'&&chainDrag.fromIdx===i;
-                        const showInsert=overStrip&&insertIdx===i;
-                        return (
-                          <React.Fragment key={i}>
-                            {showInsert&&<div style={S.chainInsertLine}/>}
-                            <div data-chainslot={i}
-                              style={Object.assign({},S.chainChip,{borderColor:"#a8c5a0",background:here?"#a8c5a0":"rgba(168,197,160,0.1)",color:here?"#1a1814":"#a8c5a0",opacity:isDragging?0.3:1,touchAction:"none"})}
-                              onPointerDown={e=>startChainDrag(e,i)}
-                              onPointerMove={onDragMove}
-                              onPointerUp={onDragUp}
-                              onPointerCancel={onDragUp}>
-                              {p?p.name:"?"}
-                            </div>
-                          </React.Fragment>
-                        );
-                      })}
-                      {overStrip&&insertIdx>=chain.length&&<div style={S.chainInsertLine}/>}
-                    </div>
-                  </div>
-                );
-              })()}
-              {activeLayer==="drums"&&(
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                    <span style={{fontSize:10,letterSpacing:1,color:"rgba(200,185,165,0.25)",fontWeight:500}}>SEQ</span>
-                  </div>
-                  <div style={Object.assign({},S.chainStrip,{marginTop:0})}>
-                    {drumChain.length===0&&<span style={S.chainStripEmpty}>no patterns in chain</span>}
-                    {drumChain.map((pid,i)=>{
-                      const dp=drumPats.find(p=>p.id===pid);
-                      const here=playing&&i===drumCpos;
-                      return(
-                        <div key={i}
-                          style={Object.assign({},S.chainChip,{borderColor:"#c4967a",background:here?"#c4967a":"rgba(196,150,122,0.1)",color:here?"#1a1814":"#c4967a",cursor:"pointer"})}
-                          onClick={()=>setDrumChain(c=>c.filter((_,idx)=>idx!==i))}>
-                          {dp?dp.name:"?"}<span style={{fontSize:7,opacity:0.5,marginLeft:3}}>×</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{marginTop:4,display:"flex",flexWrap:"wrap",gap:3}}>
-                    {drumPats.map(dp=>(
-                      <div key={dp.id}
-                        style={{padding:"3px 8px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.4)",color:"rgba(196,150,122,0.6)",fontSize:9,cursor:"pointer",userSelect:"none"}}
-                        onClick={()=>setDrumChain(c=>[...c,dp.id])}>
-                        +{dp.name}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Sequence/chain UI removed from desktop — SONG matrix replaces it */}
+          {!IS_MOBILE&&<div style={{flex:1,minHeight:0}}/>}
 
           {/* Save/load + share — pinned to bottom of left column */}
           {!IS_MOBILE&&(
