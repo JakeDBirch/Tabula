@@ -187,6 +187,17 @@ var mkGrid = function mkGrid() {
     return new Array(COLS).fill(false);
   });
 };
+// durs[r][c] = how many cols this note extends to the right (1 = single cell). Only
+// meaningful where grid[r][c] is true. Per-row durations enable true polyphony —
+// extending one note's duration doesn't affect notes in other rows. Within a row,
+// only one note plays at any moment (per-row monophony).
+var mkDurs = function mkDurs() {
+  return Array.from({
+    length: ROWS
+  }, function () {
+    return new Array(COLS).fill(1);
+  });
+};
 var defaultStepParams = function defaultStepParams() {
   return Array.from({
     length: COLS
@@ -207,6 +218,7 @@ var mkPat = function mkPat(name) {
     id: ++_id,
     name: name,
     grid: mkGrid(),
+    durs: mkDurs(),
     params: defaultStepParams(),
     gridLen: 16
   };
@@ -2217,6 +2229,43 @@ function Tabula() {
     appliedDX: 0,
     appliedDY: 0
   });
+
+  // Helper: apply dur-edit gesture state to the active pat. Targets the head row
+  // only (per-row monophony). Cannibalizes same-row notes within the span — they
+  // remain in the snapshot (g.preTieGrid) for walk-back.
+  var applyDurEditR = useRef(function () {
+    return null;
+  });
+  applyDurEditR.current = function (targetCol) {
+    var g = gesture.current;
+    if (!g.preTieGrid || !g.preTieDurs) return;
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeIdR.current) return p;
+        // Restore from snapshot, then apply head's new duration on its row.
+        var newGrid = g.preTieGrid.map(function (row) {
+          return _toConsumableArray(row);
+        });
+        var newDurs = g.preTieDurs.map(function (row) {
+          return _toConsumableArray(row);
+        });
+        // Cannibalize: clear any same-row notes between startCol+1 and targetCol.
+        // Their dur values are reset to 1 (no longer relevant once cleared).
+        for (var i = g.durStartCol + 1; i <= targetCol; i++) {
+          if (newGrid[g.durStartRow][i]) {
+            newGrid[g.durStartRow][i] = false;
+            newDurs[g.durStartRow][i] = 1;
+          }
+        }
+        // Set head's dur = how many cells it covers (1 + extension).
+        newDurs[g.durStartRow][g.durStartCol] = targetCol - g.durStartCol + 1;
+        return Object.assign({}, p, {
+          grid: newGrid,
+          durs: newDurs
+        });
+      });
+    });
+  };
   useEffect(function () {
     patsR.current = pats;
   }, [pats]);
@@ -2395,7 +2444,7 @@ function Tabula() {
       }
     }
     if (s.activeLayer && s.activeLayer !== activeLayer) setActiveLayer(s.activeLayer);
-    setPats(s.pats);
+    setPats(migratePats(s.pats));
     setDrumPats(s.drumPats);
     setChain(s.chain);
     setDrumChain(s.drumChain);
@@ -2563,6 +2612,13 @@ function Tabula() {
   // from before chains were id-keyed, or ids referencing patterns that no longer
   // exist. Filter to valid ids only, with a name→id migration pass for legacy
   // saves where pats still carry their old name field.
+  var migratePats = function migratePats(pats) {
+    return (pats || []).map(function (p) {
+      return p.durs ? p : Object.assign({}, p, {
+        durs: mkDurs()
+      });
+    });
+  };
   var sanitizeChain = function sanitizeChain(chain, pats) {
     if (!Array.isArray(chain)) return [];
     var idSet = new Set(pats.map(function (p) {
@@ -2604,7 +2660,7 @@ function Tabula() {
     }))));
     if (maxId >= _id) _id = maxId + 1;
     var cleanChain = sanitizeChain(s.chain, s.pats);
-    setPats(s.pats);
+    setPats(migratePats(s.pats));
     setChain(cleanChain.length ? cleanChain : [s.activeId || s.pats[0].id]);
     setBpm(s.bpm);
     setScale(s.scale);
@@ -2822,7 +2878,7 @@ function Tabula() {
       return p.id;
     }))));
     if (maxId >= _id) _id = maxId + 1;
-    if (s.pats) setPats(s.pats);
+    if (s.pats) setPats(migratePats(s.pats));
     if (s.chain) {
       var cc = sanitizeChain(s.chain, s.pats || []);
       setChain(cc.length ? cc : [s.activeId || s.pats && s.pats[0] && s.pats[0].id || 1]);
@@ -2988,19 +3044,10 @@ function Tabula() {
     var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
     var ratch = rhy;
     var subDur = stepDur / ratch;
-    var noteDur = stepDur;
-    if (pat.params) {
-      var ts = (s + 1) % COLS,
-        count = 0;
-      while (count < COLS - 1 && pat.params[ts] && Math.round((_pat$params$ts$rhy = pat.params[ts].rhy) !== null && _pat$params$ts$rhy !== void 0 ? _pat$params$ts$rhy : 1) === 0) {
-        var _pat$params$ts$rhy;
-        noteDur += stepDur;
-        ts = (ts + 1) % COLS;
-        count++;
-      }
-    }
     for (var r = 0; r < ROWS; r++) {
       if (!pat.grid[r][s]) continue;
+      var dur = pat.durs && pat.durs[r] && pat.durs[r][s] ? Math.max(1, pat.durs[r][s]) : 1;
+      var noteDur = stepDur * dur;
       var f = freqs[r] * ratio;
       if (ratch > 1) {
         for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, layerLP.dlySend, null, 0, layerLP);
@@ -3262,6 +3309,9 @@ function Tabula() {
               id: ++_id,
               name: symPat(patsR.current.length),
               grid: rvg,
+              durs: src.durs ? src.durs.map(function (r) {
+                return _toConsumableArray(r);
+              }) : mkDurs(),
               params: newParams,
               gridLen: (_src$gridLen = src.gridLen) !== null && _src$gridLen !== void 0 ? _src$gridLen : 16
             };
@@ -3279,31 +3329,20 @@ function Tabula() {
           }
         }
         var grid = varyModeR.current ? variedGrids.current.get(pid) || p && p.grid : p && p.grid;
+        var durs = p && p.durs;
         var freqs = SCALES[scaleR.current].freqs;
         var ratio = stR(transpR.current);
         var rawSp = p && p.params && p.params[_s] ? p.params[_s] : null;
         var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
         var rhy = sp ? Math.max(1, Math.round((_sp$rhy2 = sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1)) : 1;
         var ratch = rhy;
-        var isTie = false; // tie is done via grid only now
         var subDur = stepDur / ratch;
-
-        // Non-tie step: look ahead for consecutive tied steps and extend duration
-        var noteDur = stepDur;
-        if (!isTie && p && p.params) {
-          var ts = (_s + 1) % COLS,
-            count = 0;
-          while (count < COLS - 1 && p.params[ts] && Math.round((_p$params$ts$rhy = p.params[ts].rhy) !== null && _p$params$ts$rhy !== void 0 ? _p$params$ts$rhy : 1) === 0) {
-            var _p$params$ts$rhy;
-            noteDur += stepDur;
-            ts = (ts + 1) % COLS;
-            count++;
-          }
-        }
         if (grid) for (var _r = 0; _r < ROWS; _r++) {
           var _lastPlayedFreqR$curr;
           if (!grid[_r][_s]) continue;
-          if (isTie) continue;
+          // Per-row duration. durs[r][s] = number of step cells this note covers.
+          var dur = durs && durs[_r] && durs[_r][_s] ? Math.max(1, durs[_r][_s]) : 1;
+          var noteDur = stepDur * dur;
           var synthLP = layerParamsR.current.synth;
           var f = freqs[_r] * ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
@@ -3349,23 +3388,13 @@ function Tabula() {
             var ls = _s % lLen;
             var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
             var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
-            var lRhy = lSp ? Math.max(1, Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1)) : 1;
-            if (lRhy === 0) return 0; // continue
-            // tied step
+            var lRhyRaw = lSp ? Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1) : 1;
+            var lRhy = Math.max(1, lRhyRaw);
             var lSubDur = stepDur / lRhy;
-            var lNoteDur = stepDur;
-            if (lp.params) {
-              var _ts = (ls + 1) % COLS,
-                _count = 0;
-              while (_count < COLS - 1 && lp.params[_ts] && Math.round((_lp$params$_ts$rhy = lp.params[_ts].rhy) !== null && _lp$params$_ts$rhy !== void 0 ? _lp$params$_ts$rhy : 1) === 0) {
-                var _lp$params$_ts$rhy;
-                lNoteDur += stepDur;
-                _ts = (_ts + 1) % COLS;
-                _count++;
-              }
-            }
             for (var _r2 = 0; _r2 < ROWS; _r2++) {
               if (!lp.grid[_r2][ls]) continue;
+              var lDur = lp.durs && lp.durs[_r2] && lp.durs[_r2][ls] ? Math.max(1, lp.durs[_r2][ls]) : 1;
+              var lNoteDur = stepDur * lDur;
               var layerLP = layerParamsR.current[layer];
               // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
               // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
@@ -4467,18 +4496,30 @@ function Tabula() {
         var startCell = g.paintStartCell;
 
         // Duration-edit gesture: tap on existing note + drag horizontally rightward.
-        // Within the gesture, dragging right extends (ties subsequent cols),
-        // dragging left shrinks (clamped to the start col, so original note stays).
-        // Non-destructive: tied cols' grid notes are preserved, just silenced via rhy=0.
-        if (startCell && startCell.wasOn && dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        // Per-row monophony: only same-row notes after the head can be cannibalized.
+        // The grid + durs snapshot is preserved during the gesture so walking back
+        // restores cannibalized notes as long as the user hasn't released yet.
+        if (startCell && startCell.wasOn && dx > 0 && Math.abs(dx) > Math.abs(dy)) {
           var _snapPat = patsR.current.find(function (p) {
             return p.id === activeIdR.current;
           });
-          g.preTieRhys = _snapPat && _snapPat.params ? _snapPat.params.map(function (sp) {
-            var _sp$rhy3;
-            return (_sp$rhy3 = sp === null || sp === void 0 ? void 0 : sp.rhy) !== null && _sp$rhy3 !== void 0 ? _sp$rhy3 : 1;
-          }) : new Array(COLS).fill(1);
+          // Snapshot grid + durs as the gesture-base. We restore from this every move
+          // so the gesture always operates on the original state, never on its own
+          // partial output. This prevents ghost extensions accumulating.
+          var baseGrid = _snapPat ? _snapPat.grid.map(function (row) {
+            return _toConsumableArray(row);
+          }) : null;
+          var baseDurs = _snapPat ? _snapPat.durs ? _snapPat.durs.map(function (row) {
+            return _toConsumableArray(row);
+          }) : mkDurs() : mkDurs();
+          // Reset the head's own duration to 1 in the baseline so the gesture starts
+          // from a clean head — without this, an existing dur=4 head would mean we'd
+          // be operating from "extended" state on every fresh gesture.
+          if (baseDurs) baseDurs[startCell.r][startCell.c] = 1;
+          g.preTieGrid = baseGrid;
+          g.preTieDurs = baseDurs;
           g.durStartCol = startCell.c;
+          g.durStartRow = startCell.r;
           g.state = "dur-edit";
           // Apply initial extent based on current pointer x
           var gridEl2 = gridRef.current;
@@ -4486,24 +4527,8 @@ function Tabula() {
             var rect = gridEl2.getBoundingClientRect();
             var cellW = rect.width / COLS;
             var targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / cellW)));
-            setPats(function (ps) {
-              return ps.map(function (p) {
-                if (p.id !== activeIdR.current) return p;
-                var np = (p.params || defaultStepParams()).map(function (sp, i) {
-                  var _g$preTieRhys$i;
-                  if (i <= g.durStartCol) return sp;
-                  if (i <= targetCol) return Object.assign({}, sp, {
-                    rhy: 0
-                  });
-                  return Object.assign({}, sp, {
-                    rhy: (_g$preTieRhys$i = g.preTieRhys[i]) !== null && _g$preTieRhys$i !== void 0 ? _g$preTieRhys$i : 1
-                  });
-                });
-                return Object.assign({}, p, {
-                  params: np
-                });
-              });
-            });
+            g.lastDurTarget = targetCol;
+            applyDurEditR.current(targetCol);
           }
           return;
         }
@@ -4511,8 +4536,9 @@ function Tabula() {
         var sc = g.paintStartCell;
         g.paintedCells = new Set();
         g.tieRuns = new Map();
-        // Direction determines mode: right=create/tie, left=erase
-        g.paintMode = dx >= 0 ? "create" : "erase";
+        // Direction determines mode. Right swipe = create; clear LEFT swipe = erase.
+        // Otherwise (vertical or ambiguous), default to create — never erase by accident.
+        g.paintMode = dx < -3 && Math.abs(dx) > Math.abs(dy) ? "erase" : "create";
         var snapPat = patsR.current.find(function (p) {
           return p.id === activeIdR.current;
         });
@@ -4660,31 +4686,20 @@ function Tabula() {
       return;
     }
     if (g.state === "dur-edit") {
+      var _activePat$gridLen2;
       var _gridEl = gridRef.current;
       if (!_gridEl) return;
       var _rect4 = _gridEl.getBoundingClientRect();
       var _cellW = _rect4.width / COLS;
-      var _targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - _rect4.left) / _cellW)));
-      if (g.lastDurTarget === _targetCol) return; // no change → skip re-render
-      g.lastDurTarget = _targetCol;
-      setPats(function (ps) {
-        return ps.map(function (p) {
-          if (p.id !== activeIdR.current) return p;
-          var np = (p.params || defaultStepParams()).map(function (sp, i) {
-            var _g$preTieRhys$i2;
-            if (i <= g.durStartCol) return sp;
-            if (i <= _targetCol) return Object.assign({}, sp, {
-              rhy: 0
-            });
-            return Object.assign({}, sp, {
-              rhy: (_g$preTieRhys$i2 = g.preTieRhys[i]) !== null && _g$preTieRhys$i2 !== void 0 ? _g$preTieRhys$i2 : 1
-            });
-          });
-          return Object.assign({}, p, {
-            params: np
-          });
-        });
+      // Clamp targetCol to active pat's gridLen-1 (don't extend past the loop end)
+      var _activePat = patsR.current.find(function (p) {
+        return p.id === activeIdR.current;
       });
+      var maxCol = ((_activePat$gridLen2 = _activePat === null || _activePat === void 0 ? void 0 : _activePat.gridLen) !== null && _activePat$gridLen2 !== void 0 ? _activePat$gridLen2 : COLS) - 1;
+      var _targetCol = Math.max(g.durStartCol, Math.min(maxCol, Math.floor((e.clientX - _rect4.left) / _cellW)));
+      if (g.lastDurTarget === _targetCol) return;
+      g.lastDurTarget = _targetCol;
+      applyDurEditR.current(_targetCol);
       return;
     }
     if (g.state === "shift" && g.baseGrid && g.baseParams) {
@@ -4732,6 +4747,8 @@ function Tabula() {
     if (g.state === "dur-edit") {
       g.state = "idle";
       g.lastDurTarget = null;
+      g.preTieGrid = null;
+      g.preTieDurs = null;
       setShifting(false);
       return;
     }
@@ -4814,8 +4831,23 @@ function Tabula() {
             var np = (p.params || defaultStepParams()).map(function (sp, i) {
               return i === c && !wasOn && colWasEmpty ? defaultStepParams()[0] : sp;
             });
+            // Reset dur to 1 for the toggled cell. If we just removed, also clears the
+            // stale dur. If we added, ensures it starts at 1.
+            var baseDurs = p.durs || mkDurs();
+            var newDurs = baseDurs.map(function (row, ri) {
+              if (isMono && !wasOn) {
+                // Mono add: reset entire column durs to 1
+                return row.map(function (v, ci) {
+                  return ci === c ? 1 : v;
+                });
+              }
+              return ri !== r ? row : row.map(function (v, ci) {
+                return ci === c ? 1 : v;
+              });
+            });
             return Object.assign({}, p, {
               grid: newGrid,
+              durs: newDurs,
               params: np
             });
           });
@@ -4875,6 +4907,9 @@ function Tabula() {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
+      durs: src.durs ? src.durs.map(function (r) {
+        return _toConsumableArray(r);
+      }) : mkDurs(),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
       }),
@@ -4906,6 +4941,9 @@ function Tabula() {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
+      durs: src.durs ? src.durs.map(function (r) {
+        return _toConsumableArray(r);
+      }) : mkDurs(),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
       })
@@ -4919,6 +4957,9 @@ function Tabula() {
           grid: clipboard.grid.map(function (r) {
             return _toConsumableArray(r);
           }),
+          durs: clipboard.durs ? clipboard.durs.map(function (r) {
+            return _toConsumableArray(r);
+          }) : mkDurs(),
           params: clipboard.params.map(function (s) {
             return Object.assign({}, s);
           })
@@ -6631,23 +6672,10 @@ function Tabula() {
       var _loop5 = function _loop5() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
-          var _activePat$params, _p$rhy, _p$vel;
+          var _activePat$params, _p$rhy, _activePat$durs$r$ci, _activePat$durs, _p$vel;
           var p = activePat === null || activePat === void 0 || (_activePat$params = activePat.params) === null || _activePat$params === void 0 ? void 0 : _activePat$params[ci];
           var rhy = p ? Math.round((_p$rhy = p.rhy) !== null && _p$rhy !== void 0 ? _p$rhy : 1) : 1;
-          if (rhy === 0) {
-            ci++;
-            return 1; // continue
-          }
-          var span = 1,
-            nc = ci + 1;
-          while (nc < COLS && activePat !== null && activePat !== void 0 && activePat.grid[r][nc]) {
-            var _activePat$params2, _np2$rhy;
-            var np2 = activePat === null || activePat === void 0 || (_activePat$params2 = activePat.params) === null || _activePat$params2 === void 0 ? void 0 : _activePat$params2[nc];
-            if (np2 && Math.round((_np2$rhy = np2.rhy) !== null && _np2$rhy !== void 0 ? _np2$rhy : 1) === 0) {
-              span++;
-              nc++;
-            } else break;
-          }
+          var span = Math.max(1, (_activePat$durs$r$ci = activePat === null || activePat === void 0 || (_activePat$durs = activePat.durs) === null || _activePat$durs === void 0 || (_activePat$durs = _activePat$durs[r]) === null || _activePat$durs === void 0 ? void 0 : _activePat$durs[ci]) !== null && _activePat$durs$r$ci !== void 0 ? _activePat$durs$r$ci : 1);
           var vel = p ? (_p$vel = p.vel) !== null && _p$vel !== void 0 ? _p$vel : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
@@ -6768,7 +6796,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        if (_loop5()) continue;
+        _loop5();
       }
       return rects;
     }());
@@ -8581,23 +8609,10 @@ function Tabula() {
       var _loop6 = function _loop6() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
-          var _activePat$params3, _p$rhy2, _p$vel2;
-          var p = activePat === null || activePat === void 0 || (_activePat$params3 = activePat.params) === null || _activePat$params3 === void 0 ? void 0 : _activePat$params3[ci];
+          var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs2, _p$vel2;
+          var p = activePat === null || activePat === void 0 || (_activePat$params2 = activePat.params) === null || _activePat$params2 === void 0 ? void 0 : _activePat$params2[ci];
           var rhy = p ? Math.round((_p$rhy2 = p.rhy) !== null && _p$rhy2 !== void 0 ? _p$rhy2 : 1) : 1;
-          if (rhy === 0) {
-            ci++;
-            return 1; // continue
-          }
-          var span = 1,
-            nc = ci + 1;
-          while (nc < COLS && activePat !== null && activePat !== void 0 && activePat.grid[r][nc]) {
-            var _activePat$params4, _np2$rhy2;
-            var np2 = activePat === null || activePat === void 0 || (_activePat$params4 = activePat.params) === null || _activePat$params4 === void 0 ? void 0 : _activePat$params4[nc];
-            if (np2 && Math.round((_np2$rhy2 = np2.rhy) !== null && _np2$rhy2 !== void 0 ? _np2$rhy2 : 1) === 0) {
-              span++;
-              nc++;
-            } else break;
-          }
+          var span = Math.max(1, (_activePat$durs$r$ci2 = activePat === null || activePat === void 0 || (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[r]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[ci]) !== null && _activePat$durs$r$ci2 !== void 0 ? _activePat$durs$r$ci2 : 1);
           var vel = p ? (_p$vel2 = p.vel) !== null && _p$vel2 !== void 0 ? _p$vel2 : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
@@ -8718,7 +8733,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        if (_loop6()) continue;
+        _loop6();
       }
       return rects;
     }());

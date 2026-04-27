@@ -67,8 +67,13 @@ const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
+// durs[r][c] = how many cols this note extends to the right (1 = single cell). Only
+// meaningful where grid[r][c] is true. Per-row durations enable true polyphony —
+// extending one note's duration doesn't affect notes in other rows. Within a row,
+// only one note plays at any moment (per-row monophony).
+const mkDurs=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(1));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),params:defaultStepParams(),gridLen:16});
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
   {key:"BD",label:"BD",color:"#e07060"},
@@ -933,6 +938,32 @@ export default function Tabula(){
   const flashTmr=useRef(null),gridRef=useRef(null);
   const gesture=useRef({state:"idle",startX:0,startY:0,baseGrid:null,cellPx:24,appliedDX:0,appliedDY:0});
 
+  // Helper: apply dur-edit gesture state to the active pat. Targets the head row
+  // only (per-row monophony). Cannibalizes same-row notes within the span — they
+  // remain in the snapshot (g.preTieGrid) for walk-back.
+  const applyDurEditR = useRef(()=>null);
+  applyDurEditR.current = (targetCol)=>{
+    const g=gesture.current;
+    if(!g.preTieGrid||!g.preTieDurs)return;
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeIdR.current)return p;
+      // Restore from snapshot, then apply head's new duration on its row.
+      const newGrid = g.preTieGrid.map(row=>[...row]);
+      const newDurs = g.preTieDurs.map(row=>[...row]);
+      // Cannibalize: clear any same-row notes between startCol+1 and targetCol.
+      // Their dur values are reset to 1 (no longer relevant once cleared).
+      for(let i=g.durStartCol+1;i<=targetCol;i++){
+        if(newGrid[g.durStartRow][i]){
+          newGrid[g.durStartRow][i]=false;
+          newDurs[g.durStartRow][i]=1;
+        }
+      }
+      // Set head's dur = how many cells it covers (1 + extension).
+      newDurs[g.durStartRow][g.durStartCol] = (targetCol - g.durStartCol) + 1;
+      return Object.assign({},p,{grid:newGrid,durs:newDurs});
+    }));
+  };
+
   useEffect(()=>{patsR.current=pats;},[pats]);
   useEffect(()=>{chainR.current=chain;},[chain]);
   useEffect(()=>{bpmR.current=bpm;bell.current.stepDur=60/bpm/4*speedMultR.current;},[bpm]);
@@ -1010,7 +1041,7 @@ export default function Tabula(){
       }
     }
     if(s.activeLayer&&s.activeLayer!==activeLayer)setActiveLayer(s.activeLayer);
-    setPats(s.pats);setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
+    setPats(migratePats(s.pats));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
@@ -1075,6 +1106,8 @@ export default function Tabula(){
   // from before chains were id-keyed, or ids referencing patterns that no longer
   // exist. Filter to valid ids only, with a name→id migration pass for legacy
   // saves where pats still carry their old name field.
+  const migratePats = (pats)=>(pats||[]).map(p=>p.durs?p:Object.assign({},p,{durs:mkDurs()}));
+
   const sanitizeChain=(chain,pats)=>{
     if(!Array.isArray(chain))return[];
     const idSet=new Set(pats.map(p=>p.id));
@@ -1101,7 +1134,7 @@ export default function Tabula(){
     if(s.activeLayer)setActiveLayer(s.activeLayer);
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(s.pats);setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
+    setPats(migratePats(s.pats));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
     // layerParams: prefer new format; migrate old flat fields into synth slot if absent.
     if(s.layerParams){
       setLayerParams(s.layerParams);
@@ -1210,7 +1243,7 @@ export default function Tabula(){
   const applyShareState=s=>{
     if(!s)return;
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
-    if(s.pats)setPats(s.pats);
+    if(s.pats)setPats(migratePats(s.pats));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     if(s.bpm)setBpm(s.bpm);
     if(s.scale)setScale(s.scale);
@@ -1314,15 +1347,10 @@ export default function Tabula(){
     const rhy = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
     const ratch = rhy;
     const subDur = stepDur / ratch;
-    let noteDur = stepDur;
-    if(pat.params){
-      let ts=(s+1)%COLS, count=0;
-      while(count<COLS-1 && pat.params[ts] && Math.round(pat.params[ts].rhy??1)===0){
-        noteDur+=stepDur; ts=(ts+1)%COLS; count++;
-      }
-    }
     for(let r=0;r<ROWS;r++){
       if(!pat.grid[r][s])continue;
+      const dur = (pat.durs&&pat.durs[r]&&pat.durs[r][s])?Math.max(1,pat.durs[r][s]):1;
+      const noteDur = stepDur * dur;
       const f = freqs[r]*ratio;
       if(ratch>1){
         for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,layerLP.dlySend,null,0,layerLP);
@@ -1494,7 +1522,7 @@ export default function Tabula(){
             const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
             let rvg=genVariation(src.grid,vp);
             const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
-            const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,params:newParams,gridLen:src.gridLen??16};
+            const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:newParams,gridLen:src.gridLen??16};
             setPats(ps=>{
               if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
               return [...ps,newPat];
@@ -1503,6 +1531,7 @@ export default function Tabula(){
           }
         }
         const grid=varyModeR.current?(variedGrids.current.get(pid)||(p&&p.grid)):(p&&p.grid);
+        const durs=p&&p.durs;
         const freqs=SCALES[scaleR.current].freqs;
         const ratio=stR(transpR.current);
         const rawSp=(p&&p.params&&p.params[s])?p.params[s]:null;
@@ -1510,21 +1539,13 @@ export default function Tabula(){
 
         const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
         const ratch = rhy;
-        const isTie = false; // tie is done via grid only now
         const subDur = stepDur / ratch;
-
-        // Non-tie step: look ahead for consecutive tied steps and extend duration
-        let noteDur = stepDur;
-        if(!isTie && p && p.params){
-          let ts=(s+1)%COLS, count=0;
-          while(count<COLS-1 && p.params[ts] && Math.round(p.params[ts].rhy??1)===0){
-            noteDur+=stepDur; ts=(ts+1)%COLS; count++;
-          }
-        }
 
         if(grid)for(let r=0;r<ROWS;r++){
           if(!grid[r][s])continue;
-          if(isTie)continue;
+          // Per-row duration. durs[r][s] = number of step cells this note covers.
+          const dur = (durs&&durs[r]&&durs[r][s])?Math.max(1,durs[r][s]):1;
+          const noteDur = stepDur * dur;
           const synthLP = layerParamsR.current.synth;
           const f=freqs[r]*ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
@@ -1564,18 +1585,13 @@ export default function Tabula(){
           const ls=s%lLen;
           const lRawSp=(lp.params&&lp.params[ls])?lp.params[ls]:null;
           const lSp=varyModeR.current&&lRawSp?jitterStepParam(lRawSp,varyParamsR.current):lRawSp;
-          const lRhy=lSp?Math.max(1,Math.round(lSp.rhy??1)):1;
-          if(lRhy===0)continue; // tied step
+          const lRhyRaw=lSp?Math.round(lSp.rhy??1):1;
+          const lRhy=Math.max(1,lRhyRaw);
           const lSubDur=stepDur/lRhy;
-          let lNoteDur=stepDur;
-          if(lp.params){
-            let ts=(ls+1)%COLS,count=0;
-            while(count<COLS-1&&lp.params[ts]&&Math.round(lp.params[ts].rhy??1)===0){
-              lNoteDur+=stepDur;ts=(ts+1)%COLS;count++;
-            }
-          }
           for(let r=0;r<ROWS;r++){
             if(!lp.grid[r][ls])continue;
+            const lDur = (lp.durs&&lp.durs[r]&&lp.durs[r][ls])?Math.max(1,lp.durs[r][ls]):1;
+            const lNoteDur = stepDur * lDur;
             const layerLP = layerParamsR.current[layer];
             // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
             // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
@@ -2109,15 +2125,26 @@ export default function Tabula(){
         const startCell=g.paintStartCell;
 
         // Duration-edit gesture: tap on existing note + drag horizontally rightward.
-        // Within the gesture, dragging right extends (ties subsequent cols),
-        // dragging left shrinks (clamped to the start col, so original note stays).
-        // Non-destructive: tied cols' grid notes are preserved, just silenced via rhy=0.
-        if(startCell&&startCell.wasOn&&dx>0&&Math.abs(dx)>Math.abs(dy)*1.2){
+        // Per-row monophony: only same-row notes after the head can be cannibalized.
+        // The grid + durs snapshot is preserved during the gesture so walking back
+        // restores cannibalized notes as long as the user hasn't released yet.
+        if(startCell&&startCell.wasOn&&dx>0&&Math.abs(dx)>Math.abs(dy)){
           const snapPat=patsR.current.find(p=>p.id===activeIdR.current);
-          g.preTieRhys = snapPat&&snapPat.params
-            ? snapPat.params.map(sp=>sp?.rhy??1)
-            : new Array(COLS).fill(1);
+          // Snapshot grid + durs as the gesture-base. We restore from this every move
+          // so the gesture always operates on the original state, never on its own
+          // partial output. This prevents ghost extensions accumulating.
+          const baseGrid = snapPat ? snapPat.grid.map(row=>[...row]) : null;
+          const baseDurs = snapPat
+            ? (snapPat.durs?snapPat.durs.map(row=>[...row]):mkDurs())
+            : mkDurs();
+          // Reset the head's own duration to 1 in the baseline so the gesture starts
+          // from a clean head — without this, an existing dur=4 head would mean we'd
+          // be operating from "extended" state on every fresh gesture.
+          if(baseDurs) baseDurs[startCell.r][startCell.c]=1;
+          g.preTieGrid = baseGrid;
+          g.preTieDurs = baseDurs;
           g.durStartCol = startCell.c;
+          g.durStartRow = startCell.r;
           g.state="dur-edit";
           // Apply initial extent based on current pointer x
           const gridEl2=gridRef.current;
@@ -2125,15 +2152,8 @@ export default function Tabula(){
             const rect=gridEl2.getBoundingClientRect();
             const cellW=rect.width/COLS;
             const targetCol=Math.max(g.durStartCol,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/cellW)));
-            setPats(ps=>ps.map(p=>{
-              if(p.id!==activeIdR.current)return p;
-              const np=(p.params||defaultStepParams()).map((sp,i)=>{
-                if(i<=g.durStartCol)return sp;
-                if(i<=targetCol)return Object.assign({},sp,{rhy:0});
-                return Object.assign({},sp,{rhy:g.preTieRhys[i]??1});
-              });
-              return Object.assign({},p,{params:np});
-            }));
+            g.lastDurTarget=targetCol;
+            applyDurEditR.current(targetCol);
           }
           return;
         }
@@ -2142,8 +2162,9 @@ export default function Tabula(){
         const sc=g.paintStartCell;
         g.paintedCells=new Set();
         g.tieRuns=new Map();
-        // Direction determines mode: right=create/tie, left=erase
-        g.paintMode=dx>=0?"create":"erase";
+        // Direction determines mode. Right swipe = create; clear LEFT swipe = erase.
+        // Otherwise (vertical or ambiguous), default to create — never erase by accident.
+        g.paintMode=(dx<-3&&Math.abs(dx)>Math.abs(dy))?"erase":"create";
         const snapPat=patsR.current.find(p=>p.id===activeIdR.current);
         g.existingAtStart=new Set();
         if(snapPat)for(let ri=0;ri<ROWS;ri++)for(let ci=0;ci<COLS;ci++)if(snapPat.grid[ri][ci])g.existingAtStart.add(`${ri},${ci}`);
@@ -2230,18 +2251,13 @@ export default function Tabula(){
       const gridEl=gridRef.current;if(!gridEl)return;
       const rect=gridEl.getBoundingClientRect();
       const cellW=rect.width/COLS;
-      const targetCol=Math.max(g.durStartCol,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/cellW)));
-      if(g.lastDurTarget===targetCol)return; // no change → skip re-render
+      // Clamp targetCol to active pat's gridLen-1 (don't extend past the loop end)
+      const activePat=patsR.current.find(p=>p.id===activeIdR.current);
+      const maxCol = (activePat?.gridLen??COLS) - 1;
+      const targetCol=Math.max(g.durStartCol,Math.min(maxCol,Math.floor((e.clientX-rect.left)/cellW)));
+      if(g.lastDurTarget===targetCol)return;
       g.lastDurTarget=targetCol;
-      setPats(ps=>ps.map(p=>{
-        if(p.id!==activeIdR.current)return p;
-        const np=(p.params||defaultStepParams()).map((sp,i)=>{
-          if(i<=g.durStartCol)return sp;
-          if(i<=targetCol)return Object.assign({},sp,{rhy:0});
-          return Object.assign({},sp,{rhy:g.preTieRhys[i]??1});
-        });
-        return Object.assign({},p,{params:np});
-      }));
+      applyDurEditR.current(targetCol);
       return;
     }
 
@@ -2268,7 +2284,7 @@ export default function Tabula(){
     }
 
     if(g.state==="dur-edit"){
-      g.state="idle";g.lastDurTarget=null;setShifting(false);
+      g.state="idle";g.lastDurTarget=null;g.preTieGrid=null;g.preTieDurs=null;setShifting(false);
       return;
     }
 
@@ -2326,7 +2342,17 @@ export default function Tabula(){
           // Reset column params to defaults if we just added the first note
           const np=(p.params||defaultStepParams()).map((sp,i)=>
             i===c&&!wasOn&&colWasEmpty?defaultStepParams()[0]:sp);
-          return Object.assign({},p,{grid:newGrid,params:np});
+          // Reset dur to 1 for the toggled cell. If we just removed, also clears the
+          // stale dur. If we added, ensures it starts at 1.
+          const baseDurs=p.durs||mkDurs();
+          const newDurs=baseDurs.map((row,ri)=>{
+            if(isMono&&!wasOn){
+              // Mono add: reset entire column durs to 1
+              return row.map((v,ci)=>ci===c?1:v);
+            }
+            return ri!==r?row:row.map((v,ci)=>ci===c?1:v);
+          });
+          return Object.assign({},p,{grid:newGrid,durs:newDurs,params:np});
         }));
       }
     }
@@ -2343,10 +2369,10 @@ export default function Tabula(){
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
   const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(symPat(pats.length));setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
-  const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
-  const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
+  const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
+  const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
@@ -3028,12 +3054,7 @@ export default function Tabula(){
                         if(on){
                           const p=activePat?.params?.[ci];
                           const rhy=p?Math.round(p.rhy??1):1;
-                          if(rhy===0){ci++;continue;}
-                          let span=1,nc=ci+1;
-                          while(nc<COLS&&activePat?.grid[r][nc]){
-                            const np2=activePat?.params?.[nc];
-                            if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;
-                          }
+                          const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);
                           const vel=p?(p.vel??100):100;
                           const b=0.35+(vel/127)*0.65;
                           const inactive=ci>=gridLen;
@@ -3676,7 +3697,7 @@ export default function Tabula(){
                             background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;if(rhy===0){ci++;continue;}let span=1,nc=ci+1;while(nc<COLS&&activePat?.grid[r][nc]){const np2=activePat?.params?.[nc];if(np2&&Math.round(np2.rhy??1)===0){span++;nc++;}else break;}const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
