@@ -35,9 +35,18 @@ const prepped = raw
 writeFileSync(srcStripped, prepped);
 
 // 2. Babel compile.
-const babel = "node_modules/.bin/babel";
+// Invoke the Babel CLI JS entry directly via node, instead of the
+// node_modules/.bin/babel shim. The shim is an extensionless shell script
+// that Windows CreateProcess can't exec (execFileSync doesn't use a shell),
+// so going through node here works identically on all platforms.
+const babelJs = "node_modules/@babel/cli/bin/babel.js";
+const runBabel = (args) => execFileSync(
+  process.execPath,
+  [babelJs, ...args],
+  { stdio: ["ignore", "pipe", "pipe"] }
+);
 try {
-  execFileSync(babel, [srcStripped, "-o", compiled], { stdio: ["ignore", "pipe", "pipe"] });
+  runBabel([srcStripped, "-o", compiled]);
 } catch (err) {
   console.error("Babel compile failed:");
   console.error(err.stderr?.toString() || err.message);
@@ -50,11 +59,7 @@ try {
 // We don't ship this output; we just grep it for the footgun.
 let cjsOut;
 try {
-  cjsOut = execFileSync(
-    babel,
-    [srcStripped, "--plugins=@babel/plugin-transform-modules-commonjs"],
-    { stdio: ["ignore", "pipe", "pipe"] }
-  ).toString();
+  cjsOut = runBabel([srcStripped, "--plugins=@babel/plugin-transform-modules-commonjs"]).toString();
 } catch (err) {
   console.error("CJS audit Babel pass failed:");
   console.error(err.stderr?.toString() || err.message);
