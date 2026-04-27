@@ -4018,175 +4018,6 @@ function Tabula() {
       return varied;
     });
   };
-
-  // ── Octave Rectify ──────────────────────────────────────────────────────
-  // Collapse oct step-param mods onto the grid where possible.
-  // Each scale has 7 rows/octave (SCALE_SPAN). Shifting a note by 7 grid rows
-  // is musically equivalent to shifting its oct param by ±1. This tries to
-  // maximize the number of columns where oct=0 (unmodified), optionally
-  // applying a global octave offset that benefits the whole pattern.
-  var rectifyOctaves = function rectifyOctaves() {
-    pushHistory();
-    setPats(function (ps) {
-      return ps.map(function (p) {
-        if (p.id !== activeId) return p;
-        var OCT = SCALE_SPAN; // 7 rows per octave
-        var cols = [];
-        for (var c = 0; c < COLS; c++) {
-          var rows = [];
-          for (var r = 0; r < ROWS; r++) if (p.grid[r][c]) rows.push(r);
-          var oct = (p.params && p.params[c] ? p.params[c].oct : 2) - 2;
-          cols.push({
-            c: c,
-            rows: rows,
-            oct: oct
-          });
-        }
-        var colsAbs = cols.map(function (col) {
-          return _objectSpread(_objectSpread({}, col), {}, {
-            abs: col.rows.map(function (r) {
-              return r + col.oct * OCT;
-            })
-          });
-        });
-        var bestShift = 0,
-          bestUnmodified = -1;
-        var _loop3 = function _loop3() {
-          var gs = go * OCT;
-          var unmodified = 0;
-          var _iterator6 = _createForOfIteratorHelper(colsAbs),
-            _step6;
-          try {
-            for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
-              var col = _step6.value;
-              if (col.abs.length === 0) {
-                unmodified++;
-                continue;
-              }
-              var shifted = col.abs.map(function (a) {
-                return a + gs;
-              });
-              if (shifted.every(function (s) {
-                return s >= 0 && s < ROWS;
-              })) unmodified++;
-            }
-          } catch (err) {
-            _iterator6.e(err);
-          } finally {
-            _iterator6.f();
-          }
-          if (unmodified > bestUnmodified) {
-            bestUnmodified = unmodified;
-            bestShift = gs;
-          }
-        };
-        for (var go = -2; go <= 2; go++) {
-          _loop3();
-        }
-        var newGrid = Array.from({
-          length: ROWS
-        }, function () {
-          return new Array(COLS).fill(false);
-        });
-        var baseParams = p.params || defaultStepParams();
-        var newParams = baseParams.map(function (sp) {
-          return _objectSpread({}, sp);
-        });
-        var _iterator5 = _createForOfIteratorHelper(colsAbs),
-          _step5;
-        try {
-          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
-            var col = _step5.value;
-            if (col.abs.length === 0) {
-              newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
-                oct: 2
-              });
-              continue;
-            }
-            var shifted = col.abs.map(function (a) {
-              return a + bestShift;
-            });
-            if (shifted.every(function (s) {
-              return s >= 0 && s < ROWS;
-            })) {
-              var _iterator7 = _createForOfIteratorHelper(shifted),
-                _step7;
-              try {
-                for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-                  var _r4 = _step7.value;
-                  newGrid[_r4][col.c] = true;
-                }
-              } catch (err) {
-                _iterator7.e(err);
-              } finally {
-                _iterator7.f();
-              }
-              newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
-                oct: 2
-              });
-              continue;
-            }
-            var chosenOct = null;
-            var _loop4 = function _loop4(o) {
-              var adj = shifted.map(function (s) {
-                return s - o * OCT;
-              });
-              if (adj.every(function (a) {
-                return a >= 0 && a < ROWS;
-              })) {
-                chosenOct = o;
-                return 1; // break
-              }
-            };
-            for (var o = -2; o <= 2; o++) {
-              if (_loop4(o)) break;
-            }
-            if (chosenOct == null) {
-              chosenOct = 0;
-              var _iterator8 = _createForOfIteratorHelper(shifted),
-                _step8;
-              try {
-                for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
-                  var s = _step8.value;
-                  var _r5 = Math.max(0, Math.min(ROWS - 1, s));
-                  newGrid[_r5][col.c] = true;
-                }
-              } catch (err) {
-                _iterator8.e(err);
-              } finally {
-                _iterator8.f();
-              }
-            } else {
-              var _iterator9 = _createForOfIteratorHelper(shifted),
-                _step9;
-              try {
-                for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-                  var _s2 = _step9.value;
-                  var _r6 = _s2 - chosenOct * OCT;
-                  newGrid[_r6][col.c] = true;
-                }
-              } catch (err) {
-                _iterator9.e(err);
-              } finally {
-                _iterator9.f();
-              }
-            }
-            newParams[col.c] = _objectSpread(_objectSpread({}, newParams[col.c]), {}, {
-              oct: chosenOct + 2
-            });
-          }
-        } catch (err) {
-          _iterator5.e(err);
-        } finally {
-          _iterator5.f();
-        }
-        return Object.assign({}, p, {
-          grid: newGrid,
-          params: newParams
-        });
-      });
-    });
-  };
   var handleGridDown = useCallback(function (e) {
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
@@ -5860,8 +5691,6 @@ function Tabula() {
       });
     }, isOnlyPat, true], ["MUT8", function () {
       return act(mutatePat1);
-    }], ["OCT⇄", function () {
-      return act(rectifyOctaves);
     }], ["", null, true]].map(function (_ref16) {
       var _ref17 = _slicedToArray(_ref16, 4),
         label = _ref17[0],
@@ -6179,14 +6008,14 @@ function Tabula() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "repeat(3,1fr)",
+        gridTemplateColumns: "repeat(2,1fr)",
         gap: 2
       }
     }, [["RAND", function () {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["OCT⇄", rectifyOctaves, false, false]].map(function (_ref21) {
+    }, false, false]].map(function (_ref21) {
       var _ref22 = _slicedToArray(_ref21, 3),
         l = _ref22[0],
         f = _ref22[1],
@@ -6686,7 +6515,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop5 = function _loop5() {
+      var _loop3 = function _loop3() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params, _p$rhy, _activePat$durs$r$ci, _activePat$durs, _p$vel;
@@ -6813,7 +6642,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop5();
+        _loop3();
       }
       return rects;
     }());
@@ -8623,7 +8452,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop6 = function _loop6() {
+      var _loop4 = function _loop4() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs2, _p$vel2;
@@ -8750,7 +8579,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop6();
+        _loop4();
       }
       return rects;
     }());

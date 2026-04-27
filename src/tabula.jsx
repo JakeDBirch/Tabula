@@ -1859,73 +1859,6 @@ export default function Tabula(){
     return varied;
   });};
 
-  // ── Octave Rectify ──────────────────────────────────────────────────────
-  // Collapse oct step-param mods onto the grid where possible.
-  // Each scale has 7 rows/octave (SCALE_SPAN). Shifting a note by 7 grid rows
-  // is musically equivalent to shifting its oct param by ±1. This tries to
-  // maximize the number of columns where oct=0 (unmodified), optionally
-  // applying a global octave offset that benefits the whole pattern.
-  const rectifyOctaves=()=>{
-    pushHistory();
-    setPats(ps=>ps.map(p=>{
-      if(p.id!==activeId)return p;
-      const OCT=SCALE_SPAN; // 7 rows per octave
-      const cols=[];
-      for(let c=0;c<COLS;c++){
-        const rows=[];
-        for(let r=0;r<ROWS;r++)if(p.grid[r][c])rows.push(r);
-        const oct=((p.params&&p.params[c])?p.params[c].oct:2)-2;
-        cols.push({c,rows,oct});
-      }
-      const colsAbs=cols.map(col=>({...col,abs:col.rows.map(r=>r+col.oct*OCT)}));
-      let bestShift=0,bestUnmodified=-1;
-      for(let go=-2;go<=2;go++){
-        const gs=go*OCT;
-        let unmodified=0;
-        for(const col of colsAbs){
-          if(col.abs.length===0){unmodified++;continue;}
-          const shifted=col.abs.map(a=>a+gs);
-          if(shifted.every(s=>s>=0&&s<ROWS))unmodified++;
-        }
-        if(unmodified>bestUnmodified){bestUnmodified=unmodified;bestShift=gs;}
-      }
-      const newGrid=Array.from({length:ROWS},()=>new Array(COLS).fill(false));
-      const baseParams=p.params||defaultStepParams();
-      const newParams=baseParams.map(sp=>({...sp}));
-      for(const col of colsAbs){
-        if(col.abs.length===0){
-          newParams[col.c]={...newParams[col.c],oct:2};
-          continue;
-        }
-        const shifted=col.abs.map(a=>a+bestShift);
-        if(shifted.every(s=>s>=0&&s<ROWS)){
-          for(const r of shifted)newGrid[r][col.c]=true;
-          newParams[col.c]={...newParams[col.c],oct:2};
-          continue;
-        }
-        let chosenOct=null;
-        for(let o=-2;o<=2;o++){
-          const adj=shifted.map(s=>s-o*OCT);
-          if(adj.every(a=>a>=0&&a<ROWS)){chosenOct=o;break;}
-        }
-        if(chosenOct==null){
-          chosenOct=0;
-          for(const s of shifted){
-            const r=Math.max(0,Math.min(ROWS-1,s));
-            newGrid[r][col.c]=true;
-          }
-        } else {
-          for(const s of shifted){
-            const r=s-chosenOct*OCT;
-            newGrid[r][col.c]=true;
-          }
-        }
-        newParams[col.c]={...newParams[col.c],oct:chosenOct+2};
-      }
-      return Object.assign({},p,{grid:newGrid,params:newParams});
-    }));
-  };
-
   const handleGridDown=useCallback(e=>{
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
@@ -2756,7 +2689,6 @@ export default function Tabula(){
                   ["DUP",   ()=>act(()=>dupPatId(targetId)),   pats.length>=8],
                   ["DEL",   ()=>act(()=>delPatId(targetId)),   isOnlyPat, true],
                   ["MUT8",  ()=>act(mutatePat1)],
-                  ["OCT⇄",  ()=>act(rectifyOctaves)],
                   ["",      null, true],
                 ].map(([label,fn,disabled,danger])=>(
                   <button key={label} disabled={!!disabled}
@@ -2877,8 +2809,8 @@ export default function Tabula(){
                 const targetId=activeId;const isOnlyPat=pats.length<=1;
                 return(
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
-                      {[["RAND",()=>randPatId(targetId),false,false],["CLR",()=>clearPatId(targetId),false,false],["OCT⇄",rectifyOctaves,false,false]].map(([l,f,d])=>(
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:2}}>
+                      {[["RAND",()=>randPatId(targetId),false,false],["CLR",()=>clearPatId(targetId),false,false]].map(([l,f,d])=>(
                         <button key={l} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,0.13)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={f}>{l}</button>
                       ))}
                     </div>
