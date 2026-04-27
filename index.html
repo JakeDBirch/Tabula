@@ -6365,22 +6365,7 @@ function Tabula() {
         color: "rgba(200,185,165,0.25)",
         fontWeight: 500
       }
-    }, "SEQ"), /*#__PURE__*/React.createElement("button", {
-      style: Object.assign({}, S.loopBtnBottom, {
-        height: 22,
-        padding: "0 8px",
-        fontSize: 9
-      }, followSeq ? {
-        border: "1px solid #7aaa96",
-        color: "#7aaa96",
-        background: "rgba(122,170,150,0.12)"
-      } : {}),
-      onClick: function onClick() {
-        return setFollowSeq(function (f) {
-          return !f;
-        });
-      }
-    }, "FOLLOW")), /*#__PURE__*/React.createElement("div", {
+    }, "SEQ")), /*#__PURE__*/React.createElement("div", {
       ref: chainStripRef,
       style: Object.assign({}, S.chainStrip, {
         marginTop: 0
@@ -8289,6 +8274,17 @@ function Tabula() {
       });
     }
   }, "LOOP"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, followSeq ? {
+      border: "1px solid #7aaa96",
+      color: "#7aaa96",
+      background: "rgba(122,170,150,0.12)"
+    } : {}),
+    onClick: function onClick() {
+      return setFollowSeq(function (f) {
+        return !f;
+      });
+    }
+  }, "FOLLOW"), /*#__PURE__*/React.createElement("button", {
     style: S.loopBtnBottom,
     onClick: mutatePat1
   }, "MUT8"))), patternDrag && /*#__PURE__*/React.createElement("div", {

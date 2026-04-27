@@ -2973,7 +2973,6 @@ export default function Tabula(){
                   <div>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
                       <span style={{fontSize:10,letterSpacing:1,color:"rgba(200,185,165,0.25)",fontWeight:500}}>SEQ</span>
-                      <button style={Object.assign({},S.loopBtnBottom,{height:22,padding:"0 8px",fontSize:9},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
                     </div>
                     <div ref={chainStripRef} style={Object.assign({},S.chainStrip,{marginTop:0},overStrip?S.chainStripHot:{})}>
                       {chain.length===0&&!chainDrag&&<span style={S.chainStripEmpty}>drag patterns here</span>}
@@ -3589,6 +3588,7 @@ export default function Tabula(){
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
             <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+            <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
             <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
           </div>
         </div>
