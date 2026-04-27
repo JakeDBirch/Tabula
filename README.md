@@ -1,91 +1,82 @@
 # Tabula
 
-A touch-first grid sequencer for quick musical ideation and serious composition. Paint notes directly onto a 16×16 matrix with your fingers, shape them with per-step parameters, and let the variation engine evolve your patterns.
+A touch-first grid sequencer that runs as a single static HTML file. Built primarily for iPhone (added to home screen as a PWA), works on desktop too.
 
-**[Live app →](https://tabula.netlify.app)** *(update this URL after deploying)*
+**[Live →](https://jakedbirch.github.io/Tabula)**
 
 ---
 
 ## What it is
 
-Tabula is a step sequencer built around a gestural grid interface:
+Four layers (synth, lead, bass, drums) playing simultaneously through a 16×16 step grid per pattern. Patterns are arranged into songs via a 16×16 song matrix where each cell is a pattern reference for one layer at one bar. Each layer has its own independent synth design (waveform, envelope, filter, octave, delay send) feeding through a shared audio graph.
 
-- **Paint** notes by dragging right, **erase** by dragging left
-- **Tie** adjacent notes into longer durations by dragging across them
-- **Long press** any note for per-step velocity, cutoff, delay, octave, and ratchet controls
-- **Two-finger drag** to shift the entire pattern
-- **Variation engine** that mutates, shifts, and randomizes patterns on every loop
-- Built-in synth with sawtooth/square/triangle/sine oscillators, VCF, delay
-- 8 patterns (A–H), chainable into sequences
-- 11 scales: Major, Minor, Harm Min, Pentatonic, and all 7 modes
-- Variable grid length (1–16 steps) and 5 speed multipliers including triplets
+Notes have true per-row polyphony with editable durations — drag a note rightward to extend it; other rows continue their own notes independently. Step lanes for velocity, filter, delay, ratchet, octave, glide, and duration control sit in a slide-up drawer per pattern. A variation engine can mutate patterns each loop. Sync and free song-playback modes — sync locks all layers to one clock, free lets layers drift apart by their own gridLen.
 
 ---
 
-## Repo structure
+## Repo layout
 
 ```
 tabula/
-  tabula.html       ← compiled, deployable single file
-  src/
-    tabula.jsx      ← React source (edit this)
-  build.sh          ← compiles src/tabula.jsx → tabula.html
-  README.md
+├── src/tabula.jsx       ← source — edit this
+├── index.html           ← compiled artifact (generated, don't edit by hand)
+├── build.mjs            ← compile pipeline
+├── babel.config.json
+├── package.json
+├── kits.json            ← drum kit defs (samples not yet hooked up)
+├── samples/             ← future drum WAVs
+├── CLAUDE.md            ← project memory for Claude Code (read this first if pairing)
+└── README.md
 ```
 
 ---
 
-## Development workflow
+## Development
 
 ### Setup (once)
-```bash
-npm install --save-dev @babel/core @babel/cli @babel/preset-react @babel/preset-env
-chmod +x build.sh
-```
 
-You'll also need a `babel.config.json`:
-```json
-{
-  "presets": ["@babel/preset-env", "@babel/preset-react"]
-}
+```bash
+npm install
 ```
 
 ### Build
+
 ```bash
-./build.sh
+npm run build
 ```
 
-This compiles `src/tabula.jsx` into a self-contained `tabula.html` with no build server or bundler needed.
+This compiles `src/tabula.jsx` into a self-contained `index.html` with a CDN-hosted React runtime. No bundler, no dev server. Open `index.html` directly in a browser to test, or commit and push to deploy.
 
-### Deploy
-Push to GitHub. If connected to Netlify, it redeploys automatically in ~30 seconds.
+### Audit standalone
 
 ```bash
-git add src/tabula.jsx tabula.html
-git commit -m "update"
+npm run audit
+```
+
+Runs just the `return_react2` audit pass (a Babel CJS-mode regression check for module-level arrow functions returning JSX, which would silently break the artifact viewer). The audit is also part of `npm run build`.
+
+### Deploy
+
+GitHub Pages serves `index.html` from `main`. Push and it deploys within ~30s.
+
+```bash
+git add -A
+git commit -m "..."
 git push
 ```
 
 ---
 
-## iOS installation
+## iOS install
 
-1. Open `tabula.netlify.app` in Safari on your iPhone
-2. Tap the Share button
-3. Tap **Add to Home Screen**
-4. Name it **Tabula**, tap Add
+1. Open the live URL in Safari on iPhone
+2. Share → Add to Home Screen
+3. Name it Tabula
 
-The app runs full-screen with no browser chrome, exactly like a native app. Updates deploy automatically — just reload.
+Runs full-screen with no browser chrome.
 
 ---
 
-## Netlify setup
+## Pairing with Claude Code
 
-1. Create a free account at [netlify.com](https://netlify.com)
-2. **New site → Import from Git → GitHub**
-3. Select this repo
-4. Set publish directory to `/` (root)
-5. No build command needed — `tabula.html` is already compiled
-6. Deploy
-
-Every push to `main` triggers a new deploy.
+Read `CLAUDE.md` before making changes. It documents architecture decisions, the layer-store swap mechanism, true polyphony data model, sync/free modes, the ref-based history closure pattern, and a list of bugs not to relearn.

@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Editor
+.vscode/
+.idea/
+
+# Build scratch
+.build/
+*.tmp
