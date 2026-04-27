@@ -2820,6 +2820,7 @@ export default function Tabula(){
                                 if(!dragging){
                                   if(!isActive)switchLayer(dragLayer);
                                   setActiveId(p.id);
+                                  if(songView)setSongView(false);
                                   return;
                                 }
                                 if(songView){
@@ -2888,6 +2889,7 @@ export default function Tabula(){
                             if(!dragging){
                               if(activeLayer!=="drums")switchLayer("drums");
                               setActiveDrumId(dp.id);
+                              if(songView)setSongView(false);
                               return;
                             }
                             if(songView){
@@ -2948,6 +2950,16 @@ export default function Tabula(){
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {/* SONG mode toggle — sits below the layer boxes */}
+          {!IS_MOBILE&&(
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6}}>
+              <button style={{width:"100%",padding:"8px 0",borderRadius:8,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),background:songView?"rgba(210,195,175,0.06)":"transparent",color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .12s"}}
+                onClick={()=>{if(songView){setSongMode(false);setSongView(false);}else{setSongMode(true);setSongView(true);}}}>
+                <span style={{fontSize:14,lineHeight:1}}>▦</span> SONG
+              </button>
             </div>
           )}
 
@@ -3572,8 +3584,6 @@ export default function Tabula(){
           </div>
           {/* Transport — always visible, centered */}
           <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
-            <button style={Object.assign({},S.loopBtnBottom,songView?{border:"1px solid rgba(210,195,175,0.5)",color:"rgba(210,195,175,0.9)",background:"rgba(210,195,175,0.06)"}:songMode?{border:"1px solid rgba(210,195,175,0.3)",color:"rgba(210,195,175,0.7)"}:{})}
-              onClick={()=>{if(songView){setSongMode(false);setSongView(false);}else{setSongMode(true);setSongView(true);}}}>SONG</button>
             <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
@@ -3582,6 +3592,12 @@ export default function Tabula(){
             <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
           </div>
         </div>
+        {/* DRAG GHOST — floating pill that follows pointer (desktop) */}
+        {patternDrag&&(
+          <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overSongCell?1:0.85,transform:patternDrag.overSongCell?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+            {patternDrag.name}
+          </div>
+        )}
       </div>
       )} {/* end !IS_MOBILE desktop layout */}
 
