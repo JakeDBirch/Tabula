@@ -6454,7 +6454,208 @@ function Tabula() {
       overflow: "hidden",
       position: "relative"
     }
-  }, activeLayer !== "drums" && page === "edit" && /*#__PURE__*/React.createElement("div", {
+  }, songView && /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "flex-start",
+      padding: "6px 10px 6px",
+      boxSizing: "border-box",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      flexShrink: 0,
+      alignSelf: "center"
+    }
+  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref29) {
+    var _ref30 = _slicedToArray(_ref29, 2),
+      val = _ref30[0],
+      lbl = _ref30[1];
+    var sel = songSyncMode === val;
+    return /*#__PURE__*/React.createElement("button", {
+      key: lbl,
+      onClick: function onClick() {
+        return setSongSyncMode(val);
+      },
+      style: {
+        padding: "4px 14px",
+        fontSize: 9,
+        letterSpacing: 2,
+        fontWeight: 600,
+        border: "1px solid " + (sel ? "rgba(220,200,180,0.5)" : "rgba(220,200,180,0.12)"),
+        background: sel ? "rgba(220,200,180,0.08)" : "transparent",
+        color: sel ? "rgba(220,200,180,0.9)" : "rgba(220,200,180,0.4)",
+        borderRadius: 4,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        lineHeight: 1
+      }
+    }, lbl);
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "min(100%,calc(100dvh - 175px))",
+      aspectRatio: "1",
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0,
+      gap: 3
+    }
+  }, Array.from({
+    length: 4
+  }, function (_, group) {
+    return /*#__PURE__*/React.createElement("div", {
+      key: group,
+      style: {
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1
+      }
+    }, ["synth", "lead", "bass", "drums"].map(function (layer) {
+      var _layerStoreR$current$;
+      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#b5a0c4" : layer === "bass" ? "#d4a574" : "#c4967a";
+      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "181,160,196" : layer === "bass" ? "212,165,116" : "196,150,122";
+      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || (layer === "synth" ? pats : []);
+      return /*#__PURE__*/React.createElement("div", {
+        key: layer,
+        style: {
+          flex: 1,
+          display: "flex",
+          gap: 1
+        }
+      }, Array.from({
+        length: 16
+      }, function (_, col) {
+        var barIdx = group * 16 + col;
+        var patId = songMatrix[layer][barIdx];
+        var pat = patId != null ? patSet.find(function (p) {
+          return p.id === patId;
+        }) : null;
+        var isQ = col % 4 === 0;
+        var isHoverTarget = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overSongCell) && patternDrag.overSongCell.layer === layer && patternDrag.overSongCell.barIdx === barIdx;
+        var isDragSource = (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.sourceCell) && patternDrag.sourceCell.layer === layer && patternDrag.sourceCell.barIdx === barIdx;
+        var isCursor = playing && songView && songBarLayer[layer] === barIdx;
+        return /*#__PURE__*/React.createElement("div", {
+          key: col,
+          "data-song-cell": "1",
+          "data-song-layer": layer,
+          "data-song-bar": barIdx,
+          style: {
+            flex: 1,
+            aspectRatio: "1",
+            background: pat ? accent : isCursor ? "rgba(".concat(accentRgb, ",0.35)") : "rgba(".concat(accentRgb, ",0.06)"),
+            outline: isHoverTarget ? "2px solid ".concat(accent) : isCursor ? "2.5px solid #ffffff" : "none",
+            outlineOffset: "-1px",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: pat ? "#1a1814" : "transparent",
+            fontSize: 11,
+            fontWeight: 700,
+            opacity: isDragSource ? 0.3 : 1,
+            boxShadow: isCursor ? "0 0 8px rgba(255,255,255,0.55)".concat(pat ? ", 0 0 0 2px rgba(255,255,255,0.95) inset" : "") : "none",
+            zIndex: isCursor ? 2 : 1,
+            transform: isHoverTarget ? "scale(1.08)" : isCursor ? "scale(1.04)" : "scale(1)",
+            transition: "transform 0.08s, outline 0.08s, opacity 0.08s",
+            touchAction: "none",
+            cursor: "pointer",
+            userSelect: "none"
+          },
+          onPointerDown: function onPointerDown(e) {
+            e.stopPropagation();
+            // Empty cell — no action. (Filling happens via drag from the
+            // persistent pattern row above.)
+            if (patId == null) return;
+            var pointerId = e.pointerId;
+            var startX = e.clientX,
+              startY = e.clientY;
+            var draggedPat = pat;
+            var dragging = false;
+            var onMove = function onMove(ev) {
+              if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
+              if (!dragging) {
+                if (Math.abs(ev.clientX - startX) < 6 && Math.abs(ev.clientY - startY) < 6) return;
+                dragging = true;
+                setPatternDrag({
+                  patId: patId,
+                  name: draggedPat.name,
+                  accent: accent,
+                  x: ev.clientX,
+                  y: ev.clientY,
+                  overDrop: false,
+                  overSongCell: null,
+                  sourceCell: {
+                    layer: layer,
+                    barIdx: barIdx
+                  }
+                });
+              }
+              // hit-test other cells, exclude source
+              var overSongCell = null;
+              var el = document.elementFromPoint(ev.clientX, ev.clientY);
+              var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
+              if (targetCell && targetCell.dataset.songLayer === layer) {
+                var tBar = parseInt(targetCell.dataset.songBar, 10);
+                if (tBar !== barIdx) overSongCell = {
+                  layer: layer,
+                  barIdx: tBar
+                };
+              }
+              setPatternDrag(function (d) {
+                return d ? _objectSpread(_objectSpread({}, d), {}, {
+                  x: ev.clientX,
+                  y: ev.clientY,
+                  overSongCell: overSongCell
+                }) : null;
+              });
+            };
+            var _onUp = function onUp(ev) {
+              if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
+              document.removeEventListener("pointerup", _onUp);
+              document.removeEventListener("pointercancel", _onUp);
+              document.removeEventListener("pointermove", onMove);
+              if (!dragging) {
+                // tap on filled cell → clear
+                pushHistory();
+                setSongMatrix(function (m) {
+                  var r = _toConsumableArray(m[layer]);
+                  r[barIdx] = null;
+                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                });
+                return;
+              }
+              // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+              var el = document.elementFromPoint(ev.clientX, ev.clientY);
+              var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
+              if (targetCell && targetCell.dataset.songLayer === layer) {
+                var tBar = parseInt(targetCell.dataset.songBar, 10);
+                if (tBar !== barIdx) {
+                  pushHistory();
+                  setSongMatrix(function (m) {
+                    var r = _toConsumableArray(m[layer]);
+                    r[tBar] = patId;
+                    r[barIdx] = null;
+                    return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                  });
+                }
+              }
+              setPatternDrag(null);
+            };
+            document.addEventListener("pointermove", onMove);
+            document.addEventListener("pointerup", _onUp);
+            document.addEventListener("pointercancel", _onUp);
+          }
+        }, pat ? pat.name : "");
+      }));
+    }));
+  }))), !songView && /*#__PURE__*/React.createElement(React.Fragment, null, activeLayer !== "drums" && page === "edit" && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: "100%",
@@ -6922,12 +7123,12 @@ function Tabula() {
             if (!ev.buttons) return;
             setDrumVel(c, Math.max(1, Math.min(127, Math.round(startV + (startY - ev.clientY) * 1.5))));
           };
-          var _onUp = function onUp() {
+          var _onUp2 = function onUp() {
             document.removeEventListener("pointermove", onMove);
-            document.removeEventListener("pointerup", _onUp);
+            document.removeEventListener("pointerup", _onUp2);
           };
           document.addEventListener("pointermove", onMove);
-          document.addEventListener("pointerup", _onUp);
+          document.addEventListener("pointerup", _onUp2);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -7199,11 +7400,11 @@ function Tabula() {
     }) || drumPats[0];
     var vRhythm = (dPat === null || dPat === void 0 ? void 0 : dPat.vRhythm) || 0;
     var vVelocity = (dPat === null || dPat === void 0 ? void 0 : dPat.vVelocity) || 0;
-    var SliderRow = function SliderRow(_ref30) {
-      var label = _ref30.label,
-        value = _ref30.value,
-        onChange = _ref30.onChange,
-        accent = _ref30.accent;
+    var SliderRow = function SliderRow(_ref32) {
+      var label = _ref32.label,
+        value = _ref32.value,
+        onChange = _ref32.onChange,
+        accent = _ref32.accent;
       return /*#__PURE__*/React.createElement("div", {
         style: {
           marginBottom: 16
@@ -7795,15 +7996,15 @@ function Tabula() {
     onChange: setDlyLpVal,
     display: lpLbl(dlyLpVal),
     accent: C_DLY
-  })))))), /*#__PURE__*/React.createElement("div", {
+  }))))))), /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.tabs), {}, {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref31) {
-    var _ref32 = _slicedToArray(_ref31, 2),
-      p = _ref32[0],
-      lbl = _ref32[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref33) {
+    var _ref34 = _slicedToArray(_ref33, 2),
+      p = _ref34[0],
+      lbl = _ref34[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
@@ -7822,6 +8023,24 @@ function Tabula() {
       borderTop: "1px solid rgba(200,185,165,0.08)"
     }
   }, /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.loopBtnBottom, songView ? {
+      border: "1px solid rgba(210,195,175,0.5)",
+      color: "rgba(210,195,175,0.9)",
+      background: "rgba(210,195,175,0.06)"
+    } : songMode ? {
+      border: "1px solid rgba(210,195,175,0.3)",
+      color: "rgba(210,195,175,0.7)"
+    } : {}),
+    onClick: function onClick() {
+      if (songView) {
+        setSongMode(false);
+        setSongView(false);
+      } else {
+        setSongMode(true);
+        setSongView(true);
+      }
+    }
+  }, "SONG"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, varyMode ? {
       border: "1px solid #c9a96e",
       color: "#c9a96e",
@@ -7921,12 +8140,12 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["lead", "LEAD", "#b5a0c4", "rgba(181,160,196,"], ["bass", "BASS", "#d4a574", "rgba(212,165,116,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref33) {
-    var _ref34 = _slicedToArray(_ref33, 4),
-      lyr = _ref34[0],
-      lbl = _ref34[1],
-      c = _ref34[2],
-      cf = _ref34[3];
+  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["lead", "LEAD", "#b5a0c4", "rgba(181,160,196,"], ["bass", "BASS", "#d4a574", "rgba(212,165,116,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref35) {
+    var _ref36 = _slicedToArray(_ref35, 4),
+      lyr = _ref36[0],
+      lbl = _ref36[1],
+      c = _ref36[2],
+      cf = _ref36[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       style: {
@@ -8045,11 +8264,11 @@ function Tabula() {
             }) : null;
           });
         };
-        var _onUp2 = function onUp(ev) {
+        var _onUp3 = function onUp(ev) {
           if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
           document.removeEventListener("pointermove", onMove);
-          document.removeEventListener("pointerup", _onUp2);
-          document.removeEventListener("pointercancel", _onUp2);
+          document.removeEventListener("pointerup", _onUp3);
+          document.removeEventListener("pointercancel", _onUp3);
           try {
             target.releasePointerCapture(pointerId);
           } catch (_) {}
@@ -8112,8 +8331,8 @@ function Tabula() {
           setPatternDrag(null);
         };
         document.addEventListener("pointermove", onMove);
-        document.addEventListener("pointerup", _onUp2);
-        document.addEventListener("pointercancel", _onUp2);
+        document.addEventListener("pointerup", _onUp3);
+        document.addEventListener("pointercancel", _onUp3);
       }
     }, isP && !isA && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -8205,10 +8424,10 @@ function Tabula() {
       flexShrink: 0,
       alignSelf: "center"
     }
-  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref35) {
-    var _ref36 = _slicedToArray(_ref35, 2),
-      val = _ref36[0],
-      lbl = _ref36[1];
+  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref37) {
+    var _ref38 = _slicedToArray(_ref37, 2),
+      val = _ref38[0],
+      lbl = _ref38[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -8250,10 +8469,10 @@ function Tabula() {
         gap: 1
       }
     }, ["synth", "lead", "bass", "drums"].map(function (layer) {
-      var _layerStoreR$current$;
+      var _layerStoreR$current$2;
       var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#b5a0c4" : layer === "bass" ? "#d4a574" : "#c4967a";
       var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "181,160,196" : layer === "bass" ? "212,165,116" : "196,150,122";
-      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || (layer === "synth" ? pats : []);
+      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$2 = layerStoreR.current[layer]) === null || _layerStoreR$current$2 === void 0 ? void 0 : _layerStoreR$current$2.pats) || (layer === "synth" ? pats : []);
       return /*#__PURE__*/React.createElement("div", {
         key: layer,
         style: {
@@ -8348,10 +8567,10 @@ function Tabula() {
                 }) : null;
               });
             };
-            var _onUp3 = function onUp(ev) {
+            var _onUp4 = function onUp(ev) {
               if (ev.pointerId !== pointerId && ev.pointerId !== undefined) return;
-              document.removeEventListener("pointerup", _onUp3);
-              document.removeEventListener("pointercancel", _onUp3);
+              document.removeEventListener("pointerup", _onUp4);
+              document.removeEventListener("pointercancel", _onUp4);
               document.removeEventListener("pointermove", onMove);
               if (!dragging) {
                 // tap on filled cell → clear
@@ -8381,8 +8600,8 @@ function Tabula() {
               setPatternDrag(null);
             };
             document.addEventListener("pointermove", onMove);
-            document.addEventListener("pointerup", _onUp3);
-            document.addEventListener("pointercancel", _onUp3);
+            document.addEventListener("pointerup", _onUp4);
+            document.addEventListener("pointercancel", _onUp4);
           }
         }, pat ? pat.name : "");
       }));
@@ -9154,10 +9373,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref38) {
-    var _ref39 = _slicedToArray(_ref38, 2),
-      k = _ref39[0],
-      v = _ref39[1];
+  }, Object.entries(SCALES).map(function (_ref40) {
+    var _ref41 = _slicedToArray(_ref40, 2),
+      k = _ref41[0],
+      v = _ref41[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -9235,12 +9454,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref40) {
-      var _ref41 = _slicedToArray(_ref40, 4),
-        l = _ref41[0],
-        f = _ref41[1],
-        d = _ref41[2],
-        danger = _ref41[3];
+    }, ops.map(function (_ref42) {
+      var _ref43 = _slicedToArray(_ref42, 4),
+        l = _ref43[0],
+        f = _ref43[1],
+        d = _ref43[2],
+        danger = _ref43[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -9937,13 +10156,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref42) {
-    var _ref43 = _slicedToArray(_ref42, 5),
-      label = _ref43[0],
-      val = _ref43[1],
-      setter = _ref43[2],
-      max = _ref43[3],
-      unit = _ref43[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref44) {
+    var _ref45 = _slicedToArray(_ref44, 5),
+      label = _ref45[0],
+      val = _ref45[1],
+      setter = _ref45[2],
+      max = _ref45[3],
+      unit = _ref45[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10028,13 +10247,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 5),
-      label = _ref45[0],
-      val = _ref45[1],
-      setter = _ref45[2],
-      max = _ref45[3],
-      unit = _ref45[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref46) {
+    var _ref47 = _slicedToArray(_ref46, 5),
+      label = _ref47[0],
+      val = _ref47[1],
+      setter = _ref47[2],
+      max = _ref47[3],
+      unit = _ref47[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10119,11 +10338,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref46) {
-    var _ref47 = _slicedToArray(_ref46, 3),
-      label = _ref47[0],
-      val = _ref47[1],
-      setter = _ref47[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref48) {
+    var _ref49 = _slicedToArray(_ref48, 3),
+      label = _ref49[0],
+      val = _ref49[1],
+      setter = _ref49[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -10279,12 +10498,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref48) {
-      var _ref49 = _slicedToArray(_ref48, 4),
-        label = _ref49[0],
-        fn = _ref49[1],
-        disabled = _ref49[2],
-        danger = _ref49[3];
+    }, isOnlyPat, true]].map(function (_ref50) {
+      var _ref51 = _slicedToArray(_ref50, 4),
+        label = _ref51[0],
+        fn = _ref51[1],
+        disabled = _ref51[2],
+        danger = _ref51[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -10368,12 +10587,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref50) {
-      var _ref51 = _slicedToArray(_ref50, 4),
-        label = _ref51[0],
-        fn = _ref51[1],
-        disabled = _ref51[2],
-        danger = _ref51[3];
+    }, isOnly, true]].map(function (_ref52) {
+      var _ref53 = _slicedToArray(_ref52, 4),
+        label = _ref53[0],
+        fn = _ref53[1],
+        disabled = _ref53[2],
+        danger = _ref53[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,

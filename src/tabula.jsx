@@ -2958,6 +2958,127 @@ export default function Tabula(){
         <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
           <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
+            {/* SONG matrix — 16×16, 4 row-groups × 4 layers (synth/lead/bass/drums) × 16 bars */}
+            {songView&&(
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
+                {/* SYNC | FREE toggle — controls per-layer cursor independence */}
+                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
+                  {[[true,"SYNC"],[false,"FREE"]].map(([val,lbl])=>{
+                    const sel=songSyncMode===val;
+                    return(
+                      <button key={lbl} onClick={()=>setSongSyncMode(val)}
+                        style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(sel?"rgba(220,200,180,0.5)":"rgba(220,200,180,0.12)"),background:sel?"rgba(220,200,180,0.08)":"transparent",color:sel?"rgba(220,200,180,0.9)":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
+                        {lbl}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
+                  {Array.from({length:4},(_,group)=>(
+                    <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
+                      {["synth","lead","bass","drums"].map(layer=>{
+                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#b5a0c4":layer==="bass"?"#d4a574":"#c4967a";
+                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"181,160,196":layer==="bass"?"212,165,116":"196,150,122";
+                        const patSet = layer==="drums"
+                          ? drumPats
+                          : layer===activeLayer
+                            ? pats
+                            : (layerStoreR.current[layer]?.pats || (layer==="synth"?pats:[]));
+                        return (
+                          <div key={layer} style={{flex:1,display:"flex",gap:1}}>
+                            {Array.from({length:16},(_,col)=>{
+                              const barIdx = group*16+col;
+                              const patId = songMatrix[layer][barIdx];
+                              const pat = patId!=null ? patSet.find(p=>p.id===patId) : null;
+                              const isQ = col%4===0;
+                              const isHoverTarget = patternDrag?.overSongCell&&patternDrag.overSongCell.layer===layer&&patternDrag.overSongCell.barIdx===barIdx;
+                              const isDragSource = patternDrag?.sourceCell&&patternDrag.sourceCell.layer===layer&&patternDrag.sourceCell.barIdx===barIdx;
+                              const isCursor = playing&&songView&&songBarLayer[layer]===barIdx;
+                              return (
+                                <div key={col}
+                                     data-song-cell="1"
+                                     data-song-layer={layer}
+                                     data-song-bar={barIdx}
+                                     style={{flex:1,aspectRatio:"1",
+                                             background: pat ? accent : (isCursor ? `rgba(${accentRgb},0.35)` : `rgba(${accentRgb},0.06)`),
+                                             outline: isHoverTarget ? `2px solid ${accent}` : (isCursor ? `2.5px solid #ffffff` : "none"),
+                                             outlineOffset:"-1px",
+                                             borderRadius:2,
+                                             display:"flex",alignItems:"center",justifyContent:"center",
+                                             color: pat ? "#1a1814" : "transparent",
+                                             fontSize:11,fontWeight:700,
+                                             opacity: isDragSource ? 0.3 : 1,
+                                             boxShadow: isCursor ? `0 0 8px rgba(255,255,255,0.55)${pat?", 0 0 0 2px rgba(255,255,255,0.95) inset":""}` : "none",
+                                             zIndex: isCursor ? 2 : 1,
+                                             transform: isHoverTarget ? "scale(1.08)" : (isCursor ? "scale(1.04)" : "scale(1)"),
+                                             transition:"transform 0.08s, outline 0.08s, opacity 0.08s",
+                                             touchAction:"none",cursor:"pointer",userSelect:"none"}}
+                                     onPointerDown={(e)=>{
+                                       e.stopPropagation();
+                                       // Empty cell — no action. (Filling happens via drag from the
+                                       // persistent pattern row above.)
+                                       if(patId==null) return;
+                                       const pointerId=e.pointerId;
+                                       const startX=e.clientX, startY=e.clientY;
+                                       const draggedPat=pat;
+                                       let dragging=false;
+                                       const onMove=(ev)=>{
+                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                                         if(!dragging){
+                                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                                           dragging=true;
+                                           setPatternDrag({patId,name:draggedPat.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{layer,barIdx}});
+                                         }
+                                         // hit-test other cells, exclude source
+                                         let overSongCell=null;
+                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                         if(targetCell&&targetCell.dataset.songLayer===layer){
+                                           const tBar=parseInt(targetCell.dataset.songBar,10);
+                                           if(tBar!==barIdx) overSongCell={layer,barIdx:tBar};
+                                         }
+                                         setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
+                                       };
+                                       const onUp=(ev)=>{
+                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                                         document.removeEventListener("pointerup",onUp);
+                                         document.removeEventListener("pointercancel",onUp);
+                                         document.removeEventListener("pointermove",onMove);
+                                         if(!dragging){
+                                           // tap on filled cell → clear
+                                           pushHistory();
+                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
+                                           return;
+                                         }
+                                         // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                         if(targetCell&&targetCell.dataset.songLayer===layer){
+                                           const tBar=parseInt(targetCell.dataset.songBar,10);
+                                           if(tBar!==barIdx){
+                                             pushHistory();
+                                             setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
+                                           }
+                                         }
+                                         setPatternDrag(null);
+                                       };
+                                       document.addEventListener("pointermove",onMove);
+                                       document.addEventListener("pointerup",onUp);
+                                       document.addEventListener("pointercancel",onUp);
+                                     }}>
+                                  {pat?pat.name:""}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!songView&&(<>
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
@@ -3331,6 +3452,7 @@ export default function Tabula(){
                 </div>
               </div>
             )}
+            </>)}
           </div>
 
           {/* Tabs — always visible */}
@@ -3341,6 +3463,8 @@ export default function Tabula(){
           </div>
           {/* Transport — always visible, centered */}
           <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
+            <button style={Object.assign({},S.loopBtnBottom,songView?{border:"1px solid rgba(210,195,175,0.5)",color:"rgba(210,195,175,0.9)",background:"rgba(210,195,175,0.06)"}:songMode?{border:"1px solid rgba(210,195,175,0.3)",color:"rgba(210,195,175,0.7)"}:{})}
+              onClick={()=>{if(songView){setSongMode(false);setSongView(false);}else{setSongMode(true);setSongView(true);}}}>SONG</button>
             <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
