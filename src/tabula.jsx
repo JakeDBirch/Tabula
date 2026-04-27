@@ -2768,35 +2768,144 @@ export default function Tabula(){
           {/* Layer boxes — select layer + pattern, replaces old pills + layer selector */}
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-              {/* SYNTH layer box */}
-              <div style={{border:"1px solid "+(activeLayer==="synth"?"rgba(168,197,160,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="synth"?"rgba(168,197,160,0.06)":"transparent",transition:"all .1s"}}
-                onClick={()=>setActiveLayer("synth")}>
-                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="synth"?"rgba(168,197,160,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>SYNTH</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
-                  {pats.map((p)=>{
-                    const isA=p.id===activeId&&activeLayer==="synth";
-                    const isP=playing&&playId===p.id;
-                    return(
-                      <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #a8c5a0",background:isA?"#a8c5a0":"transparent",color:isA?"#1a1814":"#a8c5a0",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #a8c5a088":"none"}}
-                        onClick={e=>{e.stopPropagation();setActiveId(p.id);setActiveLayer("synth");}}>
-                        {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                      </div>
-                    );
-                  })}
-                  {pats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba(168,197,160,0.3)",background:"transparent",color:"rgba(168,197,160,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addPat();}}>＋</button>}
-                </div>
-              </div>
+              {/* SYNTH / LEAD / BASS layer boxes — non-active layers read pats from layerStoreR */}
+              {[
+                ["synth","SYNTH","#a8c5a0","168,197,160"],
+                ["lead", "LEAD", "#b5a0c4","181,160,196"],
+                ["bass", "BASS", "#d4a574","212,165,116"]
+              ].map(([layer,label,accent,accentRgb])=>{
+                const isActive=activeLayer===layer;
+                const layerPats=isActive?pats:(layerStoreR.current[layer]?.pats||[]);
+                const layerActiveId=isActive?activeId:layerStoreR.current[layer]?.activeId;
+                return(
+                  <div key={layer} style={{border:"1px solid "+(isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
+                    onClick={()=>switchLayer(layer)}>
+                    <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
+                      {layerPats.map((p)=>{
+                        const isA=p.id===layerActiveId&&isActive;
+                        const isP=playing&&isActive&&playId===p.id;
+                        const isDragging=patternDrag&&patternDrag.patId===p.id;
+                        return(
+                          <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px "+accent+"88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
+                            onPointerDown={e=>{
+                              e.stopPropagation();
+                              const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
+                              let dragging=false;
+                              const dragLayer=layer;
+                              const onMove=(ev)=>{
+                                if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                                if(!dragging){
+                                  if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
+                                  dragging=true;
+                                  try{target.setPointerCapture(pointerId);}catch(_){}
+                                  setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+                                }
+                                let overSongCell=null;
+                                if(songView){
+                                  const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                  const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                  if(cell&&cell.dataset.songLayer===dragLayer){
+                                    overSongCell={layer:cell.dataset.songLayer,barIdx:parseInt(cell.dataset.songBar,10)};
+                                  }
+                                }
+                                setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
+                              };
+                              const onUp=(ev)=>{
+                                if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                                document.removeEventListener("pointermove",onMove);
+                                document.removeEventListener("pointerup",onUp);
+                                document.removeEventListener("pointercancel",onUp);
+                                try{target.releasePointerCapture(pointerId);}catch(_){}
+                                if(!dragging){
+                                  if(!isActive)switchLayer(dragLayer);
+                                  setActiveId(p.id);
+                                  return;
+                                }
+                                if(songView){
+                                  const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                  const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                                  if(cell&&cell.dataset.songLayer===dragLayer){
+                                    const barIdx=parseInt(cell.dataset.songBar,10);
+                                    pushHistory();
+                                    setSongMatrix(m=>{const r=[...m[dragLayer]];r[barIdx]=p.id;return{...m,[dragLayer]:r};});
+                                  }
+                                }
+                                setPatternDrag(null);
+                              };
+                              document.addEventListener("pointermove",onMove);
+                              document.addEventListener("pointerup",onUp);
+                              document.addEventListener("pointercancel",onUp);
+                            }}>
+                            {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
+                          </div>
+                        );
+                      })}
+                      {isActive&&layerPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba("+accentRgb+",0.3)",background:"transparent",color:"rgba("+accentRgb+",0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addPat();}}>＋</button>}
+                    </div>
+                  </div>
+                );
+              })}
               {/* DRUMS layer box */}
               <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,150,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,150,122,0.06)":"transparent",transition:"all .1s"}}
-                onClick={()=>setActiveLayer("drums")}>
+                onClick={()=>switchLayer("drums")}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,150,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                   {drumPats.map((dp)=>{
                     const isA=dp.id===activeDrumId&&activeLayer==="drums";
                     const isP=playing&&drumCpos>=0&&drumChain[drumCpos]===dp.id;
+                    const isDragging=patternDrag&&patternDrag.patId===dp.id;
                     return(
-                      <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none"}}
-                        onClick={e=>{e.stopPropagation();setActiveDrumId(dp.id);setActiveLayer("drums");}} onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
+                      <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
+                        onPointerDown={e=>{
+                          e.stopPropagation();
+                          const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
+                          let dragging=false;
+                          const onMove=(ev)=>{
+                            if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                            if(!dragging){
+                              if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
+                              dragging=true;
+                              try{target.setPointerCapture(pointerId);}catch(_){}
+                              setPatternDrag({patId:dp.id,name:dp.name,accent:"#c4967a",x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+                            }
+                            let overSongCell=null;
+                            if(songView){
+                              const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                              const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                              if(cell&&cell.dataset.songLayer==="drums"){
+                                overSongCell={layer:"drums",barIdx:parseInt(cell.dataset.songBar,10)};
+                              }
+                            }
+                            setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
+                          };
+                          const onUp=(ev)=>{
+                            if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                            document.removeEventListener("pointermove",onMove);
+                            document.removeEventListener("pointerup",onUp);
+                            document.removeEventListener("pointercancel",onUp);
+                            try{target.releasePointerCapture(pointerId);}catch(_){}
+                            if(!dragging){
+                              if(activeLayer!=="drums")switchLayer("drums");
+                              setActiveDrumId(dp.id);
+                              return;
+                            }
+                            if(songView){
+                              const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                              const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                              if(cell&&cell.dataset.songLayer==="drums"){
+                                const barIdx=parseInt(cell.dataset.songBar,10);
+                                pushHistory();
+                                setSongMatrix(m=>{const r=[...m.drums];r[barIdx]=dp.id;return{...m,drums:r};});
+                              }
+                            }
+                            setPatternDrag(null);
+                          };
+                          document.addEventListener("pointermove",onMove);
+                          document.addEventListener("pointerup",onUp);
+                          document.addEventListener("pointercancel",onUp);
+                        }}
+                        onContextMenu={e=>{e.stopPropagation();setActiveDrumId(dp.id);handleDrumPillCtx(e,dp.id);}}>
                         {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{dp.name}
                       </div>
                     );
@@ -2805,7 +2914,7 @@ export default function Tabula(){
                 </div>
               </div>
               {/* Action buttons — context-sensitive to active layer */}
-              {activeLayer==="synth"&&(()=>{
+              {activeLayer!=="drums"&&(()=>{
                 const targetId=activeId;const isOnlyPat=pats.length<=1;
                 return(
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
