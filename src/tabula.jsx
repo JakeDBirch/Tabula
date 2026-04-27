@@ -152,7 +152,7 @@ const jitterStepParam=(sp,vp)=>{
     vel: vp.velJitter>0   ? jit(sp.vel, vp.velJitter*0.4, 0,127) : sp.vel,
     flt: vp.fltJitter>0   ? jit(sp.flt, vp.fltJitter*0.25,0,100) : sp.flt,
     dly: vp.dlyJitter>0   ? jit(sp.dly, vp.dlyJitter*0.4, 0,100) : sp.dly,
-    rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [0,1,1,2,3,4][Math.floor(Math.random()*6)] : sp.rhy,
+    rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [1,1,2,3,4][Math.floor(Math.random()*5)] : sp.rhy,
     oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
     glide: vp.glideJitter>0 ? (Math.random()<vp.glideJitter/100?1:sp.glide) : sp.glide,
     dur:   vp.durJitter>0   ? jit(sp.dur??0, vp.durJitter*0.8, -100, 100) : (sp.dur??0),
@@ -1237,7 +1237,7 @@ export default function Tabula(){
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songView,songSyncMode,layerStore:layerStoreR.current
+    songMatrix,songMode,songView,songSyncMode,layerStore:layerStoreR.current,activeLayer
   });
 
   const applyShareState=s=>{
@@ -2228,7 +2228,7 @@ export default function Tabula(){
             if(p.id!==activeIdR.current)return p;
             const np=(p.params||defaultStepParams()).map(s=>({...s}));
             const runCols=Array.from(g.tieRuns.get(cr)).sort((a,b)=>a-b);
-            runCols.forEach((col,i)=>{np[col]={...np[col],rhy:i===0?1:0};});
+            runCols.forEach((col)=>{np[col]={...np[col],rhy:1};});
             return Object.assign({},p,{params:np});
           }));
         } else {
@@ -2376,10 +2376,10 @@ export default function Tabula(){
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
-  const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
-  const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),params:clipboard.params.map(s=>Object.assign({},s))})));};
+  const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
+  const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
   const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;

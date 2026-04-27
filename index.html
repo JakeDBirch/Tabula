@@ -484,7 +484,7 @@ var jitterStepParam = function jitterStepParam(sp, vp) {
     vel: vp.velJitter > 0 ? jit(sp.vel, vp.velJitter * 0.4, 0, 127) : sp.vel,
     flt: vp.fltJitter > 0 ? jit(sp.flt, vp.fltJitter * 0.25, 0, 100) : sp.flt,
     dly: vp.dlyJitter > 0 ? jit(sp.dly, vp.dlyJitter * 0.4, 0, 100) : sp.dly,
-    rhy: vp.rhyJitter > 0 && Math.random() < vp.rhyJitter / 100 ? [0, 1, 1, 2, 3, 4][Math.floor(Math.random() * 6)] : sp.rhy,
+    rhy: vp.rhyJitter > 0 && Math.random() < vp.rhyJitter / 100 ? [1, 1, 2, 3, 4][Math.floor(Math.random() * 5)] : sp.rhy,
     oct: vp.octJitter > 0 && Math.random() < vp.octJitter / 100 ? Math.max(0, Math.min(4, sp.oct + (Math.random() < .5 ? 1 : -1))) : sp.oct,
     glide: vp.glideJitter > 0 ? Math.random() < vp.glideJitter / 100 ? 1 : sp.glide : sp.glide,
     dur: vp.durJitter > 0 ? jit((_sp$dur = sp.dur) !== null && _sp$dur !== void 0 ? _sp$dur : 0, vp.durJitter * 0.8, -100, 100) : (_sp$dur2 = sp.dur) !== null && _sp$dur2 !== void 0 ? _sp$dur2 : 0
@@ -2876,7 +2876,8 @@ function Tabula() {
       songMode: songMode,
       songView: songView,
       songSyncMode: songSyncMode,
-      layerStore: layerStoreR.current
+      layerStore: layerStoreR.current,
+      activeLayer: activeLayer
     };
   };
   var applyShareState = function applyShareState(s) {
@@ -4648,9 +4649,9 @@ function Tabula() {
               var runCols = Array.from(g.tieRuns.get(cr)).sort(function (a, b) {
                 return a - b;
               });
-              runCols.forEach(function (col, i) {
+              runCols.forEach(function (col) {
                 np[col] = _objectSpread(_objectSpread({}, np[col]), {}, {
-                  rhy: i === 0 ? 1 : 0
+                  rhy: 1
                 });
               });
               return Object.assign({}, p, {
@@ -4993,6 +4994,9 @@ function Tabula() {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
+      durs: src.durs ? src.durs.map(function (r) {
+        return _toConsumableArray(r);
+      }) : mkDurs(),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
       }),
@@ -5027,6 +5031,9 @@ function Tabula() {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
+      durs: src.durs ? src.durs.map(function (r) {
+        return _toConsumableArray(r);
+      }) : mkDurs(),
       params: (src.params || defaultStepParams()).map(function (s) {
         return Object.assign({}, s);
       })
@@ -5041,6 +5048,9 @@ function Tabula() {
           grid: clipboard.grid.map(function (r) {
             return _toConsumableArray(r);
           }),
+          durs: clipboard.durs ? clipboard.durs.map(function (r) {
+            return _toConsumableArray(r);
+          }) : mkDurs(),
           params: clipboard.params.map(function (s) {
             return Object.assign({}, s);
           })
