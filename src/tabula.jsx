@@ -1040,7 +1040,8 @@ export default function Tabula(){
         }
       }
     }
-    if(s.activeLayer&&s.activeLayer!==activeLayer)setActiveLayer(s.activeLayer);
+    // See doLoad note: legacy shares lack activeLayer; their `s.pats` is synth.
+    {const t=s.activeLayer||"synth";if(t!==activeLayer)setActiveLayer(t);}
     setPats(migratePats(s.pats));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
@@ -1131,7 +1132,11 @@ export default function Tabula(){
         }
       }
     }
-    if(s.activeLayer)setActiveLayer(s.activeLayer);
+    // Legacy saves predate per-layer pats — `s.pats` was always synth pats.
+    // Force activeLayer to "synth" when the field is missing so the live pats
+    // slot maps to synth on setPats below; otherwise the user's current
+    // activeLayer (e.g. bass) would absorb the legacy synth data.
+    setActiveLayer(s.activeLayer||"synth");
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
     setPats(migratePats(s.pats));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);

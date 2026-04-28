@@ -2450,7 +2450,11 @@ function Tabula() {
         }
       }
     }
-    if (s.activeLayer && s.activeLayer !== activeLayer) setActiveLayer(s.activeLayer);
+    // See doLoad note: legacy shares lack activeLayer; their `s.pats` is synth.
+    {
+      var t = s.activeLayer || "synth";
+      if (t !== activeLayer) setActiveLayer(t);
+    }
     setPats(migratePats(s.pats));
     setDrumPats(s.drumPats);
     setChain(s.chain);
@@ -2661,7 +2665,11 @@ function Tabula() {
         }
       }
     }
-    if (s.activeLayer) setActiveLayer(s.activeLayer);
+    // Legacy saves predate per-layer pats — `s.pats` was always synth pats.
+    // Force activeLayer to "synth" when the field is missing so the live pats
+    // slot maps to synth on setPats below; otherwise the user's current
+    // activeLayer (e.g. bass) would absorb the legacy synth data.
+    setActiveLayer(s.activeLayer || "synth");
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(s.pats.map(function (p) {
       return p.id;
     }))));
