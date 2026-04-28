@@ -2783,7 +2783,7 @@ export default function Tabula(){
                 const layerPats=isActive?pats:(layerStoreR.current[layer]?.pats||[]);
                 const layerActiveId=isActive?activeId:layerStoreR.current[layer]?.activeId;
                 return(
-                  <div key={layer} style={{border:"1px solid "+(isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
+                  <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
                     onClick={()=>switchLayer(layer)}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
@@ -2804,17 +2804,24 @@ export default function Tabula(){
                                   if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
                                   dragging=true;
                                   try{target.setPointerCapture(pointerId);}catch(_){}
-                                  setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+                                  setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,overLayerBox:null});
                                 }
+                                const el=document.elementFromPoint(ev.clientX,ev.clientY);
                                 let overSongCell=null;
                                 if(songView){
-                                  const el=document.elementFromPoint(ev.clientX,ev.clientY);
                                   const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                                   if(cell&&cell.dataset.songLayer===dragLayer){
                                     overSongCell={layer:cell.dataset.songLayer,barIdx:parseInt(cell.dataset.songBar,10)};
                                   }
                                 }
-                                setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
+                                // Cross-layer drop target — synth-type only, different from source.
+                                let overLayerBox=null;
+                                const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
+                                if(boxEl){
+                                  const tl=boxEl.dataset.layerBox;
+                                  if(SYNTH_LAYERS.indexOf(tl)>=0&&tl!==dragLayer)overLayerBox=tl;
+                                }
+                                setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell,overLayerBox}:null);
                               };
                               const onUp=(ev)=>{
                                 if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
@@ -2828,13 +2835,37 @@ export default function Tabula(){
                                   if(songView)setSongView(false);
                                   return;
                                 }
+                                const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                                // Drop on song-matrix cell (same-layer only)
                                 if(songView){
-                                  const el=document.elementFromPoint(ev.clientX,ev.clientY);
                                   const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                                   if(cell&&cell.dataset.songLayer===dragLayer){
                                     const barIdx=parseInt(cell.dataset.songBar,10);
                                     pushHistory();
                                     setSongMatrix(m=>{const r=[...m[dragLayer]];r[barIdx]=p.id;return{...m,[dragLayer]:r};});
+                                    setPatternDrag(null);
+                                    return;
+                                  }
+                                }
+                                // Drop on a different synth-type layer box — copy pattern across layers.
+                                // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
+                                const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
+                                if(boxEl){
+                                  const tl=boxEl.dataset.layerBox;
+                                  if(SYNTH_LAYERS.indexOf(tl)>=0&&tl!==dragLayer){
+                                    const targetData=layerStoreR.current[tl]||{pats:[],activeId:null};
+                                    const targetPats=targetData.pats||[];
+                                    if(targetPats.length<8){
+                                      pushHistory();
+                                      const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
+                                        grid:p.grid.map(r=>[...r]),
+                                        durs:p.durs?p.durs.map(r=>[...r]):mkDurs(),
+                                        params:(p.params||defaultStepParams()).map(s=>Object.assign({},s)),
+                                        gridLen:p.gridLen??16
+                                      });
+                                      layerStoreR.current[tl]={...targetData,pats:[...targetPats,newPat],activeId:newPat.id};
+                                      switchLayer(tl);
+                                    }
                                   }
                                 }
                                 setPatternDrag(null);
@@ -3531,7 +3562,7 @@ export default function Tabula(){
         </div>
         {/* DRAG GHOST — floating pill that follows pointer (desktop) */}
         {patternDrag&&(
-          <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overSongCell?1:0.85,transform:patternDrag.overSongCell?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+          <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:(patternDrag.overSongCell||patternDrag.overLayerBox)?1:0.85,transform:(patternDrag.overSongCell||patternDrag.overLayerBox)?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
             {patternDrag.name}
           </div>
         )}

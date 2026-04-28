@@ -5861,12 +5861,13 @@ function Tabula() {
     var layerActiveId = isActive ? activeId : (_layerStoreR$current$2 = layerStoreR.current[layer]) === null || _layerStoreR$current$2 === void 0 ? void 0 : _layerStoreR$current$2.activeId;
     return /*#__PURE__*/React.createElement("div", {
       key: layer,
+      "data-layer-box": layer,
       style: {
-        border: "1px solid " + (isActive ? "rgba(".concat(accentRgb, ",0.55)") : "rgba(200,185,165,0.1)"),
+        border: "1px solid " + ((patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overLayerBox) === layer ? "rgba(".concat(accentRgb, ",0.85)") : isActive ? "rgba(".concat(accentRgb, ",0.55)") : "rgba(200,185,165,0.1)"),
         borderRadius: 8,
         padding: "5px 6px",
         cursor: "pointer",
-        background: isActive ? "rgba(".concat(accentRgb, ",0.06)") : "transparent",
+        background: (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overLayerBox) === layer ? "rgba(".concat(accentRgb, ",0.18)") : isActive ? "rgba(".concat(accentRgb, ",0.06)") : "transparent",
         transition: "all .1s"
       },
       onClick: function onClick() {
@@ -5934,12 +5935,13 @@ function Tabula() {
                 x: ev.clientX,
                 y: ev.clientY,
                 overDrop: false,
-                overSongCell: null
+                overSongCell: null,
+                overLayerBox: null
               });
             }
+            var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var overSongCell = null;
             if (songView) {
-              var el = document.elementFromPoint(ev.clientX, ev.clientY);
               var cell = el && el.closest && el.closest('[data-song-cell="1"]');
               if (cell && cell.dataset.songLayer === dragLayer) {
                 overSongCell = {
@@ -5948,11 +5950,19 @@ function Tabula() {
                 };
               }
             }
+            // Cross-layer drop target — synth-type only, different from source.
+            var overLayerBox = null;
+            var boxEl = el && el.closest && el.closest('[data-layer-box]');
+            if (boxEl) {
+              var tl = boxEl.dataset.layerBox;
+              if (SYNTH_LAYERS.indexOf(tl) >= 0 && tl !== dragLayer) overLayerBox = tl;
+            }
             setPatternDrag(function (d) {
               return d ? _objectSpread(_objectSpread({}, d), {}, {
                 x: ev.clientX,
                 y: ev.clientY,
-                overSongCell: overSongCell
+                overSongCell: overSongCell,
+                overLayerBox: overLayerBox
               }) : null;
             });
           };
@@ -5970,8 +5980,9 @@ function Tabula() {
               if (songView) setSongView(false);
               return;
             }
+            var el = document.elementFromPoint(ev.clientX, ev.clientY);
+            // Drop on song-matrix cell (same-layer only)
             if (songView) {
-              var el = document.elementFromPoint(ev.clientX, ev.clientY);
               var cell = el && el.closest && el.closest('[data-song-cell="1"]');
               if (cell && cell.dataset.songLayer === dragLayer) {
                 var barIdx = parseInt(cell.dataset.songBar, 10);
@@ -5981,6 +5992,42 @@ function Tabula() {
                   r[barIdx] = p.id;
                   return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, dragLayer, r));
                 });
+                setPatternDrag(null);
+                return;
+              }
+            }
+            // Drop on a different synth-type layer box — copy pattern across layers.
+            // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
+            var boxEl = el && el.closest && el.closest('[data-layer-box]');
+            if (boxEl) {
+              var tl = boxEl.dataset.layerBox;
+              if (SYNTH_LAYERS.indexOf(tl) >= 0 && tl !== dragLayer) {
+                var targetData = layerStoreR.current[tl] || {
+                  pats: [],
+                  activeId: null
+                };
+                var targetPats = targetData.pats || [];
+                if (targetPats.length < 8) {
+                  var _p$gridLen3;
+                  pushHistory();
+                  var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
+                    grid: p.grid.map(function (r) {
+                      return _toConsumableArray(r);
+                    }),
+                    durs: p.durs ? p.durs.map(function (r) {
+                      return _toConsumableArray(r);
+                    }) : mkDurs(),
+                    params: (p.params || defaultStepParams()).map(function (s) {
+                      return Object.assign({}, s);
+                    }),
+                    gridLen: (_p$gridLen3 = p.gridLen) !== null && _p$gridLen3 !== void 0 ? _p$gridLen3 : 16
+                  });
+                  layerStoreR.current[tl] = _objectSpread(_objectSpread({}, targetData), {}, {
+                    pats: [].concat(_toConsumableArray(targetPats), [newPat]),
+                    activeId: newPat.id
+                  });
+                  switchLayer(tl);
+                }
               }
             }
             setPatternDrag(null);
@@ -8181,8 +8228,8 @@ function Tabula() {
       letterSpacing: 1,
       boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
       lineHeight: 1,
-      opacity: patternDrag.overSongCell ? 1 : 0.85,
-      transform: patternDrag.overSongCell ? "scale(1.1)" : "scale(1)",
+      opacity: patternDrag.overSongCell || patternDrag.overLayerBox ? 1 : 0.85,
+      transform: patternDrag.overSongCell || patternDrag.overLayerBox ? "scale(1.1)" : "scale(1)",
       transition: "transform 0.1s, opacity 0.1s"
     }
   }, patternDrag.name)), " ", IS_MOBILE && /*#__PURE__*/React.createElement("div", {
