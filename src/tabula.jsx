@@ -2920,8 +2920,8 @@ export default function Tabula(){
                 const targetId=activeId;const isOnlyPat=pats.length<=1;
                 return(
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:2}}>
-                      {[["RAND",()=>randPatId(targetId),false,false],["CLR",()=>clearPatId(targetId),false,false]].map(([l,f,d])=>(
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
+                      {[["RAND",()=>randPatId(targetId),false,false],["CLR",()=>clearPatId(targetId),false,false],["MUT8",mutatePat1,false,false]].map(([l,f,d])=>(
                         <button key={l} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,0.13)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={f}>{l}</button>
                       ))}
                     </div>
@@ -3522,7 +3522,6 @@ export default function Tabula(){
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
             <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
             <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
-            <button style={S.loopBtnBottom} onClick={mutatePat1}>MUT8</button>
           </div>
         </div>
         {/* DRAG GHOST — floating pill that follows pointer (desktop) */}

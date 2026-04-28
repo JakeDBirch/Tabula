@@ -6173,14 +6173,14 @@ function Tabula() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "repeat(2,1fr)",
+        gridTemplateColumns: "repeat(3,1fr)",
         gap: 2
       }
     }, [["RAND", function () {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false]].map(function (_ref23) {
+    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref23) {
       var _ref24 = _slicedToArray(_ref23, 3),
         l = _ref24[0],
         f = _ref24[1],
@@ -8156,10 +8156,7 @@ function Tabula() {
         return !f;
       });
     }
-  }, "FOLLOW"), /*#__PURE__*/React.createElement("button", {
-    style: S.loopBtnBottom,
-    onClick: mutatePat1
-  }, "MUT8"))), patternDrag && /*#__PURE__*/React.createElement("div", {
+  }, "FOLLOW"))), patternDrag && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       left: patternDrag.x - 24,
