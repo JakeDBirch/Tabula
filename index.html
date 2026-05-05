@@ -2535,6 +2535,15 @@ function Tabula() {
   // ── Undo/Redo keyboard shortcuts ─────────────────────────────────────────
   useEffect(function () {
     var onKey = function onKey(e) {
+      var _e$target, _e$target2;
+      var tag = (((_e$target = e.target) === null || _e$target === void 0 ? void 0 : _e$target.tagName) || "").toLowerCase();
+      var isEditable = tag === "input" || tag === "textarea" || ((_e$target2 = e.target) === null || _e$target2 === void 0 ? void 0 : _e$target2.isContentEditable);
+      // Spacebar toggles play/stop globally (skip when typing in a text field).
+      if (!isEditable && (e.key === " " || e.code === "Space")) {
+        e.preventDefault();
+        _startStop();
+        return;
+      }
       var isUndo = (e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "z" || e.key === "Z");
       var isRedo = (e.metaKey || e.ctrlKey) && (e.shiftKey && (e.key === "z" || e.key === "Z") || e.key === "y" || e.key === "Y");
       if (isUndo) {
@@ -3904,9 +3913,9 @@ function Tabula() {
       return e.preventDefault();
     };
     var noContext = function noContext(e) {
-      var _e$target$dataset, _e$target$closest, _e$target;
+      var _e$target$dataset, _e$target$closest, _e$target3;
       // Allow right-click on the grid (handled by onContextMenu for param popup)
-      if (e.target && ((_e$target$dataset = e.target.dataset) !== null && _e$target$dataset !== void 0 && _e$target$dataset.grid || (_e$target$closest = (_e$target = e.target).closest) !== null && _e$target$closest !== void 0 && _e$target$closest.call(_e$target, '[data-grid]'))) return;
+      if (e.target && ((_e$target$dataset = e.target.dataset) !== null && _e$target$dataset !== void 0 && _e$target$dataset.grid || (_e$target$closest = (_e$target3 = e.target).closest) !== null && _e$target$closest !== void 0 && _e$target$closest.call(_e$target3, '[data-grid]'))) return;
       e.preventDefault();
     };
     var clearSel = function clearSel() {
@@ -5880,7 +5889,11 @@ function Tabula() {
         transition: "all .1s"
       },
       onClick: function onClick() {
-        return switchLayer(layer);
+        if (songView) {
+          setSongView(false);
+          setPage("sound");
+        }
+        switchLayer(layer);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -5920,6 +5933,9 @@ function Tabula() {
           boxShadow: isP && !isA ? "0 0 10px " + accent + "88" : "none",
           touchAction: "none",
           opacity: isDragging ? 0.4 : 1
+        },
+        onClick: function onClick(e) {
+          return e.stopPropagation();
         },
         onPointerDown: function onPointerDown(e) {
           e.stopPropagation();
@@ -5986,7 +6002,10 @@ function Tabula() {
             if (!dragging) {
               if (!isActive) switchLayer(dragLayer);
               setActiveId(p.id);
-              if (songView) setSongView(false);
+              if (songView) {
+                setSongView(false);
+                setPage("edit");
+              }
               return;
             }
             var el = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -6078,7 +6097,11 @@ function Tabula() {
       transition: "all .1s"
     },
     onClick: function onClick() {
-      return switchLayer("drums");
+      if (songView) {
+        setSongView(false);
+        setPage("sound");
+      }
+      switchLayer("drums");
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6118,6 +6141,9 @@ function Tabula() {
         boxShadow: isP && !isA ? "0 0 10px #c4967a88" : "none",
         touchAction: "none",
         opacity: isDragging ? 0.4 : 1
+      },
+      onClick: function onClick(e) {
+        return e.stopPropagation();
       },
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
@@ -6174,7 +6200,10 @@ function Tabula() {
           if (!dragging) {
             if (activeLayer !== "drums") switchLayer("drums");
             setActiveDrumId(dp.id);
-            if (songView) setSongView(false);
+            if (songView) {
+              setSongView(false);
+              setPage("edit");
+            }
             return;
           }
           if (songView) {

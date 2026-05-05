@@ -1088,6 +1088,14 @@ export default function Tabula(){
   // ── Undo/Redo keyboard shortcuts ─────────────────────────────────────────
   useEffect(()=>{
     const onKey=(e)=>{
+      const tag=(e.target?.tagName||"").toLowerCase();
+      const isEditable=tag==="input"||tag==="textarea"||e.target?.isContentEditable;
+      // Spacebar toggles play/stop globally (skip when typing in a text field).
+      if(!isEditable&&(e.key===" "||e.code==="Space")){
+        e.preventDefault();
+        startStop();
+        return;
+      }
       const isUndo=(e.metaKey||e.ctrlKey)&&!e.shiftKey&&(e.key==="z"||e.key==="Z");
       const isRedo=(e.metaKey||e.ctrlKey)&&((e.shiftKey&&(e.key==="z"||e.key==="Z"))||(e.key==="y"||e.key==="Y"));
       if(isUndo){e.preventDefault();undo();}
@@ -2789,7 +2797,7 @@ export default function Tabula(){
                 const layerActiveId=isActive?activeId:layerStoreR.current[layer]?.activeId;
                 return(
                   <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
-                    onClick={()=>switchLayer(layer)}>
+                    onClick={()=>{if(songView){setSongView(false);setPage("sound");}switchLayer(layer);}}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                       {layerPats.map((p)=>{
@@ -2798,6 +2806,7 @@ export default function Tabula(){
                         const isDragging=patternDrag&&patternDrag.patId===p.id;
                         return(
                           <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px "+accent+"88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
+                            onClick={e=>e.stopPropagation()}
                             onPointerDown={e=>{
                               e.stopPropagation();
                               const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
@@ -2837,7 +2846,7 @@ export default function Tabula(){
                                 if(!dragging){
                                   if(!isActive)switchLayer(dragLayer);
                                   setActiveId(p.id);
-                                  if(songView)setSongView(false);
+                                  if(songView){setSongView(false);setPage("edit");}
                                   return;
                                 }
                                 const el=document.elementFromPoint(ev.clientX,ev.clientY);
@@ -2890,7 +2899,7 @@ export default function Tabula(){
               })}
               {/* DRUMS layer box */}
               <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,150,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,150,122,0.06)":"transparent",transition:"all .1s"}}
-                onClick={()=>switchLayer("drums")}>
+                onClick={()=>{if(songView){setSongView(false);setPage("sound");}switchLayer("drums");}}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,150,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                   {drumPats.map((dp)=>{
@@ -2899,6 +2908,7 @@ export default function Tabula(){
                     const isDragging=patternDrag&&patternDrag.patId===dp.id;
                     return(
                       <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
+                        onClick={e=>e.stopPropagation()}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
@@ -2930,7 +2940,7 @@ export default function Tabula(){
                             if(!dragging){
                               if(activeLayer!=="drums")switchLayer("drums");
                               setActiveDrumId(dp.id);
-                              if(songView)setSongView(false);
+                              if(songView){setSongView(false);setPage("edit");}
                               return;
                             }
                             if(songView){
