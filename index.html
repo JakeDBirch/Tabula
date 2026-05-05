@@ -1033,7 +1033,10 @@ var Bell = /*#__PURE__*/function () {
                 g.connect(m);
               });
 
-              // Delay line with filters in feedback
+              // Delay line with filters in both the feedback loop and the output tap.
+              // dl → dHp → dLp branches to: fb (recirculation) and ret (output).
+              // Without dLp→ret, the first echo would be unfiltered (bug); routing the
+              // output through the same filter chain means every tap is filtered.
               dl = this.ctx.createDelay(4);
               dl.delayTime.value = dlyT;
               dHp = this.ctx.createBiquadFilter();
@@ -1051,10 +1054,10 @@ var Bell = /*#__PURE__*/function () {
               dLp.connect(fb);
               fb.connect(dl);
 
-              // Fixed return — always at unity, no wet/dry scaling
+              // Fixed return — always at unity, no wet/dry scaling. Reads filtered tap.
               ret = this.ctx.createGain();
               ret.gain.value = 0.9;
-              dl.connect(ret);
+              dLp.connect(ret);
               ret.connect(m);
               this.dlyReturn = ret;
 

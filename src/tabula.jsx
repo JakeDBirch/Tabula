@@ -364,16 +364,19 @@ class Bell{
       const g=this.ctx.createGain();g.gain.value=.07;rv.connect(d);d.connect(g);g.connect(m);
     });
 
-    // Delay line with filters in feedback
+    // Delay line with filters in both the feedback loop and the output tap.
+    // dl → dHp → dLp branches to: fb (recirculation) and ret (output).
+    // Without dLp→ret, the first echo would be unfiltered (bug); routing the
+    // output through the same filter chain means every tap is filtered.
     const dl=this.ctx.createDelay(4);dl.delayTime.value=dlyT;
     const dHp=this.ctx.createBiquadFilter();dHp.type="highpass";dHp.frequency.value=hpHz(dlyHpV);dHp.Q.value=.5;
     const dLp=this.ctx.createBiquadFilter();dLp.type="lowpass";dLp.frequency.value=lpHz(dlyLpV);dLp.Q.value=.5;
     const fb=this.ctx.createGain();fb.gain.value=fbv;
     dl.connect(dHp);dHp.connect(dLp);dLp.connect(fb);fb.connect(dl);
 
-    // Fixed return — always at unity, no wet/dry scaling
+    // Fixed return — always at unity, no wet/dry scaling. Reads filtered tap.
     const ret=this.ctx.createGain();ret.gain.value=0.9;
-    dl.connect(ret);ret.connect(m);
+    dLp.connect(ret);ret.connect(m);
     this.dlyReturn=ret;
 
     // Global send gain — this is what the SEND knob controls
