@@ -723,6 +723,10 @@ export default function Tabula(){
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
   const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
+  // Most recently loaded/saved slot — shown highlighted so the user can see
+  // which slot's project is currently in memory and avoid overwriting the
+  // wrong one. Resets to null on page reload (not persisted).
+  const [activeSlot, setActiveSlot] = useState(null);
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
@@ -1100,7 +1104,7 @@ export default function Tabula(){
     }
     const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
     const next=Object.assign({},slotData,{[slot]:snap});
-    setSlotData(next);await storageSet("slots",JSON.stringify(next));showFlash("SAVED "+slot);
+    setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   // Saved projects can contain stale chain entries: legacy name strings ("A","B")
@@ -1195,6 +1199,7 @@ export default function Tabula(){
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
     if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
+    setActiveSlot(slot);
     showFlash("LOADED "+slot);
   };
   const saveSlot=slot=>{
@@ -3017,14 +3022,14 @@ export default function Tabula(){
               )}
 
                 <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3,marginBottom:3}}>
-                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                    <button key={slot+"sv"} style={{...S.menuSlotBtn,padding:"4px 0",fontSize:8,position:"relative"}}
+                  {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;return(
+                    <button key={slot+"sv"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8,position:"relative"},isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{})}
                       onClick={()=>saveSlot(slot)}>{slot}{has&&<span style={{...S.menuSlotDot,position:"absolute",top:2,right:3}}>●</span>}</button>
                   );})}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3}}>
-                  {SLOTS.map(slot=>{const has=!!slotData[slot];return(
-                    <button key={slot+"ld"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8},has?S.menuSlotBtnLit:{})}
+                  {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;return(
+                    <button key={slot+"ld"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8},has?S.menuSlotBtnLit:{},isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{})}
                       onClick={()=>loadSlot(slot)} disabled={!has}>{slot}</button>
                   );})}
                 </div>
@@ -4178,11 +4183,11 @@ export default function Tabula(){
                       </div>
                     )}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                      {SLOTS.map(slot=>{const has=!!slotData[slot];return(
+                      {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};return(
                         <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                          <span style={S.menuSlotName}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                          <button style={S.menuSlotBtn} onClick={()=>saveSlot(slot)}>SAVE</button>
-                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{})} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                          <span style={Object.assign({},S.menuSlotName,isActive?{color:"#c9a96e"}:{})}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
+                          <button style={Object.assign({},S.menuSlotBtn,activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
+                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
                         </div>
                       );})}
                     </div>
