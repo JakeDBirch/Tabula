@@ -3008,7 +3008,7 @@ export default function Tabula(){
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6}}>
               <button style={{width:"100%",padding:"8px 0",borderRadius:8,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),background:songView?"rgba(210,195,175,0.06)":"transparent",color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .12s"}}
-                onClick={()=>{if(songView){setSongMode(false);setSongView(false);}else{setSongMode(true);setSongView(true);}}}>
+                onClick={()=>{if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);}}}>
                 <span style={{fontSize:14,lineHeight:1}}>▦</span> SONG
               </button>
             </div>
@@ -3562,7 +3562,7 @@ export default function Tabula(){
           {/* Tabs — always visible */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
             {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>setPage(p)}>{lbl}</button>
+              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
           {/* Transport — always visible, centered */}
@@ -3961,15 +3961,15 @@ export default function Tabula(){
                 <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
               </button>
-              {/* SONG chip — toggles song mode (matrix-driven playback) and view together.
-                   If view was off but song mode was on (left via pill tap), re-enters view. */}
+              {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
+                   stays on once enabled — only loop mode in transport overrides it. */}
               <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>{
                   if(songView){
-                    // currently in matrix view: tap exits song mode entirely
-                    setSongMode(false);setSongView(false);
+                    // exit matrix view; song mode (playback intent) stays on
+                    setSongView(false);
                   }else{
-                    // not in view: enter (and ensure song mode is on)
+                    // enter matrix view, ensure song mode is on
                     setSongMode(true);setSongView(true);
                   }
                   setActiveSheet(null);

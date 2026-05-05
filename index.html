@@ -6422,7 +6422,6 @@ function Tabula() {
     },
     onClick: function onClick() {
       if (songView) {
-        setSongMode(false);
         setSongView(false);
       } else {
         setSongMode(true);
@@ -8174,7 +8173,8 @@ function Tabula() {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
       onClick: function onClick() {
-        return setPage(p);
+        setPage(p);
+        if (songView) setSongView(false);
       }
     }, lbl);
   })), /*#__PURE__*/React.createElement("div", {
@@ -9335,11 +9335,10 @@ function Tabula() {
     },
     onClick: function onClick() {
       if (songView) {
-        // currently in matrix view: tap exits song mode entirely
-        setSongMode(false);
+        // exit matrix view; song mode (playback intent) stays on
         setSongView(false);
       } else {
-        // not in view: enter (and ensure song mode is on)
+        // enter matrix view, ensure song mode is on
         setSongMode(true);
         setSongView(true);
       }
