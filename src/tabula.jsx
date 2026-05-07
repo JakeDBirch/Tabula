@@ -909,7 +909,12 @@ export default function Tabula(){
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
   const [songView,     setSongView]     = useState(false);
-  const [songSyncMode, setSongSyncMode] = useState(true); // true = sync (single cursor), false = free (4 cursors)
+  // Song playback mode: "sync" = single shared cursor across all four layers,
+  // "free" = each layer has its own cursor and advances independently,
+  // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
+  // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
+  // paths migrate via _normalizeSongSyncMode below.
+  const [songSyncMode, setSongSyncMode] = useState("sync");
   const [songMatrix,   setSongMatrix]   = useState({
     synth: Array(64).fill(null),
     lead:  Array(64).fill(null),
@@ -921,7 +926,10 @@ export default function Tabula(){
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,bass:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
-  const songSyncR   = useRef(true);
+  const songSyncR   = useRef("sync");
+  // Legacy saves stored songSyncMode as boolean (true=sync, false=free). Coerce
+  // to the current string form so old projects load correctly.
+  const _normalizeSongSyncMode=(v)=>typeof v==="boolean"?(v?"sync":"free"):(v||"sync");
   const songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
   // so layers can drift apart by gridLen. In sync mode these are unused.
@@ -960,6 +968,11 @@ export default function Tabula(){
   const prevFreqByRowR=useRef({});
   const lastPlayedFreqR=useRef(null);
   const lastGlideEnabledR=useRef(false); // glide is a departure attr — enabled note slides INTO next note
+  // Per-layer glide tracking — lead and bass each track their own previous
+  // played frequency / glide flag so glide works independently across layers
+  // (synth uses lastPlayedFreqR/lastGlideEnabledR above for the synth-track).
+  const layerLastFreqR=useRef({lead:null,bass:null});
+  const layerLastGlideR=useRef({lead:false,bass:false});
   const flashTmr=useRef(null),gridRef=useRef(null);
   const gesture=useRef({state:"idle",startX:0,startY:0,baseGrid:null,cellPx:24,appliedDX:0,appliedDY:0});
 
@@ -1072,7 +1085,7 @@ export default function Tabula(){
     if(s.songMatrix)setSongMatrix(s.songMatrix);
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);
-    if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
+    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
@@ -1240,7 +1253,7 @@ export default function Tabula(){
     }
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
-    if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
+    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
     setActiveSlot(slot);
     showFlash("LOADED "+slot);
   };
@@ -1274,7 +1287,7 @@ export default function Tabula(){
     layerStoreR.current={synth:null,lead:null,bass:null};
     setActiveLayer("synth");
     setLoopMode(false);setVaryMode(false);
-    setSongMode(false);setSongView(false);setSongSyncMode(true);
+    setSongMode(false);setSongView(false);setSongSyncMode("sync");
     setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),bass:Array(64).fill(null),drums:Array(64).fill(null)});
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
@@ -1290,6 +1303,8 @@ export default function Tabula(){
     if(prevFreqByRowR)prevFreqByRowR.current={};
     if(lastPlayedFreqR)lastPlayedFreqR.current=null;
     if(lastGlideEnabledR)lastGlideEnabledR.current=false;
+    if(layerLastFreqR)layerLastFreqR.current={lead:null,bass:null};
+    if(layerLastGlideR)layerLastGlideR.current={lead:false,bass:false};
     setRecMode(false);recModeR.current=false;
     if(variedGrids&&variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
     if(variedDrumGrids&&variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
@@ -1406,7 +1421,7 @@ export default function Tabula(){
     }
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
-    if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
+    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
   };
 
   const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};
@@ -1496,7 +1511,7 @@ export default function Tabula(){
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if(songModeR.current && !loopR.current && !songSyncR.current){
+    if(songModeR.current && !loopR.current && songSyncR.current==="free"){
       const sm=songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       const ranges={};
@@ -1728,10 +1743,22 @@ export default function Tabula(){
             // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
             // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
             const lF=freqs[r]*ratio;
+            // Glide tracking — same pattern as the synth-track path: glide on
+            // step N means slide FROM N INTO N+1, so check the PREVIOUS step's
+            // glide flag. Compares actual played frequencies (oct applied) so
+            // octave changes on the same row trigger glide.
+            const lStepOct=lSp?(lSp.oct-2):0;
+            const lLayerOct=layerLP.octave||0;
+            const lActualF=lF*Math.pow(2,lStepOct+lLayerOct);
+            const lHasGlide=!!(lSp&&lSp.glide);
+            const lPrevF=layerLastGlideR.current[layer]?(layerLastFreqR.current[layer]??null):null;
+            const lGlideTime=lPrevF&&lPrevF!==lActualF?(60/bpmR.current/8)*(lp?.speedMult??speedMultR.current):0;
+            layerLastFreqR.current[layer]=lActualF;
+            layerLastGlideR.current[layer]=lHasGlide;
             if(lRhy>1){
-              for(let ri=0;ri<lRhy;ri++)bell.current.play(lF,at+ri*lSubDur,lSp,lSubDur*0.9,layerLP.dlySend,null,0,layerLP);
+              for(let ri=0;ri<lRhy;ri++)bell.current.play(lF,at+ri*lSubDur,lSp,lSubDur*0.9,layerLP.dlySend,ri===0?lPrevF:null,ri===0?lGlideTime:0,layerLP);
             } else {
-              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,null,0,layerLP);
+              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,lPrevF,lGlideTime,layerLP);
             }
           }
         }
@@ -1790,8 +1817,22 @@ export default function Tabula(){
         const ns=(s+1)%activeLen;stepR.current=ns;
         if(ns===0){
           if(inSong){
-            let nextBar=songCurBar+1;
-            if(nextBar>songLastBar)nextBar=songFirstBar;
+            let nextBar;
+            if(songSyncR.current==="random"){
+              // Random mode: pick a random populated bar from any layer's lane.
+              // Allows the same bar to be picked twice in a row — that's fine,
+              // each pick is independent. Falls back to firstBar on empty matrix.
+              const sm=songMatrixR.current;
+              const candidates=[];
+              for(let i=songFirstBar;i<=songLastBar;i++){
+                if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null)candidates.push(i);
+              }
+              nextBar=candidates.length?candidates[Math.floor(Math.random()*candidates.length)]:songFirstBar;
+            } else {
+              // Sync (default): sequential bar advance, wrapping at end.
+              nextBar=songCurBar+1;
+              if(nextBar>songLastBar)nextBar=songFirstBar;
+            }
             songBarR.current=nextBar;setSongBar(nextBar);
             // Sync mode: all four cursors track songBar
             setSongBarLayer({synth:nextBar,lead:nextBar,bass:nextBar,drums:nextBar});
@@ -1810,6 +1851,7 @@ export default function Tabula(){
       setSongBar(-1);songBarR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
       prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
+      layerLastFreqR.current={lead:null,bass:null};layerLastGlideR.current={lead:false,bass:false};
       setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
       releaseWakeLock();
@@ -3200,7 +3242,7 @@ export default function Tabula(){
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
                 {/* SYNC | FREE toggle — controls per-layer cursor independence */}
                 <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
-                  {[[true,"SYNC"],[false,"FREE"]].map(([val,lbl])=>{
+                  {[["sync","SYNC"],["free","FREE"],["random","RAND"]].map(([val,lbl])=>{
                     const sel=songSyncMode===val;
                     return(
                       <button key={lbl} onClick={()=>setSongSyncMode(val)}
@@ -3582,7 +3624,24 @@ export default function Tabula(){
                 </div>
                   {LANES.map(lane=>{
                     const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                    const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
+                    // Per-note params (vel, dur) only apply at the note's start cell.
+                    // Modulation params (flt, dly, oct, glide, rhy) keep animating during
+                    // tied notes, so unlock cells under any (tied) note's extension too.
+                    const isPerNote=lane.key==="vel"||lane.key==="dur";
+                    const colHasNote=Array.from({length:COLS},(_,c)=>{
+                      if(!activePat)return false;
+                      if(isPerNote){
+                        for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
+                        return false;
+                      }
+                      for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
+                        if(activePat.grid[r][c2]){
+                          const span=Math.max(1,activePat.durs?.[r]?.[c2]??1);
+                          if(c<c2+span) return true;
+                        }
+                      }
+                      return false;
+                    });
                     const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
                     const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                     return(
@@ -3861,7 +3920,7 @@ export default function Tabula(){
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
                 {/* SYNC | FREE toggle — controls per-layer cursor independence */}
                 <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
-                  {[[true,"SYNC"],[false,"FREE"]].map(([val,lbl])=>{
+                  {[["sync","SYNC"],["free","FREE"],["random","RAND"]].map(([val,lbl])=>{
                     const sel=songSyncMode===val;
                     return(
                       <button key={lbl} onClick={()=>setSongSyncMode(val)}
@@ -4204,7 +4263,23 @@ export default function Tabula(){
                         </div>
                         {LANES.map(lane=>{
                           const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                          const colHasNote=Array.from({length:COLS},(_,c)=>!!(activePat&&Array.from({length:ROWS},(_,r)=>activePat.grid[r][c]).some(Boolean)));
+                          // Per-note (vel, dur) only at note start; modulation lanes keep
+                          // editing during tied-note extensions.
+                          const isPerNote=lane.key==="vel"||lane.key==="dur";
+                          const colHasNote=Array.from({length:COLS},(_,c)=>{
+                            if(!activePat)return false;
+                            if(isPerNote){
+                              for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
+                              return false;
+                            }
+                            for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
+                              if(activePat.grid[r][c2]){
+                                const span=Math.max(1,activePat.durs?.[r]?.[c2]??1);
+                                if(c<c2+span) return true;
+                              }
+                            }
+                            return false;
+                          });
                           const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
                           const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                           return(

@@ -2137,10 +2137,15 @@ function Tabula() {
     _useState140 = _slicedToArray(_useState139, 2),
     songView = _useState140[0],
     setSongView = _useState140[1];
-  var _useState141 = useState(true),
+  // Song playback mode: "sync" = single shared cursor across all four layers,
+  // "free" = each layer has its own cursor and advances independently,
+  // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
+  // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
+  // paths migrate via _normalizeSongSyncMode below.
+  var _useState141 = useState("sync"),
     _useState142 = _slicedToArray(_useState141, 2),
     songSyncMode = _useState142[0],
-    setSongSyncMode = _useState142[1]; // true = sync (single cursor), false = free (4 cursors)
+    setSongSyncMode = _useState142[1];
   var _useState143 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
@@ -2166,7 +2171,12 @@ function Tabula() {
     setSongBarLayer = _useState148[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
-  var songSyncR = useRef(true);
+  var songSyncR = useRef("sync");
+  // Legacy saves stored songSyncMode as boolean (true=sync, false=free). Coerce
+  // to the current string form so old projects load correctly.
+  var _normalizeSongSyncMode = function _normalizeSongSyncMode(v) {
+    return typeof v === "boolean" ? v ? "sync" : "free" : v || "sync";
+  };
   var songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
   // so layers can drift apart by gridLen. In sync mode these are unused.
@@ -2260,6 +2270,17 @@ function Tabula() {
   var prevFreqByRowR = useRef({});
   var lastPlayedFreqR = useRef(null);
   var lastGlideEnabledR = useRef(false); // glide is a departure attr — enabled note slides INTO next note
+  // Per-layer glide tracking — lead and bass each track their own previous
+  // played frequency / glide flag so glide works independently across layers
+  // (synth uses lastPlayedFreqR/lastGlideEnabledR above for the synth-track).
+  var layerLastFreqR = useRef({
+    lead: null,
+    bass: null
+  });
+  var layerLastGlideR = useRef({
+    lead: false,
+    bass: false
+  });
   var flashTmr = useRef(null),
     gridRef = useRef(null);
   var gesture = useRef({
@@ -2500,7 +2521,7 @@ function Tabula() {
     if (s.songMatrix) setSongMatrix(s.songMatrix);
     if (s.songMode != null) setSongMode(s.songMode);
     if (s.songView != null) setSongView(s.songView);
-    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
+    if (s.songSyncMode != null) setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
     setActiveId(s.activeId);
     setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);
@@ -2814,7 +2835,7 @@ function Tabula() {
     }
     if (s.songMode != null) setSongMode(s.songMode);
     if (s.songView != null) setSongView(s.songView);else if (s.songMode) setSongView(true);
-    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
+    if (s.songSyncMode != null) setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
     setActiveSlot(slot);
     showFlash("LOADED " + slot);
   };
@@ -2892,7 +2913,7 @@ function Tabula() {
     setVaryMode(false);
     setSongMode(false);
     setSongView(false);
-    setSongSyncMode(true);
+    setSongSyncMode("sync");
     setSongMatrix({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
@@ -2940,6 +2961,14 @@ function Tabula() {
     if (prevFreqByRowR) prevFreqByRowR.current = {};
     if (lastPlayedFreqR) lastPlayedFreqR.current = null;
     if (lastGlideEnabledR) lastGlideEnabledR.current = false;
+    if (layerLastFreqR) layerLastFreqR.current = {
+      lead: null,
+      bass: null
+    };
+    if (layerLastGlideR) layerLastGlideR.current = {
+      lead: false,
+      bass: false
+    };
     setRecMode(false);
     recModeR.current = false;
     if (variedGrids && variedGrids.current && variedGrids.current.clear) variedGrids.current.clear();
@@ -3158,7 +3187,7 @@ function Tabula() {
     }
     if (s.songMode != null) setSongMode(s.songMode);
     if (s.songView != null) setSongView(s.songView);else if (s.songMode) setSongView(true);
-    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
+    if (s.songSyncMode != null) setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
   };
   var encodeState = function encodeState(s) {
     try {
@@ -3292,7 +3321,7 @@ function Tabula() {
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
-    if (songModeR.current && !loopR.current && !songSyncR.current) {
+    if (songModeR.current && !loopR.current && songSyncR.current === "free") {
       var sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
@@ -3621,6 +3650,7 @@ function Tabula() {
               var lRhy = Math.max(1, lRhyRaw);
               var lSubDur = stepDur / lRhy;
               for (var _r3 = 0; _r3 < ROWS; _r3++) {
+                var _layerLastFreqR$curre, _lp$speedMult, _lp3;
                 if (!lp.grid[_r3][ls]) continue;
                 var lDur = lp.durs && lp.durs[_r3] && lp.durs[_r3][ls] ? Math.max(1, lp.durs[_r3][ls]) : 1;
                 var lNoteDur = stepDur * lDur;
@@ -3628,10 +3658,22 @@ function Tabula() {
                 // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
                 // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
                 var lF = freqs[_r3] * ratio;
+                // Glide tracking — same pattern as the synth-track path: glide on
+                // step N means slide FROM N INTO N+1, so check the PREVIOUS step's
+                // glide flag. Compares actual played frequencies (oct applied) so
+                // octave changes on the same row trigger glide.
+                var lStepOct = lSp ? lSp.oct - 2 : 0;
+                var lLayerOct = layerLP.octave || 0;
+                var lActualF = lF * Math.pow(2, lStepOct + lLayerOct);
+                var lHasGlide = !!(lSp && lSp.glide);
+                var lPrevF = layerLastGlideR.current[layer] ? (_layerLastFreqR$curre = layerLastFreqR.current[layer]) !== null && _layerLastFreqR$curre !== void 0 ? _layerLastFreqR$curre : null : null;
+                var lGlideTime = lPrevF && lPrevF !== lActualF ? 60 / bpmR.current / 8 * ((_lp$speedMult = (_lp3 = lp) === null || _lp3 === void 0 ? void 0 : _lp3.speedMult) !== null && _lp$speedMult !== void 0 ? _lp$speedMult : speedMultR.current) : 0;
+                layerLastFreqR.current[layer] = lActualF;
+                layerLastGlideR.current[layer] = lHasGlide;
                 if (lRhy > 1) {
-                  for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, null, 0, layerLP);
+                  for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, _ri === 0 ? lPrevF : null, _ri === 0 ? lGlideTime : 0, layerLP);
                 } else {
-                  bell.current.play(lF, at, lSp, lNoteDur, layerLP.dlySend, null, 0, layerLP);
+                  bell.current.play(lF, at, lSp, lNoteDur, layerLP.dlySend, lPrevF, lGlideTime, layerLP);
                 }
               }
             },
@@ -3719,8 +3761,22 @@ function Tabula() {
         stepR.current = _ns;
         if (_ns === 0) {
           if (inSong) {
-            var nextBar = songCurBar + 1;
-            if (nextBar > songLastBar) nextBar = songFirstBar;
+            var nextBar;
+            if (songSyncR.current === "random") {
+              // Random mode: pick a random populated bar from any layer's lane.
+              // Allows the same bar to be picked twice in a row — that's fine,
+              // each pick is independent. Falls back to firstBar on empty matrix.
+              var _sm2 = songMatrixR.current;
+              var candidates = [];
+              for (var _i8 = songFirstBar; _i8 <= songLastBar; _i8++) {
+                if (_sm2.synth[_i8] != null || _sm2.lead[_i8] != null || _sm2.bass[_i8] != null || _sm2.drums[_i8] != null) candidates.push(_i8);
+              }
+              nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
+            } else {
+              // Sync (default): sequential bar advance, wrapping at end.
+              nextBar = songCurBar + 1;
+              if (nextBar > songLastBar) nextBar = songFirstBar;
+            }
             songBarR.current = nextBar;
             setSongBar(nextBar);
             // Sync mode: all four cursors track songBar
@@ -3742,7 +3798,7 @@ function Tabula() {
   }, []);
   var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, sm, t0, layerFirst, _i8, _arr5, layer, f, i, firstBar, _i9, _t4;
+      var dlyT, sm, t0, layerFirst, _i9, _arr5, layer, f, i, firstBar, _i0, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -3766,6 +3822,14 @@ function Tabula() {
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
+            layerLastFreqR.current = {
+              lead: null,
+              bass: null
+            };
+            layerLastGlideR.current = {
+              lead: false,
+              bass: false
+            };
             setRecMode(false);
             recModeR.current = false;
             if (silentLoopR.current) {
@@ -3848,13 +3912,13 @@ function Tabula() {
             sm = songMatrix; // Per-layer first populated bar — used for free mode init
             t0 = bell.current.ctx.currentTime + 0.05;
             layerFirst = {};
-            _i8 = 0, _arr5 = ["synth", "lead", "bass", "drums"];
+            _i9 = 0, _arr5 = ["synth", "lead", "bass", "drums"];
           case 11:
-            if (!(_i8 < _arr5.length)) {
+            if (!(_i9 < _arr5.length)) {
               _context9.n = 16;
               break;
             }
-            layer = _arr5[_i8];
+            layer = _arr5[_i9];
             f = -1;
             i = 0;
           case 12:
@@ -3880,25 +3944,25 @@ function Tabula() {
               bar: layerFirst[layer]
             };
           case 15:
-            _i8++;
+            _i9++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i9 = 0;
+            _i0 = 0;
           case 17:
-            if (!(_i9 < 64)) {
+            if (!(_i0 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i9] != null || sm.lead[_i9] != null || sm.bass[_i9] != null || sm.drums[_i9] != null)) {
+            if (!(sm.synth[_i0] != null || sm.lead[_i0] != null || sm.bass[_i0] != null || sm.drums[_i0] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i9;
+            firstBar = _i0;
             return _context9.a(3, 19);
           case 18:
-            _i9++;
+            _i0++;
             _context9.n = 17;
             break;
           case 19:
@@ -6879,7 +6943,7 @@ function Tabula() {
       flexShrink: 0,
       alignSelf: "center"
     }
-  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref31) {
+  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref31) {
     var _ref32 = _slicedToArray(_ref31, 2),
       val = _ref32[0],
       lbl = _ref32[1];
@@ -7967,14 +8031,26 @@ function Tabula() {
       var _sp$lane$key;
       return (_sp$lane$key = sp[lane.key]) !== null && _sp$lane$key !== void 0 ? _sp$lane$key : lane.def;
     });
+    // Per-note params (vel, dur) only apply at the note's start cell.
+    // Modulation params (flt, dly, oct, glide, rhy) keep animating during
+    // tied notes, so unlock cells under any (tied) note's extension too.
+    var isPerNote = lane.key === "vel" || lane.key === "dur";
     var colHasNote = Array.from({
       length: COLS
     }, function (_, c) {
-      return !!(activePat && Array.from({
-        length: ROWS
-      }, function (_, r) {
-        return activePat.grid[r][c];
-      }).some(Boolean));
+      if (!activePat) return false;
+      if (isPerNote) {
+        for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
+        return false;
+      }
+      for (var _r5 = 0; _r5 < ROWS; _r5++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r5][c2]) {
+          var _activePat$durs$_r5$c, _activePat$durs2;
+          var span = Math.max(1, (_activePat$durs$_r5$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r5]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r5$c !== void 0 ? _activePat$durs$_r5$c : 1);
+          if (c < c2 + span) return true;
+        }
+      }
+      return false;
     });
     var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
     var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? "×" + Math.max(1, curVal) : lane.key === "dur" ? curVal > 0 ? "+" + curVal + "%" : curVal + "%" : String(curVal);
@@ -8842,7 +8918,7 @@ function Tabula() {
       flexShrink: 0,
       alignSelf: "center"
     }
-  }, [[true, "SYNC"], [false, "FREE"]].map(function (_ref39) {
+  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref39) {
     var _ref40 = _slicedToArray(_ref39, 2),
       val = _ref40[0],
       lbl = _ref40[1];
@@ -9092,10 +9168,10 @@ function Tabula() {
       var _loop4 = function _loop4() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
-          var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs2, _p$vel2;
+          var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs3, _p$vel2;
           var p = activePat === null || activePat === void 0 || (_activePat$params2 = activePat.params) === null || _activePat$params2 === void 0 ? void 0 : _activePat$params2[ci];
           var rhy = p ? Math.round((_p$rhy2 = p.rhy) !== null && _p$rhy2 !== void 0 ? _p$rhy2 : 1) : 1;
-          var span = Math.max(1, (_activePat$durs$r$ci2 = activePat === null || activePat === void 0 || (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[r]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[ci]) !== null && _activePat$durs$r$ci2 !== void 0 ? _activePat$durs$r$ci2 : 1);
+          var span = Math.max(1, (_activePat$durs$r$ci2 = activePat === null || activePat === void 0 || (_activePat$durs3 = activePat.durs) === null || _activePat$durs3 === void 0 || (_activePat$durs3 = _activePat$durs3[r]) === null || _activePat$durs3 === void 0 ? void 0 : _activePat$durs3[ci]) !== null && _activePat$durs$r$ci2 !== void 0 ? _activePat$durs$r$ci2 : 1);
           var vel = p ? (_p$vel2 = p.vel) !== null && _p$vel2 !== void 0 ? _p$vel2 : 100 : 100;
           var b = 0.35 + vel / 127 * 0.65;
           var inactive = ci >= gridLen;
@@ -9954,14 +10030,25 @@ function Tabula() {
       var _sp$lane$key2;
       return (_sp$lane$key2 = sp[lane.key]) !== null && _sp$lane$key2 !== void 0 ? _sp$lane$key2 : lane.def;
     });
+    // Per-note (vel, dur) only at note start; modulation lanes keep
+    // editing during tied-note extensions.
+    var isPerNote = lane.key === "vel" || lane.key === "dur";
     var colHasNote = Array.from({
       length: COLS
     }, function (_, c) {
-      return !!(activePat && Array.from({
-        length: ROWS
-      }, function (_, r) {
-        return activePat.grid[r][c];
-      }).some(Boolean));
+      if (!activePat) return false;
+      if (isPerNote) {
+        for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
+        return false;
+      }
+      for (var _r6 = 0; _r6 < ROWS; _r6++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r6][c2]) {
+          var _activePat$durs$_r6$c, _activePat$durs4;
+          var span = Math.max(1, (_activePat$durs$_r6$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r6]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r6$c !== void 0 ? _activePat$durs$_r6$c : 1);
+          if (c < c2 + span) return true;
+        }
+      }
+      return false;
     });
     var curVal = playing && playId === activeId && step >= 0 ? vals[step] : null;
     var liveLabel = curVal == null ? null : lane.key === "oct" ? (curVal - 2 > 0 ? "+" : curVal - 2 < 0 ? "" : "") + String(curVal - 2) + "oct" : lane.key === "rhy" ? "×" + Math.max(1, curVal) : lane.key === "dur" ? curVal > 0 ? "+" + curVal + "%" : curVal + "%" : String(curVal);
