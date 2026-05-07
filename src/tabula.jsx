@@ -1244,10 +1244,41 @@ export default function Tabula(){
     if(hasContent){setConfirmAction({type:"load",slot,label:"LOAD "+slot+"? UNSAVED WORK LOST"});return;}
     doLoad(slot);
   };
+  // ── New project ─────────────────────────────────────────────────────────
+  // Reset everything to default initial state. Save slots are NOT cleared
+  // (that's persistent storage outside the session). Confirms before
+  // discarding any in-memory work, mirroring loadSlot's hasContent guard.
+  const doNew=()=>{
+    const p0=mkPat(symPat(0));
+    const dp0=mkDrumPat(symPat(0));
+    setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
+    setDrumPats([dp0]);setActiveDrumId(dp0.id);setDrumChain([dp0.id]);
+    layerStoreR.current={synth:null,lead:null,bass:null};
+    setActiveLayer("synth");
+    setLoopMode(false);setVaryMode(false);
+    setSongMode(false);setSongView(false);
+    setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),bass:Array(64).fill(null),drums:Array(64).fill(null)});
+    setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
+    setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)});
+    setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
+    setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
+    setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
+    setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
+    setVRhyJitter(0);setVOctJitter(0);setVGlideJitter(0);setVDurJitter(0);
+    setActiveSlot(null);
+    setPage("edit");
+    showFlash("NEW PROJECT");
+  };
+  const newProject=()=>{
+    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
+    if(hasContent){setConfirmAction({type:"new",label:"NEW PROJECT? UNSAVED WORK LOST"});return;}
+    doNew();
+  };
   const confirmYes=()=>{
     if(!confirmAction)return;
     if(confirmAction.type==="save")doSave(confirmAction.slot);
-    else doLoad(confirmAction.slot);
+    else if(confirmAction.type==="load")doLoad(confirmAction.slot);
+    else if(confirmAction.type==="new")doNew();
     setConfirmAction(null);
   };
   const confirmNo=()=>setConfirmAction(null);
@@ -3093,17 +3124,22 @@ export default function Tabula(){
                 </div>
               )}
 
-                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3,marginBottom:3}}>
-                  {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;return(
-                    <button key={slot+"sv"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8,position:"relative"},isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{})}
-                      onClick={()=>saveSlot(slot)}>{slot}{has&&<span style={{...S.menuSlotDot,position:"absolute",top:2,right:3}}>●</span>}</button>
-                  );})}
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(4,1fr)":"repeat(auto-fill,minmax(22px,1fr))",gap:3}}>
-                  {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;return(
-                    <button key={slot+"ld"} style={Object.assign({},S.menuSlotBtn,{padding:"4px 0",fontSize:8},has?S.menuSlotBtnLit:{},isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{})}
-                      onClick={()=>loadSlot(slot)} disabled={!has}>{slot}</button>
-                  );})}
+                {/* NEW PROJECT — discards in-memory work and resets to defaults */}
+                <button style={{width:"100%",padding:"7px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:5,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:6,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
+                {/* Slot grid: each slot is a column with label, SAVE, LOAD stacked */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                  {SLOTS.map(slot=>{
+                    const has=!!slotData[slot];
+                    const isActive=activeSlot===slot;
+                    const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};
+                    return(
+                      <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"stretch"}}>
+                        <div style={{fontSize:9,letterSpacing:2,fontWeight:600,color:isActive?"#c9a96e":"rgba(210,195,175,0.55)",textAlign:"center",marginBottom:1}}>{slot}{has&&<span style={{...S.menuSlotDot,marginLeft:2}}>●</span>}</div>
+                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
+                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div style={{marginBottom:6}}>
@@ -4254,6 +4290,8 @@ export default function Tabula(){
                         <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
                       </div>
                     )}
+                    {/* NEW PROJECT — discards in-memory work and resets to defaults */}
+                    <button style={{width:"100%",padding:"10px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:6,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:14,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
                       {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};return(
                         <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>

@@ -2843,9 +2843,92 @@ function Tabula() {
     }
     doLoad(slot);
   };
+  // ── New project ─────────────────────────────────────────────────────────
+  // Reset everything to default initial state. Save slots are NOT cleared
+  // (that's persistent storage outside the session). Confirms before
+  // discarding any in-memory work, mirroring loadSlot's hasContent guard.
+  var doNew = function doNew() {
+    var p0 = mkPat(symPat(0));
+    var dp0 = mkDrumPat(symPat(0));
+    setPats([p0]);
+    setActiveId(p0.id);
+    setChain([p0.id]);
+    setDrumPats([dp0]);
+    setActiveDrumId(dp0.id);
+    setDrumChain([dp0.id]);
+    layerStoreR.current = {
+      synth: null,
+      lead: null,
+      bass: null
+    };
+    setActiveLayer("synth");
+    setLoopMode(false);
+    setVaryMode(false);
+    setSongMode(false);
+    setSongView(false);
+    setSongMatrix({
+      synth: Array(64).fill(null),
+      lead: Array(64).fill(null),
+      bass: Array(64).fill(null),
+      drums: Array(64).fill(null)
+    });
+    setBpm(120);
+    setScale("major");
+    setTranspose(0);
+    setSwing(0);
+    setSpeedMult(1);
+    setLayerParams({
+      synth: DEFAULT_LP(0),
+      lead: DEFAULT_LP(1),
+      bass: DEFAULT_LP(-1)
+    });
+    setDlyIdx(3);
+    setDlyFbPct(45);
+    setDlyHpVal(8);
+    setDlyLpVal(78);
+    setVDropRate(13);
+    setVShiftRate(17);
+    setVShiftRange(1);
+    setVPitchRate(0);
+    setVPitchRange(1);
+    setVGhostRate(0);
+    setVVelJitter(0);
+    setVFltJitter(0);
+    setVDlyJitter(0);
+    setVRhyJitter(0);
+    setVOctJitter(0);
+    setVGlideJitter(0);
+    setVDurJitter(0);
+    setActiveSlot(null);
+    setPage("edit");
+    showFlash("NEW PROJECT");
+  };
+  var newProject = function newProject() {
+    var hasContent = pats.some(function (p) {
+      return p.grid.some(function (r) {
+        return r.some(function (c) {
+          return c;
+        });
+      });
+    }) || drumPats.some(function (p) {
+      return p.grid.some(function (r) {
+        return r.some(function (c) {
+          return c;
+        });
+      });
+    });
+    if (hasContent) {
+      setConfirmAction({
+        type: "new",
+        label: "NEW PROJECT? UNSAVED WORK LOST"
+      });
+      return;
+    }
+    doNew();
+  };
   var confirmYes = function confirmYes() {
     if (!confirmAction) return;
-    if (confirmAction.type === "save") doSave(confirmAction.slot);else doLoad(confirmAction.slot);
+    if (confirmAction.type === "save") doSave(confirmAction.slot);else if (confirmAction.type === "load") doLoad(confirmAction.slot);else if (confirmAction.type === "new") doNew();
     setConfirmAction(null);
   };
   var confirmNo = function confirmNo() {
@@ -6584,61 +6667,80 @@ function Tabula() {
       fontFamily: "inherit"
     },
     onClick: confirmNo
-  }, "NO")), /*#__PURE__*/React.createElement("div", {
+  }, "NO")), /*#__PURE__*/React.createElement("button", {
+    style: {
+      width: "100%",
+      padding: "7px 0",
+      border: "1px solid rgba(122,170,150,0.4)",
+      borderRadius: 5,
+      background: "transparent",
+      color: "rgba(122,170,150,0.85)",
+      fontSize: 10,
+      letterSpacing: 2,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginBottom: 6,
+      transition: "all .12s"
+    },
+    onClick: newProject
+  }, "\uFF0B NEW PROJECT"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(22px,1fr))",
-      gap: 3,
-      marginBottom: 3
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 6
     }
   }, SLOTS.map(function (slot) {
     var has = !!slotData[slot];
     var isActive = activeSlot === slot;
-    return /*#__PURE__*/React.createElement("button", {
-      key: slot + "sv",
-      style: Object.assign({}, S.menuSlotBtn, {
-        padding: "4px 0",
-        fontSize: 8,
-        position: "relative"
-      }, isActive ? {
-        border: "1px solid #c9a96e",
-        background: "rgba(201,169,110,0.12)",
-        color: "#c9a96e"
-      } : {}),
-      onClick: function onClick() {
-        return saveSlot(slot);
+    var activeStyle = isActive ? {
+      border: "1px solid #c9a96e",
+      background: "rgba(201,169,110,0.12)",
+      color: "#c9a96e"
+    } : {};
+    return /*#__PURE__*/React.createElement("div", {
+      key: slot,
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        alignItems: "stretch"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        letterSpacing: 2,
+        fontWeight: 600,
+        color: isActive ? "#c9a96e" : "rgba(210,195,175,0.55)",
+        textAlign: "center",
+        marginBottom: 1
       }
     }, slot, has && /*#__PURE__*/React.createElement("span", {
       style: _objectSpread(_objectSpread({}, S.menuSlotDot), {}, {
-        position: "absolute",
-        top: 2,
-        right: 3
+        marginLeft: 2
       })
-    }, "\u25CF"));
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: winW > 900 ? "repeat(4,1fr)" : "repeat(auto-fill,minmax(22px,1fr))",
-      gap: 3
-    }
-  }, SLOTS.map(function (slot) {
-    var has = !!slotData[slot];
-    var isActive = activeSlot === slot;
-    return /*#__PURE__*/React.createElement("button", {
-      key: slot + "ld",
+    }, "\u25CF")), /*#__PURE__*/React.createElement("button", {
       style: Object.assign({}, S.menuSlotBtn, {
-        padding: "4px 0",
-        fontSize: 8
-      }, has ? S.menuSlotBtnLit : {}, isActive ? {
-        border: "1px solid #c9a96e",
-        background: "rgba(201,169,110,0.12)",
-        color: "#c9a96e"
-      } : {}),
+        padding: "6px 0",
+        fontSize: 9,
+        letterSpacing: 1,
+        fontWeight: 600
+      }, activeStyle),
+      onClick: function onClick() {
+        return saveSlot(slot);
+      }
+    }, "SAVE"), /*#__PURE__*/React.createElement("button", {
+      style: Object.assign({}, S.menuSlotBtn, {
+        padding: "6px 0",
+        fontSize: 9,
+        letterSpacing: 1,
+        fontWeight: 600
+      }, has ? S.menuSlotBtnLit : {}, activeStyle),
       onClick: function onClick() {
         return loadSlot(slot);
       },
       disabled: !has
-    }, slot);
+    }, "LOAD"));
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 6
@@ -10299,7 +10401,24 @@ function Tabula() {
       fontFamily: "inherit"
     },
     onClick: confirmNo
-  }, "NO")), /*#__PURE__*/React.createElement("div", {
+  }, "NO")), /*#__PURE__*/React.createElement("button", {
+    style: {
+      width: "100%",
+      padding: "10px 0",
+      border: "1px solid rgba(122,170,150,0.4)",
+      borderRadius: 6,
+      background: "transparent",
+      color: "rgba(122,170,150,0.85)",
+      fontSize: 11,
+      letterSpacing: 2,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginBottom: 14,
+      transition: "all .12s"
+    },
+    onClick: newProject
+  }, "\uFF0B NEW PROJECT"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(4,1fr)",
