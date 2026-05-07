@@ -227,7 +227,8 @@ var mkPat = function mkPat(name) {
     grid: mkGrid(),
     durs: mkDurs(),
     params: defaultStepParams(),
-    gridLen: 16
+    gridLen: 16,
+    speedMult: 1
   };
 };
 // ─── Drum layer ───────────────────────────────────────────────────────────────
@@ -290,7 +291,8 @@ var mkDrumPat = function mkDrumPat(name) {
     gridLen: 16,
     mix: defaultDrumMix(),
     vRhythm: 0,
-    vVelocity: 0
+    vVelocity: 0,
+    speedMult: 1
   };
 };
 var defaultDrumMix = function defaultDrumMix() {
@@ -1649,7 +1651,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _activePat$gridLen;
+  var _activePat$gridLen, _activePatForSpeed$sp;
   var _useState = useState(function () {
       var a = mkPat(symPat(0));
       return [a];
@@ -2480,7 +2482,7 @@ function Tabula() {
       var t = s.activeLayer || "synth";
       if (t !== activeLayer) setActiveLayer(t);
     }
-    setPats(migratePats(s.pats));
+    setPats(migratePats(s.pats, s.speedMult));
     setDrumPats(s.drumPats);
     setChain(s.chain);
     setDrumChain(s.drumChain);
@@ -2658,11 +2660,17 @@ function Tabula() {
   // from before chains were id-keyed, or ids referencing patterns that no longer
   // exist. Filter to valid ids only, with a name→id migration pass for legacy
   // saves where pats still carry their old name field.
+  // Forward-migrate legacy pats to the current schema. Keep the original ref
+  // when nothing's missing so React reconciles cleanly. Pass the file's
+  // global speedMult as `defaultSpeed` so unmigrated pats inherit the session
+  // speed they were saved at, not 1×.
   var migratePats = function migratePats(pats) {
+    var defaultSpeed = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 1;
     return (pats || []).map(function (p) {
-      return p.durs ? p : Object.assign({}, p, {
-        durs: mkDurs()
-      });
+      var updates = {};
+      if (!p.durs) updates.durs = mkDurs();
+      if (p.speedMult == null) updates.speedMult = defaultSpeed != null ? defaultSpeed : 1;
+      return Object.keys(updates).length ? Object.assign({}, p, updates) : p;
     });
   };
   var sanitizeChain = function sanitizeChain(chain, pats) {
@@ -2695,6 +2703,7 @@ function Tabula() {
         var layer = _SYNTH_LAYERS2[_i2];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if (ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
           if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
           layerStoreR.current[layer] = ld;
         }
@@ -2710,7 +2719,7 @@ function Tabula() {
     }))));
     if (maxId >= _id) _id = maxId + 1;
     var cleanChain = sanitizeChain(s.chain, s.pats);
-    setPats(migratePats(s.pats));
+    setPats(migratePats(s.pats, s.speedMult));
     setChain(cleanChain.length ? cleanChain : [s.activeId || s.pats[0].id]);
     setBpm(s.bpm);
     setScale(s.scale);
@@ -2930,7 +2939,7 @@ function Tabula() {
       return p.id;
     }))));
     if (maxId >= _id) _id = maxId + 1;
-    if (s.pats) setPats(migratePats(s.pats));
+    if (s.pats) setPats(migratePats(s.pats, s.speedMult));
     if (s.chain) {
       var cc = sanitizeChain(s.chain, s.pats || []);
       setChain(cc.length ? cc : [s.activeId || s.pats && s.pats[0] && s.pats[0].id || 1]);
@@ -3126,10 +3135,18 @@ function Tabula() {
     }
   };
   var scheduler = useCallback(function () {
+    var _masterPat$speedMult;
     if (!bell.current.ready) return;
     var ctx = bell.current.ctx;
     var LOOKAHEAD = 0.1; // seconds ahead to schedule
-    var stepDur = 60 / bpmR.current / 4 * speedMultR.current;
+    // Master stepDur is now per-pattern: it follows the ACTIVE LAYER's pat's
+    // speedMult. (Free mode below recomputes per-layer per-pat.)
+    var masterPat = activeLayerR.current === "drums" ? drumPatsR.current.find(function (x) {
+      return x.id === activeDrumIdR.current;
+    }) : patsR.current.find(function (x) {
+      return x.id === activeIdR.current;
+    });
+    var stepDur = 60 / bpmR.current / 4 * ((_masterPat$speedMult = masterPat === null || masterPat === void 0 ? void 0 : masterPat.speedMult) !== null && _masterPat$speedMult !== void 0 ? _masterPat$speedMult : speedMultR.current);
 
     // ── Free song mode: each layer has its own (step, nextAt, bar) timeline ──────
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
@@ -3193,18 +3210,21 @@ function Tabula() {
           lf.step = 0;
         }
         while (lf.nextAt < ctx.currentTime + LOOKAHEAD) {
-          var _pat$gridLen;
+          var _pat$gridLen, _pat$speedMult;
           var pat = resolvePat(_layer, lf.bar);
           var len = pat ? (_pat$gridLen = pat.gridLen) !== null && _pat$gridLen !== void 0 ? _pat$gridLen : 16 : 16;
+          // Per-pat speed in free mode — each layer advances at its own pat's
+          // rate, so songs with mixed-tempo pats actually drift independently.
+          var layerStepDur = 60 / bpmR.current / 4 * ((_pat$speedMult = pat === null || pat === void 0 ? void 0 : pat.speedMult) !== null && _pat$speedMult !== void 0 ? _pat$speedMult : speedMultR.current);
           var s = lf.step % len;
           var at = lf.nextAt;
           if (pat) {
-            if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, stepDur);
+            if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
           }
           // Advance step; on bar boundary advance bar within layer's range
           var ns = (s + 1) % len;
           lf.step = ns;
-          lf.nextAt += stepDur;
+          lf.nextAt += layerStepDur;
           if (ns === 0) {
             var nb = lf.bar + 1;
             if (nb > r.last) nb = r.empty ? 0 : r.first;
@@ -3399,7 +3419,7 @@ function Tabula() {
         var ratch = rhy;
         var subDur = stepDur / ratch;
         if (grid) for (var _r = 0; _r < ROWS; _r++) {
-          var _lastPlayedFreqR$curr;
+          var _lastPlayedFreqR$curr, _p$speedMult, _p;
           if (!grid[_r][_s]) continue;
           // Per-row duration. durs[r][s] = number of step cells this note covers.
           var dur = durs && durs[_r] && durs[_r][_s] ? Math.max(1, durs[_r][_s]) : 1;
@@ -3418,7 +3438,7 @@ function Tabula() {
           // Departure glide: glide on step N means slide FROM step N INTO step N+1
           // So we glide if the PREVIOUS step had glide enabled
           var prevF = lastGlideEnabledR.current ? (_lastPlayedFreqR$curr = lastPlayedFreqR.current) !== null && _lastPlayedFreqR$curr !== void 0 ? _lastPlayedFreqR$curr : null : null;
-          var glideTime = prevF && prevF !== actualF ? 60 / bpmR.current / 8 * speedMultR.current : 0;
+          var glideTime = prevF && prevF !== actualF ? 60 / bpmR.current / 8 * ((_p$speedMult = (_p = p) === null || _p === void 0 ? void 0 : _p.speedMult) !== null && _p$speedMult !== void 0 ? _p$speedMult : speedMultR.current) : 0;
           lastPlayedFreqR.current = actualF;
           lastGlideEnabledR.current = hasGlide; // store for next step to read
           if (ratch > 1) {
@@ -5513,6 +5533,31 @@ function Tabula() {
   }, [isOverStrip, getChainInsertIdx]);
   var loopSec = chain.length ? (chain.length * COLS / (bpm / 60 * 4)).toFixed(1) : "0.0";
   var stLabel = transpose === 0 ? "0" : transpose > 0 ? "+" + transpose : String(transpose);
+
+  // Per-pattern speed: the SPEED selector reads/writes the active pat's
+  // speedMult so each pattern can have its own playback rate. Falls back to
+  // the legacy global speedMult when the pat is missing the field.
+  var activePatForSpeed = activeLayer === "drums" ? drumPats.find(function (x) {
+    return x.id === activeDrumId;
+  }) : pats.find(function (x) {
+    return x.id === activeId;
+  });
+  var activePatSpeed = (_activePatForSpeed$sp = activePatForSpeed === null || activePatForSpeed === void 0 ? void 0 : activePatForSpeed.speedMult) !== null && _activePatForSpeed$sp !== void 0 ? _activePatForSpeed$sp : speedMult;
+  var setActivePatSpeed = function setActivePatSpeed(mult) {
+    if (activeLayer === "drums") setDrumPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== activeDrumId ? p : Object.assign({}, p, {
+          speedMult: mult
+        });
+      });
+    });else setPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== activeId ? p : Object.assign({}, p, {
+          speedMult: mult
+        });
+      });
+    });
+  };
   return /*#__PURE__*/React.createElement("div", {
     style: S.root,
     onContextMenu: function onContextMenu(e) {
@@ -5890,9 +5935,9 @@ function Tabula() {
         padding: winW > 900 ? "6px 2px" : "4px 1px",
         fontSize: winW > 900 ? 10 : 8,
         minWidth: 0
-      }, speedMult === mult ? S.speedBtnOn : {}),
+      }, Math.abs(activePatSpeed - mult) < 0.001 ? S.speedBtnOn : {}),
       onClick: function onClick() {
-        return setSpeedMult(mult);
+        return setActivePatSpeed(mult);
       }
     }, label);
   }))), !IS_MOBILE && /*#__PURE__*/React.createElement("div", {
@@ -9716,12 +9761,12 @@ function Tabula() {
       marginRight: 4
     }
   }, "SPEED"), SPEED_OPTS.map(function (opt) {
-    var sel = Math.abs(speedMult - opt.mult) < 0.001;
+    var sel = Math.abs(activePatSpeed - opt.mult) < 0.001;
     return /*#__PURE__*/React.createElement("div", {
       key: opt.label,
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
-        setSpeedMult(opt.mult);
+        setActivePatSpeed(opt.mult);
       },
       style: {
         padding: "5px 10px",

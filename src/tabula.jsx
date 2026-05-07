@@ -73,7 +73,7 @@ const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 // only one note plays at any moment (per-row monophony).
 const mkDurs=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(1));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16});
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,speedMult:1});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
   {key:"BD",label:"BD",color:"#e07060"},
@@ -88,7 +88,7 @@ const DRUM_VOICES=[
   {key:"CB",label:"CB",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
-const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0});
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
 const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({level:100,pan:0}));
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
@@ -1060,7 +1060,7 @@ export default function Tabula(){
     }
     // See doLoad note: legacy shares lack activeLayer; their `s.pats` is synth.
     {const t=s.activeLayer||"synth";if(t!==activeLayer)setActiveLayer(t);}
-    setPats(migratePats(s.pats));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
+    setPats(migratePats(s.pats,s.speedMult));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
@@ -1133,7 +1133,16 @@ export default function Tabula(){
   // from before chains were id-keyed, or ids referencing patterns that no longer
   // exist. Filter to valid ids only, with a name→id migration pass for legacy
   // saves where pats still carry their old name field.
-  const migratePats = (pats)=>(pats||[]).map(p=>p.durs?p:Object.assign({},p,{durs:mkDurs()}));
+  // Forward-migrate legacy pats to the current schema. Keep the original ref
+  // when nothing's missing so React reconciles cleanly. Pass the file's
+  // global speedMult as `defaultSpeed` so unmigrated pats inherit the session
+  // speed they were saved at, not 1×.
+  const migratePats = (pats, defaultSpeed=1)=>(pats||[]).map(p=>{
+    const updates={};
+    if(!p.durs) updates.durs=mkDurs();
+    if(p.speedMult==null) updates.speedMult=defaultSpeed!=null?defaultSpeed:1;
+    return Object.keys(updates).length ? Object.assign({},p,updates) : p;
+  });
 
   const sanitizeChain=(chain,pats)=>{
     if(!Array.isArray(chain))return[];
@@ -1153,6 +1162,7 @@ export default function Tabula(){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
           const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if(ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
           if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
           layerStoreR.current[layer]=ld;
         }
@@ -1165,7 +1175,7 @@ export default function Tabula(){
     setActiveLayer(s.activeLayer||"synth");
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(migratePats(s.pats));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
+    setPats(migratePats(s.pats,s.speedMult));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
     // layerParams: prefer new format; migrate old flat fields into synth slot if absent.
     if(s.layerParams){
       setLayerParams(s.layerParams);
@@ -1275,7 +1285,7 @@ export default function Tabula(){
   const applyShareState=s=>{
     if(!s)return;
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
-    if(s.pats)setPats(migratePats(s.pats));
+    if(s.pats)setPats(migratePats(s.pats,s.speedMult));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     if(s.bpm)setBpm(s.bpm);
     if(s.scale)setScale(s.scale);
@@ -1409,7 +1419,12 @@ export default function Tabula(){
     if(!bell.current.ready)return;
     const ctx=bell.current.ctx;
     const LOOKAHEAD=0.1; // seconds ahead to schedule
-    const stepDur=(60/bpmR.current/4)*speedMultR.current;
+    // Master stepDur is now per-pattern: it follows the ACTIVE LAYER's pat's
+    // speedMult. (Free mode below recomputes per-layer per-pat.)
+    const masterPat = activeLayerR.current==="drums"
+      ? drumPatsR.current.find(x=>x.id===activeDrumIdR.current)
+      : patsR.current.find(x=>x.id===activeIdR.current);
+    const stepDur=(60/bpmR.current/4)*(masterPat?.speedMult??speedMultR.current);
 
     // ── Free song mode: each layer has its own (step, nextAt, bar) timeline ──────
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
@@ -1451,16 +1466,19 @@ export default function Tabula(){
         while(lf.nextAt < ctx.currentTime + LOOKAHEAD){
           const pat = resolvePat(layer,lf.bar);
           const len = pat ? (pat.gridLen??16) : 16;
+          // Per-pat speed in free mode — each layer advances at its own pat's
+          // rate, so songs with mixed-tempo pats actually drift independently.
+          const layerStepDur = (60/bpmR.current/4)*(pat?.speedMult??speedMultR.current);
           const s = lf.step % len;
           const at = lf.nextAt;
           if(pat){
             if(layer==="drums") playDrumStep(pat,s,at);
-            else playSynthLayerStep(layer,pat,s,at,stepDur);
+            else playSynthLayerStep(layer,pat,s,at,layerStepDur);
           }
           // Advance step; on bar boundary advance bar within layer's range
           const ns=(s+1)%len;
           lf.step=ns;
-          lf.nextAt+=stepDur;
+          lf.nextAt+=layerStepDur;
           if(ns===0){
             let nb=lf.bar+1;
             if(nb>r.last)nb=r.empty?0:r.first;
@@ -1601,7 +1619,7 @@ export default function Tabula(){
           // Departure glide: glide on step N means slide FROM step N INTO step N+1
           // So we glide if the PREVIOUS step had glide enabled
           const prevF=lastGlideEnabledR.current?(lastPlayedFreqR.current??null):null;
-          const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*speedMultR.current:0;
+          const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*(p?.speedMult??speedMultR.current):0;
           lastPlayedFreqR.current=actualF;
           lastGlideEnabledR.current=hasGlide; // store for next step to read
           if(ratch>1){
@@ -2644,6 +2662,18 @@ export default function Tabula(){
   const loopSec=chain.length?(chain.length*COLS/(bpm/60*4)).toFixed(1):"0.0";
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
+  // Per-pattern speed: the SPEED selector reads/writes the active pat's
+  // speedMult so each pattern can have its own playback rate. Falls back to
+  // the legacy global speedMult when the pat is missing the field.
+  const activePatForSpeed = activeLayer==="drums"
+    ? drumPats.find(x=>x.id===activeDrumId)
+    : pats.find(x=>x.id===activeId);
+  const activePatSpeed = activePatForSpeed?.speedMult ?? speedMult;
+  const setActivePatSpeed = (mult)=>{
+    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{speedMult:mult})));
+    else setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{speedMult:mult})));
+  };
+
   return(
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
@@ -2808,8 +2838,8 @@ export default function Tabula(){
               {/* Speed — CSS grid forces equal cell width regardless of content */}
               <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(5,1fr)":"repeat(auto-fill,minmax(30px,1fr))",gap:3,marginBottom:winW>900?8:4}}>
                 {SPEED_OPTS.map(({label,mult})=>(
-                  <button key={label} style={Object.assign({},S.speedBtn,{padding:winW>900?"6px 2px":"4px 1px",fontSize:winW>900?10:8,minWidth:0},speedMult===mult?S.speedBtnOn:{})}
-                    onClick={()=>setSpeedMult(mult)}>{label}</button>
+                  <button key={label} style={Object.assign({},S.speedBtn,{padding:winW>900?"6px 2px":"4px 1px",fontSize:winW>900?10:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
+                    onClick={()=>setActivePatSpeed(mult)}>{label}</button>
                 ))}
               </div>
             </>
@@ -4088,9 +4118,9 @@ export default function Tabula(){
                         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,flexShrink:0}}>
                           <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginRight:4}}>SPEED</div>
                           {SPEED_OPTS.map(opt=>{
-                            const sel=Math.abs(speedMult-opt.mult)<0.001;
+                            const sel=Math.abs(activePatSpeed-opt.mult)<0.001;
                             return(
-                              <div key={opt.label} onPointerDown={e=>{e.stopPropagation();setSpeedMult(opt.mult);}}
+                              <div key={opt.label} onPointerDown={e=>{e.stopPropagation();setActivePatSpeed(opt.mult);}}
                                 style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+(sel?"rgba(168,197,160,0.7)":"rgba(168,197,160,0.18)"),background:sel?"rgba(168,197,160,0.15)":"transparent",color:sel?"#a8c5a0":"rgba(210,195,175,0.5)",fontSize:11,fontWeight:600,cursor:"pointer",userSelect:"none",lineHeight:1,flexShrink:0}}>
                                 {opt.label}
                               </div>
