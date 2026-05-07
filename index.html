@@ -28,11 +28,11 @@ function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t =
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
 function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
 function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
+function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n4 = 0, F = function F() {}; return { s: F, n: function n() { return _n4 >= r.length ? { done: !0 } : { done: !1, value: r[_n4++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
 function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
-function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n4 = 0, F = function F() {}; return { s: F, n: function n() { return _n4 >= r.length ? { done: !0 } : { done: !1, value: r[_n4++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _toConsumableArray(r) { return _arrayWithoutHoles(r) || _iterableToArray(r) || _unsupportedIterableToArray(r) || _nonIterableSpread(); }
 function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
@@ -454,17 +454,25 @@ var genVariation = function genVariation(grid) {
     }
     if (g[r][c]) on.push([r, c]);
   }
-  // Balance drops with adds: for every note removed, attempt to seed one new
-  // note at a random empty cell. Otherwise repeated MUT8 calls would drift the
-  // pattern toward empty.
-  for (var i = 0; i < droppedCount; i++) {
-    for (var tries = 0; tries < 10; tries++) {
-      var er = Math.floor(Math.random() * ROWS);
-      var ec = Math.floor(Math.random() * COLS);
-      if (!g[er][ec]) {
-        g[er][ec] = true;
-        break;
-      }
+  // Balance drops with adds: collect every empty cell, then sample without
+  // replacement up to `droppedCount` times. Avoids the under-add failure mode
+  // a fixed-tries random-pick had on dense grids; over many MUT8 calls the
+  // note count stays roughly stable rather than drifting toward empty.
+  if (droppedCount > 0) {
+    var empties = [];
+    for (var _r = 0; _r < ROWS; _r++) for (var _c = 0; _c < COLS; _c++) {
+      if (!g[_r][_c]) empties.push([_r, _c]);
+    }
+    var adds = Math.min(droppedCount, empties.length);
+    for (var i = 0; i < adds; i++) {
+      var j = i + Math.floor(Math.random() * (empties.length - i));
+      var tmp = empties[i];
+      empties[i] = empties[j];
+      empties[j] = tmp;
+      var _empties$i = _slicedToArray(empties[i], 2),
+        er = _empties$i[0],
+        ec = _empties$i[1];
+      g[er][ec] = true;
     }
   }
   if (ghost > 0) {
@@ -2341,9 +2349,6 @@ function Tabula() {
     swingR.current = swing;
   }, [swing]);
   useEffect(function () {
-    speedMultR.current = speedMult;
-  }, [speedMult]);
-  useEffect(function () {
     varyParamsR.current = {
       dropRate: vDropRate,
       shiftRate: vShiftRate,
@@ -2434,6 +2439,9 @@ function Tabula() {
       drumPhrases: JSON.parse(JSON.stringify(drumPhrases)),
       sections: JSON.parse(JSON.stringify(sections)),
       songMatrix: JSON.parse(JSON.stringify(songMatrix)),
+      songMode: songMode,
+      songView: songView,
+      songSyncMode: songSyncMode,
       activeId: activeId,
       activeDrumId: activeDrumId,
       activeSynthPhraseId: activeSynthPhraseId,
@@ -2490,6 +2498,9 @@ function Tabula() {
     setDrumPhrases(s.drumPhrases);
     setSections(s.sections);
     if (s.songMatrix) setSongMatrix(s.songMatrix);
+    if (s.songMode != null) setSongMode(s.songMode);
+    if (s.songView != null) setSongView(s.songView);
+    if (s.songSyncMode != null) setSongSyncMode(s.songSyncMode);
     setActiveId(s.activeId);
     setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);
@@ -2848,6 +2859,21 @@ function Tabula() {
   // (that's persistent storage outside the session). Confirms before
   // discarding any in-memory work, mirroring loadSlot's hasContent guard.
   var doNew = function doNew() {
+    // Stop playback if running — discarding work mid-play would otherwise leave
+    // the scheduler ticking against fresh state.
+    if (playing) {
+      clearInterval(tmrR.current);
+      setPlaying(false);
+      setStep(-1);
+      setPlayId(null);
+      setDrumStep(-1);
+      if (silentLoopR.current) {
+        try {
+          silentLoopR.current.pause();
+        } catch (e) {}
+      }
+      releaseWakeLock();
+    }
     var p0 = mkPat(symPat(0));
     var dp0 = mkDrumPat(symPat(0));
     setPats([p0]);
@@ -2866,11 +2892,20 @@ function Tabula() {
     setVaryMode(false);
     setSongMode(false);
     setSongView(false);
+    setSongSyncMode(true);
     setSongMatrix({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       bass: Array(64).fill(null),
       drums: Array(64).fill(null)
+    });
+    setSongBar(-1);
+    songBarR.current = -1;
+    setSongBarLayer({
+      synth: -1,
+      lead: -1,
+      bass: -1,
+      drums: -1
     });
     setBpm(120);
     setScale("major");
@@ -2899,6 +2934,28 @@ function Tabula() {
     setVOctJitter(0);
     setVGlideJitter(0);
     setVDurJitter(0);
+    // Transient scheduler/UI state — clear so the next play starts fresh.
+    stepR.current = 0;
+    cposR.current = 0;
+    if (prevFreqByRowR) prevFreqByRowR.current = {};
+    if (lastPlayedFreqR) lastPlayedFreqR.current = null;
+    if (lastGlideEnabledR) lastGlideEnabledR.current = false;
+    setRecMode(false);
+    recModeR.current = false;
+    if (variedGrids && variedGrids.current && variedGrids.current.clear) variedGrids.current.clear();
+    if (variedDrumGrids && variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
+    if (variedDrumVels && variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
+    if (freeR && freeR.current) {
+      for (var _i3 = 0, _arr = ["synth", "lead", "bass", "drums"]; _i3 < _arr.length; _i3++) {
+        var l = _arr[_i3];
+        if (freeR.current[l]) freeR.current[l] = {
+          step: 0,
+          nextAt: 0,
+          bar: 0
+        };
+      }
+    }
+    setPatternDrag(null);
     setActiveSlot(null);
     setPage("edit");
     showFlash("NEW PROJECT");
@@ -3239,8 +3296,8 @@ function Tabula() {
       var sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
-      for (var _i3 = 0, _arr = ["synth", "lead", "bass", "drums"]; _i3 < _arr.length; _i3++) {
-        var layer = _arr[_i3];
+      for (var _i4 = 0, _arr2 = ["synth", "lead", "bass", "drums"]; _i4 < _arr2.length; _i4++) {
+        var layer = _arr2[_i4];
         var first = -1,
           last = -1;
         for (var i = 0; i < 64; i++) {
@@ -3281,8 +3338,8 @@ function Tabula() {
       };
       var newCursor = _objectSpread({}, songBarLayer);
       var cursorChanged = false;
-      for (var _i4 = 0, _arr2 = ["synth", "lead", "bass", "drums"]; _i4 < _arr2.length; _i4++) {
-        var _layer = _arr2[_i4];
+      for (var _i5 = 0, _arr3 = ["synth", "lead", "bass", "drums"]; _i5 < _arr3.length; _i5++) {
+        var _layer = _arr3[_i5];
         var r = ranges[_layer];
         // Skip silent layers (no pats at all in their lane, except synth which has fallback)
         if (r.empty && !(_layer === "synth" && allEmpty)) continue;
@@ -3346,10 +3403,10 @@ function Tabula() {
         var _sm = songMatrixR.current;
         var firstBar = -1,
           lastBar = -1;
-        for (var _i5 = 0; _i5 < 64; _i5++) {
-          if (_sm.synth[_i5] != null || _sm.lead[_i5] != null || _sm.bass[_i5] != null || _sm.drums[_i5] != null) {
-            if (firstBar === -1) firstBar = _i5;
-            lastBar = _i5;
+        for (var _i6 = 0; _i6 < 64; _i6++) {
+          if (_sm.synth[_i6] != null || _sm.lead[_i6] != null || _sm.bass[_i6] != null || _sm.drums[_i6] != null) {
+            if (firstBar === -1) firstBar = _i6;
+            lastBar = _i6;
           }
         }
         var empty = firstBar === -1;
@@ -3501,17 +3558,17 @@ function Tabula() {
         var rhy = sp ? Math.max(1, Math.round((_sp$rhy2 = sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1)) : 1;
         var ratch = rhy;
         var subDur = stepDur / ratch;
-        if (grid) for (var _r = 0; _r < ROWS; _r++) {
+        if (grid) for (var _r2 = 0; _r2 < ROWS; _r2++) {
           var _lastPlayedFreqR$curr, _p$speedMult, _p;
-          if (!grid[_r][_s]) continue;
+          if (!grid[_r2][_s]) continue;
           // Per-row duration. durs[r][s] = number of step cells this note covers.
-          var dur = durs && durs[_r] && durs[_r][_s] ? Math.max(1, durs[_r][_s]) : 1;
+          var dur = durs && durs[_r2] && durs[_r2][_s] ? Math.max(1, durs[_r2][_s]) : 1;
           var noteDur = stepDur * dur;
           // In loop mode the synth-track plays the active layer's grid; route it
           // through THAT layer's params so the user hears bass-as-bass etc. In
           // song or default mode the synth-track is synth's, so use synth params.
           var synthLP = loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current) >= 0 ? layerParamsR.current[activeLayerR.current] : layerParamsR.current.synth;
-          var f = freqs[_r] * ratio;
+          var f = freqs[_r2] * ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
           // both step and layer octaves; mirror that here).
           var stepOct = sp ? sp.oct - 2 : 0;
@@ -3538,7 +3595,7 @@ function Tabula() {
         if (playSubLayers) {
           var _loop2 = function _loop2() {
               var _lSp$rhy;
-              var layer = _arr3[_i6];
+              var layer = _arr4[_i7];
               var lp, lLen;
               if (inSong) {
                 lp = layer === "lead" ? songLead : songBass;
@@ -3563,14 +3620,14 @@ function Tabula() {
               var lRhyRaw = lSp ? Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1) : 1;
               var lRhy = Math.max(1, lRhyRaw);
               var lSubDur = stepDur / lRhy;
-              for (var _r2 = 0; _r2 < ROWS; _r2++) {
-                if (!lp.grid[_r2][ls]) continue;
-                var lDur = lp.durs && lp.durs[_r2] && lp.durs[_r2][ls] ? Math.max(1, lp.durs[_r2][ls]) : 1;
+              for (var _r3 = 0; _r3 < ROWS; _r3++) {
+                if (!lp.grid[_r3][ls]) continue;
+                var lDur = lp.durs && lp.durs[_r3] && lp.durs[_r3][ls] ? Math.max(1, lp.durs[_r3][ls]) : 1;
                 var lNoteDur = stepDur * lDur;
                 var layerLP = layerParamsR.current[layer];
                 // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
                 // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
-                var lF = freqs[_r2] * ratio;
+                var lF = freqs[_r3] * ratio;
                 if (lRhy > 1) {
                   for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, null, 0, layerLP);
                 } else {
@@ -3579,7 +3636,7 @@ function Tabula() {
               }
             },
             _ret;
-          for (var _i6 = 0, _arr3 = ["lead", "bass"]; _i6 < _arr3.length; _i6++) {
+          for (var _i7 = 0, _arr4 = ["lead", "bass"]; _i7 < _arr4.length; _i7++) {
             _ret = _loop2();
             if (_ret === 0) continue;
           }
@@ -3641,15 +3698,15 @@ function Tabula() {
             }
             var useGrid = varyModeR.current ? variedDrumGrids.current.get(dPat.id) || dPat.grid : dPat.grid;
             var useVel = varyModeR.current ? variedDrumVels.current.get(dPat.id) || dPat.vel : dPat.vel;
-            for (var _r3 = 0; _r3 < DRUM_ROWS; _r3++) {
-              if (useGrid[_r3] && useGrid[_r3][ds]) {
+            for (var _r4 = 0; _r4 < DRUM_ROWS; _r4++) {
+              if (useGrid[_r4] && useGrid[_r4][ds]) {
                 var _useVel$ds;
                 var dVel = (_useVel$ds = useVel === null || useVel === void 0 ? void 0 : useVel[ds]) !== null && _useVel$ds !== void 0 ? _useVel$ds : 100;
-                var dMix = (dPat.mix || defaultDrumMix())[_r3] || {
+                var dMix = (dPat.mix || defaultDrumMix())[_r4] || {
                   level: 100,
                   pan: 0
                 };
-                drumEngine.current.play(DRUM_VOICES[_r3].key, at, dVel, dMix.level, dMix.pan);
+                drumEngine.current.play(DRUM_VOICES[_r4].key, at, dVel, dMix.level, dMix.pan);
               }
             }
             setDrumStep(ds);
@@ -3685,7 +3742,7 @@ function Tabula() {
   }, []);
   var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, sm, t0, layerFirst, _i7, _arr4, layer, f, i, firstBar, _i8, _t4;
+      var dlyT, sm, t0, layerFirst, _i8, _arr5, layer, f, i, firstBar, _i9, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -3791,13 +3848,13 @@ function Tabula() {
             sm = songMatrix; // Per-layer first populated bar — used for free mode init
             t0 = bell.current.ctx.currentTime + 0.05;
             layerFirst = {};
-            _i7 = 0, _arr4 = ["synth", "lead", "bass", "drums"];
+            _i8 = 0, _arr5 = ["synth", "lead", "bass", "drums"];
           case 11:
-            if (!(_i7 < _arr4.length)) {
+            if (!(_i8 < _arr5.length)) {
               _context9.n = 16;
               break;
             }
-            layer = _arr4[_i7];
+            layer = _arr5[_i8];
             f = -1;
             i = 0;
           case 12:
@@ -3823,25 +3880,25 @@ function Tabula() {
               bar: layerFirst[layer]
             };
           case 15:
-            _i7++;
+            _i8++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i8 = 0;
+            _i9 = 0;
           case 17:
-            if (!(_i8 < 64)) {
+            if (!(_i9 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i8] != null || sm.lead[_i8] != null || sm.bass[_i8] != null || sm.drums[_i8] != null)) {
+            if (!(sm.synth[_i9] != null || sm.lead[_i9] != null || sm.bass[_i9] != null || sm.drums[_i9] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i8;
+            firstBar = _i9;
             return _context9.a(3, 19);
           case 18:
-            _i8++;
+            _i9++;
             _context9.n = 17;
             break;
           case 19:

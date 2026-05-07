@@ -133,14 +133,21 @@ const genVariation=(grid,vp={})=>{
     }
     if(g[r][c])on.push([r,c]);
   }
-  // Balance drops with adds: for every note removed, attempt to seed one new
-  // note at a random empty cell. Otherwise repeated MUT8 calls would drift the
-  // pattern toward empty.
-  for(let i=0;i<droppedCount;i++){
-    for(let tries=0;tries<10;tries++){
-      const er=Math.floor(Math.random()*ROWS);
-      const ec=Math.floor(Math.random()*COLS);
-      if(!g[er][ec]){g[er][ec]=true;break;}
+  // Balance drops with adds: collect every empty cell, then sample without
+  // replacement up to `droppedCount` times. Avoids the under-add failure mode
+  // a fixed-tries random-pick had on dense grids; over many MUT8 calls the
+  // note count stays roughly stable rather than drifting toward empty.
+  if(droppedCount>0){
+    const empties=[];
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      if(!g[r][c])empties.push([r,c]);
+    }
+    const adds=Math.min(droppedCount,empties.length);
+    for(let i=0;i<adds;i++){
+      const j=i+Math.floor(Math.random()*(empties.length-i));
+      const tmp=empties[i];empties[i]=empties[j];empties[j]=tmp;
+      const[er,ec]=empties[i];
+      g[er][ec]=true;
     }
   }
   if(ghost>0){
@@ -998,7 +1005,6 @@ export default function Tabula(){
     else recSourceIdR.current=null;
   },[recMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
-  useEffect(()=>{speedMultR.current=speedMult;},[speedMult]);
   useEffect(()=>{
     varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,fltJitter:vFltJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
   },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,vGlideJitter,vDurJitter]);
@@ -1039,6 +1045,7 @@ export default function Tabula(){
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
     songMatrix:JSON.parse(JSON.stringify(songMatrix)),
+    songMode,songView,songSyncMode,
     activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
@@ -1063,6 +1070,9 @@ export default function Tabula(){
     setPats(migratePats(s.pats,s.speedMult));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
+    if(s.songMode!=null)setSongMode(s.songMode);
+    if(s.songView!=null)setSongView(s.songView);
+    if(s.songSyncMode!=null)setSongSyncMode(s.songSyncMode);
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
@@ -1249,6 +1259,14 @@ export default function Tabula(){
   // (that's persistent storage outside the session). Confirms before
   // discarding any in-memory work, mirroring loadSlot's hasContent guard.
   const doNew=()=>{
+    // Stop playback if running — discarding work mid-play would otherwise leave
+    // the scheduler ticking against fresh state.
+    if(playing){
+      clearInterval(tmrR.current);
+      setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
+      if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
+      releaseWakeLock();
+    }
     const p0=mkPat(symPat(0));
     const dp0=mkDrumPat(symPat(0));
     setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
@@ -1256,8 +1274,10 @@ export default function Tabula(){
     layerStoreR.current={synth:null,lead:null,bass:null};
     setActiveLayer("synth");
     setLoopMode(false);setVaryMode(false);
-    setSongMode(false);setSongView(false);
+    setSongMode(false);setSongView(false);setSongSyncMode(true);
     setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),bass:Array(64).fill(null),drums:Array(64).fill(null)});
+    setSongBar(-1);songBarR.current=-1;
+    setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
@@ -1265,6 +1285,21 @@ export default function Tabula(){
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
     setVRhyJitter(0);setVOctJitter(0);setVGlideJitter(0);setVDurJitter(0);
+    // Transient scheduler/UI state — clear so the next play starts fresh.
+    stepR.current=0;cposR.current=0;
+    if(prevFreqByRowR)prevFreqByRowR.current={};
+    if(lastPlayedFreqR)lastPlayedFreqR.current=null;
+    if(lastGlideEnabledR)lastGlideEnabledR.current=false;
+    setRecMode(false);recModeR.current=false;
+    if(variedGrids&&variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
+    if(variedDrumGrids&&variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
+    if(variedDrumVels&&variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
+    if(freeR&&freeR.current){
+      for(const l of ["synth","lead","bass","drums"]){
+        if(freeR.current[l]) freeR.current[l]={step:0,nextAt:0,bar:0};
+      }
+    }
+    setPatternDrag(null);
     setActiveSlot(null);
     setPage("edit");
     showFlash("NEW PROJECT");
