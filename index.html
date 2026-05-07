@@ -430,11 +430,13 @@ var genVariation = function genVariation(grid) {
   var pRange = (_vp$pitchRange = vp.pitchRange) !== null && _vp$pitchRange !== void 0 ? _vp$pitchRange : 1;
   var ghost = ((_vp$ghostRate = vp.ghostRate) !== null && _vp$ghostRate !== void 0 ? _vp$ghostRate : 0) / 100;
   var on = [];
+  var droppedCount = 0;
   for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLS; c++) {
     if (!grid[r][c]) continue;
     var roll = Math.random();
     if (roll < drop) {
       g[r][c] = false;
+      droppedCount++;
     } else if (roll < drop + shift) {
       var nc = (c + (Math.floor(Math.random() * sRange * 2 + 1) - sRange) + COLS) % COLS;
       if (!g[r][nc]) {
@@ -449,6 +451,19 @@ var genVariation = function genVariation(grid) {
       }
     }
     if (g[r][c]) on.push([r, c]);
+  }
+  // Balance drops with adds: for every note removed, attempt to seed one new
+  // note at a random empty cell. Otherwise repeated MUT8 calls would drift the
+  // pattern toward empty.
+  for (var i = 0; i < droppedCount; i++) {
+    for (var tries = 0; tries < 10; tries++) {
+      var er = Math.floor(Math.random() * ROWS);
+      var ec = Math.floor(Math.random() * COLS);
+      if (!g[er][ec]) {
+        g[er][ec] = true;
+        break;
+      }
+    }
   }
   if (ghost > 0) {
     var _iterator = _createForOfIteratorHelper(on),
@@ -3312,7 +3327,10 @@ function Tabula() {
         });
         activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
       } else {
-        var _synthData$activeId2, _p$gridLen2;
+        var _synthData$activeId2, _aPat$gridLen;
+        // Default pattern mode: synth voice plays from synth, but the master loop
+        // length follows the ACTIVE LAYER's pat. Otherwise a 12-step bass gets
+        // truncated by synth's 16-step default and the bass loops 12-4-12-4.
         var _synthData = activeLayerR.current === "synth" ? {
           pats: patsR.current,
           activeId: activeIdR.current
@@ -3321,7 +3339,13 @@ function Tabula() {
         p = _synthData ? _synthData.pats.find(function (x) {
           return x.id === pid;
         }) : null;
-        activeLen = p ? (_p$gridLen2 = p.gridLen) !== null && _p$gridLen2 !== void 0 ? _p$gridLen2 : 16 : 16;
+        var aPat;
+        if (activeLayerR.current === "drums") aPat = drumPatsR.current.find(function (x) {
+          return x.id === activeDrumIdR.current;
+        });else if (activeLayerR.current === "synth") aPat = p;else aPat = patsR.current.find(function (x) {
+          return x.id === activeIdR.current;
+        }); // lead/bass: live pats
+        activeLen = aPat ? (_aPat$gridLen = aPat.gridLen) !== null && _aPat$gridLen !== void 0 ? _aPat$gridLen : 16 : 16;
       }
       // Run the scheduler unconditionally — lead/bass/drums may have content even if synth pat is missing.
       {
@@ -3380,7 +3404,10 @@ function Tabula() {
           // Per-row duration. durs[r][s] = number of step cells this note covers.
           var dur = durs && durs[_r] && durs[_r][_s] ? Math.max(1, durs[_r][_s]) : 1;
           var noteDur = stepDur * dur;
-          var synthLP = layerParamsR.current.synth;
+          // In loop mode the synth-track plays the active layer's grid; route it
+          // through THAT layer's params so the user hears bass-as-bass etc. In
+          // song or default mode the synth-track is synth's, so use synth params.
+          var synthLP = loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current) >= 0 ? layerParamsR.current[activeLayerR.current] : layerParamsR.current.synth;
           var f = freqs[_r] * ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
           // both step and layer octaves; mirror that here).
@@ -3400,56 +3427,64 @@ function Tabula() {
             bell.current.play(f, at, sp, noteDur, synthLP.dlySend, prevF, glideTime, synthLP);
           }
         }
-        // Lead & Bass — play their currently-active pattern through the same Bell
-        var _loop2 = function _loop2() {
-            var _lSp$rhy;
-            var layer = _arr3[_i6];
-            var lp, lLen;
-            if (inSong) {
-              lp = layer === "lead" ? songLead : songBass;
-              if (!lp || !lp.grid) return 0; // continue
-              lLen = songBarLen;
-            } else {
-              var _lp$gridLen;
-              var lData = activeLayerR.current === layer ? {
-                pats: patsR.current,
-                activeId: activeIdR.current
-              } : layerStoreR.current[layer];
-              if (!lData) return 0; // continue
-              lp = lData.pats.find(function (x) {
-                return x.id === lData.activeId;
-              });
-              if (!lp || !lp.grid) return 0; // continue
-              lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
-            }
-            var ls = _s % lLen;
-            var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
-            var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
-            var lRhyRaw = lSp ? Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1) : 1;
-            var lRhy = Math.max(1, lRhyRaw);
-            var lSubDur = stepDur / lRhy;
-            for (var _r2 = 0; _r2 < ROWS; _r2++) {
-              if (!lp.grid[_r2][ls]) continue;
-              var lDur = lp.durs && lp.durs[_r2] && lp.durs[_r2][ls] ? Math.max(1, lp.durs[_r2][ls]) : 1;
-              var lNoteDur = stepDur * lDur;
-              var layerLP = layerParamsR.current[layer];
-              // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
-              // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
-              var lF = freqs[_r2] * ratio;
-              if (lRhy > 1) {
-                for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, null, 0, layerLP);
+        // Lead & Bass — play their currently-active pattern through the same Bell.
+        // Loop mode is strict solo of the active layer (the synth-track path above
+        // already covers it through the active layer's params), so skip the
+        // lead/bass loop in loop+non-song mode to avoid octave-doubling artifacts.
+        var playSubLayers = inSong || !loopR.current;
+        if (playSubLayers) {
+          var _loop2 = function _loop2() {
+              var _lSp$rhy;
+              var layer = _arr3[_i6];
+              var lp, lLen;
+              if (inSong) {
+                lp = layer === "lead" ? songLead : songBass;
+                if (!lp || !lp.grid) return 0; // continue
+                lLen = songBarLen;
               } else {
-                bell.current.play(lF, at, lSp, lNoteDur, layerLP.dlySend, null, 0, layerLP);
+                var _lp$gridLen;
+                var lData = activeLayerR.current === layer ? {
+                  pats: patsR.current,
+                  activeId: activeIdR.current
+                } : layerStoreR.current[layer];
+                if (!lData) return 0; // continue
+                lp = lData.pats.find(function (x) {
+                  return x.id === lData.activeId;
+                });
+                if (!lp || !lp.grid) return 0; // continue
+                lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
               }
-            }
-          },
-          _ret;
-        for (var _i6 = 0, _arr3 = ["lead", "bass"]; _i6 < _arr3.length; _i6++) {
-          _ret = _loop2();
-          if (_ret === 0) continue;
+              var ls = _s % lLen;
+              var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
+              var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
+              var lRhyRaw = lSp ? Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1) : 1;
+              var lRhy = Math.max(1, lRhyRaw);
+              var lSubDur = stepDur / lRhy;
+              for (var _r2 = 0; _r2 < ROWS; _r2++) {
+                if (!lp.grid[_r2][ls]) continue;
+                var lDur = lp.durs && lp.durs[_r2] && lp.durs[_r2][ls] ? Math.max(1, lp.durs[_r2][ls]) : 1;
+                var lNoteDur = stepDur * lDur;
+                var layerLP = layerParamsR.current[layer];
+                // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
+                // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
+                var lF = freqs[_r2] * ratio;
+                if (lRhy > 1) {
+                  for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, null, 0, layerLP);
+                } else {
+                  bell.current.play(lF, at, lSp, lNoteDur, layerLP.dlySend, null, 0, layerLP);
+                }
+              }
+            },
+            _ret;
+          for (var _i6 = 0, _arr3 = ["lead", "bass"]; _i6 < _arr3.length; _i6++) {
+            _ret = _loop2();
+            if (_ret === 0) continue;
+          }
         }
-        // Drum layer — uses drumChain for sequencing (or song matrix in song mode)
-        if (drumEngine.current.ready) {
+        // Drum layer — uses drumChain for sequencing (or song matrix in song mode).
+        // In loop mode, drums only play if drums is the active (soloed) layer.
+        var playDrums = inSong || !loopR.current || activeLayerR.current === "drums";
+        if (playDrums && drumEngine.current.ready) {
           var dPat,
             dLen,
             ds,
@@ -6039,7 +6074,7 @@ function Tabula() {
                 };
                 var targetPats = targetData.pats || [];
                 if (targetPats.length < 8) {
-                  var _p$gridLen3;
+                  var _p$gridLen2;
                   pushHistory();
                   var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
                     grid: p.grid.map(function (r) {
@@ -6051,7 +6086,7 @@ function Tabula() {
                     params: (p.params || defaultStepParams()).map(function (s) {
                       return Object.assign({}, s);
                     }),
-                    gridLen: (_p$gridLen3 = p.gridLen) !== null && _p$gridLen3 !== void 0 ? _p$gridLen3 : 16
+                    gridLen: (_p$gridLen2 = p.gridLen) !== null && _p$gridLen2 !== void 0 ? _p$gridLen2 : 16
                   });
                   layerStoreR.current[tl] = _objectSpread(_objectSpread({}, targetData), {}, {
                     pats: [].concat(_toConsumableArray(targetPats), [newPat]),

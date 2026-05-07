@@ -119,10 +119,11 @@ const genVariation=(grid,vp={})=>{
   const pRange=vp.pitchRange??1;
   const ghost=(vp.ghostRate??0)/100;
   const on=[];
+  let droppedCount=0;
   for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
     if(!grid[r][c])continue;
     const roll=Math.random();
-    if(roll<drop){ g[r][c]=false; }
+    if(roll<drop){ g[r][c]=false; droppedCount++; }
     else if(roll<drop+shift){
       const nc=(c+(Math.floor(Math.random()*sRange*2+1)-sRange)+COLS)%COLS;
       if(!g[r][nc]){g[r][c]=false;g[r][nc]=true;}
@@ -131,6 +132,16 @@ const genVariation=(grid,vp={})=>{
       if(!g[nr][c]){g[r][c]=false;g[nr][c]=true;}
     }
     if(g[r][c])on.push([r,c]);
+  }
+  // Balance drops with adds: for every note removed, attempt to seed one new
+  // note at a random empty cell. Otherwise repeated MUT8 calls would drift the
+  // pattern toward empty.
+  for(let i=0;i<droppedCount;i++){
+    for(let tries=0;tries<10;tries++){
+      const er=Math.floor(Math.random()*ROWS);
+      const ec=Math.floor(Math.random()*COLS);
+      if(!g[er][ec]){g[er][ec]=true;break;}
+    }
   }
   if(ghost>0){
     for(const[br,bc]of on){
@@ -1526,10 +1537,17 @@ export default function Tabula(){
         p = patsR.current.find(x=>x.id===pid);
         activeLen = p?(p.gridLen??16):16;
       } else {
+        // Default pattern mode: synth voice plays from synth, but the master loop
+        // length follows the ACTIVE LAYER's pat. Otherwise a 12-step bass gets
+        // truncated by synth's 16-step default and the bass loops 12-4-12-4.
         const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
         pid = synthData?.activeId ?? -1;
         p = synthData ? synthData.pats.find(x=>x.id===pid) : null;
-        activeLen = p?(p.gridLen??16):16;
+        let aPat;
+        if(activeLayerR.current==="drums") aPat = drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
+        else if(activeLayerR.current==="synth") aPat = p;
+        else aPat = patsR.current.find(x=>x.id===activeIdR.current); // lead/bass: live pats
+        activeLen = aPat?(aPat.gridLen??16):16;
       }
       // Run the scheduler unconditionally — lead/bass/drums may have content even if synth pat is missing.
       {
@@ -1567,7 +1585,12 @@ export default function Tabula(){
           // Per-row duration. durs[r][s] = number of step cells this note covers.
           const dur = (durs&&durs[r]&&durs[r][s])?Math.max(1,durs[r][s]):1;
           const noteDur = stepDur * dur;
-          const synthLP = layerParamsR.current.synth;
+          // In loop mode the synth-track plays the active layer's grid; route it
+          // through THAT layer's params so the user hears bass-as-bass etc. In
+          // song or default mode the synth-track is synth's, so use synth params.
+          const synthLP = (loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current)>=0)
+            ? layerParamsR.current[activeLayerR.current]
+            : layerParamsR.current.synth;
           const f=freqs[r]*ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
           // both step and layer octaves; mirror that here).
@@ -1587,8 +1610,12 @@ export default function Tabula(){
             bell.current.play(f,at,sp,noteDur,synthLP.dlySend,prevF,glideTime,synthLP);
           }
         }
-        // Lead & Bass — play their currently-active pattern through the same Bell
-        for(const layer of ["lead","bass"]){
+        // Lead & Bass — play their currently-active pattern through the same Bell.
+        // Loop mode is strict solo of the active layer (the synth-track path above
+        // already covers it through the active layer's params), so skip the
+        // lead/bass loop in loop+non-song mode to avoid octave-doubling artifacts.
+        const playSubLayers = inSong || !loopR.current;
+        if(playSubLayers) for(const layer of ["lead","bass"]){
           let lp, lLen;
           if(inSong){
             lp = layer==="lead" ? songLead : songBass;
@@ -1624,8 +1651,10 @@ export default function Tabula(){
             }
           }
         }
-        // Drum layer — uses drumChain for sequencing (or song matrix in song mode)
-        if(drumEngine.current.ready){
+        // Drum layer — uses drumChain for sequencing (or song matrix in song mode).
+        // In loop mode, drums only play if drums is the active (soloed) layer.
+        const playDrums = inSong || !loopR.current || activeLayerR.current==="drums";
+        if(playDrums && drumEngine.current.ready){
           let dPat, dLen, ds, dChain=null, dcp=0;
           if(inSong){
             dPat = songDrum;
