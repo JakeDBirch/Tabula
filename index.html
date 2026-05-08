@@ -8319,15 +8319,16 @@ function Tabula() {
       var _sp$lane$key;
       return (_sp$lane$key = sp[lane.key]) !== null && _sp$lane$key !== void 0 ? _sp$lane$key : lane.def;
     });
-    // Per-note params (vel, dur) only apply at the note's start cell.
-    // Modulation params (flt, dly, oct, glide, rhy) keep animating during
-    // tied notes, so unlock cells under any (tied) note's extension too.
-    var isPerNote = lane.key === "vel" || lane.key === "dur";
+    // Only FLT/OCT/GLIDE actually animate mid-note (Bell.play's mods array
+    // schedules cutoff/pitch/transition style). Everything else (VEL, DUR,
+    // DLY, REV, RHY) is locked at note-start, so on tied-note extension
+    // cells those lanes stay locked.
+    var isMidNote = lane.key === "flt" || lane.key === "oct" || lane.key === "glide";
     var colHasNote = Array.from({
       length: COLS
     }, function (_, c) {
       if (!activePat) return false;
-      if (isPerNote) {
+      if (!isMidNote) {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
@@ -10368,14 +10369,15 @@ function Tabula() {
       var _sp$lane$key2;
       return (_sp$lane$key2 = sp[lane.key]) !== null && _sp$lane$key2 !== void 0 ? _sp$lane$key2 : lane.def;
     });
-    // Per-note (vel, dur) only at note start; modulation lanes keep
-    // editing during tied-note extensions.
-    var isPerNote = lane.key === "vel" || lane.key === "dur";
+    // Only FLT/OCT/GLIDE animate mid-note via Bell.play's mods array.
+    // VEL/DUR/DLY/REV/RHY are locked at note-start, so tied-note
+    // extension cells stay locked for those lanes.
+    var isMidNote = lane.key === "flt" || lane.key === "oct" || lane.key === "glide";
     var colHasNote = Array.from({
       length: COLS
     }, function (_, c) {
       if (!activePat) return false;
-      if (isPerNote) {
+      if (!isMidNote) {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }

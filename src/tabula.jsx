@@ -3796,13 +3796,14 @@ export default function Tabula(){
                 </div>
                   {LANES.map(lane=>{
                     const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                    // Per-note params (vel, dur) only apply at the note's start cell.
-                    // Modulation params (flt, dly, oct, glide, rhy) keep animating during
-                    // tied notes, so unlock cells under any (tied) note's extension too.
-                    const isPerNote=lane.key==="vel"||lane.key==="dur";
+                    // Only FLT/OCT/GLIDE actually animate mid-note (Bell.play's mods array
+                    // schedules cutoff/pitch/transition style). Everything else (VEL, DUR,
+                    // DLY, REV, RHY) is locked at note-start, so on tied-note extension
+                    // cells those lanes stay locked.
+                    const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
                     const colHasNote=Array.from({length:COLS},(_,c)=>{
                       if(!activePat)return false;
-                      if(isPerNote){
+                      if(!isMidNote){
                         for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
                         return false;
                       }
@@ -4444,12 +4445,13 @@ export default function Tabula(){
                         </div>
                         {LANES.map(lane=>{
                           const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
-                          // Per-note (vel, dur) only at note start; modulation lanes keep
-                          // editing during tied-note extensions.
-                          const isPerNote=lane.key==="vel"||lane.key==="dur";
+                          // Only FLT/OCT/GLIDE animate mid-note via Bell.play's mods array.
+                          // VEL/DUR/DLY/REV/RHY are locked at note-start, so tied-note
+                          // extension cells stay locked for those lanes.
+                          const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
                           const colHasNote=Array.from({length:COLS},(_,c)=>{
                             if(!activePat)return false;
-                            if(isPerNote){
+                            if(!isMidNote){
                               for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
                               return false;
                             }
