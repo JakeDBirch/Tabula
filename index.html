@@ -1306,8 +1306,9 @@ var Bell = /*#__PURE__*/function () {
       o1.connect(vcf);
       o1.start(t);
       o1.stop(t + end + .05);
+      var o2 = null;
       if (p.detune > 2) {
-        var o2 = this.ctx.createOscillator();
+        o2 = this.ctx.createOscillator();
         o2.type = p.waveform;
         if (prevFreq && glideTime > 0) {
           o2.frequency.setValueAtTime(Math.max(1, prevFreq), t);
@@ -1319,6 +1320,41 @@ var Bell = /*#__PURE__*/function () {
         o2.connect(vcf);
         o2.start(t);
         o2.stop(t + end + .05);
+      }
+      // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
+      // oct (relative to row) is scheduled on the oscillators while the single
+      // envelope keeps holding — giving mono-legato behavior. GLIDE on a sub-
+      // step makes the transition INTO the next sub-step a smooth slide;
+      // otherwise it jumps. The initial step's glide flag governs the
+      // transition INTO the first mod.
+      if (hasMods) {
+        var prevModFreq = playFreq;
+        var prevModGlide = !!(sp && sp.glide);
+        var _iterator5 = _createForOfIteratorHelper(mods),
+          _step5;
+        try {
+          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+            var _m = _step5.value;
+            if (_m.at <= t || _m.at >= t + dur) continue;
+            var mStepOct = _m.sp ? _m.sp.oct - 2 : 0;
+            var mPlayFreq = freq * Math.pow(2, mStepOct + layerOct);
+            if (Math.abs(mPlayFreq - prevModFreq) > 0.5) {
+              if (prevModGlide) {
+                o1.frequency.exponentialRampToValueAtTime(Math.max(1, mPlayFreq), _m.at);
+                if (o2) o2.frequency.exponentialRampToValueAtTime(Math.max(1, mPlayFreq), _m.at);
+              } else {
+                o1.frequency.setValueAtTime(Math.max(1, mPlayFreq), _m.at);
+                if (o2) o2.frequency.setValueAtTime(Math.max(1, mPlayFreq), _m.at);
+              }
+            }
+            prevModFreq = mPlayFreq;
+            prevModGlide = !!(_m.sp && _m.sp.glide);
+          }
+        } catch (err) {
+          _iterator5.e(err);
+        } finally {
+          _iterator5.f();
+        }
       }
       vcf.connect(vca);
       // Dry: always direct to master at full level
@@ -4443,11 +4479,11 @@ function Tabula() {
     // Use a per-touch-identifier map so multi-touch is handled correctly.
     var scrollableStarts = new Map(); // identifier → boolean
     var onTouchStart = function onTouchStart(e) {
-      var _iterator5 = _createForOfIteratorHelper(e.changedTouches),
-        _step5;
+      var _iterator6 = _createForOfIteratorHelper(e.changedTouches),
+        _step6;
       try {
-        for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
-          var t = _step5.value;
+        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+          var t = _step6.value;
           var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
           while (el && el !== document.body) {
@@ -4461,42 +4497,42 @@ function Tabula() {
           scrollableStarts.set(t.identifier, scrollable);
         }
       } catch (err) {
-        _iterator5.e(err);
-      } finally {
-        _iterator5.f();
-      }
-    };
-    var onTouchEnd = function onTouchEnd(e) {
-      var _iterator6 = _createForOfIteratorHelper(e.changedTouches),
-        _step6;
-      try {
-        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
-          var t = _step6.value;
-          scrollableStarts["delete"](t.identifier);
-        }
-      } catch (err) {
         _iterator6.e(err);
       } finally {
         _iterator6.f();
       }
     };
-    var noOverscroll = function noOverscroll(e) {
-      // Block if ALL active touches started on non-scrollable elements
-      var anyScrollable = false;
-      var _iterator7 = _createForOfIteratorHelper(e.touches),
+    var onTouchEnd = function onTouchEnd(e) {
+      var _iterator7 = _createForOfIteratorHelper(e.changedTouches),
         _step7;
       try {
         for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
           var t = _step7.value;
+          scrollableStarts["delete"](t.identifier);
+        }
+      } catch (err) {
+        _iterator7.e(err);
+      } finally {
+        _iterator7.f();
+      }
+    };
+    var noOverscroll = function noOverscroll(e) {
+      // Block if ALL active touches started on non-scrollable elements
+      var anyScrollable = false;
+      var _iterator8 = _createForOfIteratorHelper(e.touches),
+        _step8;
+      try {
+        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+          var t = _step8.value;
           if (scrollableStarts.get(t.identifier)) {
             anyScrollable = true;
             break;
           }
         }
       } catch (err) {
-        _iterator7.e(err);
+        _iterator8.e(err);
       } finally {
-        _iterator7.f();
+        _iterator8.f();
       }
       if (!anyScrollable && e.cancelable) e.preventDefault();
     };

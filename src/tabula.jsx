@@ -539,8 +539,9 @@ class Bell{
       o1.frequency.value=playFreq;
     }
     o1.connect(vcf);o1.start(t);o1.stop(t+end+.05);
+    let o2=null;
     if(p.detune>2){
-      const o2=this.ctx.createOscillator();
+      o2=this.ctx.createOscillator();
       o2.type=p.waveform;
       if(prevFreq&&glideTime>0){
         o2.frequency.setValueAtTime(Math.max(1,prevFreq),t);
@@ -550,6 +551,32 @@ class Bell{
       }
       o2.detune.value=p.detune;
       o2.connect(vcf);o2.start(t);o2.stop(t+end+.05);
+    }
+    // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
+    // oct (relative to row) is scheduled on the oscillators while the single
+    // envelope keeps holding — giving mono-legato behavior. GLIDE on a sub-
+    // step makes the transition INTO the next sub-step a smooth slide;
+    // otherwise it jumps. The initial step's glide flag governs the
+    // transition INTO the first mod.
+    if(hasMods){
+      let prevModFreq=playFreq;
+      let prevModGlide=!!(sp&&sp.glide);
+      for(const m of mods){
+        if(m.at<=t||m.at>=t+dur)continue;
+        const mStepOct=m.sp?(m.sp.oct-2):0;
+        const mPlayFreq=freq*Math.pow(2,mStepOct+layerOct);
+        if(Math.abs(mPlayFreq-prevModFreq)>0.5){
+          if(prevModGlide){
+            o1.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
+            if(o2)o2.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
+          } else {
+            o1.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
+            if(o2)o2.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
+          }
+        }
+        prevModFreq=mPlayFreq;
+        prevModGlide=!!(m.sp&&m.sp.glide);
+      }
     }
     vcf.connect(vca);
     // Dry: always direct to master at full level
