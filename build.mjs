@@ -40,9 +40,12 @@ writeFileSync(srcStripped, prepped);
 // that Windows CreateProcess can't exec (execFileSync doesn't use a shell),
 // so going through node here works identically on all platforms.
 const babelJs = "node_modules/@babel/cli/bin/babel.js";
+// Bump V8's old-space heap so Babel can transform the JSX without OOMing.
+// At ~6.5k LOC the default 4GB heap was failing the CJS audit pass; 8GB has
+// margin for further growth.
 const runBabel = (args) => execFileSync(
   process.execPath,
-  [babelJs, ...args],
+  ["--max-old-space-size=8192", babelJs, ...args],
   { stdio: ["ignore", "pipe", "pipe"] }
 );
 try {
