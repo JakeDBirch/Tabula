@@ -60,7 +60,7 @@ const SHIFT_THRESHOLD=10;
 const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
-const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f";
+const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
 
 const rowHue=r=>Math.round(195-(r/(ROWS-1))*135);
 const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
@@ -72,7 +72,7 @@ const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 // extending one note's duration doesn't affect notes in other rows. Within a row,
 // only one note plays at any moment (per-row monophony).
 const mkDurs=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(1));
-const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rhy:1,dur:0,oct:2,glide:0}));
+const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0}));
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,speedMult:1});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
@@ -170,6 +170,7 @@ const jitterStepParam=(sp,vp)=>{
     vel: vp.velJitter>0   ? jit(sp.vel, vp.velJitter*0.4, 0,127) : sp.vel,
     flt: vp.fltJitter>0   ? jit(sp.flt, vp.fltJitter*0.25,0,100) : sp.flt,
     dly: vp.dlyJitter>0   ? jit(sp.dly, vp.dlyJitter*0.4, 0,100) : sp.dly,
+    rev: sp.rev??0, // preserve through vary; no rev-specific jitter knob yet
     rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [1,1,2,3,4][Math.floor(Math.random()*5)] : sp.rhy,
     oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
     glide: vp.glideJitter>0 ? (Math.random()<vp.glideJitter/100?1:sp.glide) : sp.glide,
@@ -248,6 +249,7 @@ const LANES=[
   {key:"vel",  label:"VEL",  color:"#c8bfb0",min:0,   max:127, def:100, center:null, bool:false},
   {key:"flt",  label:"FLT",  color:"#c97b8a",min:0,   max:100, def:50,  center:50,   bool:false},
   {key:"dly",  label:"DLY",  color:"#7aaa96",min:0,   max:100, def:0,   center:null, bool:false},
+  {key:"rev",  label:"REV",  color:"#a8b8d0",min:0,   max:100, def:0,   center:null, bool:false},
   {key:"rhy",  label:"RTCH", color:"#c9a96e",min:1,   max:4,   def:1,   center:null, bool:false},
   {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
   {key:"oct",  label:"OCT",  color:"#b5a0c4",min:0,   max:4,   def:2,   center:2,    bool:false},
@@ -375,12 +377,27 @@ class Bell{
     await this.ctx.resume();
     const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
 
-    // Reverb — fixed subtle ambience, always on
-    const rv=this.ctx.createGain();rv.gain.value=0.12;rv.connect(m);this.rev=rv;
-    [.057,.095,.154,.249,.403].forEach(dt=>{
-      const d=this.ctx.createDelay(1);d.delayTime.value=dt;
-      const g=this.ctx.createGain();g.gain.value=.07;rv.connect(d);d.connect(g);g.connect(m);
+    // Reverb — Schroeder-style 4-comb feedback, with per-layer send and
+    // optional delay-to-reverb feed. Variable size (decay) and damp (HF roll).
+    const rvIn = this.ctx.createGain(); rvIn.gain.value = 1.0;
+    const rvOut = this.ctx.createGain(); rvOut.gain.value = 0.6; // wet level
+    rvOut.connect(m);
+    this.rev = rvIn;            // input bus (per-note sends + delay→rev all connect here)
+    this.rvOut = rvOut;
+    // Pre-tap allpass for diffusion
+    const rvCombs = [];
+    [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>{
+      const cd = this.ctx.createDelay(1); cd.delayTime.value = ct;
+      const cfb = this.ctx.createGain(); cfb.gain.value = 0.84;
+      const clp = this.ctx.createBiquadFilter();
+      clp.type="lowpass"; clp.frequency.value = 4500; clp.Q.value = 0.5;
+      // Loop: rvIn → cd → clp → cfb → cd  (recirculation)
+      rvIn.connect(cd);
+      cd.connect(clp); clp.connect(cfb); cfb.connect(cd);
+      cd.connect(rvOut);
+      rvCombs.push({delay:cd, fb:cfb, lp:clp});
     });
+    this.rvCombs = rvCombs;
 
     // Delay line with filters in both the feedback loop and the output tap.
     // dl → dHp → dLp branches to: fb (recirculation) and ret (output).
@@ -397,6 +414,12 @@ class Bell{
     dLp.connect(ret);ret.connect(m);
     this.dlyReturn=ret;
 
+    // Delay → reverb send. Tap from the filtered delay output so the same
+    // dampening that affects the audible delay also colors the reverb feed.
+    const dlyToRev=this.ctx.createGain();dlyToRev.gain.value=0; // off by default
+    dLp.connect(dlyToRev);dlyToRev.connect(rvIn);
+    this.dlyToRev=dlyToRev;
+
     // Global send gain — this is what the SEND knob controls
     const sg=this.ctx.createGain();sg.gain.value=sendPct/100;
     sg.connect(dl);
@@ -405,9 +428,31 @@ class Bell{
     this.dly=dl;this.dlyFb=fb;this.dlyHp=dHp;this.dlyLp=dLp;
     this.ready=true;
   }
-  play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime,layerP){
+  // Reverb param setters — analogous to setDly* helpers above
+  setRvSize(pct){if(!this.ready||!this.rvCombs)return;
+    const fb=0.5+(Math.max(0,Math.min(100,pct))/100)*0.49; // 0.5..0.99
+    for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
+  }
+  setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
+    // Higher pct = brighter (less damping). Lower pct = darker tail.
+    const hz=800+(Math.max(0,Math.min(100,pct))/100)*9200;
+    for(const c of this.rvCombs)c.lp.frequency.setTargetAtTime(hz,this.ctx.currentTime,0.02);
+  }
+  setRvWet(pct){if(!this.ready||!this.rvOut)return;
+    this.rvOut.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
+  }
+  setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
+    this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
+  }
+  // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
+  // Each entry schedules a smooth filter cutoff transition at that time using
+  // the entry's flt/vel/oct/glide. Used by the scheduler for tied notes — sub-
+  // steps within the held note's duration animate the filter without
+  // re-triggering the envelope.
+  play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime,layerP,mods){
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=layerP||this.p;
+    const hasMods=!!(mods&&mods.length);
     const velMul   = sp ? (sp.vel/127) : 1;
     const fltDev  = sp ? (((sp.flt??50)-50)/50) : 0; // -1..+1
     const cutOff   = fltDev * 0.3 * 40;               // 30% → ±12 semitone cutoff offset
@@ -441,13 +486,33 @@ class Bell{
       vcf.frequency.linearRampToValueAtTime(peakHz,t+atk);
       if(dur>=atk+dec){
         vcf.frequency.exponentialRampToValueAtTime(Math.max(20,susHz),t+atk+dec);
-        vcf.frequency.setValueAtTime(Math.max(20,susHz),t+dur);
+        // Skip the sustain "lock" point if mid-note mods are scheduled —
+        // a setValueAtTime here would cancel the upcoming setTargetAtTime
+        // approach. Release ramp picks up from whatever value mods leave.
+        if(!hasMods)vcf.frequency.setValueAtTime(Math.max(20,susHz),t+dur);
       } else {
         vcf.frequency.exponentialRampToValueAtTime(Math.max(20,freqAtGate),t+dur);
       }
       vcf.frequency.exponentialRampToValueAtTime(Math.max(20,baseHz),t+end);
     } else {
       vcf.frequency.value=baseHz;
+    }
+    // Mid-note FLT modulation — for tied notes, schedule cutoff approaches at
+    // each sub-step time so the filter "animates" through the held note. Each
+    // entry's flt produces a target sustain cutoff; setTargetAtTime smooths it.
+    if(hasMods&&envAmt>0.01){
+      for(const m of mods){
+        if(m.at<=t+atk+dec||m.at>=t+dur)continue; // only inside the sustain window
+        const mFltDev=m.sp?(((m.sp.flt??50)-50)/50):0;
+        const mCutOff=mFltDev*0.3*40;
+        const mEnvScale=1+mFltDev*0.7;
+        const mRawCut=Math.max(0,Math.min(100,p.vcfCutoff+mCutOff));
+        const mBaseHz=vcfHz(mRawCut);
+        const mEnvAmt=(p.filterEnvAmt/100)*velMul*Math.max(0,mEnvScale);
+        const mPeakHz=mEnvAmt>0.001?mBaseHz*Math.pow(20000/Math.max(20,mBaseHz),mEnvAmt):mBaseHz;
+        const mSusHz=Math.max(20,mBaseHz+(mPeakHz-mBaseHz)*sus);
+        vcf.frequency.setTargetAtTime(mSusHz,m.at,0.015);
+      }
     }
 
     const vca=this.ctx.createGain();
@@ -489,8 +554,15 @@ class Bell{
     vcf.connect(vca);
     // Dry: always direct to master at full level
     vca.connect(this.master);
-    // Reverb: fixed send
-    vca.connect(this.rev);
+    // Reverb: per-note variable send. Layer's rvSend is the default; per-step
+    // sp.rev > 0 overrides it (matching the dly-send convention).
+    const stepRev = sp ? (sp.rev??0)/100 : 0;
+    const layerRev = (p && p.rvSend!=null) ? p.rvSend/100 : 0;
+    const revMul = (sp && (sp.rev??0) > 0) ? stepRev : layerRev;
+    if(revMul>0){
+      const revG=this.ctx.createGain();revG.gain.value=revMul;
+      vca.connect(revG);revG.connect(this.rev);
+    }
     // Delay send: additive (global + step), capped at 1 — computed in dlyMul
     if(dlyMul>0){
       const stepSend=this.ctx.createGain();stepSend.gain.value=dlyMul;
@@ -805,6 +877,14 @@ export default function Tabula(){
     vcfCutoff:80, vcfRes:15, filterEnvAmt:0,
     octave: octave,    // -2..+2; lead defaults +1, bass -1, synth 0
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
+    rvSend: 30,        // 0..100; per-layer send into the global reverb bus
+  });
+  // Backfill missing fields when loading legacy layerParams (e.g. older saves
+  // lack rvSend). Returns a new layerParams object with all fields populated.
+  const fillLayerParams=(lp)=>({
+    synth:{...DEFAULT_LP(0), ...(lp&&lp.synth?lp.synth:{})},
+    lead: {...DEFAULT_LP(1), ...(lp&&lp.lead ?lp.lead :{})},
+    bass: {...DEFAULT_LP(-1),...(lp&&lp.bass ?lp.bass :{})}
   });
   const [layerParams, setLayerParams] = useState({
     synth: DEFAULT_LP(0),
@@ -830,12 +910,18 @@ export default function Tabula(){
   const filterEnvAmt = _lp.filterEnvAmt, setFilterEnvAmt = _setLP("filterEnvAmt");
   const octaveLP = _lp.octave,           setOctaveLP = _setLP("octave");
   const dlySend = _lp.dlySend,           setDlySend = _setLP("dlySend");
+  const rvSend  = _lp.rvSend??0,         setRvSend  = _setLP("rvSend");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   const [dlyIdx,    setDlyIdx]    = useState(3);
   const [dlyFbPct,  setDlyFbPct]  = useState(45);
   const [dlyHpVal,  setDlyHpVal]  = useState(8);
   const [dlyLpVal,  setDlyLpVal]  = useState(78);
+  // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend
+  const [rvSize,    setRvSize]    = useState(50); // comb feedback (0..100)
+  const [rvDamp,    setRvDamp]    = useState(60); // comb LP cutoff (0=dark, 100=bright)
+  const [rvWet,     setRvWet]     = useState(40); // reverb output level
+  const [dlyToRev,  setDlyToRev]  = useState(0);  // delay output → reverb input send
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
@@ -1008,7 +1094,11 @@ export default function Tabula(){
   useEffect(()=>{speedMultR.current=speedMult;bell.current.stepDur=60/bpmR.current/4*speedMult;},[speedMult]);
   useEffect(()=>{scaleR.current=scale;},[scale]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
-  useEffect(()=>{if(followSeq&&playing&&playId)setActiveId(playId);},[playId,followSeq,playing]);
+  // FOLLOW only meaningfully applies to the synth track — that's where
+  // playId comes from (synth chain or song-mode synth pat). On bass/lead,
+  // setting activeId to a synth pat id leaves activePat undefined and
+  // freezes the playhead animation.
+  useEffect(()=>{if(followSeq&&playing&&playId&&activeLayer==="synth")setActiveId(playId);},[playId,followSeq,playing,activeLayer]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
@@ -1029,6 +1119,10 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setDlyFb(dlyFbPct/100);},[dlyFbPct]);
   useEffect(()=>{bell.current.setDlyHp(dlyHpVal);},[dlyHpVal]);
   useEffect(()=>{bell.current.setDlyLp(dlyLpVal);},[dlyLpVal]);
+  useEffect(()=>{bell.current.setRvSize(rvSize);},[rvSize]);
+  useEffect(()=>{bell.current.setRvDamp(rvDamp);},[rvDamp]);
+  useEffect(()=>{bell.current.setRvWet(rvWet);},[rvWet]);
+  useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
 
   useEffect(()=>{
     (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
@@ -1064,7 +1158,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvWet,dlyToRev,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -1089,8 +1183,12 @@ export default function Tabula(){
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
-    if(s.layerParams)setLayerParams(s.layerParams);
+    if(s.layerParams)setLayerParams(fillLayerParams(s.layerParams));
     setDlyIdx(s.dlyIdx);setDlyFbPct(s.dlyFbPct);setDlyHpVal(s.dlyHpVal);setDlyLpVal(s.dlyLpVal);
+    if(s.rvSize!=null)setRvSize(s.rvSize);
+    if(s.rvDamp!=null)setRvDamp(s.rvDamp);
+    if(s.rvWet!=null)setRvWet(s.rvWet);
+    if(s.dlyToRev!=null)setDlyToRev(s.dlyToRev);
     setVDropRate(s.vDropRate);setVShiftRate(s.vShiftRate);setVShiftRange(s.vShiftRange);
     setVPitchRate(s.vPitchRate);setVPitchRange(s.vPitchRange);setVGhostRate(s.vGhostRate);
     setVVelJitter(s.vVelJitter);setVFltJitter(s.vFltJitter);setVDlyJitter(s.vDlyJitter);
@@ -1201,7 +1299,7 @@ export default function Tabula(){
     setPats(migratePats(s.pats,s.speedMult));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
     // layerParams: prefer new format; migrate old flat fields into synth slot if absent.
     if(s.layerParams){
-      setLayerParams(s.layerParams);
+      setLayerParams(fillLayerParams(s.layerParams));
     }else if(s.waveform!=null||s.attack!=null){
       const migrated={
         synth:{...DEFAULT_LP(0),
@@ -1218,7 +1316,7 @@ export default function Tabula(){
       };
       setLayerParams(migrated);
     }
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvWet",setRvWet],["dlyToRev",setDlyToRev],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -1294,6 +1392,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
+    setRvSize(50);setRvDamp(60);setRvWet(40);setDlyToRev(0);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -1355,7 +1454,7 @@ export default function Tabula(){
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvWet,dlyToRev,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -1375,7 +1474,7 @@ export default function Tabula(){
     if(s.gridLen!=null)setGridLen(s.gridLen);
     if(s.speedMult!=null)setSpeedMult(s.speedMult);
     if(s.activeId)setActiveId(s.activeId);
-    if(s.layerParams)setLayerParams(s.layerParams);
+    if(s.layerParams)setLayerParams(fillLayerParams(s.layerParams));
     else if(s.waveform!=null||s.attack!=null){
       // Migrate legacy flat fields into synth slot
       setLayerParams(lps=>({
@@ -1403,7 +1502,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvWet",setRvWet],["dlyToRev",setDlyToRev],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -1478,7 +1577,21 @@ export default function Tabula(){
       if(ratch>1){
         for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,layerLP.dlySend,null,0,layerLP);
       } else {
-        bell.current.play(f,at,sp,noteDur,layerLP.dlySend,null,0,layerLP);
+        // Free-mode tied note mods — same shape as the sync paths.
+        let mods=null;
+        if(dur>1&&pat.params){
+          mods=[];
+          const plen=pat.params.length||COLS;
+          for(let i=1;i<dur;i++){
+            const subC=(s+i)%plen;
+            const subRaw=pat.params[subC];
+            if(!subRaw)continue;
+            const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+            mods.push({at:at+i*stepDur,sp:subSp});
+          }
+          if(mods.length===0)mods=null;
+        }
+        bell.current.play(f,at,sp,noteDur,layerLP.dlySend,null,0,layerLP,mods);
       }
     }
   };
@@ -1706,7 +1819,23 @@ export default function Tabula(){
           if(ratch>1){
             for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,synthLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,synthLP);
           } else {
-            bell.current.play(f,at,sp,noteDur,synthLP.dlySend,prevF,glideTime,synthLP);
+            // For tied notes, build the mid-note FLT modulation list — each
+            // subsequent step within the tie contributes a sub-step entry.
+            // Bell.play() schedules cutoff approaches at those times.
+            let mods=null;
+            if(dur>1&&p&&p.params){
+              mods=[];
+              const plen=p.params.length||COLS;
+              for(let i=1;i<dur;i++){
+                const subC=(s+i)%plen;
+                const subRaw=p.params[subC];
+                if(!subRaw)continue;
+                const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+                mods.push({at:at+i*stepDur,sp:subSp});
+              }
+              if(mods.length===0)mods=null;
+            }
+            bell.current.play(f,at,sp,noteDur,synthLP.dlySend,prevF,glideTime,synthLP,mods);
           }
         }
         // Lead & Bass — play their currently-active pattern through the same Bell.
@@ -1758,7 +1887,23 @@ export default function Tabula(){
             if(lRhy>1){
               for(let ri=0;ri<lRhy;ri++)bell.current.play(lF,at+ri*lSubDur,lSp,lSubDur*0.9,layerLP.dlySend,ri===0?lPrevF:null,ri===0?lGlideTime:0,layerLP);
             } else {
-              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,lPrevF,lGlideTime,layerLP);
+              // Mid-note FLT modulation for tied notes — same shape as the
+              // synth-track path above, sourcing per-sub-step params from this
+              // layer's own pat.
+              let lMods=null;
+              if(lDur>1&&lp&&lp.params){
+                lMods=[];
+                const lplen=lp.params.length||COLS;
+                for(let i=1;i<lDur;i++){
+                  const subC=(ls+i)%lplen;
+                  const subRaw=lp.params[subC];
+                  if(!subRaw)continue;
+                  const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+                  lMods.push({at:at+i*stepDur,sp:subSp});
+                }
+                if(lMods.length===0)lMods=null;
+              }
+              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,lPrevF,lGlideTime,layerLP,lMods);
             }
           }
         }
@@ -3745,6 +3890,15 @@ export default function Tabula(){
                         <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
                       </div>
                     </SynthSection>
+                    <SynthSection title="REVERB" accent={C_REV}>
+                      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+                        <KnobSlider label="SIZE"   value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
+                        <KnobSlider label="DAMP"   value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
+                        <KnobSlider label="WET"    value={rvWet}    min={0} max={100} onChange={setRvWet}    display={rvWet+"%"}    accent={C_REV}/>
+                        <KnobSlider label="SEND"   value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
+                        <KnobSlider label="DLY→RV" value={dlyToRev} min={0} max={100} onChange={setDlyToRev} display={dlyToRev+"%"} accent={C_REV}/>
+                      </div>
+                    </SynthSection>
                 </div>
               </div>
             )}
@@ -4351,6 +4505,15 @@ export default function Tabula(){
                               <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
                               <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
                               <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                            </div>
+                          </SynthSection>
+                          <SynthSection title="REVERB" accent={C_REV}>
+                            <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
+                              <KnobSlider label="SIZE"   value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
+                              <KnobSlider label="DAMP"   value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
+                              <KnobSlider label="WET"    value={rvWet}    min={0} max={100} onChange={setRvWet}    display={rvWet+"%"}    accent={C_REV}/>
+                              <KnobSlider label="SEND"   value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
+                              <KnobSlider label="DLY→RV" value={dlyToRev} min={0} max={100} onChange={setDlyToRev} display={dlyToRev+"%"} accent={C_REV}/>
                             </div>
                           </SynthSection>
                         </div>
