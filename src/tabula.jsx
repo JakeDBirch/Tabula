@@ -430,16 +430,16 @@ class Bell{
   }
   // Reverb param setters — analogous to setDly* helpers above
   setRvSize(pct){if(!this.ready||!this.rvCombs)return;
-    const fb=0.5+(Math.max(0,Math.min(100,pct))/100)*0.49; // 0.5..0.99
+    // Cap below 0.9 — at the old 0.99 with continuous input the combs would
+    // accumulate energy faster than the damping LP removed it, producing a
+    // runaway feedback loop on busy patterns.
+    const fb=0.45+(Math.max(0,Math.min(100,pct))/100)*0.4; // 0.45..0.85
     for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
   }
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
     // Higher pct = brighter (less damping). Lower pct = darker tail.
     const hz=800+(Math.max(0,Math.min(100,pct))/100)*9200;
     for(const c of this.rvCombs)c.lp.frequency.setTargetAtTime(hz,this.ctx.currentTime,0.02);
-  }
-  setRvWet(pct){if(!this.ready||!this.rvOut)return;
-    this.rvOut.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
   }
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
@@ -944,10 +944,11 @@ export default function Tabula(){
   const [dlyFbPct,  setDlyFbPct]  = useState(45);
   const [dlyHpVal,  setDlyHpVal]  = useState(8);
   const [dlyLpVal,  setDlyLpVal]  = useState(78);
-  // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend
+  // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
+  // No "wet" master — per-layer SEND already covers wet level cleanly;
+  // having both was confusing and made it too easy to drench the mix.
   const [rvSize,    setRvSize]    = useState(50); // comb feedback (0..100)
   const [rvDamp,    setRvDamp]    = useState(60); // comb LP cutoff (0=dark, 100=bright)
-  const [rvWet,     setRvWet]     = useState(40); // reverb output level
   const [dlyToRev,  setDlyToRev]  = useState(0);  // delay output → reverb input send
 
   const bell=useRef(new Bell());
@@ -1148,7 +1149,6 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setDlyLp(dlyLpVal);},[dlyLpVal]);
   useEffect(()=>{bell.current.setRvSize(rvSize);},[rvSize]);
   useEffect(()=>{bell.current.setRvDamp(rvDamp);},[rvDamp]);
-  useEffect(()=>{bell.current.setRvWet(rvWet);},[rvWet]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
 
   useEffect(()=>{
@@ -1185,7 +1185,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvWet,dlyToRev,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -1214,7 +1214,6 @@ export default function Tabula(){
     setDlyIdx(s.dlyIdx);setDlyFbPct(s.dlyFbPct);setDlyHpVal(s.dlyHpVal);setDlyLpVal(s.dlyLpVal);
     if(s.rvSize!=null)setRvSize(s.rvSize);
     if(s.rvDamp!=null)setRvDamp(s.rvDamp);
-    if(s.rvWet!=null)setRvWet(s.rvWet);
     if(s.dlyToRev!=null)setDlyToRev(s.dlyToRev);
     setVDropRate(s.vDropRate);setVShiftRate(s.vShiftRate);setVShiftRange(s.vShiftRange);
     setVPitchRate(s.vPitchRate);setVPitchRange(s.vPitchRange);setVGhostRate(s.vGhostRate);
@@ -1343,7 +1342,7 @@ export default function Tabula(){
       };
       setLayerParams(migrated);
     }
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvWet",setRvWet],["dlyToRev",setDlyToRev],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -1419,7 +1418,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(60);setRvWet(40);setDlyToRev(0);
+    setRvSize(50);setRvDamp(60);setDlyToRev(0);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -1481,7 +1480,7 @@ export default function Tabula(){
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvWet,dlyToRev,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -1529,7 +1528,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvWet",setRvWet],["dlyToRev",setDlyToRev],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3911,20 +3910,19 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                        <KnobSlider label="SEND" value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
-                        <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                        <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                        <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+                        <KnobSlider label="SEND"   value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
+                        <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
+                        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                        <KnobSlider label="→ REV"  value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}             accent={C_DLY}/>
                       </div>
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SIZE"   value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
-                        <KnobSlider label="DAMP"   value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
-                        <KnobSlider label="WET"    value={rvWet}    min={0} max={100} onChange={setRvWet}    display={rvWet+"%"}    accent={C_REV}/>
-                        <KnobSlider label="SEND"   value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
-                        <KnobSlider label="DLY→RV" value={dlyToRev} min={0} max={100} onChange={setDlyToRev} display={dlyToRev+"%"} accent={C_REV}/>
+                        <KnobSlider label="SIZE" value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
+                        <KnobSlider label="DAMP" value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
+                        <KnobSlider label="SEND" value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
                       </div>
                     </SynthSection>
                 </div>
@@ -4529,20 +4527,19 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="DELAY" accent={C_DLY}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="TIME" value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                              <KnobSlider label="SEND" value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
-                              <KnobSlider label="FDBK" value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                              <KnobSlider label="HP"   value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                              <KnobSlider label="LP"   value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                              <KnobSlider label="TIME"  value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+                              <KnobSlider label="SEND"  value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
+                              <KnobSlider label="FDBK"  value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
+                              <KnobSlider label="HP"    value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
+                              <KnobSlider label="LP"    value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
+                              <KnobSlider label="→ REV" value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}             accent={C_DLY}/>
                             </div>
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SIZE"   value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
-                              <KnobSlider label="DAMP"   value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
-                              <KnobSlider label="WET"    value={rvWet}    min={0} max={100} onChange={setRvWet}    display={rvWet+"%"}    accent={C_REV}/>
-                              <KnobSlider label="SEND"   value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
-                              <KnobSlider label="DLY→RV" value={dlyToRev} min={0} max={100} onChange={setDlyToRev} display={dlyToRev+"%"} accent={C_REV}/>
+                              <KnobSlider label="SIZE" value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
+                              <KnobSlider label="DAMP" value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
+                              <KnobSlider label="SEND" value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
                             </div>
                           </SynthSection>
                         </div>
