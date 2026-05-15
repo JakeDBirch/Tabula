@@ -47,7 +47,7 @@ const IS_MOBILE = (()=>{
       || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch(e) { return false; }
 })();
-const PAT_COLORS=["#a8c5a0","#c4967a","#9fb4c7","#c9a96e","#b5a0c4","#7aaa96","#c4b07a","#a09ec4"];
+const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#c9a96e","#6c9ad6","#7aaa96","#c4b07a","#a09ec4"];
 const SLOTS=["S1","S2","S3","S4"];
 const SPEED_OPTS=[
   {label:"2×",  mult:0.5},
@@ -252,7 +252,7 @@ const LANES=[
   {key:"rev",  label:"REV",  color:"#a8b8d0",min:0,   max:100, def:0,   center:null, bool:false},
   {key:"rhy",  label:"RTCH", color:"#c9a96e",min:1,   max:4,   def:1,   center:null, bool:false},
   {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
-  {key:"oct",  label:"OCT",  color:"#b5a0c4",min:0,   max:4,   def:2,   center:2,    bool:false},
+  {key:"oct",  label:"OCT",  color:"#6c9ad6",min:0,   max:4,   def:2,   center:2,    bool:false},
   {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,   max:1,   def:0,   center:null, bool:true},
 ];
 // rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
@@ -265,7 +265,7 @@ const PARAM_ARMS=[
   {key:"vel", label:"VEL",  color:"#c8bfb0", angle:90,  min:0,    max:127, discrete:false},
   {key:"dur", label:"DUR",  color:"#9fb4c7", angle:60,  min:-100, max:100, discrete:false},
   {key:"flt", label:"FLT",  color:"#c97b8a", angle:30,  min:0,    max:100, discrete:false},
-  {key:"oct", label:"OCT",  color:"#b5a0c4", angle:10,  min:0,    max:4,   discrete:true},
+  {key:"oct", label:"OCT",  color:"#6c9ad6", angle:10,  min:0,    max:4,   discrete:true},
 ];
 
 function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote}){
@@ -816,7 +816,7 @@ export default function Tabula(){
   const [activeId,  setActiveId]  = useState(1);
   const [chain,     setChain]     = useState([1]);
   const [page,      setPage]      = useState("edit");
-  const [activeLayer, setActiveLayer] = useState("synth"); // "synth" | "lead" | "bass" | "drums"
+  const [activeLayer, setActiveLayer] = useState("synth"); // "synth" (POLY) | "lead" (MONO) | "drums"
   const [bpm,       setBpm]       = useState(120);
 
   // Drum step editing state
@@ -906,17 +906,17 @@ export default function Tabula(){
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
     rvSend: 30,        // 0..100; per-layer send into the global reverb bus
   });
-  // Backfill missing fields when loading legacy layerParams (e.g. older saves
-  // lack rvSend). Returns a new layerParams object with all fields populated.
+  // Backfill missing fields when loading legacy layerParams. Returns a new
+  // layerParams object with all fields populated. Three-layer pare-down:
+  // legacy "bass" slot is dropped from the output (bass params discarded;
+  // bass pats are merged into lead pats by the load paths separately).
   const fillLayerParams=(lp)=>({
     synth:{...DEFAULT_LP(0), ...(lp&&lp.synth?lp.synth:{})},
-    lead: {...DEFAULT_LP(1), ...(lp&&lp.lead ?lp.lead :{})},
-    bass: {...DEFAULT_LP(-1),...(lp&&lp.bass ?lp.bass :{})}
+    lead: {...DEFAULT_LP(0), ...(lp&&lp.lead ?lp.lead :{})}
   });
   const [layerParams, setLayerParams] = useState({
     synth: DEFAULT_LP(0),
-    lead:  DEFAULT_LP(1),
-    bass:  DEFAULT_LP(-1)
+    lead:  DEFAULT_LP(0)   // mono layer; user adjusts octave to taste
   });
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
@@ -970,20 +970,21 @@ export default function Tabula(){
   const [activeDrumPhraseId,  setActiveDrumPhraseId]  = useState("DP1");
   const [activeSectionId,     setActiveSectionId]     = useState("SC1");
   const [seqTab,        setSeqTab]        = useState("patterns"); // "patterns"|"phrases"|"sections"
-  // ── Multi-voice layer store: lead and bass synth layers held in a ref ─────
-  // Synth-type layers (synth, lead, bass) share the editing UI by swapping
-  // their data in/out of the live state on layer switch. Each layer has its
-  // own pats array, active pattern, phrases, and active phrase.
+  // ── Synth-type layer store ─────────────────────────────────────────────
+  // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
+  // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
+  // string keys remain "synth"/"lead" to minimize refactor scope; the UI
+  // labels are POLY / MONO. The legacy "bass" layer was removed in the
+  // 3-layer pare-down — bass pats from legacy saves migrate into the mono
+  // layer (see fillLayerParams + load paths).
   const _initLeadPat = mkPat(symPat(0));
-  const _initBassPat = mkPat(symPat(0));
   const layerStoreR = useRef({
     synth: null, // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
-    lead:  { pats:[_initLeadPat], activeId:_initLeadPat.id, phrases:[{id:"LP1",name:symPhr(0),chain:[_initLeadPat.id]}], activePhraseId:"LP1" },
-    bass:  { pats:[_initBassPat], activeId:_initBassPat.id, phrases:[{id:"BP1",name:symPhr(0),chain:[_initBassPat.id]}], activePhraseId:"BP1" }
+    lead:  { pats:[_initLeadPat], activeId:_initLeadPat.id, phrases:[{id:"LP1",name:symPhr(0),chain:[_initLeadPat.id]}], activePhraseId:"LP1" }
   });
   const activeLayerR = useRef("synth");
   useEffect(()=>{activeLayerR.current=activeLayer;},[activeLayer]);
-  const SYNTH_LAYERS = ["synth","lead","bass"];
+  const SYNTH_LAYERS = ["synth","lead"];
   const switchLayer = (newLayer)=>{
     if(newLayer===activeLayer)return;
     const oldIsSynth = SYNTH_LAYERS.indexOf(activeLayer)>=0;
@@ -1032,12 +1033,11 @@ export default function Tabula(){
   const [songMatrix,   setSongMatrix]   = useState({
     synth: Array(64).fill(null),
     lead:  Array(64).fill(null),
-    bass:  Array(64).fill(null),
     drums: Array(64).fill(null)
   });
   const [songBar,      setSongBar]      = useState(-1); // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,bass:-1,drums:-1});
+  const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
   const songSyncR   = useRef("sync");
@@ -1050,7 +1050,6 @@ export default function Tabula(){
   const freeR = useRef({
     synth:{step:0,nextAt:0,bar:0},
     lead: {step:0,nextAt:0,bar:0},
-    bass: {step:0,nextAt:0,bar:0},
     drums:{step:0,nextAt:0,bar:0},
   });
   useEffect(()=>{songBarR.current=songBar;},[songBar]);
@@ -1085,8 +1084,8 @@ export default function Tabula(){
   // Per-layer glide tracking — lead and bass each track their own previous
   // played frequency / glide flag so glide works independently across layers
   // (synth uses lastPlayedFreqR/lastGlideEnabledR above for the synth-track).
-  const layerLastFreqR=useRef({lead:null,bass:null});
-  const layerLastGlideR=useRef({lead:false,bass:false});
+  const layerLastFreqR=useRef({lead:null});
+  const layerLastGlideR=useRef({lead:false});
   const flashTmr=useRef(null),gridRef=useRef(null);
   const gesture=useRef({state:"idle",startX:0,startY:0,baseGrid:null,cellPx:24,appliedDX:0,appliedDY:0});
 
@@ -1290,6 +1289,34 @@ export default function Tabula(){
     if(p.speedMult==null) updates.speedMult=defaultSpeed!=null?defaultSpeed:1;
     return Object.keys(updates).length ? Object.assign({},p,updates) : p;
   });
+  // 3-layer pare-down: collapse legacy "bass" layer into "lead". Active
+  // layer "bass" becomes "lead"; bass pats append to lead pats (capped at
+  // 8). Bass songMatrix lane is folded by the setSongMatrix calls separately.
+  // Returns a normalized save state — non-bass saves pass through unchanged.
+  const migrateLegacyBass = (s)=>{
+    if(!s) return s;
+    const hasBassStore = !!(s.layerStore && s.layerStore.bass);
+    const wasBassActive = s.activeLayer==="bass";
+    if(!hasBassStore && !wasBassActive) return s;
+    const out = {...s};
+    if(wasBassActive) out.activeLayer = "lead"; // s.pats (legacy bass) becomes lead live
+    const bassPats = (s.layerStore&&s.layerStore.bass?.pats)||[];
+    if(bassPats.length){
+      if(out.activeLayer==="lead"){
+        // Merge bass pats into the soon-to-be lead live pats.
+        out.pats = [...(s.pats||[]), ...bassPats].slice(0,8);
+      } else {
+        // Active is synth or drums — merge bass pats into layerStore.lead.
+        const lead = (s.layerStore && s.layerStore.lead)||{pats:[],activeId:null,phrases:[],activePhraseId:null};
+        out.layerStore = {...s.layerStore, lead:{...lead, pats:[...(lead.pats||[]),...bassPats].slice(0,8)}};
+        delete out.layerStore.bass;
+      }
+    } else if(hasBassStore){
+      out.layerStore = {...s.layerStore};
+      delete out.layerStore.bass;
+    }
+    return out;
+  };
 
   const sanitizeChain=(chain,pats)=>{
     if(!Array.isArray(chain))return[];
@@ -1304,7 +1331,8 @@ export default function Tabula(){
     return phrases.map(ph=>Object.assign({},ph,{chain:sanitizeChain(ph.chain||[],pats)}));
   };
   const doLoad=slot=>{
-    const s=slotData[slot];if(!s)return;
+    let s=slotData[slot];if(!s)return;
+    s=migrateLegacyBass(s);
     if(s.layerStore){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
@@ -1338,7 +1366,7 @@ export default function Tabula(){
           ...(s.vcfRes!=null?{vcfRes:s.vcfRes}:{}),
           ...(s.filterEnvAmt!=null?{filterEnvAmt:s.filterEnvAmt}:{}),
           ...(s.dlyWetPct!=null?{dlySend:s.dlyWetPct}:{})},
-        lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)
+        lead:DEFAULT_LP(0)
       };
       setLayerParams(migrated);
     }
@@ -1361,17 +1389,21 @@ export default function Tabula(){
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
     if(s.songMatrix){
       // Sanitize each lane against its layer's current pats. Drop entries
-      // referencing pat IDs that no longer exist; pad to 64.
+      // referencing pat IDs that no longer exist; pad to 64. Legacy "bass"
+      // lane is folded into the lead lane where lead is null at that bar
+      // (mono playback can only carry one of them per bar).
       const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
       const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
       const synthPats=s.pats||[];
-      const leadPats=s.layerStore?.lead?.pats||[];
-      const bassPats=s.layerStore?.bass?.pats||[];
+      // Lead now also covers legacy bass content.
+      const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
       const drumPats=s.drumPats||[];
+      const leadLane=padTo64(s.songMatrix.lead);
+      const bassLane=padTo64(s.songMatrix.bass);
+      const mergedLead=leadLane.map((v,i)=>v!=null?v:bassLane[i]);
       setSongMatrix({
         synth: filterIds(padTo64(s.songMatrix.synth),synthPats),
-        lead:  filterIds(padTo64(s.songMatrix.lead),leadPats),
-        bass:  filterIds(padTo64(s.songMatrix.bass),bassPats),
+        lead:  filterIds(mergedLead,leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums),drumPats)
       });
     }
@@ -1408,15 +1440,15 @@ export default function Tabula(){
     const dp0=mkDrumPat(symPat(0));
     setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
     setDrumPats([dp0]);setActiveDrumId(dp0.id);setDrumChain([dp0.id]);
-    layerStoreR.current={synth:null,lead:null,bass:null};
+    layerStoreR.current={synth:null,lead:null};
     setActiveLayer("synth");
     setLoopMode(false);setVaryMode(false);
     setSongMode(false);setSongView(false);setSongSyncMode("sync");
-    setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),bass:Array(64).fill(null),drums:Array(64).fill(null)});
+    setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),drums:Array(64).fill(null)});
     setSongBar(-1);songBarR.current=-1;
-    setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
+    setSongBarLayer({synth:-1,lead:-1,drums:-1});
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
-    setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(1),bass:DEFAULT_LP(-1)});
+    setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(60);setDlyToRev(0);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
@@ -1428,14 +1460,14 @@ export default function Tabula(){
     if(prevFreqByRowR)prevFreqByRowR.current={};
     if(lastPlayedFreqR)lastPlayedFreqR.current=null;
     if(lastGlideEnabledR)lastGlideEnabledR.current=false;
-    if(layerLastFreqR)layerLastFreqR.current={lead:null,bass:null};
-    if(layerLastGlideR)layerLastGlideR.current={lead:false,bass:false};
+    if(layerLastFreqR)layerLastFreqR.current={lead:null};
+    if(layerLastGlideR)layerLastGlideR.current={lead:false};
     setRecMode(false);recModeR.current=false;
     if(variedGrids&&variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
     if(variedDrumGrids&&variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
     if(variedDrumVels&&variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
     if(freeR&&freeR.current){
-      for(const l of ["synth","lead","bass","drums"]){
+      for(const l of ["synth","lead","drums"]){
         if(freeR.current[l]) freeR.current[l]={step:0,nextAt:0,bar:0};
       }
     }
@@ -1488,8 +1520,9 @@ export default function Tabula(){
     songMatrix,songMode,songView,songSyncMode,layerStore:layerStoreR.current,activeLayer
   });
 
-  const applyShareState=s=>{
-    if(!s)return;
+  const applyShareState=rawState=>{
+    if(!rawState)return;
+    const s=migrateLegacyBass(rawState);
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     if(s.pats)setPats(migratePats(s.pats,s.speedMult));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
@@ -1537,10 +1570,14 @@ export default function Tabula(){
     if(s.songMatrix){
       const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
       const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
+      // Fold legacy bass lane into lead where lead is null.
+      const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
+      const leadLane=padTo64(s.songMatrix.lead);
+      const bassLane=padTo64(s.songMatrix.bass);
+      const mergedLead=leadLane.map((v,i)=>v!=null?v:bassLane[i]);
       setSongMatrix({
         synth: filterIds(padTo64(s.songMatrix.synth),s.pats||[]),
-        lead:  filterIds(padTo64(s.songMatrix.lead),s.layerStore?.lead?.pats||[]),
-        bass:  filterIds(padTo64(s.songMatrix.bass),s.layerStore?.bass?.pats||[]),
+        lead:  filterIds(mergedLead,leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums),s.drumPats||[])
       });
     }
@@ -1654,12 +1691,12 @@ export default function Tabula(){
       const sm=songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       const ranges={};
-      for(const layer of ["synth","lead","bass","drums"]){
+      for(const layer of ["synth","lead","drums"]){
         let first=-1,last=-1;
         for(let i=0;i<64;i++){if(sm[layer][i]!=null){if(first===-1)first=i;last=i;}}
         ranges[layer]={first,last,empty:first===-1};
       }
-      const allEmpty=ranges.synth.empty&&ranges.lead.empty&&ranges.bass.empty&&ranges.drums.empty;
+      const allEmpty=ranges.synth.empty&&ranges.lead.empty&&ranges.drums.empty;
       // Helper: resolve pat for a given layer at a given bar
       const resolvePat=(layer,bar)=>{
         const id=sm[layer][bar];
@@ -1676,7 +1713,7 @@ export default function Tabula(){
       };
       const newCursor={...songBarLayer};
       let cursorChanged=false;
-      for(const layer of ["synth","lead","bass","drums"]){
+      for(const layer of ["synth","lead","drums"]){
         const r=ranges[layer];
         // Skip silent layers (no pats at all in their lane, except synth which has fallback)
         if(r.empty && !(layer==="synth" && allEmpty)) continue;
@@ -1722,13 +1759,13 @@ export default function Tabula(){
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
       const inSong = songModeR.current && !loopR.current;
-      let songSyn=null, songLead=null, songBass=null, songDrum=null;
+      let songSyn=null, songLead=null, songDrum=null;
       let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
       if(inSong){
         const sm=songMatrixR.current;
         let firstBar=-1, lastBar=-1;
         for(let i=0;i<64;i++){
-          if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null){
+          if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){
             if(firstBar===-1)firstBar=i;
             lastBar=i;
           }
@@ -1738,25 +1775,22 @@ export default function Tabula(){
         let bar=songBarR.current;
         if(bar<firstBar||bar>lastBar)bar=firstBar;
         songFirstBar=firstBar; songLastBar=lastBar; songCurBar=bar;
-        const sId=sm.synth[bar], lId=sm.lead[bar], bId=sm.bass[bar], dId=sm.drums[bar];
+        const sId=sm.synth[bar], lId=sm.lead[bar], dId=sm.drums[bar];
         const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
         const leadData  = activeLayerR.current==="lead"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
-        const bassData  = activeLayerR.current==="bass"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.bass;
         const sIdEff = sId!=null ? sId : (empty ? (synthData?.activeId ?? null) : null);
         songSyn  = sIdEff!=null && synthData ? synthData.pats.find(x=>x.id===sIdEff) : null;
         songLead = lId!=null && leadData ? leadData.pats.find(x=>x.id===lId) : null;
-        songBass = bId!=null && bassData ? bassData.pats.find(x=>x.id===bId) : null;
         songDrum = dId!=null ? drumPatsR.current.find(x=>x.id===dId) : null;
         const lens=[];
         if(songSyn) lens.push(songSyn.gridLen??16);
         if(songLead) lens.push(songLead.gridLen??16);
-        if(songBass) lens.push(songBass.gridLen??16);
         if(songDrum) lens.push(songDrum.gridLen??16);
         songBarLen = lens.length ? Math.min(...lens) : 16;
         if(songCurBar!==songBarR.current){
           songBarR.current=songCurBar;setSongBar(songCurBar);
           // Sync mode: all four cursors equal songBar
-          setSongBarLayer({synth:songCurBar,lead:songCurBar,bass:songCurBar,drums:songCurBar});
+          setSongBarLayer({synth:songCurBar,lead:songCurBar,drums:songCurBar});
         }
       }
 
@@ -1869,10 +1903,10 @@ export default function Tabula(){
         // already covers it through the active layer's params), so skip the
         // lead/bass loop in loop+non-song mode to avoid octave-doubling artifacts.
         const playSubLayers = inSong || !loopR.current;
-        if(playSubLayers) for(const layer of ["lead","bass"]){
+        if(playSubLayers) for(const layer of ["lead"]){
           let lp, lLen;
           if(inSong){
-            lp = layer==="lead" ? songLead : songBass;
+            lp = songLead; // layer is "lead" only after the bass collapse
             if(!lp||!lp.grid)continue;
             lLen = songBarLen;
           } else {
@@ -1996,7 +2030,7 @@ export default function Tabula(){
               const sm=songMatrixR.current;
               const candidates=[];
               for(let i=songFirstBar;i<=songLastBar;i++){
-                if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null)candidates.push(i);
+                if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)candidates.push(i);
               }
               nextBar=candidates.length?candidates[Math.floor(Math.random()*candidates.length)]:songFirstBar;
             } else {
@@ -2006,7 +2040,7 @@ export default function Tabula(){
             }
             songBarR.current=nextBar;setSongBar(nextBar);
             // Sync mode: all four cursors track songBar
-            setSongBarLayer({synth:nextBar,lead:nextBar,bass:nextBar,drums:nextBar});
+            setSongBarLayer({synth:nextBar,lead:nextBar,drums:nextBar});
           }
           // Non-song mode: single pat loops on its own — nothing to advance.
         }
@@ -2020,9 +2054,9 @@ export default function Tabula(){
       clearInterval(tmrR.current);
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
-      setSongBarLayer({synth:-1,lead:-1,bass:-1,drums:-1});
+      setSongBarLayer({synth:-1,lead:-1,drums:-1});
       prevFreqByRowR.current={};lastPlayedFreqR.current=null;lastGlideEnabledR.current=false;
-      layerLastFreqR.current={lead:null,bass:null};layerLastGlideR.current={lead:false,bass:false};
+      layerLastFreqR.current={lead:null};layerLastGlideR.current={lead:false};
       setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
       releaseWakeLock();
@@ -2058,7 +2092,7 @@ export default function Tabula(){
       // Per-layer first populated bar — used for free mode init
       const t0=bell.current.ctx.currentTime+0.05;
       const layerFirst={};
-      for(const layer of ["synth","lead","bass","drums"]){
+      for(const layer of ["synth","lead","drums"]){
         let f=-1;
         for(let i=0;i<64;i++){if(sm[layer][i]!=null){f=i;break;}}
         layerFirst[layer]=f===-1?0:f;
@@ -2066,11 +2100,11 @@ export default function Tabula(){
       }
       let firstBar=-1;
       for(let i=0;i<64;i++){
-        if(sm.synth[i]!=null||sm.lead[i]!=null||sm.bass[i]!=null||sm.drums[i]!=null){firstBar=i;break;}
+        if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}
       }
       if(firstBar===-1)firstBar=0;
       songBarR.current=firstBar;setSongBar(firstBar);
-      setSongBarLayer({synth:layerFirst.synth,lead:layerFirst.lead,bass:layerFirst.bass,drums:layerFirst.drums});
+      setSongBarLayer({synth:layerFirst.synth,lead:layerFirst.lead,drums:layerFirst.drums});
     }
     nextNoteR.current=bell.current.ctx.currentTime+0.05; // small initial offset
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
@@ -2467,7 +2501,7 @@ export default function Tabula(){
               }
               setPats(ps=>ps.map(p=>{
                 if(p.id!==activeIdR.current)return p;
-                const isMono=activeLayerR.current==="lead"||activeLayerR.current==="bass";
+                const isMono=activeLayerR.current==="lead";
                 const ng=isMono&&!isExisting?p.grid.map((row,ri)=>row.map((v,ci)=>ci===sc.c?(ri===sc.r):v)):p.grid.map(r=>[...r]);
                 const np=(p.params||defaultStepParams()).map(s=>({...s}));
                 const colWasEmpty=!p.grid.some(row=>row[sc.c]);
@@ -2514,7 +2548,7 @@ export default function Tabula(){
         } else {
           setPats(ps=>ps.map(p=>{
             if(p.id!==activeIdR.current)return p;
-            const isMono=activeLayerR.current==="lead"||activeLayerR.current==="bass";
+            const isMono=activeLayerR.current==="lead";
             const ng=isMono?p.grid.map((row,ri)=>row.map((v,ci)=>ci===cc?(ri===cr):v)):p.grid.map(r=>[...r]);
             const np=(p.params||defaultStepParams()).map(s=>({...s}));
             const colWasEmpty=!p.grid.some(row=>row[cc]);
@@ -2605,7 +2639,7 @@ export default function Tabula(){
       // Tap: use paintStartCell which was recorded before pointer capture was set
       const sc=g.paintStartCell;
       if(sc&&!isNaN(sc.r)&&!isNaN(sc.c)){
-        const isMono=activeLayerR.current==="lead"||activeLayerR.current==="bass";
+        const isMono=activeLayerR.current==="lead";
         setPats(ps=>ps.map(p=>{
           if(p.id!==activeIdR.current)return p;
           const r=sc.r,c=sc.c;
@@ -2663,7 +2697,7 @@ export default function Tabula(){
   const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
   const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;
-    const isMono=activeLayerR.current==="lead"||activeLayerR.current==="bass";
+    const isMono=activeLayerR.current==="lead";
     let grid;
     if(isMono){
       // One note per column at most, ~50% column-fill density
@@ -3129,9 +3163,8 @@ export default function Tabula(){
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
               {/* SYNTH / LEAD / BASS layer boxes — non-active layers read pats from layerStoreR */}
               {[
-                ["synth","SYNTH","#a8c5a0","168,197,160"],
-                ["lead", "LEAD", "#b5a0c4","181,160,196"],
-                ["bass", "BASS", "#d4a574","212,165,116"]
+                ["synth","POLY","#a8c5a0","168,197,160"],
+                ["lead", "MONO","#6c9ad6","108,154,214"]
               ].map(([layer,label,accent,accentRgb])=>{
                 const isActive=activeLayer===layer;
                 const layerPats=isActive?pats:(layerStoreR.current[layer]?.pats||[]);
@@ -3239,16 +3272,16 @@ export default function Tabula(){
                 );
               })}
               {/* DRUMS layer box */}
-              <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,150,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,150,122,0.06)":"transparent",transition:"all .1s"}}
+              <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
                 onClick={()=>{if(songView){setSongView(false);setPage("sound");}switchLayer("drums");}}>
-                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,150,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
+                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                   {drumPats.map((dp)=>{
                     const isA=dp.id===activeDrumId&&activeLayer==="drums";
                     const isP=playing&&drumCpos>=0&&drumChain[drumCpos]===dp.id;
                     const isDragging=patternDrag&&patternDrag.patId===dp.id;
                     return(
-                      <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4967a",background:isA?"#c4967a":"transparent",color:isA?"#1a1814":"#c4967a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4967a88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
+                      <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4727a",background:isA?"#c4727a":"transparent",color:isA?"#1a1814":"#c4727a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4727a88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
                         onClick={e=>e.stopPropagation()}
                         onPointerDown={e=>{
                           e.stopPropagation();
@@ -3260,7 +3293,7 @@ export default function Tabula(){
                               if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
                               dragging=true;
                               try{target.setPointerCapture(pointerId);}catch(_){}
-                              setPatternDrag({patId:dp.id,name:dp.name,accent:"#c4967a",x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+                              setPatternDrag({patId:dp.id,name:dp.name,accent:"#c4727a",x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
                             }
                             let overSongCell=null;
                             if(songView){
@@ -3304,7 +3337,7 @@ export default function Tabula(){
                       </div>
                     );
                   })}
-                  {drumPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba(196,150,122,0.3)",background:"transparent",color:"rgba(196,150,122,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addDrumPat();}}>＋</button>}
+                  {drumPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba(196,114,122,0.3)",background:"transparent",color:"rgba(196,114,122,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addDrumPat();}}>＋</button>}
                 </div>
               </div>
               {/* Action buttons — context-sensitive to active layer */}
@@ -3408,7 +3441,7 @@ export default function Tabula(){
         <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
           <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
-            {/* SONG matrix — 16×16, 4 row-groups × 4 layers (synth/lead/bass/drums) × 16 bars */}
+            {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
                 {/* SYNC | FREE toggle — controls per-layer cursor independence */}
@@ -3426,9 +3459,9 @@ export default function Tabula(){
                 <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
-                      {["synth","lead","bass","drums"].map(layer=>{
-                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#b5a0c4":layer==="bass"?"#d4a574":"#c4967a";
-                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"181,160,196":layer==="bass"?"212,165,116":"196,150,122";
+                      {["synth","lead","drums"].map(layer=>{
+                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#6c9ad6":"#c4727a";
+                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"108,154,214":"196,114,122";
                         const patSet = layer==="drums"
                           ? drumPats
                           : layer===activeLayer
@@ -3618,7 +3651,7 @@ export default function Tabula(){
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
                 {/* Drum header: active pattern name + RAND/CLR */}
                 <div style={{width:dw||"80%",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                  <span style={{fontSize:9,letterSpacing:2,color:"#c4967a",fontWeight:700,opacity:0.7}}>{drumPats.find(p=>p.id===activeDrumId)?.name||"A"}</span>
+                  <span style={{fontSize:9,letterSpacing:2,color:"#c4727a",fontWeight:700,opacity:0.7}}>{drumPats.find(p=>p.id===activeDrumId)?.name||"A"}</span>
                   <div style={{flex:1}}/>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
@@ -3838,18 +3871,18 @@ export default function Tabula(){
             {activeLayer!=="drums"&&page==="set"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
-                    <SynthSection title="RHYTHM VARY / MUT8" accent="#c4967a">
+                    <SynthSection title="RHYTHM VARY / MUT8" accent="#c4727a">
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4967a"/>
-                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4967a"/>
-                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4967a"/>
+                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4727a"/>
+                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4727a"/>
+                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4727a"/>
                       </div>
                     </SynthSection>
-                    <SynthSection title="MELODY VARY / MUT8" accent="#b5a0c4">
+                    <SynthSection title="MELODY VARY / MUT8" accent="#6c9ad6">
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#b5a0c4"/>
-                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#b5a0c4"/>
-                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#b5a0c4"/>
+                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#6c9ad6"/>
+                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#6c9ad6"/>
+                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#6c9ad6"/>
                       </div>
                     </SynthSection>
                     <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
@@ -3967,7 +4000,7 @@ export default function Tabula(){
 
           {/* ── PERSISTENT LAYER BAR — top of screen ── */}
           <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
-            {[["synth","SYNTH","#a8c5a0","rgba(168,197,160,"],["lead","LEAD","#b5a0c4","rgba(181,160,196,"],["bass","BASS","#d4a574","rgba(212,165,116,"],["drums","DRUMS","#c4967a","rgba(196,150,122,"]].map(([lyr,lbl,c,cf])=>(
+            {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
               <button key={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1.2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>{
                   if(activeLayer===lyr){
@@ -3989,7 +4022,7 @@ export default function Tabula(){
               const isSynth=!isDrums; // any synth-type layer
               const isA=isDrums?p.id===activeDrumId:p.id===activeId;
               const isP=playing&&(isSynth&&activeLayer==="synth"?playId===p.id:false);
-              const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#b5a0c4":activeLayer==="bass"?"#d4a574":"#c4967a";
+              const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
               const isDragging=patternDrag&&patternDrag.patId===p.id;
               return(
                 <div key={p.id} style={{padding:"6px 14px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",WebkitUserSelect:"none",touchAction:"none",display:"flex",alignItems:"center",gap:2,opacity:isDragging?0.4:1,lineHeight:1}}
@@ -4078,7 +4111,7 @@ export default function Tabula(){
                   {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
                 </div>);
             })}
-            {(activeLayer==="drums"?drumPats:pats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(181,160,196,0.35)":activeLayer==="bass"?"rgba(212,165,116,0.35)":"rgba(196,150,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(181,160,196,0.45)":activeLayer==="bass"?"rgba(212,165,116,0.45)":"rgba(196,150,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="drums"?addDrumPat():addPat();}}>＋</div>}
+            {(activeLayer==="drums"?drumPats:pats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="drums"?addDrumPat():addPat();}}>＋</div>}
           </div>
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
@@ -4095,7 +4128,7 @@ export default function Tabula(){
           {/* ── CONTENT AREA — full height grid ── */}
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
-            {/* SONG matrix — 16×16, 4 row-groups × 4 layers (synth/lead/bass/drums) × 16 bars */}
+            {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
                 {/* SYNC | FREE toggle — controls per-layer cursor independence */}
@@ -4113,9 +4146,9 @@ export default function Tabula(){
                 <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
-                      {["synth","lead","bass","drums"].map(layer=>{
-                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#b5a0c4":layer==="bass"?"#d4a574":"#c4967a";
-                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"181,160,196":layer==="bass"?"212,165,116":"196,150,122";
+                      {["synth","lead","drums"].map(layer=>{
+                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#6c9ad6":"#c4727a";
+                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"108,154,214":"196,114,122";
                         const patSet = layer==="drums"
                           ? drumPats
                           : layer===activeLayer
@@ -4408,8 +4441,8 @@ export default function Tabula(){
                     {/* Pattern ops — operate on the active pattern of the active layer */}
                     {(()=>{
                       const isDrum=activeLayer==="drums";
-                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#b5a0c4":activeLayer==="bass"?"#d4a574":"#c4967a";
-                      const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(181,160,196,":activeLayer==="bass"?"rgba(212,165,116,":"rgba(196,150,122,";
+                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
+                      const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(108,154,214,":"rgba(196,114,122,";
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",null,true,false]]
                         :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
@@ -4619,7 +4652,7 @@ export default function Tabula(){
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
                           <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
                         </div>
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"#c4967a",fontWeight:600,marginBottom:8}}>RHYTHM</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"#c4727a",fontWeight:600,marginBottom:8}}>RHYTHM</div>
                         {[["DROP",vDropRate,setVDropRate,60],["SHIFT",vShiftRate,setVShiftRate,60],["RANGE",vShiftRange,setVShiftRange,8,"st"]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
@@ -4628,12 +4661,12 @@ export default function Tabula(){
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(196,150,122,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(196,114,122,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
                         ))}
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"#b5a0c4",fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"#6c9ad6",fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
                         {[["PITCH",vPitchRate,setVPitchRate,60],["RANGE",vPitchRange,setVPitchRange,12,"st"],["GHOST",vGhostRate,setVGhostRate,60]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
@@ -4642,7 +4675,7 @@ export default function Tabula(){
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(181,160,196,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(108,154,214,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>

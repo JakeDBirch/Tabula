@@ -151,7 +151,7 @@ var IS_MOBILE = function () {
     return false;
   }
 }();
-var PAT_COLORS = ["#a8c5a0", "#c4967a", "#9fb4c7", "#c9a96e", "#b5a0c4", "#7aaa96", "#c4b07a", "#a09ec4"];
+var PAT_COLORS = ["#a8c5a0", "#c4727a", "#9fb4c7", "#c9a96e", "#6c9ad6", "#7aaa96", "#c4b07a", "#a09ec4"];
 var SLOTS = ["S1", "S2", "S3", "S4"];
 var SPEED_OPTS = [{
   label: "2×",
@@ -769,7 +769,7 @@ var LANES = [{
 }, {
   key: "oct",
   label: "OCT",
-  color: "#b5a0c4",
+  color: "#6c9ad6",
   min: 0,
   max: 4,
   def: 2,
@@ -832,7 +832,7 @@ var PARAM_ARMS = [{
 }, {
   key: "oct",
   label: "OCT",
-  color: "#b5a0c4",
+  color: "#6c9ad6",
   angle: 10,
   min: 0,
   max: 4,
@@ -1849,7 +1849,7 @@ function Tabula() {
   var _useState9 = useState("synth"),
     _useState0 = _slicedToArray(_useState9, 2),
     activeLayer = _useState0[0],
-    setActiveLayer = _useState0[1]; // "synth" | "lead" | "bass" | "drums"
+    setActiveLayer = _useState0[1]; // "synth" (POLY) | "lead" (MONO) | "drums"
   var _useState1 = useState(120),
     _useState10 = _slicedToArray(_useState1, 2),
     bpm = _useState10[0],
@@ -2096,19 +2096,19 @@ function Tabula() {
       rvSend: 30 // 0..100; per-layer send into the global reverb bus
     };
   };
-  // Backfill missing fields when loading legacy layerParams (e.g. older saves
-  // lack rvSend). Returns a new layerParams object with all fields populated.
+  // Backfill missing fields when loading legacy layerParams. Returns a new
+  // layerParams object with all fields populated. Three-layer pare-down:
+  // legacy "bass" slot is dropped from the output (bass params discarded;
+  // bass pats are merged into lead pats by the load paths separately).
   var fillLayerParams = function fillLayerParams(lp) {
     return {
       synth: _objectSpread(_objectSpread({}, DEFAULT_LP(0)), lp && lp.synth ? lp.synth : {}),
-      lead: _objectSpread(_objectSpread({}, DEFAULT_LP(1)), lp && lp.lead ? lp.lead : {}),
-      bass: _objectSpread(_objectSpread({}, DEFAULT_LP(-1)), lp && lp.bass ? lp.bass : {})
+      lead: _objectSpread(_objectSpread({}, DEFAULT_LP(0)), lp && lp.lead ? lp.lead : {})
     };
   };
   var _useState101 = useState({
       synth: DEFAULT_LP(0),
-      lead: DEFAULT_LP(1),
-      bass: DEFAULT_LP(-1)
+      lead: DEFAULT_LP(0) // mono layer; user adjusts octave to taste
     }),
     _useState102 = _slicedToArray(_useState101, 2),
     layerParams = _useState102[0],
@@ -2252,12 +2252,14 @@ function Tabula() {
     _useState140 = _slicedToArray(_useState139, 2),
     seqTab = _useState140[0],
     setSeqTab = _useState140[1]; // "patterns"|"phrases"|"sections"
-  // ── Multi-voice layer store: lead and bass synth layers held in a ref ─────
-  // Synth-type layers (synth, lead, bass) share the editing UI by swapping
-  // their data in/out of the live state on layer switch. Each layer has its
-  // own pats array, active pattern, phrases, and active phrase.
+  // ── Synth-type layer store ─────────────────────────────────────────────
+  // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
+  // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
+  // string keys remain "synth"/"lead" to minimize refactor scope; the UI
+  // labels are POLY / MONO. The legacy "bass" layer was removed in the
+  // 3-layer pare-down — bass pats from legacy saves migrate into the mono
+  // layer (see fillLayerParams + load paths).
   var _initLeadPat = mkPat(symPat(0));
-  var _initBassPat = mkPat(symPat(0));
   var layerStoreR = useRef({
     synth: null,
     // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
@@ -2270,23 +2272,13 @@ function Tabula() {
         chain: [_initLeadPat.id]
       }],
       activePhraseId: "LP1"
-    },
-    bass: {
-      pats: [_initBassPat],
-      activeId: _initBassPat.id,
-      phrases: [{
-        id: "BP1",
-        name: symPhr(0),
-        chain: [_initBassPat.id]
-      }],
-      activePhraseId: "BP1"
     }
   });
   var activeLayerR = useRef("synth");
   useEffect(function () {
     activeLayerR.current = activeLayer;
   }, [activeLayer]);
-  var SYNTH_LAYERS = ["synth", "lead", "bass"];
+  var SYNTH_LAYERS = ["synth", "lead"];
   var switchLayer = function switchLayer(newLayer) {
     if (newLayer === activeLayer) return;
     var oldIsSynth = SYNTH_LAYERS.indexOf(activeLayer) >= 0;
@@ -2345,7 +2337,6 @@ function Tabula() {
   var _useState149 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
-      bass: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
     _useState150 = _slicedToArray(_useState149, 2),
@@ -2359,7 +2350,6 @@ function Tabula() {
   var _useState153 = useState({
       synth: -1,
       lead: -1,
-      bass: -1,
       drums: -1
     }),
     _useState154 = _slicedToArray(_useState153, 2),
@@ -2383,11 +2373,6 @@ function Tabula() {
       bar: 0
     },
     lead: {
-      step: 0,
-      nextAt: 0,
-      bar: 0
-    },
-    bass: {
       step: 0,
       nextAt: 0,
       bar: 0
@@ -2470,12 +2455,10 @@ function Tabula() {
   // played frequency / glide flag so glide works independently across layers
   // (synth uses lastPlayedFreqR/lastGlideEnabledR above for the synth-track).
   var layerLastFreqR = useRef({
-    lead: null,
-    bass: null
+    lead: null
   });
   var layerLastGlideR = useRef({
-    lead: false,
-    bass: false
+    lead: false
   });
   var flashTmr = useRef(null),
     gridRef = useRef(null);
@@ -2920,6 +2903,44 @@ function Tabula() {
       return Object.keys(updates).length ? Object.assign({}, p, updates) : p;
     });
   };
+  // 3-layer pare-down: collapse legacy "bass" layer into "lead". Active
+  // layer "bass" becomes "lead"; bass pats append to lead pats (capped at
+  // 8). Bass songMatrix lane is folded by the setSongMatrix calls separately.
+  // Returns a normalized save state — non-bass saves pass through unchanged.
+  var migrateLegacyBass = function migrateLegacyBass(s) {
+    var _s$layerStore$bass;
+    if (!s) return s;
+    var hasBassStore = !!(s.layerStore && s.layerStore.bass);
+    var wasBassActive = s.activeLayer === "bass";
+    if (!hasBassStore && !wasBassActive) return s;
+    var out = _objectSpread({}, s);
+    if (wasBassActive) out.activeLayer = "lead"; // s.pats (legacy bass) becomes lead live
+    var bassPats = s.layerStore && ((_s$layerStore$bass = s.layerStore.bass) === null || _s$layerStore$bass === void 0 ? void 0 : _s$layerStore$bass.pats) || [];
+    if (bassPats.length) {
+      if (out.activeLayer === "lead") {
+        // Merge bass pats into the soon-to-be lead live pats.
+        out.pats = [].concat(_toConsumableArray(s.pats || []), _toConsumableArray(bassPats)).slice(0, 8);
+      } else {
+        // Active is synth or drums — merge bass pats into layerStore.lead.
+        var lead = s.layerStore && s.layerStore.lead || {
+          pats: [],
+          activeId: null,
+          phrases: [],
+          activePhraseId: null
+        };
+        out.layerStore = _objectSpread(_objectSpread({}, s.layerStore), {}, {
+          lead: _objectSpread(_objectSpread({}, lead), {}, {
+            pats: [].concat(_toConsumableArray(lead.pats || []), _toConsumableArray(bassPats)).slice(0, 8)
+          })
+        });
+        delete out.layerStore.bass;
+      }
+    } else if (hasBassStore) {
+      out.layerStore = _objectSpread({}, s.layerStore);
+      delete out.layerStore.bass;
+    }
+    return out;
+  };
   var sanitizeChain = function sanitizeChain(chain, pats) {
     if (!Array.isArray(chain)) return [];
     var idSet = new Set(pats.map(function (p) {
@@ -2945,6 +2966,7 @@ function Tabula() {
   var doLoad = function doLoad(slot) {
     var s = slotData[slot];
     if (!s) return;
+    s = migrateLegacyBass(s);
     if (s.layerStore) {
       for (var _i2 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS2.length; _i2++) {
         var layer = _SYNTH_LAYERS2[_i2];
@@ -2998,8 +3020,7 @@ function Tabula() {
         } : {}), s.dlyWetPct != null ? {
           dlySend: s.dlyWetPct
         } : {}),
-        lead: DEFAULT_LP(1),
-        bass: DEFAULT_LP(-1)
+        lead: DEFAULT_LP(0)
       };
       setLayerParams(migrated);
     }
@@ -3023,7 +3044,9 @@ function Tabula() {
     if (s.songMatrix) {
       var _s$layerStore, _s$layerStore2;
       // Sanitize each lane against its layer's current pats. Drop entries
-      // referencing pat IDs that no longer exist; pad to 64.
+      // referencing pat IDs that no longer exist; pad to 64. Legacy "bass"
+      // lane is folded into the lead lane where lead is null at that bar
+      // (mono playback can only carry one of them per bar).
       var padTo64 = function padTo64(arr) {
         var a = Array.isArray(arr) ? arr.slice(0, 64) : [];
         while (a.length < 64) a.push(null);
@@ -3038,13 +3061,17 @@ function Tabula() {
         });
       };
       var synthPats = s.pats || [];
-      var leadPats = ((_s$layerStore = s.layerStore) === null || _s$layerStore === void 0 || (_s$layerStore = _s$layerStore.lead) === null || _s$layerStore === void 0 ? void 0 : _s$layerStore.pats) || [];
-      var bassPats = ((_s$layerStore2 = s.layerStore) === null || _s$layerStore2 === void 0 || (_s$layerStore2 = _s$layerStore2.bass) === null || _s$layerStore2 === void 0 ? void 0 : _s$layerStore2.pats) || [];
+      // Lead now also covers legacy bass content.
+      var leadPats = [].concat(_toConsumableArray(((_s$layerStore = s.layerStore) === null || _s$layerStore === void 0 || (_s$layerStore = _s$layerStore.lead) === null || _s$layerStore === void 0 ? void 0 : _s$layerStore.pats) || []), _toConsumableArray(((_s$layerStore2 = s.layerStore) === null || _s$layerStore2 === void 0 || (_s$layerStore2 = _s$layerStore2.bass) === null || _s$layerStore2 === void 0 ? void 0 : _s$layerStore2.pats) || [])).slice(0, 8);
       var _drumPats = s.drumPats || [];
+      var leadLane = padTo64(s.songMatrix.lead);
+      var bassLane = padTo64(s.songMatrix.bass);
+      var mergedLead = leadLane.map(function (v, i) {
+        return v != null ? v : bassLane[i];
+      });
       setSongMatrix({
         synth: filterIds(padTo64(s.songMatrix.synth), synthPats),
-        lead: filterIds(padTo64(s.songMatrix.lead), leadPats),
-        bass: filterIds(padTo64(s.songMatrix.bass), bassPats),
+        lead: filterIds(mergedLead, leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums), _drumPats)
       });
     }
@@ -3120,8 +3147,7 @@ function Tabula() {
     setDrumChain([dp0.id]);
     layerStoreR.current = {
       synth: null,
-      lead: null,
-      bass: null
+      lead: null
     };
     setActiveLayer("synth");
     setLoopMode(false);
@@ -3132,7 +3158,6 @@ function Tabula() {
     setSongMatrix({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
-      bass: Array(64).fill(null),
       drums: Array(64).fill(null)
     });
     setSongBar(-1);
@@ -3140,7 +3165,6 @@ function Tabula() {
     setSongBarLayer({
       synth: -1,
       lead: -1,
-      bass: -1,
       drums: -1
     });
     setBpm(120);
@@ -3150,8 +3174,7 @@ function Tabula() {
     setSpeedMult(1);
     setLayerParams({
       synth: DEFAULT_LP(0),
-      lead: DEFAULT_LP(1),
-      bass: DEFAULT_LP(-1)
+      lead: DEFAULT_LP(0)
     });
     setDlyIdx(3);
     setDlyFbPct(45);
@@ -3180,12 +3203,10 @@ function Tabula() {
     if (lastPlayedFreqR) lastPlayedFreqR.current = null;
     if (lastGlideEnabledR) lastGlideEnabledR.current = false;
     if (layerLastFreqR) layerLastFreqR.current = {
-      lead: null,
-      bass: null
+      lead: null
     };
     if (layerLastGlideR) layerLastGlideR.current = {
-      lead: false,
-      bass: false
+      lead: false
     };
     setRecMode(false);
     recModeR.current = false;
@@ -3193,7 +3214,7 @@ function Tabula() {
     if (variedDrumGrids && variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
     if (variedDrumVels && variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
     if (freeR && freeR.current) {
-      for (var _i3 = 0, _arr = ["synth", "lead", "bass", "drums"]; _i3 < _arr.length; _i3++) {
+      for (var _i3 = 0, _arr = ["synth", "lead", "drums"]; _i3 < _arr.length; _i3++) {
         var l = _arr[_i3];
         if (freeR.current[l]) freeR.current[l] = {
           step: 0,
@@ -3323,8 +3344,9 @@ function Tabula() {
       activeLayer: activeLayer
     };
   };
-  var applyShareState = function applyShareState(s) {
-    if (!s) return;
+  var applyShareState = function applyShareState(rawState) {
+    if (!rawState) return;
+    var s = migrateLegacyBass(rawState);
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray((s.pats || []).map(function (p) {
       return p.id;
     }))));
@@ -3399,10 +3421,16 @@ function Tabula() {
           return v != null && ids.has(v) ? v : null;
         });
       };
+      // Fold legacy bass lane into lead where lead is null.
+      var leadPats = [].concat(_toConsumableArray(((_s$layerStore3 = s.layerStore) === null || _s$layerStore3 === void 0 || (_s$layerStore3 = _s$layerStore3.lead) === null || _s$layerStore3 === void 0 ? void 0 : _s$layerStore3.pats) || []), _toConsumableArray(((_s$layerStore4 = s.layerStore) === null || _s$layerStore4 === void 0 || (_s$layerStore4 = _s$layerStore4.bass) === null || _s$layerStore4 === void 0 ? void 0 : _s$layerStore4.pats) || [])).slice(0, 8);
+      var leadLane = padTo64(s.songMatrix.lead);
+      var bassLane = padTo64(s.songMatrix.bass);
+      var mergedLead = leadLane.map(function (v, i) {
+        return v != null ? v : bassLane[i];
+      });
       setSongMatrix({
         synth: filterIds(padTo64(s.songMatrix.synth), s.pats || []),
-        lead: filterIds(padTo64(s.songMatrix.lead), ((_s$layerStore3 = s.layerStore) === null || _s$layerStore3 === void 0 || (_s$layerStore3 = _s$layerStore3.lead) === null || _s$layerStore3 === void 0 ? void 0 : _s$layerStore3.pats) || []),
-        bass: filterIds(padTo64(s.songMatrix.bass), ((_s$layerStore4 = s.layerStore) === null || _s$layerStore4 === void 0 || (_s$layerStore4 = _s$layerStore4.bass) === null || _s$layerStore4 === void 0 ? void 0 : _s$layerStore4.pats) || []),
+        lead: filterIds(mergedLead, leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums), s.drumPats || [])
       });
     }
@@ -3563,7 +3591,7 @@ function Tabula() {
       var sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
-      for (var _i4 = 0, _arr2 = ["synth", "lead", "bass", "drums"]; _i4 < _arr2.length; _i4++) {
+      for (var _i4 = 0, _arr2 = ["synth", "lead", "drums"]; _i4 < _arr2.length; _i4++) {
         var layer = _arr2[_i4];
         var first = -1,
           last = -1;
@@ -3579,7 +3607,7 @@ function Tabula() {
           empty: first === -1
         };
       }
-      var allEmpty = ranges.synth.empty && ranges.lead.empty && ranges.bass.empty && ranges.drums.empty;
+      var allEmpty = ranges.synth.empty && ranges.lead.empty && ranges.drums.empty;
       // Helper: resolve pat for a given layer at a given bar
       var resolvePat = function resolvePat(layer, bar) {
         var id = sm[layer][bar];
@@ -3605,7 +3633,7 @@ function Tabula() {
       };
       var newCursor = _objectSpread({}, songBarLayer);
       var cursorChanged = false;
-      for (var _i5 = 0, _arr3 = ["synth", "lead", "bass", "drums"]; _i5 < _arr3.length; _i5++) {
+      for (var _i5 = 0, _arr3 = ["synth", "lead", "drums"]; _i5 < _arr3.length; _i5++) {
         var _layer = _arr3[_i5];
         var r = ranges[_layer];
         // Skip silent layers (no pats at all in their lane, except synth which has fallback)
@@ -3659,19 +3687,18 @@ function Tabula() {
       var inSong = songModeR.current && !loopR.current;
       var songSyn = null,
         songLead = null,
-        songBass = null,
         songDrum = null;
       var songBarLen = 16,
         songFirstBar = 0,
         songLastBar = 0,
         songCurBar = 0;
       if (inSong) {
-        var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songBass$gridLen, _songDrum$gridLen;
+        var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songDrum$gridLen;
         var _sm = songMatrixR.current;
         var firstBar = -1,
           lastBar = -1;
         for (var _i6 = 0; _i6 < 64; _i6++) {
-          if (_sm.synth[_i6] != null || _sm.lead[_i6] != null || _sm.bass[_i6] != null || _sm.drums[_i6] != null) {
+          if (_sm.synth[_i6] != null || _sm.lead[_i6] != null || _sm.drums[_i6] != null) {
             if (firstBar === -1) firstBar = _i6;
             lastBar = _i6;
           }
@@ -3688,7 +3715,6 @@ function Tabula() {
         songCurBar = bar;
         var sId = _sm.synth[bar],
           lId = _sm.lead[bar],
-          bId = _sm.bass[bar],
           dId = _sm.drums[bar];
         var synthData = activeLayerR.current === "synth" ? {
           pats: patsR.current,
@@ -3698,10 +3724,6 @@ function Tabula() {
           pats: patsR.current,
           activeId: activeIdR.current
         } : layerStoreR.current.lead;
-        var bassData = activeLayerR.current === "bass" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.bass;
         var sIdEff = sId != null ? sId : empty ? (_synthData$activeId = synthData === null || synthData === void 0 ? void 0 : synthData.activeId) !== null && _synthData$activeId !== void 0 ? _synthData$activeId : null : null;
         songSyn = sIdEff != null && synthData ? synthData.pats.find(function (x) {
           return x.id === sIdEff;
@@ -3709,16 +3731,12 @@ function Tabula() {
         songLead = lId != null && leadData ? leadData.pats.find(function (x) {
           return x.id === lId;
         }) : null;
-        songBass = bId != null && bassData ? bassData.pats.find(function (x) {
-          return x.id === bId;
-        }) : null;
         songDrum = dId != null ? drumPatsR.current.find(function (x) {
           return x.id === dId;
         }) : null;
         var lens = [];
         if (songSyn) lens.push((_songSyn$gridLen = songSyn.gridLen) !== null && _songSyn$gridLen !== void 0 ? _songSyn$gridLen : 16);
         if (songLead) lens.push((_songLead$gridLen = songLead.gridLen) !== null && _songLead$gridLen !== void 0 ? _songLead$gridLen : 16);
-        if (songBass) lens.push((_songBass$gridLen = songBass.gridLen) !== null && _songBass$gridLen !== void 0 ? _songBass$gridLen : 16);
         if (songDrum) lens.push((_songDrum$gridLen = songDrum.gridLen) !== null && _songDrum$gridLen !== void 0 ? _songDrum$gridLen : 16);
         songBarLen = lens.length ? Math.min.apply(Math, lens) : 16;
         if (songCurBar !== songBarR.current) {
@@ -3728,7 +3746,6 @@ function Tabula() {
           setSongBarLayer({
             synth: songCurBar,
             lead: songCurBar,
-            bass: songCurBar,
             drums: songCurBar
           });
         }
@@ -3884,7 +3901,7 @@ function Tabula() {
               var layer = _arr4[_i8];
               var lp, lLen;
               if (inSong) {
-                lp = layer === "lead" ? songLead : songBass;
+                lp = songLead; // layer is "lead" only after the bass collapse
                 if (!lp || !lp.grid) return 0; // continue
                 lLen = songBarLen;
               } else {
@@ -3954,7 +3971,7 @@ function Tabula() {
               }
             },
             _ret;
-          for (var _i8 = 0, _arr4 = ["lead", "bass"]; _i8 < _arr4.length; _i8++) {
+          for (var _i8 = 0, _arr4 = ["lead"]; _i8 < _arr4.length; _i8++) {
             _ret = _loop2();
             if (_ret === 0) continue;
           }
@@ -4045,7 +4062,7 @@ function Tabula() {
               var _sm2 = songMatrixR.current;
               var candidates = [];
               for (var _i0 = songFirstBar; _i0 <= songLastBar; _i0++) {
-                if (_sm2.synth[_i0] != null || _sm2.lead[_i0] != null || _sm2.bass[_i0] != null || _sm2.drums[_i0] != null) candidates.push(_i0);
+                if (_sm2.synth[_i0] != null || _sm2.lead[_i0] != null || _sm2.drums[_i0] != null) candidates.push(_i0);
               }
               nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
             } else {
@@ -4059,7 +4076,6 @@ function Tabula() {
             setSongBarLayer({
               synth: nextBar,
               lead: nextBar,
-              bass: nextBar,
               drums: nextBar
             });
           }
@@ -4092,19 +4108,16 @@ function Tabula() {
             setSongBarLayer({
               synth: -1,
               lead: -1,
-              bass: -1,
               drums: -1
             });
             prevFreqByRowR.current = {};
             lastPlayedFreqR.current = null;
             lastGlideEnabledR.current = false;
             layerLastFreqR.current = {
-              lead: null,
-              bass: null
+              lead: null
             };
             layerLastGlideR.current = {
-              lead: false,
-              bass: false
+              lead: false
             };
             setRecMode(false);
             recModeR.current = false;
@@ -4188,7 +4201,7 @@ function Tabula() {
             sm = songMatrix; // Per-layer first populated bar — used for free mode init
             t0 = bell.current.ctx.currentTime + 0.05;
             layerFirst = {};
-            _i1 = 0, _arr5 = ["synth", "lead", "bass", "drums"];
+            _i1 = 0, _arr5 = ["synth", "lead", "drums"];
           case 11:
             if (!(_i1 < _arr5.length)) {
               _context9.n = 16;
@@ -4231,7 +4244,7 @@ function Tabula() {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i10] != null || sm.lead[_i10] != null || sm.bass[_i10] != null || sm.drums[_i10] != null)) {
+            if (!(sm.synth[_i10] != null || sm.lead[_i10] != null || sm.drums[_i10] != null)) {
               _context9.n = 18;
               break;
             }
@@ -4248,7 +4261,6 @@ function Tabula() {
             setSongBarLayer({
               synth: layerFirst.synth,
               lead: layerFirst.lead,
-              bass: layerFirst.bass,
               drums: layerFirst.drums
             });
           case 20:
@@ -4973,7 +4985,7 @@ function Tabula() {
               setPats(function (ps) {
                 return ps.map(function (p) {
                   if (p.id !== activeIdR.current) return p;
-                  var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+                  var isMono = activeLayerR.current === "lead";
                   var ng = isMono && !isExisting ? p.grid.map(function (row, ri) {
                     return row.map(function (v, ci) {
                       return ci === sc.c ? ri === sc.r : v;
@@ -5058,7 +5070,7 @@ function Tabula() {
           setPats(function (ps) {
             return ps.map(function (p) {
               if (p.id !== activeIdR.current) return p;
-              var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+              var isMono = activeLayerR.current === "lead";
               var ng = isMono ? p.grid.map(function (row, ri) {
                 return row.map(function (v, ci) {
                   return ci === cc ? ri === cr : v;
@@ -5208,7 +5220,7 @@ function Tabula() {
       // Tap: use paintStartCell which was recorded before pointer capture was set
       var sc = g.paintStartCell;
       if (sc && !isNaN(sc.r) && !isNaN(sc.c)) {
-        var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+        var isMono = activeLayerR.current === "lead";
         setPats(function (ps) {
           return ps.map(function (p) {
             if (p.id !== activeIdR.current) return p;
@@ -5468,7 +5480,7 @@ function Tabula() {
     setPats(function (ps) {
       return ps.map(function (p) {
         if (p.id !== id) return p;
-        var isMono = activeLayerR.current === "lead" || activeLayerR.current === "bass";
+        var isMono = activeLayerR.current === "lead";
         var grid;
         if (isMono) {
           // One note per column at most, ~50% column-fill density
@@ -6430,7 +6442,7 @@ function Tabula() {
       flexDirection: "column",
       gap: 4
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "168,197,160"], ["lead", "LEAD", "#b5a0c4", "181,160,196"], ["bass", "BASS", "#d4a574", "212,165,116"]].map(function (_ref21) {
+  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref21) {
     var _layerStoreR$current$, _layerStoreR$current$2;
     var _ref22 = _slicedToArray(_ref21, 4),
       layer = _ref22[0],
@@ -6652,11 +6664,11 @@ function Tabula() {
     }, "\uFF0B")));
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      border: "1px solid " + (activeLayer === "drums" ? "rgba(196,150,122,0.55)" : "rgba(200,185,165,0.1)"),
+      border: "1px solid " + (activeLayer === "drums" ? "rgba(196,114,122,0.55)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
       padding: "5px 6px",
       cursor: "pointer",
-      background: activeLayer === "drums" ? "rgba(196,150,122,0.06)" : "transparent",
+      background: activeLayer === "drums" ? "rgba(196,114,122,0.06)" : "transparent",
       transition: "all .1s"
     },
     onClick: function onClick() {
@@ -6670,7 +6682,7 @@ function Tabula() {
     style: {
       fontSize: 7,
       letterSpacing: 2,
-      color: activeLayer === "drums" ? "rgba(196,150,122,0.6)" : "rgba(210,195,175,0.25)",
+      color: activeLayer === "drums" ? "rgba(196,114,122,0.6)" : "rgba(210,195,175,0.25)",
       fontWeight: 500,
       marginBottom: 4
     }
@@ -6690,9 +6702,9 @@ function Tabula() {
       style: {
         padding: "3px 9px",
         borderRadius: 20,
-        border: "1.5px solid #c4967a",
-        background: isA ? "#c4967a" : "transparent",
-        color: isA ? "#1a1814" : "#c4967a",
+        border: "1.5px solid #c4727a",
+        background: isA ? "#c4727a" : "transparent",
+        color: isA ? "#1a1814" : "#c4727a",
         fontSize: 10,
         fontWeight: 700,
         letterSpacing: 1,
@@ -6701,7 +6713,7 @@ function Tabula() {
         display: "flex",
         alignItems: "center",
         gap: 3,
-        boxShadow: isP && !isA ? "0 0 10px #c4967a88" : "none",
+        boxShadow: isP && !isA ? "0 0 10px #c4727a88" : "none",
         touchAction: "none",
         opacity: isDragging ? 0.4 : 1
       },
@@ -6726,7 +6738,7 @@ function Tabula() {
             setPatternDrag({
               patId: dp.id,
               name: dp.name,
-              accent: "#c4967a",
+              accent: "#c4727a",
               x: ev.clientX,
               y: ev.clientY,
               overDrop: false,
@@ -6805,9 +6817,9 @@ function Tabula() {
     style: {
       padding: "3px 7px",
       borderRadius: 20,
-      border: "1px dashed rgba(196,150,122,0.3)",
+      border: "1px dashed rgba(196,114,122,0.3)",
       background: "transparent",
-      color: "rgba(196,150,122,0.4)",
+      color: "rgba(196,114,122,0.4)",
       fontSize: 12,
       lineHeight: 1,
       cursor: "pointer",
@@ -7263,10 +7275,10 @@ function Tabula() {
         flexDirection: "column",
         gap: 1
       }
-    }, ["synth", "lead", "bass", "drums"].map(function (layer) {
+    }, ["synth", "lead", "drums"].map(function (layer) {
       var _layerStoreR$current$3;
-      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#b5a0c4" : layer === "bass" ? "#d4a574" : "#c4967a";
-      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "181,160,196" : layer === "bass" ? "212,165,116" : "196,150,122";
+      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#6c9ad6" : "#c4727a";
+      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "108,154,214" : "196,114,122";
       var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$3 = layerStoreR.current[layer]) === null || _layerStoreR$current$3 === void 0 ? void 0 : _layerStoreR$current$3.pats) || (layer === "synth" ? pats : []);
       return /*#__PURE__*/React.createElement("div", {
         key: layer,
@@ -7689,7 +7701,7 @@ function Tabula() {
       style: {
         fontSize: 9,
         letterSpacing: 2,
-        color: "#c4967a",
+        color: "#c4727a",
         fontWeight: 700,
         opacity: 0.7
       }
@@ -8391,7 +8403,7 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement(SynthSection, {
     title: "RHYTHM VARY / MUT8",
-    accent: "#c4967a"
+    accent: "#c4727a"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -8408,7 +8420,7 @@ function Tabula() {
     max: 60,
     onChange: setVDropRate,
     display: vDropRate + "%",
-    accent: "#c4967a"
+    accent: "#c4727a"
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "SHIFT",
@@ -8417,7 +8429,7 @@ function Tabula() {
     max: 60,
     onChange: setVShiftRate,
     display: vShiftRate + "%",
-    accent: "#c4967a"
+    accent: "#c4727a"
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "RANGE",
@@ -8426,10 +8438,10 @@ function Tabula() {
     max: 8,
     onChange: setVShiftRange,
     display: vShiftRange + "st",
-    accent: "#c4967a"
+    accent: "#c4727a"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "MELODY VARY / MUT8",
-    accent: "#b5a0c4"
+    accent: "#6c9ad6"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -8446,7 +8458,7 @@ function Tabula() {
     max: 60,
     onChange: setVPitchRate,
     display: vPitchRate + "%",
-    accent: "#b5a0c4"
+    accent: "#6c9ad6"
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "RANGE",
@@ -8455,7 +8467,7 @@ function Tabula() {
     max: 12,
     onChange: setVPitchRange,
     display: vPitchRange + "st",
-    accent: "#b5a0c4"
+    accent: "#6c9ad6"
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "GHOST",
@@ -8464,7 +8476,7 @@ function Tabula() {
     max: 60,
     onChange: setVGhostRate,
     display: vGhostRate + "%",
-    accent: "#b5a0c4"
+    accent: "#6c9ad6"
   }))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "STEP VARY / MUT8",
     accent: "#9fb4c7"
@@ -8953,7 +8965,7 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "SYNTH", "#a8c5a0", "rgba(168,197,160,"], ["lead", "LEAD", "#b5a0c4", "rgba(181,160,196,"], ["bass", "BASS", "#d4a574", "rgba(212,165,116,"], ["drums", "DRUMS", "#c4967a", "rgba(196,150,122,"]].map(function (_ref37) {
+  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref37) {
     var _ref38 = _slicedToArray(_ref37, 4),
       lyr = _ref38[0],
       lbl = _ref38[1],
@@ -9001,7 +9013,7 @@ function Tabula() {
     var isSynth = !isDrums; // any synth-type layer
     var isA = isDrums ? p.id === activeDrumId : p.id === activeId;
     var isP = playing && (isSynth && activeLayer === "synth" ? playId === p.id : false);
-    var accent = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#b5a0c4" : activeLayer === "bass" ? "#d4a574" : "#c4967a";
+    var accent = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#6c9ad6" : "#c4727a";
     var isDragging = patternDrag && patternDrag.patId === p.id;
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
@@ -9157,8 +9169,8 @@ function Tabula() {
     style: {
       padding: "4px 10px",
       borderRadius: 20,
-      border: "1px dashed " + (activeLayer === "synth" ? "rgba(168,197,160,0.35)" : activeLayer === "lead" ? "rgba(181,160,196,0.35)" : activeLayer === "bass" ? "rgba(212,165,116,0.35)" : "rgba(196,150,122,0.35)"),
-      color: activeLayer === "synth" ? "rgba(168,197,160,0.45)" : activeLayer === "lead" ? "rgba(181,160,196,0.45)" : activeLayer === "bass" ? "rgba(212,165,116,0.45)" : "rgba(196,150,122,0.45)",
+      border: "1px dashed " + (activeLayer === "synth" ? "rgba(168,197,160,0.35)" : activeLayer === "lead" ? "rgba(108,154,214,0.35)" : "rgba(196,114,122,0.35)"),
+      color: activeLayer === "synth" ? "rgba(168,197,160,0.45)" : activeLayer === "lead" ? "rgba(108,154,214,0.45)" : "rgba(196,114,122,0.45)",
       fontSize: 12,
       cursor: "pointer",
       flexShrink: 0,
@@ -9281,10 +9293,10 @@ function Tabula() {
         flexDirection: "column",
         gap: 1
       }
-    }, ["synth", "lead", "bass", "drums"].map(function (layer) {
+    }, ["synth", "lead", "drums"].map(function (layer) {
       var _layerStoreR$current$4;
-      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#b5a0c4" : layer === "bass" ? "#d4a574" : "#c4967a";
-      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "181,160,196" : layer === "bass" ? "212,165,116" : "196,150,122";
+      var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#6c9ad6" : "#c4727a";
+      var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "108,154,214" : "196,114,122";
       var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$4 = layerStoreR.current[layer]) === null || _layerStoreR$current$4 === void 0 ? void 0 : _layerStoreR$current$4.pats) || (layer === "synth" ? pats : []);
       return /*#__PURE__*/React.createElement("div", {
         key: layer,
@@ -10244,8 +10256,8 @@ function Tabula() {
     }
   }, function () {
     var isDrum = activeLayer === "drums";
-    var accent = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#b5a0c4" : activeLayer === "bass" ? "#d4a574" : "#c4967a";
-    var accentF = activeLayer === "synth" ? "rgba(168,197,160," : activeLayer === "lead" ? "rgba(181,160,196," : activeLayer === "bass" ? "rgba(212,165,116," : "rgba(196,150,122,";
+    var accent = activeLayer === "synth" ? "#a8c5a0" : activeLayer === "lead" ? "#6c9ad6" : "#c4727a";
+    var accentF = activeLayer === "synth" ? "rgba(168,197,160," : activeLayer === "lead" ? "rgba(108,154,214," : "rgba(196,114,122,";
     var ops = isDrum ? [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, drumPats.length <= 1, true], ["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["MUT8", null, true, false]] : [["RAND", function () {
       return randPatId(activeId);
     }, false, false], ["CLR", function () {
@@ -11043,7 +11055,7 @@ function Tabula() {
     style: {
       fontSize: 8,
       letterSpacing: 1.5,
-      color: "#c4967a",
+      color: "#c4727a",
       fontWeight: 600,
       marginBottom: 8
     }
@@ -11115,7 +11127,7 @@ function Tabula() {
         top: 0,
         bottom: 0,
         width: val / max * 100 + "%",
-        background: "rgba(196,150,122,0.45)",
+        background: "rgba(196,114,122,0.45)",
         borderRadius: 3
       }
     }), /*#__PURE__*/React.createElement("div", {
@@ -11133,7 +11145,7 @@ function Tabula() {
     style: {
       fontSize: 8,
       letterSpacing: 1.5,
-      color: "#b5a0c4",
+      color: "#6c9ad6",
       fontWeight: 600,
       marginBottom: 8,
       marginTop: 14
@@ -11206,7 +11218,7 @@ function Tabula() {
         top: 0,
         bottom: 0,
         width: val / max * 100 + "%",
-        background: "rgba(181,160,196,0.45)",
+        background: "rgba(108,154,214,0.45)",
         borderRadius: 3
       }
     }), /*#__PURE__*/React.createElement("div", {
