@@ -641,7 +641,7 @@ class DrumEngine{
     const s=ctx.createBufferSource();s.buffer=b;return s;
   }
 
-  play(voice,t,vel,level=100,pan=0){
+  play(voice,t,vel,level=100,pan=0,sample=null){
     if(!this.ready)return;
     const ctx=this.ctx;
     const v=Math.max(0.001,vel/127);
@@ -651,6 +651,14 @@ class DrumEngine{
     if(panner){panner.pan.value=Math.max(-1,Math.min(1,pan/100));lvlGain.connect(panner);panner.connect(this.master);}
     else{lvlGain.connect(this.master);}
     const out=lvlGain;
+    // User-recorded sample takes precedence over the synthesized voice.
+    if(sample){
+      const src=ctx.createBufferSource();src.buffer=sample;
+      const g=ctx.createGain();g.gain.value=v;
+      src.connect(g);g.connect(out);
+      try{src.start(t);}catch(e){src.start();}
+      return;
+    }
 
     if(voice==="BD"){
       // Tonal body: deep sine sweep
@@ -859,6 +867,15 @@ export default function Tabula(){
   const [shifting,  setShifting]  = useState(false);
   const [varyMode,  setVaryMode]  = useState(false);
   const [recMode,   setRecMode]   = useState(false);
+  // Internal sampler — per-drum-voice user-recorded AudioBuffer. Stored in
+  // state so the UI can show "loaded" indicators; mirrored to voiceSamplesR
+  // for the scheduler to read without stale-closure issues. Session-only —
+  // not persisted to save slots (would bloat them with binary audio data).
+  const [voiceSamples, setVoiceSamples] = useState({});
+  const voiceSamplesR = useRef({});
+  const [recordingVoice, setRecordingVoice] = useState(null);
+  const recorderRef = useRef(null);
+  const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
   const swingR = useRef(0);
   const gridLenR   = useRef(16);
@@ -1135,6 +1152,9 @@ export default function Tabula(){
     else recSourceIdR.current=null;
   },[recMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
+  // Sync voiceSamples state → ref so the scheduler reads the latest map
+  // without a stale closure dependency.
+  useEffect(()=>{voiceSamplesR.current=voiceSamples;},[voiceSamples]);
   useEffect(()=>{
     varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,fltJitter:vFltJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
   },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,vGlideJitter,vDurJitter]);
@@ -1474,6 +1494,12 @@ export default function Tabula(){
     setPatternDrag(null);
     setActiveSlot(null);
     setPage("edit");
+    // Stop any in-flight sample recording + clear stored samples.
+    if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}
+    if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
+    recorderRef.current=null;
+    setRecordingVoice(null);
+    setVoiceSamples({});
     showFlash("NEW PROJECT");
   };
   const newProject=()=>{
@@ -1667,7 +1693,7 @@ export default function Tabula(){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
         const dMix=(pat.mix||defaultDrumMix())[r]||{level:100,pan:0};
-        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan);
+        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key]);
       }
     }
   };
@@ -2012,7 +2038,7 @@ export default function Tabula(){
               if(useGrid[r]&&useGrid[r][ds]){
                 const dVel=useVel?.[ds]??100;
                 const dMix=(dPat.mix||defaultDrumMix())[r]||{level:100,pan:0};
-                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan);
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key]);
               }
             }
             setDrumStep(ds);
@@ -2744,6 +2770,53 @@ export default function Tabula(){
     const vel=p.vel.map(()=>Math.round(80+Math.random()*Math.random()*47));
     return Object.assign({},p,{vel});
   }));}
+
+  // ── Internal sampler ─────────────────────────────────────────────────
+  // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
+  // store it per drum voice. Drum playback paths read voiceSamplesR.current
+  // and substitute the sample for the synthesized voice when present.
+  const startRecord=async(voiceKey)=>{
+    if(recordingVoice)return; // serialize — one voice at a time
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined"){
+      showFlash("MIC UNSUPPORTED");return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      recordStreamRef.current=stream;
+      const recorder=new MediaRecorder(stream);
+      const chunks=[];
+      recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
+      recorder.onstop=async()=>{
+        try{
+          const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+          const buf=await blob.arrayBuffer();
+          const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx);
+          if(ctx){
+            const audioBuf=await ctx.decodeAudioData(buf);
+            setVoiceSamples(prev=>({...prev,[voiceKey]:audioBuf}));
+            showFlash("REC OK "+voiceKey);
+          }
+        }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
+        if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
+        recorderRef.current=null;
+        setRecordingVoice(null);
+      };
+      recorder.start();
+      recorderRef.current=recorder;
+      setRecordingVoice(voiceKey);
+    }catch(err){
+      console.error("Mic denied:",err);
+      showFlash("MIC DENIED");
+      setRecordingVoice(null);
+    }
+  };
+  const stopRecord=()=>{
+    const r=recorderRef.current;
+    if(r&&r.state==="recording")r.stop();
+  };
+  const clearVoiceSample=(voiceKey)=>{
+    setVoiceSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
+  };
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
@@ -3764,6 +3837,20 @@ export default function Tabula(){
                         <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
                       </div>
                     </div>
+                    {/* Sampler: REC mic into this voice's slot; LD indicator when a sample is loaded */}
+                    {(()=>{
+                      const isRec=recordingVoice===voice.key;
+                      const hasSample=!!voiceSamples[voice.key];
+                      return(
+                        <div style={{display:"flex",gap:3,flexShrink:0}}>
+                          <button style={{padding:"3px 6px",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",minWidth:28}}
+                            onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
+                            {isRec?"STOP":hasSample?"●":"REC"}
+                          </button>
+                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:4,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                        </div>
+                      );
+                    })()}
                   </div>
                   );
                 })}
@@ -4587,6 +4674,19 @@ export default function Tabula(){
                                 <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
                               </div>
                             </div>
+                            {(()=>{
+                              const isRec=recordingVoice===voice.key;
+                              const hasSample=!!voiceSamples[voice.key];
+                              return(
+                                <div style={{display:"flex",gap:3,flexShrink:0}}>
+                                  <button style={{padding:"3px 6px",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",minWidth:28}}
+                                    onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
+                                    {isRec?"STOP":hasSample?"●":"REC"}
+                                  </button>
+                                  {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:4,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                                </div>
+                              );
+                            })()}
                           </div>);
                         })}
                       </div>);
