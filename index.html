@@ -7740,42 +7740,9 @@ function Tabula() {
       onClick: clearDrums
     }, "CLR")), /*#__PURE__*/React.createElement("div", {
       style: {
-        position: "relative",
         width: dw || "80%",
         height: dh || "auto",
-        flexShrink: 0
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        position: "absolute",
-        right: "100%",
-        top: 0,
-        bottom: 0,
-        width: 26,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        paddingRight: 4,
-        boxSizing: "border-box"
-      }
-    }, DRUM_VOICES.map(function (v) {
-      return /*#__PURE__*/React.createElement("div", {
-        key: v.key,
-        style: {
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          fontSize: 8,
-          fontWeight: 700,
-          letterSpacing: 1,
-          color: v.color + "99"
-        }
-      }, v.label);
-    })), /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: "100%",
-        height: "100%",
+        flexShrink: 0,
         display: "flex",
         flexDirection: "column",
         gap: 2
@@ -7786,16 +7753,24 @@ function Tabula() {
         style: {
           flex: 1,
           display: "flex",
-          alignItems: "stretch",
-          gap: 2
+          gap: 2,
+          position: "relative"
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
-          flex: 1,
-          display: "flex",
-          gap: 2
+          position: "absolute",
+          left: 6,
+          top: "50%",
+          transform: "translateY(-50%)",
+          fontSize: 9,
+          fontWeight: 700,
+          color: voice.color,
+          opacity: 0.5,
+          letterSpacing: 1,
+          pointerEvents: "none",
+          zIndex: 2
         }
-      }, Array.from({
+      }, voice.label), Array.from({
         length: COLS
       }, function (_, c) {
         var _dPat$grid$r;
@@ -7822,8 +7797,8 @@ function Tabula() {
             }
           }
         });
-      })));
-    }))), /*#__PURE__*/React.createElement("div", {
+      }));
+    })), /*#__PURE__*/React.createElement("div", {
       style: {
         width: dw || "80%",
         height: 28,
@@ -9710,88 +9685,67 @@ function Tabula() {
     }) || drumPats[0];
     var dLen = (_dPat$gridLen3 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen3 !== void 0 ? _dPat$gridLen3 : 16;
     var GAP = 2;
-    var HEADER = 14;
-    // Match synth grid TOTAL size. Labels go inside the same area as synth cells —
-    // not added on top of it. So drum cells absorb the header overhead and end up
-    // slightly smaller than synth cells. Also use DRUM_ROWS (10) for column count.
+    // Drum grid is now oriented to match the synth grid: voices
+    // run vertically as rows, steps horizontally as columns. Time
+    // flows right → same direction as synth playback. Voice
+    // labels are transparent overlays on the leftmost portion of
+    // each row so the cells themselves get the full width.
     var SIZE = "min(calc(100vw - 20px), calc(100dvh - 150px))";
-    var cell = "calc((".concat(SIZE, " - ").concat(HEADER, "px - ").concat(16 * GAP, "px) / 16)");
-    var gridW = "calc(".concat(cell, " * ").concat(DRUM_ROWS, " + ").concat((DRUM_ROWS - 1) * GAP, "px)");
-    var gridH = SIZE;
     return /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
         gap: 6,
-        alignItems: "flex-start",
         flexShrink: 0
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        width: gridW,
-        height: gridH,
+        width: SIZE,
         display: "flex",
         flexDirection: "column",
         gap: GAP,
         flexShrink: 0,
         touchAction: "none"
       }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        gap: GAP,
-        flexShrink: 0,
-        height: HEADER,
-        alignItems: "center"
-      }
-    }, DRUM_VOICES.map(function (v) {
+    }, DRUM_VOICES.map(function (voice, r) {
       return /*#__PURE__*/React.createElement("div", {
-        key: v.key,
+        key: voice.key,
         style: {
-          flex: 1,
-          textAlign: "center",
-          fontSize: 7,
-          fontWeight: 700,
-          color: v.color + "cc",
-          letterSpacing: 0.3,
-          lineHeight: 1
-        }
-      }, v.label);
-    })), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: GAP,
-        minHeight: 0
-      }
-    }, Array.from({
-      length: COLS
-    }, function (_, step) {
-      var isActive = playing && step === drumStep;
-      var inactive = step >= dLen;
-      var isQ = step % 4 === 0;
-      return /*#__PURE__*/React.createElement("div", {
-        key: step,
-        style: {
-          height: cell,
           display: "flex",
           gap: GAP,
-          background: isActive ? "rgba(220,200,180,0.06)" : "transparent",
-          borderRadius: 2,
-          borderTop: isQ && step > 0 ? "1px solid rgba(220,200,180,0.08)" : "none"
+          position: "relative"
         }
-      }, DRUM_VOICES.map(function (voice, r) {
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          position: "absolute",
+          left: 6,
+          top: "50%",
+          transform: "translateY(-50%)",
+          fontSize: 9,
+          fontWeight: 700,
+          color: voice.color,
+          opacity: 0.5,
+          letterSpacing: 1,
+          pointerEvents: "none",
+          zIndex: 2
+        }
+      }, voice.label), Array.from({
+        length: COLS
+      }, function (_, step) {
         var _dPat$grid$r2;
         var on = (dPat === null || dPat === void 0 || (_dPat$grid$r2 = dPat.grid[r]) === null || _dPat$grid$r2 === void 0 ? void 0 : _dPat$grid$r2[step]) || false;
+        var isActive = playing && step === drumStep;
+        var inactive = step >= dLen;
+        var isQ = step % 4 === 0;
         return /*#__PURE__*/React.createElement("div", {
-          key: r,
+          key: step,
           style: {
-            width: cell,
-            height: cell,
+            flex: 1,
             aspectRatio: "1",
             borderRadius: 2,
             cursor: inactive ? "default" : "pointer",
-            flexShrink: 0,
-            background: inactive ? "rgba(220,200,180,0.015)" : on ? isActive ? "rgba(255,255,255,0.88)" : voice.color : isActive ? "rgba(220,200,180,0.1)" : "rgba(220,200,180,0.03)",
+            background: inactive ? "rgba(220,200,180,0.015)" : on ? isActive ? "rgba(255,255,255,0.88)" : voice.color : isActive ? "rgba(220,200,180,0.1)" : isQ ? "rgba(220,200,180,0.05)" : "rgba(220,200,180,0.03)",
             border: "1px solid " + (inactive ? "rgba(220,200,180,0.03)" : on ? voice.color : "rgba(220,200,180,0.07)"),
             boxShadow: on && isActive ? "0 0 4px " + voice.color : "none",
             boxSizing: "border-box"
@@ -9806,22 +9760,22 @@ function Tabula() {
           }
         });
       }));
-    }))), /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("div", {
       style: {
-        width: 10,
-        height: gridH,
+        width: SIZE,
+        height: 10,
         background: "rgba(220,200,180,0.06)",
         borderRadius: 5,
         position: "relative",
-        cursor: "ns-resize",
-        flexShrink: 0,
-        touchAction: "none"
+        cursor: "ew-resize",
+        touchAction: "none",
+        flexShrink: 0
       },
       onPointerDown: function onPointerDown(e) {
         e.stopPropagation();
         var rect = e.currentTarget.getBoundingClientRect();
         var update = function update(ev) {
-          var pct = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+          var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
           setDrumLen(Math.max(1, Math.round(pct * COLS)));
         };
         update(e);
@@ -9836,19 +9790,19 @@ function Tabula() {
       style: {
         position: "absolute",
         top: 0,
+        bottom: 0,
         left: 0,
-        right: 0,
-        height: "".concat(dLen / COLS * 100, "%"),
+        width: "".concat(dLen / COLS * 100, "%"),
         background: "rgba(210,195,175,0.18)",
-        borderRadius: "5px 5px 0 0"
+        borderRadius: "5px 0 0 5px"
       }
     }), /*#__PURE__*/React.createElement("div", {
       style: {
         position: "absolute",
-        left: -2,
-        right: -2,
-        height: 6,
-        top: "calc(".concat(dLen / COLS * 100, "% - 3px)"),
+        top: -2,
+        bottom: -2,
+        width: 6,
+        left: "calc(".concat(dLen / COLS * 100, "% - 3px)"),
         background: "rgba(255,255,255,0.85)",
         borderRadius: 3,
         boxShadow: "0 0 5px rgba(255,255,255,0.3)"
@@ -9856,9 +9810,9 @@ function Tabula() {
     }), /*#__PURE__*/React.createElement("span", {
       style: {
         position: "absolute",
-        bottom: 3,
-        left: "50%",
-        transform: "translateX(-50%)",
+        right: 6,
+        top: "50%",
+        transform: "translateY(-50%)",
         fontSize: 6,
         color: "rgba(210,195,175,0.4)",
         pointerEvents: "none"

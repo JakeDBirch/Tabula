@@ -3656,31 +3656,23 @@ export default function Tabula(){
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
                 </div>
-                {/* Grid — labels sit outside dw via position:absolute on wrapper */}
-                <div style={{position:"relative",width:dw||"80%",height:dh||"auto",flexShrink:0}}>
-                  {/* Label column — positioned left of grid, zero impact on dw */}
-                  <div style={{position:"absolute",right:"100%",top:0,bottom:0,width:26,display:"flex",flexDirection:"column",gap:2,paddingRight:4,boxSizing:"border-box"}}>
-                    {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"flex-end",fontSize:8,fontWeight:700,letterSpacing:1,color:v.color+"99"}}>{v.label}</div>))}
-                  </div>
-                  {/* Step cells — fill full dw, no label children */}
-                  <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",gap:2}}>
+                {/* Grid — voice labels are transparent overlays inside each row */}
+                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
                   {DRUM_VOICES.map((voice,r)=>(
-                    <div key={voice.key} style={{flex:1,display:"flex",alignItems:"stretch",gap:2}}>
-                      <div style={{flex:1,display:"flex",gap:2}}>
-                        {Array.from({length:COLS},(_,c)=>{
-                          const on=dPat?.grid[r]?.[c]||false;
-                          const isActive=playing&&c===drumStep;
-                          const inactive=c>=dLen;
-                          const isQ=c%4===0;
-                          return(
-                            <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
-                              onPointerDown={e=>{e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,c,!on);}}}/>
-                          );
-                        })}
-                      </div>
+                    <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
+                      <div style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,fontWeight:700,color:voice.color,opacity:0.5,letterSpacing:1,pointerEvents:"none",zIndex:2}}>{voice.label}</div>
+                      {Array.from({length:COLS},(_,c)=>{
+                        const on=dPat?.grid[r]?.[c]||false;
+                        const isActive=playing&&c===drumStep;
+                        const inactive=c>=dLen;
+                        const isQ=c%4===0;
+                        return(
+                          <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
+                            onPointerDown={e=>{e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,c,!on);}}}/>
+                        );
+                      })}
                     </div>
                   ))}
-                  </div>
                 </div>
                 {/* Velocity lane */}
                 <div style={{width:dw||"80%",height:28,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",position:"relative"}}>
@@ -4288,55 +4280,46 @@ export default function Tabula(){
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
                   const GAP=2;
-                  const HEADER=14;
-                  // Match synth grid TOTAL size. Labels go inside the same area as synth cells —
-                  // not added on top of it. So drum cells absorb the header overhead and end up
-                  // slightly smaller than synth cells. Also use DRUM_ROWS (10) for column count.
+                  // Drum grid is now oriented to match the synth grid: voices
+                  // run vertically as rows, steps horizontally as columns. Time
+                  // flows right → same direction as synth playback. Voice
+                  // labels are transparent overlays on the leftmost portion of
+                  // each row so the cells themselves get the full width.
                   const SIZE=`min(calc(100vw - 20px), calc(100dvh - 150px))`;
-                  const cell=`calc((${SIZE} - ${HEADER}px - ${16*GAP}px) / 16)`;
-                  const gridW=`calc(${cell} * ${DRUM_ROWS} + ${(DRUM_ROWS-1)*GAP}px)`;
-                  const gridH=SIZE;
                   return(
-                    <div style={{display:"flex",gap:6,alignItems:"flex-start",flexShrink:0}}>
-                      {/* Portrait grid — same cell size as synth grid, 8 cols × 16 rows */}
-                      <div style={{width:gridW,height:gridH,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
-                        <div style={{display:"flex",gap:GAP,flexShrink:0,height:HEADER,alignItems:"center"}}>
-                          {DRUM_VOICES.map(v=>(<div key={v.key} style={{flex:1,textAlign:"center",fontSize:7,fontWeight:700,color:v.color+"cc",letterSpacing:0.3,lineHeight:1}}>{v.label}</div>))}
-                        </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:GAP,minHeight:0}}>
-                          {Array.from({length:COLS},(_,step)=>{
-                            const isActive=playing&&step===drumStep;
-                            const inactive=step>=dLen;
-                            const isQ=step%4===0;
-                            return(
-                              <div key={step} style={{height:cell,display:"flex",gap:GAP,background:isActive?"rgba(220,200,180,0.06)":"transparent",borderRadius:2,borderTop:isQ&&step>0?"1px solid rgba(220,200,180,0.08)":"none"}}>
-                                {DRUM_VOICES.map((voice,r)=>{
-                                  const on=dPat?.grid[r]?.[step]||false;
-                                  return(<div key={r} style={{width:cell,height:cell,aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",flexShrink:0,
-                                    background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":"rgba(220,200,180,0.03)",
-                                    border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
-                                    boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
-                                    boxSizing:"border-box",
-                                  }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,step,!on);}}}/> );
-                                })}
-                              </div>
-                            );
-                          })}
-                        </div>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
+                      <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
+                        {DRUM_VOICES.map((voice,r)=>(
+                          <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
+                            <div style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,fontWeight:700,color:voice.color,opacity:0.5,letterSpacing:1,pointerEvents:"none",zIndex:2}}>{voice.label}</div>
+                            {Array.from({length:COLS},(_,step)=>{
+                              const on=dPat?.grid[r]?.[step]||false;
+                              const isActive=playing&&step===drumStep;
+                              const inactive=step>=dLen;
+                              const isQ=step%4===0;
+                              return(<div key={step} style={{flex:1,aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
+                                background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
+                                border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
+                                boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
+                                boxSizing:"border-box",
+                              }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,step,!on);}}}/>);
+                            })}
+                          </div>
+                        ))}
                       </div>
-                      {/* Vertical length slider */}
-                      <div style={{width:10,height:gridH,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}
+                      {/* Horizontal length slider (matches synth grid orientation) */}
+                      <div style={{width:SIZE,height:10,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
+                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
                           update(e);
                           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                         }}>
-                        <div style={{position:"absolute",top:0,left:0,right:0,height:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 5px 0 0"}}/>
-                        <div style={{position:"absolute",left:-2,right:-2,height:6,top:`calc(${(dLen/COLS)*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
-                        <span style={{position:"absolute",bottom:3,left:"50%",transform:"translateX(-50%)",fontSize:6,color:"rgba(210,195,175,0.4)",pointerEvents:"none"}}>{dLen}</span>
+                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 0 0 5px"}}/>
+                        <div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${(dLen/COLS)*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
+                        <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:6,color:"rgba(210,195,175,0.4)",pointerEvents:"none"}}>{dLen}</span>
                       </div>
                     </div>
                   );
