@@ -1342,6 +1342,25 @@ export default function Tabula(){
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
+  // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
+  // layer silences non-solo'd ones, even if they aren't muted. Stored as
+  // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
+  const [trackMute, setTrackMute] = useState({synth:false,lead:false,drums:false});
+  const [trackSolo, setTrackSolo] = useState({synth:false,lead:false,drums:false});
+  const trackMuteR = useRef(trackMute);
+  const trackSoloR = useRef(trackSolo);
+  useEffect(()=>{trackMuteR.current=trackMute;},[trackMute]);
+  useEffect(()=>{trackSoloR.current=trackSolo;},[trackSolo]);
+  // Effective-audible test — true if the layer should be heard right now.
+  // Reads refs so the scheduler can call this without re-binding every tick.
+  const isLayerAudibleR = useRef(()=>true);
+  isLayerAudibleR.current = (layer)=>{
+    const m=trackMuteR.current, s=trackSoloR.current;
+    if(m[layer])return false;
+    const anySolo=s.synth||s.lead||s.drums;
+    if(anySolo&&!s[layer])return false;
+    return true;
+  };
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
@@ -1666,6 +1685,7 @@ export default function Tabula(){
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    trackMute:{...trackMute},trackSolo:{...trackSolo},
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -1714,6 +1734,8 @@ export default function Tabula(){
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
+    setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
   };
   // Stable function references — read live state via the refs above
   const pushHistoryR = useRef(()=>{});
@@ -1770,7 +1792,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
@@ -1903,6 +1925,8 @@ export default function Tabula(){
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
+    setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
     if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
@@ -1983,6 +2007,8 @@ export default function Tabula(){
     };
     setActiveLayer("synth");
     setLoopMode(false);setVaryMode(false);
+    setTrackMute({synth:false,lead:false,drums:false});
+    setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);setSongSyncMode("sync");
     setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),drums:Array(64).fill(null)});
     setSongBar(-1);songBarR.current=-1;
@@ -2057,6 +2083,7 @@ export default function Tabula(){
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    trackMute,trackSolo,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -2100,6 +2127,8 @@ export default function Tabula(){
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
+    setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
@@ -2371,8 +2400,13 @@ export default function Tabula(){
           }
         }
         // Play this layer's step.
-        if(layer==="drums")playDrumStep(pat,s,at);
-        else playSynthLayerStep(layer,pat,s,at,layerStepDur);
+        // Mute / solo gate — silence the play call but keep advancing the
+        // scheduler clock so the layer stays in sync if it gets un-muted
+        // mid-bar.
+        if(isLayerAudibleR.current(layer)){
+          if(layer==="drums")playDrumStep(pat,s,at);
+          else playSynthLayerStep(layer,pat,s,at,layerStepDur);
+        }
         // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
           if(layer==="drums")setDrumStep(s);else setStep(s);
@@ -3498,15 +3532,14 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
   }));}
-  // CH (closed hat) + OH (open hat) are linked on pan + level since they
-  // model the same physical hi-hat in any real kit — independent placement
-  // or balance would sound off. Sends and samples stay independent so users
-  // can still e.g. reverb the open hat alone.
+  // CH (closed hat) + OH (open hat) are linked on pan, level, AND the FX
+  // sends since they model the same physical hi-hat in any real kit. Sample
+  // slots stay independent so each can hold its own recording.
   const _CH_ROW=DRUM_VOICES.findIndex(v=>v.key==="CH");
   const _OH_ROW=DRUM_VOICES.findIndex(v=>v.key==="OH");
   const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const linksHat=(key==="pan"||key==="level")&&(row===_CH_ROW||row===_OH_ROW);
+    const linksHat=(key==="pan"||key==="level"||key==="rvSend"||key==="dlySend")&&(row===_CH_ROW||row===_OH_ROW);
     const linkedRow=linksHat?(row===_CH_ROW?_OH_ROW:_CH_ROW):-1;
     // fillDrumMix normalizes any partial saves so old voice rows without
     // rvSend/dlySend pick up the default before getting the new value applied.
@@ -4363,23 +4396,39 @@ export default function Tabula(){
             const monoMix=layerParams.lead?.mix??85;
             const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
             const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
-            const fader=(label,val,color,onChange)=>(
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                  onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
-                  <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
-                </div>
-                <span style={{width:20,fontSize:7,color:"rgba(210,195,175,0.5)",textAlign:"right",flexShrink:0}}>{val}</span>
-              </div>
+            const toggleMute=key=>setTrackMute(t=>({...t,[key]:!t[key]}));
+            const toggleSolo=key=>setTrackSolo(t=>({...t,[key]:!t[key]}));
+            const msBtn=(label,active,color,onClick)=>(
+              <button onClick={e=>{e.stopPropagation();onClick();}}
+                style={{width:16,height:14,fontSize:7,fontWeight:700,letterSpacing:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
+                  border:"1px solid "+(active?color:"rgba(200,185,165,0.2)"),
+                  background:active?color+"22":"transparent",
+                  color:active?color:"rgba(210,195,175,0.45)"}}>{label}</button>
             );
+            const fader=(label,val,color,onChange,layerKey)=>{
+              const muted=!!trackMute[layerKey];
+              const solo=!!trackSolo[layerKey];
+              const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
+              const dim=muted||(anySolo&&!solo);
+              return(
+                <div style={{display:"flex",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
+                  <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
+                  <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                    onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
+                    <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
+                  </div>
+                  {msBtn("M",muted,"#c47a7a",()=>toggleMute(layerKey))}
+                  {msBtn("S",solo,"#d4a850",()=>toggleSolo(layerKey))}
+                </div>
+              );
+            };
             return(
               <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
                 <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIX</div>
-                {fader("POLY",polyMix,"#a8c5a0",setSynthMix)}
-                {fader("MONO",monoMix,"#6c9ad6",setLeadMix)}
-                {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel)}
+                {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
+                {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
+                {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
               </div>
             );
           })()}
@@ -5816,23 +5865,39 @@ export default function Tabula(){
                       const monoMix=layerParams.lead?.mix??85;
                       const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
                       const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
-                      const fader=(label,val,color,onChange)=>(
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                          <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                          <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"pointer"}}
-                            onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                            <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
-                            <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
-                          </div>
-                          <span style={{width:24,fontSize:8,color:"rgba(210,195,175,0.55)",textAlign:"right",flexShrink:0}}>{val}</span>
-                        </div>
+                      const toggleMute=key=>setTrackMute(t=>({...t,[key]:!t[key]}));
+                      const toggleSolo=key=>setTrackSolo(t=>({...t,[key]:!t[key]}));
+                      const msBtn=(label,active,color,onClick)=>(
+                        <button onClick={e=>{e.stopPropagation();onClick();}}
+                          style={{width:22,height:22,fontSize:9,fontWeight:700,letterSpacing:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
+                            border:"1px solid "+(active?color:"rgba(200,185,165,0.2)"),
+                            background:active?color+"22":"transparent",
+                            color:active?color:"rgba(210,195,175,0.45)"}}>{label}</button>
                       );
+                      const fader=(label,val,color,onChange,layerKey)=>{
+                        const muted=!!trackMute[layerKey];
+                        const solo=!!trackSolo[layerKey];
+                        const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
+                        const dim=muted||(anySolo&&!solo);
+                        return(
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,opacity:dim?0.4:1}}>
+                            <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
+                            <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"pointer"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
+                              <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
+                            </div>
+                            {msBtn("M",muted,"#c47a7a",()=>toggleMute(layerKey))}
+                            {msBtn("S",solo,"#d4a850",()=>toggleSolo(layerKey))}
+                          </div>
+                        );
+                      };
                       return(
                         <div style={{marginBottom:16}}>
                           <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>MIX</div>
-                          {fader("POLY",polyMix,"#a8c5a0",setSynthMix)}
-                          {fader("MONO",monoMix,"#6c9ad6",setLeadMix)}
-                          {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel)}
+                          {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
+                          {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
+                          {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
                         </div>
                       );
                     })()}
