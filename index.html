@@ -1275,7 +1275,11 @@ var Bell = /*#__PURE__*/function () {
     key: "setRvSize",
     value: function setRvSize(pct) {
       if (!this.ready || !this.rvCombs) return;
-      var fb = 0.40 + Math.max(0, Math.min(100, pct)) / 100 * 0.52; // 0.40..0.92
+      // Feedback gain → exponential decay rate. fb=0.96 roughly doubles the
+      // max tail length vs the old 0.92 cap. Damping prevents HF runaway even
+      // at the top of the range — shelf cuts accumulate per pass, so nothing
+      // builds up unbounded.
+      var fb = 0.40 + Math.max(0, Math.min(100, pct)) / 100 * 0.56; // 0.40..0.96
       var _iterator2 = _createForOfIteratorHelper(this.rvCombs),
         _step2;
       try {
@@ -9744,17 +9748,19 @@ function Tabula() {
     label: "PRE",
     value: rvPreDelay,
     min: 0,
-    max: 500,
+    max: 250,
     onChange: setRvPreDelay,
     display: rvPreDelay + "ms",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF DAMP",
-    value: rvDamp,
+    label: "HF",
+    value: 100 - rvDamp,
     min: 0,
     max: 100,
-    onChange: setRvDamp,
-    display: rvDamp + "%",
+    onChange: function onChange(v) {
+      return setRvDamp(100 - v);
+    },
+    display: 100 - rvDamp + "%",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "LF DAMP",
@@ -11696,17 +11702,19 @@ function Tabula() {
     label: "PRE",
     value: rvPreDelay,
     min: 0,
-    max: 500,
+    max: 250,
     onChange: setRvPreDelay,
     display: rvPreDelay + "ms",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF DAMP",
-    value: rvDamp,
+    label: "HF",
+    value: 100 - rvDamp,
     min: 0,
     max: 100,
-    onChange: setRvDamp,
-    display: rvDamp + "%",
+    onChange: function onChange(v) {
+      return setRvDamp(100 - v);
+    },
+    display: 100 - rvDamp + "%",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "LF DAMP",

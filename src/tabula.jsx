@@ -504,7 +504,11 @@ class Bell{
   }
   // Reverb param setters — analogous to setDly* helpers above
   setRvSize(pct){if(!this.ready||!this.rvCombs)return;
-    const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.52; // 0.40..0.92
+    // Feedback gain → exponential decay rate. fb=0.96 roughly doubles the
+    // max tail length vs the old 0.92 cap. Damping prevents HF runaway even
+    // at the top of the range — shelf cuts accumulate per pass, so nothing
+    // builds up unbounded.
+    const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.56; // 0.40..0.96
     for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
   }
   // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
@@ -4534,9 +4538,10 @@ export default function Tabula(){
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
                         <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
-                        <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={500} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
-                        <KnobSlider label="HF DAMP" value={rvDamp}     min={0} max={100} onChange={setRvDamp}     display={rvDamp+"%"}        accent={C_REV}/>
-                        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
+                        <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}     accent={C_REV}/>
+                        {/* HF knob: full clockwise = bright (no damp), engine stores damp internally. */}
+                        <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
+                        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}        accent={C_REV}/>
                         <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                       </div>
                     </SynthSection>
@@ -5180,11 +5185,12 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
-                              <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={500} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
-                              <KnobSlider label="HF DAMP" value={rvDamp}     min={0} max={100} onChange={setRvDamp}     display={rvDamp+"%"}      accent={C_REV}/>
-                              <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}    accent={C_REV}/>
-                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}      accent={C_REV}/>
+                              <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
+                              <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
+                              {/* HF knob behaves like a low-pass: full clockwise = bright (no damp). Engine semantics keep 0=no damp internally; UI inverts here. */}
+                              <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
+                              <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
+                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                             </div>
                           </SynthSection>
                         </div>
