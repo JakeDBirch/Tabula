@@ -379,30 +379,34 @@ class Bell{
     await this.ctx.resume();
     const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
 
-    // Reverb — Schroeder-style 4-comb feedback, with per-layer send and
-    // optional delay-to-reverb feed. Variable size (decay) and damp (HF roll).
+    // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
+    // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
+    // L/R image). Per-layer send and optional delay-to-reverb feed both land
+    // on rvIn (mono input bus); combs branch to a ChannelMergerNode for
+    // stereo output. Variable size (decay) and damp (HF roll).
     const rvIn = this.ctx.createGain(); rvIn.gain.value = 1.0;
     const rvOut = this.ctx.createGain(); rvOut.gain.value = 0.6; // wet level
-    rvOut.connect(m);
-    this.rev = rvIn;            // input bus (per-note sends + delay→rev all connect here)
+    const rvMerger = this.ctx.createChannelMerger(2);
+    rvMerger.connect(rvOut); rvOut.connect(m);
+    this.rev = rvIn;
     this.rvOut = rvOut;
-    // Pre-tap allpass for diffusion
     const rvCombs = [];
-    [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>{
-      const cd = this.ctx.createDelay(1); cd.delayTime.value = ct;
+    // Q kept very low (0.05 ≈ flat) — appreciable Q on a biquad in a feedback
+    // loop accumulates a resonant peak that sounds like ringing tone (the
+    // "runaway feedback" report).
+    const mkComb = (delaySec, channel) => {
+      const cd = this.ctx.createDelay(1); cd.delayTime.value = delaySec;
       const cfb = this.ctx.createGain(); cfb.gain.value = 0.78;
-      // Q kept very low — a biquad lowpass with appreciable Q places a
-      // resonant peak at the cutoff frequency. Inside a feedback loop
-      // that peak accumulates and sounds like a ringing tone (the user's
-      // "runaway feedback" complaint). 0.05 ≈ flat rolloff, no peak.
       const clp = this.ctx.createBiquadFilter();
       clp.type="lowpass"; clp.frequency.value = 4500; clp.Q.value = 0.05;
-      // Loop: rvIn → cd → clp → cfb → cd  (recirculation)
       rvIn.connect(cd);
       cd.connect(clp); clp.connect(cfb); cfb.connect(cd);
-      cd.connect(rvOut);
+      // Each comb's pre-feedback output taps the merger on its channel.
+      cd.connect(rvMerger, 0, channel);
       rvCombs.push({delay:cd, fb:cfb, lp:clp});
-    });
+    };
+    [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>mkComb(ct, 0)); // left
+    [0.0306, 0.0383, 0.0421, 0.0451].forEach(ct=>mkComb(ct, 1)); // right (offset)
     this.rvCombs = rvCombs;
 
     // Delay line with filters in both the feedback loop and the output tap.
@@ -436,10 +440,10 @@ class Bell{
   }
   // Reverb param setters — analogous to setDly* helpers above
   setRvSize(pct){if(!this.ready||!this.rvCombs)return;
-    // Capped well below unity — even with the LP damping, busy patterns
-    // were producing the user's "runaway" tail at higher values. The new
-    // 0.40..0.78 range gives a long-but-stable musical decay.
-    const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.38; // 0.40..0.78
+    // Range pushed back up after the Q=0.05 damping fix removed the
+    // resonance accumulation that caused the original runaway. 0.40..0.92
+    // covers small-room to very-long-hall decays musically.
+    const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.52; // 0.40..0.92
     for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
   }
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
@@ -1230,6 +1234,14 @@ export default function Tabula(){
   });};
   const applySnapshot = s=>{
     if(!s)return;
+    // Reset layerStoreR to fresh defaults BEFORE restoring — undo/redo
+    // snapshots from previous projects shouldn't bleed through stale lead/
+    // synth data if the new snapshot doesn't define them.
+    const _freshLead=mkPat(symPat(0));
+    layerStoreR.current={
+      synth:null,
+      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
+    };
     if(s.layerStore){
       // Restore non-active layers to the store
       for(const layer of SYNTH_LAYERS){
@@ -1373,6 +1385,15 @@ export default function Tabula(){
   const doLoad=slot=>{
     let s=slotData[slot];if(!s)return;
     s=migrateLegacyBass(s);
+    // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
+    // entries in the save don't leave stale data from a previous load. Lead
+    // gets a fresh empty pat (matches init shape so switching to MONO post-
+    // load doesn't fall through to inheriting POLY's pats).
+    const _freshLead=mkPat(symPat(0));
+    layerStoreR.current={
+      synth:null,
+      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
+    };
     if(s.layerStore){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
@@ -2239,6 +2260,10 @@ export default function Tabula(){
     else await bell.current.resume();
     bell.current.stepDur=60/bpm/4*speedMult;
     await drumEngine.current.init(bell.current.master);
+    // Apply the current drum master level — the useEffect that syncs drumLevel
+    // can run before drumEngine is ready (e.g. on session load) and the setter
+    // no-ops if !ready. Re-apply after init so saved levels take effect.
+    drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
     if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
     if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
@@ -2917,7 +2942,10 @@ export default function Tabula(){
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     const vel=p.vel.map(()=>Math.round(80+Math.random()*Math.random()*47));
-    return Object.assign({},p,{vel});
+    // Also randomize the rhythm grid. ~22% density per cell gives a sparse-
+    // but-populated rhythm — repeat RAND to keep generating variations.
+    const grid=p.grid.map(row=>row.map(()=>Math.random()<0.22));
+    return Object.assign({},p,{vel,grid});
   }));}
 
   // ── Internal sampler ─────────────────────────────────────────────────
