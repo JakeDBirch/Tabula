@@ -3271,7 +3271,30 @@ export default function Tabula(){
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
   const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);};
+  // Strip the id from songMatrix as well — leaving a dangling ref produces
+  // silent gaps in the song timeline. Drag-off-layer delete relies on this.
+  const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);setSongMatrix(m=>({...m,synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v)}));};
+  // Unified by-layer delete. Used by drag-off-layer-to-delete since dragged
+  // pat lives in whichever layer the drag started from, not necessarily the
+  // active one. For the active synth layer we go through delPatId (touches
+  // live state). For a non-active synth layer we have to mutate layerStoreR
+  // directly — refs don't trigger re-render, but the setSongMatrix call we
+  // do next will cause one and the layerPats lookup re-reads the ref.
+  const delPatInLayer=(layer,id)=>{
+    if(layer==="drums"){delDrumPatId(id);return;}
+    if(layer===activeLayer){delPatId(id);return;}
+    const stored=layerStoreR.current[layer];
+    if(!stored||!stored.pats||stored.pats.length<=1)return;
+    pushHistory();
+    const rem=stored.pats.filter(x=>x.id!==id);
+    layerStoreR.current[layer]={
+      ...stored,
+      pats:rem,
+      activeId:stored.activeId===id?rem[0].id:stored.activeId,
+      phrases:(stored.phrases||[]).map(ph=>({...ph,chain:(ph.chain||[]).filter(x=>x!==id)})),
+    };
+    setSongMatrix(m=>({...m,[layer]:m[layer].map(v=>v===id?null:v)}));
+  };
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
@@ -3448,6 +3471,18 @@ export default function Tabula(){
     const rem=drumPats.filter(p=>p.id!==activeDrumId);
     setDrumPats(rem);setDrumChain(c=>c.filter(id=>id!==activeDrumId));
     setActiveDrumId(rem[0].id);
+  };
+  // ID-targeted drum delete — needed for drag-off-layer-to-delete since the
+  // dragged pat isn't necessarily the active one. Also strips the id from
+  // the songMatrix.drums lane so deleted pats don't leave dangling refs.
+  const delDrumPatId=(id)=>{
+    if(drumPats.length<=1)return;
+    pushHistory();
+    const rem=drumPats.filter(p=>p.id!==id);
+    setDrumPats(rem);
+    setDrumChain(c=>c.filter(x=>x!==id));
+    setActiveDrumId(a=>a===id?rem[0].id:a);
+    setSongMatrix(m=>({...m,drums:m.drums.map(v=>v===id?null:v)}));
   };
   const copyDrumPatFn=()=>{
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
@@ -3943,15 +3978,12 @@ export default function Tabula(){
                                     return;
                                   }
                                 }
-                                // Drop on a different synth-type layer box — copy pattern across layers.
-                                // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
-                                // Dropping a POLY pattern onto MONO ("lead") culls the grid down to
-                                // one note per column — otherwise a chord would try to play through
-                                // the mono engine.
+                                // Drop on a layer box — cross-layer copy if different layer, cancel if same.
                                 const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
                                 if(boxEl){
                                   const tl=boxEl.dataset.layerBox;
                                   if(SYNTH_LAYERS.indexOf(tl)>=0&&tl!==dragLayer){
+                                    // Cross-layer copy. POLY → MONO culls to monophonic.
                                     const targetData=layerStoreR.current[tl]||{pats:[],activeId:null};
                                     const targetPats=targetData.pats||[];
                                     if(targetPats.length<8){
@@ -3969,7 +4001,13 @@ export default function Tabula(){
                                       switchLayer(tl);
                                     }
                                   }
+                                  // Dropping on ANY layer box (including the source) is a cancel,
+                                  // not a delete. Only truly off-canvas drops delete.
+                                  setPatternDrag(null);
+                                  return;
                                 }
+                                // Dropped outside any valid target — delete the pattern.
+                                delPatInLayer(dragLayer,p.id);
                                 setPatternDrag(null);
                               };
                               document.addEventListener("pointermove",onMove);
@@ -4039,15 +4077,23 @@ export default function Tabula(){
                               else if(wasActivePattern){setPage("edit");}
                               return;
                             }
+                            const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                            // Drop on drums song-matrix cell
                             if(songView){
-                              const el=document.elementFromPoint(ev.clientX,ev.clientY);
                               const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                               if(cell&&cell.dataset.songLayer==="drums"){
                                 const barIdx=parseInt(cell.dataset.songBar,10);
                                 pushHistory();
                                 setSongMatrix(m=>{const r=[...m.drums];r[barIdx]=dp.id;return{...m,drums:r};});
+                                setPatternDrag(null);
+                                return;
                               }
                             }
+                            // Drop on a layer box — cancel (no cross-layer drum → synth or vice versa).
+                            const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
+                            if(boxEl){setPatternDrag(null);return;}
+                            // Dropped outside any valid target — delete this drum pattern.
+                            delPatInLayer("drums",dp.id);
                             setPatternDrag(null);
                           };
                           document.addEventListener("pointermove",onMove);
@@ -4299,7 +4345,7 @@ export default function Tabula(){
                                            setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
                                            return;
                                          }
-                                         // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+                                         // drop logic — same-layer cell = move; off-grid = clear source cell.
                                          const el=document.elementFromPoint(ev.clientX,ev.clientY);
                                          const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                                          if(targetCell&&targetCell.dataset.songLayer===layer){
@@ -4308,6 +4354,12 @@ export default function Tabula(){
                                              pushHistory();
                                              setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
                                            }
+                                         } else {
+                                           // Dropped outside the song grid (or on a different layer's cell)
+                                           // → remove the pattern from this cell. The pattern itself stays in
+                                           // the library; only the bar assignment goes away.
+                                           pushHistory();
+                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
                                          }
                                          setPatternDrag(null);
                                        };
@@ -4929,8 +4981,8 @@ export default function Tabula(){
                           return;
                         }
                       }
-                      // Drop on another synth-type layer's bar button — copy pat across layers.
-                      // Same mono-cull rule as the desktop drop: POLY→MONO collapses chords.
+                      // Drop on a layer button — cross-layer copy if different synth-type; cancel otherwise.
+                      // Mobile mono-cull mirrors the desktop drop rule.
                       const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
                       if(boxEl){
                         const tl=boxEl.dataset.layerBox;
@@ -4956,15 +5008,23 @@ export default function Tabula(){
                             return;
                           }
                         }
+                        // Layer-bar drop (any direction) is a cancel — not a delete.
+                        setPatternDrag(null);
+                        return;
                       }
+                      // Drop on phrase chain — append to active phrase.
                       if(phraseDropRef.current){
                         const rect=phraseDropRef.current.getBoundingClientRect();
                         if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right){
                           pushHistory();
                           if(isSynth)setSynthPhrases(ps=>ps.map(ph=>ph.id===activeSynthPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
                           else setDrumPhrases(ps=>ps.map(ph=>ph.id===activeDrumPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
+                          setPatternDrag(null);
+                          return;
                         }
                       }
+                      // Dropped outside any valid target — delete the pattern.
+                      delPatInLayer(dragLayer,p.id);
                       setPatternDrag(null);
                     };
                     document.addEventListener("pointermove",onMove);
@@ -5083,7 +5143,7 @@ export default function Tabula(){
                                            setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
                                            return;
                                          }
-                                         // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+                                         // drop logic — same-layer cell = move; off-grid = clear source cell.
                                          const el=document.elementFromPoint(ev.clientX,ev.clientY);
                                          const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
                                          if(targetCell&&targetCell.dataset.songLayer===layer){
@@ -5092,6 +5152,12 @@ export default function Tabula(){
                                              pushHistory();
                                              setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
                                            }
+                                         } else {
+                                           // Dropped outside the song grid (or on a different layer's cell)
+                                           // → remove the pattern from this cell. The pattern itself stays in
+                                           // the library; only the bar assignment goes away.
+                                           pushHistory();
+                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
                                          }
                                          setPatternDrag(null);
                                        };

@@ -6160,6 +6160,8 @@ function Tabula() {
     });
     setActiveId(p.id);
   };
+  // Strip the id from songMatrix as well — leaving a dangling ref produces
+  // silent gaps in the song timeline. Drag-off-layer delete relies on this.
   var delPatId = function delPatId(id) {
     pushHistory();
     if (pats.length <= 1) return;
@@ -6174,6 +6176,54 @@ function Tabula() {
     });
     setActiveId(function (a) {
       return a === id ? rem[0].id : a;
+    });
+    setSongMatrix(function (m) {
+      return _objectSpread(_objectSpread({}, m), {}, {
+        synth: m.synth.map(function (v) {
+          return v === id ? null : v;
+        }),
+        lead: m.lead.map(function (v) {
+          return v === id ? null : v;
+        })
+      });
+    });
+  };
+  // Unified by-layer delete. Used by drag-off-layer-to-delete since dragged
+  // pat lives in whichever layer the drag started from, not necessarily the
+  // active one. For the active synth layer we go through delPatId (touches
+  // live state). For a non-active synth layer we have to mutate layerStoreR
+  // directly — refs don't trigger re-render, but the setSongMatrix call we
+  // do next will cause one and the layerPats lookup re-reads the ref.
+  var delPatInLayer = function delPatInLayer(layer, id) {
+    if (layer === "drums") {
+      delDrumPatId(id);
+      return;
+    }
+    if (layer === activeLayer) {
+      delPatId(id);
+      return;
+    }
+    var stored = layerStoreR.current[layer];
+    if (!stored || !stored.pats || stored.pats.length <= 1) return;
+    pushHistory();
+    var rem = stored.pats.filter(function (x) {
+      return x.id !== id;
+    });
+    layerStoreR.current[layer] = _objectSpread(_objectSpread({}, stored), {}, {
+      pats: rem,
+      activeId: stored.activeId === id ? rem[0].id : stored.activeId,
+      phrases: (stored.phrases || []).map(function (ph) {
+        return _objectSpread(_objectSpread({}, ph), {}, {
+          chain: (ph.chain || []).filter(function (x) {
+            return x !== id;
+          })
+        });
+      })
+    });
+    setSongMatrix(function (m) {
+      return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, m[layer].map(function (v) {
+        return v === id ? null : v;
+      })));
     });
   };
   var copyPatId = function copyPatId(id) {
@@ -6606,6 +6656,32 @@ function Tabula() {
       });
     });
     setActiveDrumId(rem[0].id);
+  };
+  // ID-targeted drum delete — needed for drag-off-layer-to-delete since the
+  // dragged pat isn't necessarily the active one. Also strips the id from
+  // the songMatrix.drums lane so deleted pats don't leave dangling refs.
+  var delDrumPatId = function delDrumPatId(id) {
+    if (drumPats.length <= 1) return;
+    pushHistory();
+    var rem = drumPats.filter(function (p) {
+      return p.id !== id;
+    });
+    setDrumPats(rem);
+    setDrumChain(function (c) {
+      return c.filter(function (x) {
+        return x !== id;
+      });
+    });
+    setActiveDrumId(function (a) {
+      return a === id ? rem[0].id : a;
+    });
+    setSongMatrix(function (m) {
+      return _objectSpread(_objectSpread({}, m), {}, {
+        drums: m.drums.map(function (v) {
+          return v === id ? null : v;
+        })
+      });
+    });
   };
   var copyDrumPatFn = function copyDrumPatFn() {
     var src = drumPats.find(function (p) {
@@ -7630,15 +7706,12 @@ function Tabula() {
                 return;
               }
             }
-            // Drop on a different synth-type layer box — copy pattern across layers.
-            // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
-            // Dropping a POLY pattern onto MONO ("lead") culls the grid down to
-            // one note per column — otherwise a chord would try to play through
-            // the mono engine.
+            // Drop on a layer box — cross-layer copy if different layer, cancel if same.
             var boxEl = el && el.closest && el.closest('[data-layer-box]');
             if (boxEl) {
               var tl = boxEl.dataset.layerBox;
               if (SYNTH_LAYERS.indexOf(tl) >= 0 && tl !== dragLayer) {
+                // Cross-layer copy. POLY → MONO culls to monophonic.
                 var targetData = layerStoreR.current[tl] || {
                   pats: [],
                   activeId: null
@@ -7672,7 +7745,13 @@ function Tabula() {
                   switchLayer(tl);
                 }
               }
+              // Dropping on ANY layer box (including the source) is a cancel,
+              // not a delete. Only truly off-canvas drops delete.
+              setPatternDrag(null);
+              return;
             }
+            // Dropped outside any valid target — delete the pattern.
+            delPatInLayer(dragLayer, p.id);
             setPatternDrag(null);
           };
           document.addEventListener("pointermove", onMove);
@@ -7831,8 +7910,9 @@ function Tabula() {
             }
             return;
           }
+          var el = document.elementFromPoint(ev.clientX, ev.clientY);
+          // Drop on drums song-matrix cell
           if (songView) {
-            var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var cell = el && el.closest && el.closest('[data-song-cell="1"]');
             if (cell && cell.dataset.songLayer === "drums") {
               var barIdx = parseInt(cell.dataset.songBar, 10);
@@ -7844,8 +7924,18 @@ function Tabula() {
                   drums: r
                 });
               });
+              setPatternDrag(null);
+              return;
             }
           }
+          // Drop on a layer box — cancel (no cross-layer drum → synth or vice versa).
+          var boxEl = el && el.closest && el.closest('[data-layer-box]');
+          if (boxEl) {
+            setPatternDrag(null);
+            return;
+          }
+          // Dropped outside any valid target — delete this drum pattern.
+          delPatInLayer("drums", dp.id);
           setPatternDrag(null);
         };
         document.addEventListener("pointermove", onMove);
@@ -8592,7 +8682,7 @@ function Tabula() {
                 });
                 return;
               }
-              // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+              // drop logic — same-layer cell = move; off-grid = clear source cell.
               var el = document.elementFromPoint(ev.clientX, ev.clientY);
               var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
               if (targetCell && targetCell.dataset.songLayer === layer) {
@@ -8606,6 +8696,16 @@ function Tabula() {
                     return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
                   });
                 }
+              } else {
+                // Dropped outside the song grid (or on a different layer's cell)
+                // → remove the pattern from this cell. The pattern itself stays in
+                // the library; only the bar assignment goes away.
+                pushHistory();
+                setSongMatrix(function (m) {
+                  var r = _toConsumableArray(m[layer]);
+                  r[barIdx] = null;
+                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                });
               }
               setPatternDrag(null);
             };
@@ -10564,8 +10664,8 @@ function Tabula() {
               return;
             }
           }
-          // Drop on another synth-type layer's bar button — copy pat across layers.
-          // Same mono-cull rule as the desktop drop: POLY→MONO collapses chords.
+          // Drop on a layer button — cross-layer copy if different synth-type; cancel otherwise.
+          // Mobile mono-cull mirrors the desktop drop rule.
           var boxEl = el && el.closest && el.closest('[data-layer-box]');
           if (boxEl) {
             var tl = boxEl.dataset.layerBox;
@@ -10607,7 +10707,11 @@ function Tabula() {
                 return;
               }
             }
+            // Layer-bar drop (any direction) is a cancel — not a delete.
+            setPatternDrag(null);
+            return;
           }
+          // Drop on phrase chain — append to active phrase.
           if (phraseDropRef.current) {
             var rect = phraseDropRef.current.getBoundingClientRect();
             if (ev.clientY >= rect.top && ev.clientY <= rect.bottom && ev.clientX >= rect.left && ev.clientX <= rect.right) {
@@ -10625,8 +10729,12 @@ function Tabula() {
                   }) : ph;
                 });
               });
+              setPatternDrag(null);
+              return;
             }
           }
+          // Dropped outside any valid target — delete the pattern.
+          delPatInLayer(dragLayer, p.id);
           setPatternDrag(null);
         };
         document.addEventListener("pointermove", onMove);
@@ -10881,7 +10989,7 @@ function Tabula() {
                 });
                 return;
               }
-              // drop logic — same-layer cell only; outside or wrong layer = no-op (revert)
+              // drop logic — same-layer cell = move; off-grid = clear source cell.
               var el = document.elementFromPoint(ev.clientX, ev.clientY);
               var targetCell = el && el.closest && el.closest('[data-song-cell="1"]');
               if (targetCell && targetCell.dataset.songLayer === layer) {
@@ -10895,6 +11003,16 @@ function Tabula() {
                     return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
                   });
                 }
+              } else {
+                // Dropped outside the song grid (or on a different layer's cell)
+                // → remove the pattern from this cell. The pattern itself stays in
+                // the library; only the bar assignment goes away.
+                pushHistory();
+                setSongMatrix(function (m) {
+                  var r = _toConsumableArray(m[layer]);
+                  r[barIdx] = null;
+                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
+                });
               }
               setPatternDrag(null);
             };
