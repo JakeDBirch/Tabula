@@ -91,12 +91,40 @@ const DRUM_ROWS=DRUM_VOICES.length;
 const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
 // Default drum voice level — sits at 75% so users have headroom to boost
 // individual voices instead of only being able to attenuate from a ceiling.
-const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({level:75,pan:0}));
+// rvSend/dlySend default to 0 — per-channel FX sends are opt-in.
+const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({level:75,pan:0,rvSend:0,dlySend:0}));
+// Backfill any missing fields on loaded drum mix arrays — older saves only had
+// {level,pan}, so we need to pad new fields with their defaults.
+const fillDrumMix=(mix)=>{
+  const out=defaultDrumMix();
+  if(!Array.isArray(mix))return out;
+  return out.map((d,i)=>Object.assign({},d,mix[i]||{}));
+};
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
   vel:Array.from({length:COLS},()=>100),
   gridLen:16,
   mix:defaultDrumMix()
+});
+
+// ─── Session defaults ────────────────────────────────────────────────────────
+// Single source of truth for every loadable top-level param. Used by:
+//   doLoad / applyShareState / applySnapshot — fall back to default when a
+//   saved project is missing a field. Without this, loading a project that
+//   predates a new param leaves the previous session's value in place, which
+//   feels broken (e.g. one project's reverb tail carries over to another).
+// Keep this in sync with the defaults set in `doNew`.
+const SESSION_DEFAULTS = Object.freeze({
+  bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
+  dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
+  rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
+  drumLevel:85,
+  vDropRate:13, vShiftRate:17, vShiftRange:1,
+  vPitchRate:0, vPitchRange:1, vGhostRate:0,
+  vVelJitter:0, vFltJitter:0, vDlyJitter:0,
+  vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
+  loopMode:false, varyMode:false,
+  songMode:false, songView:false, songSyncMode:"sync",
 });
 
 
@@ -578,6 +606,11 @@ class Bell{
     }
     vca.gain.exponentialRampToValueAtTime(0.0001,t+end);
 
+    // Stereo spread of the detune stack — when both oscillators are running,
+    // pan them opposite sides by spread/100 (0 = mono center, 1 = hard L/R).
+    // The pan nodes precede vcf+vca; since biquad and gain process per-channel
+    // on stereo inputs, separation survives all the way to master.
+    const spreadAmt=(p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
     const o1=this.ctx.createOscillator();
     o1.type=p.waveform;
     if(prevFreq&&glideTime>0){
@@ -587,8 +620,15 @@ class Bell{
     } else {
       o1.frequency.value=playFreq;
     }
-    o1.connect(vcf);o1.start(t);o1.stop(t+end+.05);
-    let o2=null;
+    let pan1=null;
+    if(spreadAmt>0&&this.ctx.createStereoPanner){
+      pan1=this.ctx.createStereoPanner();pan1.pan.value=-spreadAmt;
+      o1.connect(pan1);pan1.connect(vcf);
+    } else {
+      o1.connect(vcf);
+    }
+    o1.start(t);o1.stop(t+end+.05);
+    let o2=null,pan2=null;
     if(p.detune>2){
       o2=this.ctx.createOscillator();
       o2.type=p.waveform;
@@ -599,7 +639,34 @@ class Bell{
         o2.frequency.value=playFreq;
       }
       o2.detune.value=p.detune;
-      o2.connect(vcf);o2.start(t);o2.stop(t+end+.05);
+      if(spreadAmt>0&&this.ctx.createStereoPanner){
+        pan2=this.ctx.createStereoPanner();pan2.pan.value=+spreadAmt;
+        o2.connect(pan2);pan2.connect(vcf);
+      } else {
+        o2.connect(vcf);
+      }
+      o2.start(t);o2.stop(t+end+.05);
+    }
+    // Sub-oscillator — 1 octave below playFreq, sine for clean low end. Level
+    // is post-VCA shaping (still goes through vcf+vca for envelope match), so
+    // it's tied to the note's amplitude profile. Used primarily on MONO; POLY
+    // panel doesn't expose this knob but the field is honored if present.
+    const subLvl=(p&&p.subLevel!=null)?Math.max(0,Math.min(100,p.subLevel))/100:0;
+    let subOsc=null;
+    if(subLvl>0){
+      subOsc=this.ctx.createOscillator();
+      subOsc.type="sine";
+      if(prevFreq&&glideTime>0){
+        subOsc.frequency.setValueAtTime(Math.max(1,prevFreq/2),t);
+        subOsc.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq/2),t+glideTime);
+      } else {
+        subOsc.frequency.value=playFreq/2;
+      }
+      const subG=this.ctx.createGain();
+      // Cap at ~0.55 to keep the sub from dominating; user dials 0..100.
+      subG.gain.value=subLvl*0.55;
+      subOsc.connect(subG);subG.connect(vcf);
+      subOsc.start(t);subOsc.stop(t+end+.05);
     }
     // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
     // oct (relative to row) is scheduled on the oscillators while the single
@@ -618,9 +685,11 @@ class Bell{
           if(prevModGlide){
             o1.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
             if(o2)o2.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
+            if(subOsc)subOsc.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           } else {
             o1.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
             if(o2)o2.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
+            if(subOsc)subOsc.frequency.setValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           }
         }
         prevModFreq=mPlayFreq;
@@ -656,8 +725,15 @@ class Bell{
 
 // ─── Drum Engine (808-style synthesis) ───────────────────────────────────────
 class DrumEngine{
-  constructor(){this.ctx=null;this.master=null;this.masterIn=null;this.ready=false;}
-  async init(masterNode){
+  constructor(){
+    this.ctx=null;this.master=null;this.masterIn=null;this.ready=false;
+    // Bell FX inputs (set in init) — per-voice rvSend/dlySend tap into these.
+    this.revNode=null;this.dlyNode=null;
+    // Active open-hat gain ref for CH choke. Cleared when CH cuts it or the
+    // sample ends naturally. Holds {g, endT}.
+    this.activeOH=null;
+  }
+  async init(masterNode, revNode, dlyNode){
     if(this.ready)return;
     const AudioContext=window.AudioContext||window.webkitAudioContext;
     this.ctx=masterNode.context||new AudioContext();
@@ -666,10 +742,21 @@ class DrumEngine{
     this.masterIn=this.ctx.createGain();this.masterIn.gain.value=0.85;
     this.masterIn.connect(masterNode);
     this.master=this.masterIn;
+    this.revNode=revNode||null;
+    this.dlyNode=dlyNode||null;
     this.ready=true;
   }
   setMasterLevel(pct){
     if(this.ready&&this.masterIn)this.masterIn.gain.setTargetAtTime(Math.max(0,Math.min(150,pct))/100,this.ctx.currentTime,0.02);
+  }
+  // Fast-fade whatever open-hat is currently sustaining. Used when CH fires so
+  // a closed hat properly cuts the open hat (classic choke-group behavior).
+  // 8ms time constant keeps the kill audible-but-not-clicky.
+  chokeOH(t){
+    if(!this.activeOH||!this.activeOH.g)return;
+    const g=this.activeOH.g;const at=Math.max(t,this.ctx.currentTime);
+    try{g.gain.cancelScheduledValues(at);g.gain.setTargetAtTime(0.0001,at,0.008);}catch(e){}
+    this.activeOH=null;
   }
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
 
@@ -697,15 +784,29 @@ class DrumEngine{
     const s=ctx.createBufferSource();s.buffer=b;return s;
   }
 
-  play(voice,t,vel,level=100,pan=0,sample=null){
+  play(voice,t,vel,level=100,pan=0,sample=null,rvSend=0,dlySend=0){
     if(!this.ready)return;
     const ctx=this.ctx;
     const v=Math.max(0.001,vel/127);
+    // Closed-hat chokes any currently-sounding open hat.
+    if(voice==="CH")this.chokeOH(t);
     // Level + pan routing
     const lvlGain=ctx.createGain();lvlGain.gain.value=Math.max(0,level/100);
     const panner=ctx.createStereoPanner?ctx.createStereoPanner():null;
+    // Tap point for FX sends — post-pan so the wet signal inherits the same
+    // stereo placement as the dry. Falls back to lvlGain if no panner.
+    const sendTap=panner||lvlGain;
     if(panner){panner.pan.value=Math.max(-1,Math.min(1,pan/100));lvlGain.connect(panner);panner.connect(this.master);}
     else{lvlGain.connect(this.master);}
+    // Per-channel FX sends route into Bell's reverb + delay inputs.
+    if(rvSend>0&&this.revNode){
+      const rg=ctx.createGain();rg.gain.value=Math.max(0,Math.min(100,rvSend))/100;
+      sendTap.connect(rg);rg.connect(this.revNode);
+    }
+    if(dlySend>0&&this.dlyNode){
+      const dg=ctx.createGain();dg.gain.value=Math.max(0,Math.min(100,dlySend))/100;
+      sendTap.connect(dg);dg.connect(this.dlyNode);
+    }
     const out=lvlGain;
     // User-recorded sample takes precedence over the synthesized voice.
     if(sample){
@@ -713,6 +814,8 @@ class DrumEngine{
       const g=ctx.createGain();g.gain.value=v;
       src.connect(g);g.connect(out);
       try{src.start(t);}catch(e){src.start();}
+      // Track sample-based OH for choke too — duration approximated from buffer.
+      if(voice==="OH")this.activeOH={g,endT:t+(sample.duration||0.5)};
       return;
     }
 
@@ -793,6 +896,8 @@ class DrumEngine{
       const g=ctx.createGain();
       this._env(g.gain,t,0.5*v,0.001,0.06,0.12,0.55);
       n.connect(bp1);bp1.connect(bp2);bp2.connect(hp);hp.connect(g);g.connect(out);n.start(t);
+      // Track for CH choke. End time ≈ atk+dec+rel from _env params.
+      this.activeOH={g,endT:t+0.001+0.06+0.12+0.55};
     }
 
     else if(voice==="CY"){
@@ -979,6 +1084,8 @@ export default function Tabula(){
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
     rvSend: 30,        // 0..100; per-layer send into the global reverb bus
     mix: 85,           // 0..100; mixer level multiplier on this layer's voices
+    subLevel: 0,       // 0..100; MONO-only sub-oscillator (1 octave down)
+    spread: 0,         // 0..100; POLY-only stereo spread of detune stack
   });
   // Backfill missing fields when loading legacy layerParams. Returns a new
   // layerParams object with all fields populated. Three-layer pare-down:
@@ -1013,6 +1120,8 @@ export default function Tabula(){
   const dlySend = _lp.dlySend,           setDlySend = _setLP("dlySend");
   const rvSend  = _lp.rvSend??0,         setRvSend  = _setLP("rvSend");
   const mixLvl  = _lp.mix??85,           setMixLvl  = _setLP("mix");
+  const subLvl  = _lp.subLevel??0,       setSubLvl  = _setLP("subLevel");
+  const spread  = _lp.spread??0,         setSpread  = _setLP("spread");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   const [dlyIdx,    setDlyIdx]    = useState(3);
@@ -1308,16 +1417,23 @@ export default function Tabula(){
     if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
-    setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose);setSwing(s.swing);setSpeedMult(s.speedMult);
-    if(s.layerParams)setLayerParams(fillLayerParams(s.layerParams));
-    setDlyIdx(s.dlyIdx);setDlyFbPct(s.dlyFbPct);setDlyHpVal(s.dlyHpVal);setDlyLpVal(s.dlyLpVal);
-    if(s.rvSize!=null)setRvSize(s.rvSize);
-    if(s.rvDamp!=null)setRvDamp(s.rvDamp);
-    if(s.dlyToRev!=null)setDlyToRev(s.dlyToRev);
-    setVDropRate(s.vDropRate);setVShiftRate(s.vShiftRate);setVShiftRange(s.vShiftRange);
-    setVPitchRate(s.vPitchRate);setVPitchRange(s.vPitchRange);setVGhostRate(s.vGhostRate);
-    setVVelJitter(s.vVelJitter);setVFltJitter(s.vFltJitter);setVDlyJitter(s.vDlyJitter);
-    setVRhyJitter(s.vRhyJitter);setVOctJitter(s.vOctJitter);setVGlideJitter(s.vGlideJitter);setVDurJitter(s.vDurJitter);
+    // Undo/redo snapshots — fall back to defaults for any field a previous
+    // snapshot didn't carry (so undo across a feature-add boundary doesn't
+    // leave new params at stale values from outside the snapshot's lifetime).
+    setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
+    setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
+    setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
+    setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
+    setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
+     ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],
+     ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
+     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
+     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
+     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
+    ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
   };
   // Stable function references — read live state via the refs above
   const pushHistoryR = useRef(()=>{});
@@ -1370,7 +1486,11 @@ export default function Tabula(){
     if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
       liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
     }
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
+    // Reverb knobs + drumLevel were previously not in this snap → they never
+    // persisted to slot saves (issue surfaced when users noticed their reverb
+    // and drum-bus levels never came back on load). Keep this list in sync
+    // with captureSnapshotR / getShareState — the 4-site rule.
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
@@ -1459,8 +1579,19 @@ export default function Tabula(){
     setActiveLayer(s.activeLayer||"synth");
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(migratePats(s.pats,s.speedMult));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);setBpm(s.bpm);setScale(s.scale);setTranspose(s.transpose||0);if(s.swing!=null)setSwing(s.swing);if(s.speedMult!=null)setSpeedMult(s.speedMult);setActiveId(s.activeId);
+    setPats(migratePats(s.pats,s.speedMult));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
+    // Top-level scalar params — always set, fall back to defaults if missing.
+    // Old saves predate some fields (e.g. swing, speedMult); without explicit
+    // fallback the previous project's value would leak into this load.
+    setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
+    setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
+    setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
+    setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
+    setActiveId(s.activeId);
     // layerParams: prefer new format; migrate old flat fields into synth slot if absent.
+    // No-data case still resets to defaults so leftover sound design from the
+    // previous load doesn't bleed in.
     if(s.layerParams){
       setLayerParams(fillLayerParams(s.layerParams));
     }else if(s.waveform!=null||s.attack!=null){
@@ -1478,16 +1609,23 @@ export default function Tabula(){
         lead:DEFAULT_LP(0)
       };
       setLayerParams(migrated);
+    }else{
+      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
     }
+    // Default-fallback on load: every key gets either the saved value or the
+    // session default. Older saves that predate a field (e.g. rvLfDamp added
+    // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
-    ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
-    if(s.loopMode!=null)setLoopMode(s.loopMode);
-    if(s.varyMode!=null)setVaryMode(s.varyMode);
-    if(s.drumPats)setDrumPats(s.drumPats);
+    ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
+    setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    // Backfill missing fields on drum pats — older saves only carried
+    // {level,pan} per voice; rvSend/dlySend default to 0.
+    if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats));
@@ -1516,9 +1654,9 @@ export default function Tabula(){
         drums: filterIds(padTo64(s.songMatrix.drums),drumPats)
       });
     }
-    if(s.songMode!=null)setSongMode(s.songMode);
-    if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
-    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
+    setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
+    setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
+    setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
     setActiveSlot(slot);
     showFlash("LOADED "+slot);
   };
@@ -1646,12 +1784,14 @@ export default function Tabula(){
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     if(s.pats)setPats(migratePats(s.pats,s.speedMult));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
-    if(s.bpm)setBpm(s.bpm);
-    if(s.scale)setScale(s.scale);
-    if(s.transpose!=null)setTranspose(s.transpose);
-    if(s.swing!=null)setSwing(s.swing);
+    // Apply with fallback to defaults — share imports should reset to a clean
+    // baseline for anything the link doesn't carry, same rule as doLoad.
+    setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
+    setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
+    setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     if(s.gridLen!=null)setGridLen(s.gridLen);
-    if(s.speedMult!=null)setSpeedMult(s.speedMult);
+    setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
     if(s.activeId)setActiveId(s.activeId);
     if(s.layerParams)setLayerParams(fillLayerParams(s.layerParams));
     else if(s.waveform!=null||s.attack!=null){
@@ -1669,10 +1809,12 @@ export default function Tabula(){
           ...(s.filterEnvAmt!=null?{filterEnvAmt:s.filterEnvAmt}:{}),
           ...(s.dlyWetPct!=null?{dlySend:s.dlyWetPct}:{})}
       }));
+    }else{
+      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
     }
-    if(s.loopMode!=null)setLoopMode(s.loopMode);
-    if(s.varyMode!=null)setVaryMode(s.varyMode);
-    if(s.drumPats)setDrumPats(s.drumPats);
+    setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
+    setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats||[]));
@@ -1686,7 +1828,7 @@ export default function Tabula(){
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
-    ].forEach(([k,fn])=>{if(s[k]!=null)fn(s[k]);});
+    ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     if(s.songMatrix){
       const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
       const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
@@ -1701,9 +1843,9 @@ export default function Tabula(){
         drums: filterIds(padTo64(s.songMatrix.drums),s.drumPats||[])
       });
     }
-    if(s.songMode!=null)setSongMode(s.songMode);
-    if(s.songView!=null)setSongView(s.songView);else if(s.songMode)setSongView(true);
-    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
+    setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
+    setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
+    setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
   };
 
   const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};
@@ -1802,8 +1944,8 @@ export default function Tabula(){
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
-        const dMix=(pat.mix||defaultDrumMix())[r]||{level:100,pan:0};
-        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key]);
+        const dMix=(pat.mix||defaultDrumMix())[r]||{level:100,pan:0,rvSend:0,dlySend:0};
+        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
       }
     }
   };
@@ -2251,8 +2393,8 @@ export default function Tabula(){
             for(let r=0;r<DRUM_ROWS;r++){
               if(useGrid[r]&&useGrid[r][ds]){
                 const dVel=useVel?.[ds]??100;
-                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:100,pan:0};
-                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key]);
+                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:100,pan:0,rvSend:0,dlySend:0};
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
               }
             }
             setDrumStep(ds);
@@ -2307,7 +2449,9 @@ export default function Tabula(){
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,50,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
     bell.current.stepDur=60/bpm/4*speedMult;
-    await drumEngine.current.init(bell.current.master);
+    // Pass Bell's reverb + delay inputs so DrumEngine voices can have per-
+    // channel sends. Without these refs, send knobs in the drum mixer no-op.
+    await drumEngine.current.init(bell.current.master, bell.current.rev, bell.current.dly);
     // Apply the current drum master level — the useEffect that syncs drumLevel
     // can run before drumEngine is ready (e.g. on session load) and the setter
     // no-ops if !ready. Re-apply after init so saved levels take effect.
@@ -2984,7 +3128,9 @@ export default function Tabula(){
   }));}
   const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const mix=(p.mix||defaultDrumMix()).map((m,i)=>i===row?Object.assign({},m,{[key]:val}):m);
+    // fillDrumMix normalizes any partial saves so old voice rows without
+    // rvSend/dlySend pick up the default before getting the new value applied.
+    const mix=fillDrumMix(p.mix).map((m,i)=>i===row?Object.assign({},m,{[key]:val}):m);
     return Object.assign({},p,{mix});
   }));
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
@@ -4096,72 +4242,99 @@ export default function Tabula(){
             )}
             {activeLayer==="drums"&&page==="sound"&&(()=>{
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const mix=dPat?.mix||defaultDrumMix();
+              const mix=fillDrumMix(dPat?.mix);
               return(
-              <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"12px 16px",boxSizing:"border-box"}}>
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>MIXER</div>
-                {DRUM_VOICES.map((voice,r)=>{
-                  const m=mix[r]||{level:100,pan:0};
-                  return(
-                  <div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                    {/* Voice label */}
-                    <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
-                    {/* Level */}
-                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
-                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+              <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8,flexShrink:0}}>MIXER</div>
+                {/* Channel strips — horizontal row of conventional vertical strips.
+                    Layout per strip: name → PAN → REV → DLY → vertical level fader → REC/CLR. */}
+                <div style={{flex:1,display:"flex",gap:4,overflowX:"auto",overflowY:"hidden",alignItems:"stretch",paddingBottom:4}}>
+                  {DRUM_VOICES.map((voice,r)=>{
+                    const m=mix[r];
+                    const stripBg="rgba(30,28,24,0.55)";
+                    const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
+                    // Horizontal mini-slider builder (pan + sends share this shape).
+                    const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
+                      <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"level",Math.round(pct*100));};
-                          update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
-                        }}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3,transition:"width .04s"}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
-                      </div>
-                    </div>
-                    {/* Pan */}
-                    <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
-                      <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumMix(r,"pan",Math.round((pct*2-1)*100));};
+                          const update=ev=>{
+                            const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));
+                            const v=bipolar?Math.round(pct*200-100):Math.round(pct*100);
+                            setDrumMix(r,key,Math.max(minVal,Math.min(maxVal,v)));
+                          };
                           update(e);
                           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                         }}
-                        onDoubleClick={()=>setDrumMix(r,"pan",0)}>
-                        {/* Center tick */}
-                        <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
-                        {/* Pan fill — from center */}
-                        <div style={{position:"absolute",top:0,bottom:0,
-                          left:m.pan<=0?`${50+m.pan/2}%`:"50%",
-                          width:`${Math.abs(m.pan)/2}%`,
-                          background:voice.color+"99",borderRadius:3}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
+                        onDoubleClick={()=>setDrumMix(r,key,bipolar?0:0)}>
+                        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
+                        {bipolar
+                          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+val/2}%`:"50%",width:`${Math.abs(val)/2}%`,background:voice.color+"99",borderRadius:3}}/>
+                          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:voice.color+"99",borderRadius:3}}/>}
+                        <div style={{position:"absolute",top:-3,bottom:-3,width:8,
+                          left:bipolar?`calc(${50+val/2}% - 4px)`:`calc(${val}% - 4px)`,
+                          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+voice.color+"88"}}/>
                       </div>
-                    </div>
-                    {/* Sampler: REC mic into this voice's slot; LD indicator when a sample is loaded */}
-                    {(()=>{
-                      const isRec=recordingVoice===voice.key;
-                      const hasSample=!!voiceSamples[voice.key];
-                      return(
-                        <div style={{display:"flex",gap:3,flexShrink:0}}>
-                          <button style={{padding:"3px 6px",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",minWidth:28}}
+                    );
+                    const isRec=recordingVoice===voice.key;
+                    const hasSample=!!voiceSamples[voice.key];
+                    return(
+                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:6,padding:"6px 4px",background:stripBg,border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box"}}>
+                        {/* Voice name */}
+                        <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.15,minHeight:12}}>{voice.full||voice.label}</div>
+                        {/* PAN */}
+                        <div style={cell}>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
+                          {miniSlider("pan",m.pan,-100,100,true)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.pan>0?"+"+m.pan:m.pan}</div>
+                        </div>
+                        {/* REV send */}
+                        <div style={cell}>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
+                          {miniSlider("rvSend",m.rvSend,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.rvSend}</div>
+                        </div>
+                        {/* DLY send */}
+                        <div style={cell}>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
+                          {miniSlider("dlySend",m.dlySend,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.dlySend}</div>
+                        </div>
+                        {/* Vertical level fader */}
+                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0"}}
+                          onPointerDown={e=>{
+                            e.stopPropagation();
+                            const rect=e.currentTarget.getBoundingClientRect();
+                            const update=ev=>{
+                              const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));
+                              setDrumMix(r,"level",Math.round(pct*100));
+                            };
+                            update(e);
+                            const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                            document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                          }}>
+                          {/* Fill from bottom up */}
+                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${m.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                          {/* Thumb */}
+                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-m.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
+                          {/* Center notch */}
+                          <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
+                        </div>
+                        <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{m.level}</div>
+                        {/* REC / sample */}
+                        <div style={{display:"flex",gap:2,justifyContent:"center"}}>
+                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                             onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
                             {isRec?"STOP":hasSample?"●":"REC"}
                           </button>
-                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:4,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                         </div>
-                      );
-                    })()}
-                  </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               );
             })()}
@@ -4290,8 +4463,14 @@ export default function Tabula(){
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                      <div style={{display:"flex",gap:16,padding:"8px 16px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
+                      <div style={{display:"flex",gap:12,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                        {activeLayer==="synth"&&(
+                          <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
+                        )}
+                        {activeLayer==="lead"&&(
+                          <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
+                        )}
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
@@ -4934,8 +5113,14 @@ export default function Tabula(){
                       <div style={{overflowY:"auto"}}>
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                           <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                            <div style={{display:"flex",gap:10,padding:"6px 12px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
+                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                              {activeLayer==="synth"&&(
+                                <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
+                              )}
+                              {activeLayer==="lead"&&(
+                                <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
+                              )}
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
                                   <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
@@ -4993,43 +5178,58 @@ export default function Tabula(){
                     )}
                     {activeLayer==="drums"&&(()=>{
                       const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=dPat?.mix||defaultDrumMix();
-                      return(<div style={{overflowY:"auto"}}>
+                      const mix=fillDrumMix(dPat?.mix);
+                      // Mobile mixer: horizontally-scrolling row of compact channel strips.
+                      // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
+                      // vertical level fader → REC) but at a narrower width.
+                      return(<div style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:300,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
                         {DRUM_VOICES.map((voice,r)=>{
-                          const m=mix[r]||{level:100,pan:0};
-                          return(<div key={voice.key} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                            <div style={{width:24,flexShrink:0,fontSize:9,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"right"}}>{voice.label}</div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>LVL <span style={{color:"rgba(210,195,175,0.6)"}}>{m.level}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"level",Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
-                                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${m.level}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${m.level}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
+                          const m=mix[r];
+                          const isRec=recordingVoice===voice.key;
+                          const hasSample=!!voiceSamples[voice.key];
+                          const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
+                          const miniSlider=(key,val,bipolar)=>(
+                            <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));const v=bipolar?Math.round(pct*200-100):Math.round(pct*100);setDrumMix(r,key,v);};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
+                              onDoubleClick={()=>setDrumMix(r,key,0)}>
+                              {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
+                              {bipolar
+                                ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+val/2}%`:"50%",width:`${Math.abs(val)/2}%`,background:voice.color+"99",borderRadius:3}}/>
+                                :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:voice.color+"99",borderRadius:3}}/>}
+                              <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:bipolar?`calc(${50+val/2}% - 4px)`:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
                             </div>
-                            <div style={{flex:2,display:"flex",flexDirection:"column",gap:2}}>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:1}}>PAN <span style={{color:"rgba(210,195,175,0.6)"}}>{m.pan>0?"+"+m.pan:m.pan}</span></div>
-                              <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                                onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{setDrumMix(r,"pan",Math.round((Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*2-1)*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
-                                onDoubleClick={()=>setDrumMix(r,"pan",0)}>
-                                <div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.2)"}}/>
-                                <div style={{position:"absolute",top:0,bottom:0,left:m.pan<=0?`${50+m.pan/2}%`:"50%",width:`${Math.abs(m.pan)/2}%`,background:voice.color+"99",borderRadius:3}}/>
-                                <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${50+m.pan/2}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                              </div>
+                          );
+                          return(<div key={voice.key} style={{flexShrink:0,width:54,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box"}}>
+                            <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{voice.full||voice.label}</div>
+                            <div style={cell}>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
+                              {miniSlider("pan",m.pan,true)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.pan>0?"+"+m.pan:m.pan}</div>
                             </div>
-                            {(()=>{
-                              const isRec=recordingVoice===voice.key;
-                              const hasSample=!!voiceSamples[voice.key];
-                              return(
-                                <div style={{display:"flex",gap:3,flexShrink:0}}>
-                                  <button style={{padding:"3px 6px",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",minWidth:28}}
-                                    onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                                    {isRec?"STOP":hasSample?"●":"REC"}
-                                  </button>
-                                  {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:4,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
-                                </div>
-                              );
-                            })()}
+                            <div style={cell}>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
+                              {miniSlider("rvSend",m.rvSend,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.rvSend}</div>
+                            </div>
+                            <div style={cell}>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
+                              {miniSlider("dlySend",m.dlySend,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.dlySend}</div>
+                            </div>
+                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));setDrumMix(r,"level",Math.round(pct*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${m.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-m.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
+                              <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
+                            </div>
+                            <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{m.level}</div>
+                            <div style={{display:"flex",gap:2,justifyContent:"center"}}>
+                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                                onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
+                                {isRec?"STOP":hasSample?"●":"REC"}
+                              </button>
+                              {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                            </div>
                           </div>);
                         })}
                       </div>);
