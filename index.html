@@ -8673,13 +8673,14 @@ function Tabula() {
               document.removeEventListener("pointercancel", _onUp3);
               document.removeEventListener("pointermove", onMove);
               if (!dragging) {
-                // tap on filled cell → clear
-                pushHistory();
-                setSongMatrix(function (m) {
-                  var r = _toConsumableArray(m[layer]);
-                  r[barIdx] = null;
-                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
-                });
+                // Tap on filled cell → step into the pattern. Switch to the
+                // cell's layer (if different), make this pat the active one,
+                // exit song view, land on the edit page. Clearing a cell now
+                // happens via drag-off-grid (handled below).
+                if (layer !== activeLayer) switchLayer(layer);
+                if (layer === "drums") setActiveDrumId(patId);else setActiveId(patId);
+                setSongView(false);
+                setPage("edit");
                 return;
               }
               // drop logic — same-layer cell = move; off-grid = clear source cell.
@@ -10980,13 +10981,14 @@ function Tabula() {
               document.removeEventListener("pointercancel", _onUp6);
               document.removeEventListener("pointermove", onMove);
               if (!dragging) {
-                // tap on filled cell → clear
-                pushHistory();
-                setSongMatrix(function (m) {
-                  var r = _toConsumableArray(m[layer]);
-                  r[barIdx] = null;
-                  return _objectSpread(_objectSpread({}, m), {}, _defineProperty({}, layer, r));
-                });
+                // Tap on filled cell → step into the pattern. Switch to the
+                // cell's layer (if different), make this pat the active one,
+                // exit song view, land on the edit page. Clearing a cell now
+                // happens via drag-off-grid (handled below).
+                if (layer !== activeLayer) switchLayer(layer);
+                if (layer === "drums") setActiveDrumId(patId);else setActiveId(patId);
+                setSongView(false);
+                setPage("edit");
                 return;
               }
               // drop logic — same-layer cell = move; off-grid = clear source cell.

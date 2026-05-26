@@ -4340,9 +4340,15 @@ export default function Tabula(){
                                          document.removeEventListener("pointercancel",onUp);
                                          document.removeEventListener("pointermove",onMove);
                                          if(!dragging){
-                                           // tap on filled cell → clear
-                                           pushHistory();
-                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
+                                           // Tap on filled cell → step into the pattern. Switch to the
+                                           // cell's layer (if different), make this pat the active one,
+                                           // exit song view, land on the edit page. Clearing a cell now
+                                           // happens via drag-off-grid (handled below).
+                                           if(layer!==activeLayer)switchLayer(layer);
+                                           if(layer==="drums")setActiveDrumId(patId);
+                                           else setActiveId(patId);
+                                           setSongView(false);
+                                           setPage("edit");
                                            return;
                                          }
                                          // drop logic — same-layer cell = move; off-grid = clear source cell.
@@ -5138,9 +5144,15 @@ export default function Tabula(){
                                          document.removeEventListener("pointercancel",onUp);
                                          document.removeEventListener("pointermove",onMove);
                                          if(!dragging){
-                                           // tap on filled cell → clear
-                                           pushHistory();
-                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
+                                           // Tap on filled cell → step into the pattern. Switch to the
+                                           // cell's layer (if different), make this pat the active one,
+                                           // exit song view, land on the edit page. Clearing a cell now
+                                           // happens via drag-off-grid (handled below).
+                                           if(layer!==activeLayer)switchLayer(layer);
+                                           if(layer==="drums")setActiveDrumId(patId);
+                                           else setActiveId(patId);
+                                           setSongView(false);
+                                           setPage("edit");
                                            return;
                                          }
                                          // drop logic — same-layer cell = move; off-grid = clear source cell.
