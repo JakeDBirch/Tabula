@@ -7218,11 +7218,18 @@ function Tabula() {
         transition: "all .1s"
       },
       onClick: function onClick() {
+        // Clicking an already-active layer jumps into its sound page
+        // (mirrors mobile). Clicking a different one just switches.
         if (songView) {
           setSongView(false);
           setPage("sound");
+          return;
         }
-        switchLayer(layer);
+        if (isActive) {
+          setPage("sound");
+        } else {
+          switchLayer(layer);
+        }
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -7329,10 +7336,15 @@ function Tabula() {
               target.releasePointerCapture(pointerId);
             } catch (_) {}
             if (!dragging) {
+              // Clicking an already-active pattern jumps into edit
+              // (mirrors mobile). New layer / new pattern: switch + activate.
+              var wasActivePattern = isActive && activeId === p.id;
               if (!isActive) switchLayer(dragLayer);
               setActiveId(p.id);
               if (songView) {
                 setSongView(false);
+                setPage("edit");
+              } else if (wasActivePattern) {
                 setPage("edit");
               }
               return;
@@ -7429,8 +7441,13 @@ function Tabula() {
       if (songView) {
         setSongView(false);
         setPage("sound");
+        return;
       }
-      switchLayer("drums");
+      if (activeLayer === "drums") {
+        setPage("sound");
+      } else {
+        switchLayer("drums");
+      }
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7527,10 +7544,15 @@ function Tabula() {
             target.releasePointerCapture(pointerId);
           } catch (_) {}
           if (!dragging) {
+            // Same rule as synth pillows: clicking the active drum
+            // pattern enters edit.
+            var wasActivePattern = activeLayer === "drums" && activeDrumId === dp.id;
             if (activeLayer !== "drums") switchLayer("drums");
             setActiveDrumId(dp.id);
             if (songView) {
               setSongView(false);
+              setPage("edit");
+            } else if (wasActivePattern) {
               setPage("edit");
             }
             return;
@@ -9695,20 +9717,20 @@ function Tabula() {
       gap: 6
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "TIME",
-    value: dlyIdx,
-    min: 0,
-    max: DLY_NOTES.length - 1,
-    onChange: setDlyIdx,
-    display: DLY_NOTES[dlyIdx].label,
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "SEND",
     value: dlySend,
     min: 0,
     max: 100,
     onChange: setDlySend,
     display: dlySend + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "TIME",
+    value: dlyIdx,
+    min: 0,
+    max: DLY_NOTES.length - 1,
+    onChange: setDlyIdx,
+    display: DLY_NOTES[dlyIdx].label,
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "FDBK",
@@ -9753,6 +9775,14 @@ function Tabula() {
       gap: 6
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SEND",
+    value: rvSend,
+    min: 0,
+    max: 100,
+    onChange: setRvSend,
+    display: rvSend + "%",
+    accent: C_REV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "SIZE",
     value: rvSize,
     min: 0,
@@ -9785,14 +9815,6 @@ function Tabula() {
     max: 100,
     onChange: setRvLfDamp,
     display: rvLfDamp + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SEND",
-    value: rvSend,
-    min: 0,
-    max: 100,
-    onChange: setRvSend,
-    display: rvSend + "%",
     accent: C_REV
   }))))))), /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.tabs), {}, {
@@ -11649,20 +11671,20 @@ function Tabula() {
       gap: 5
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "TIME",
-    value: dlyIdx,
-    min: 0,
-    max: DLY_NOTES.length - 1,
-    onChange: setDlyIdx,
-    display: DLY_NOTES[dlyIdx].label,
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "SEND",
     value: dlySend,
     min: 0,
     max: 100,
     onChange: setDlySend,
     display: dlySend + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "TIME",
+    value: dlyIdx,
+    min: 0,
+    max: DLY_NOTES.length - 1,
+    onChange: setDlyIdx,
+    display: DLY_NOTES[dlyIdx].label,
     accent: C_DLY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "FDBK",
@@ -11707,6 +11729,14 @@ function Tabula() {
       gap: 5
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SEND",
+    value: rvSend,
+    min: 0,
+    max: 100,
+    onChange: setRvSend,
+    display: rvSend + "%",
+    accent: C_REV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "SIZE",
     value: rvSize,
     min: 0,
@@ -11739,14 +11769,6 @@ function Tabula() {
     max: 100,
     onChange: setRvLfDamp,
     display: rvLfDamp + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SEND",
-    value: rvSend,
-    min: 0,
-    max: 100,
-    onChange: setRvSend,
-    display: rvSend + "%",
     accent: C_REV
   }))))), activeLayer === "drums" && function () {
     var dPat = drumPats.find(function (p) {

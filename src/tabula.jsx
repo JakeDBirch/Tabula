@@ -3700,7 +3700,13 @@ export default function Tabula(){
                 const layerActiveId=isActive?activeId:layerStoreR.current[layer]?.activeId;
                 return(
                   <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
-                    onClick={()=>{if(songView){setSongView(false);setPage("sound");}switchLayer(layer);}}>
+                    onClick={()=>{
+                      // Clicking an already-active layer jumps into its sound page
+                      // (mirrors mobile). Clicking a different one just switches.
+                      if(songView){setSongView(false);setPage("sound");return;}
+                      if(isActive){setPage("sound");}
+                      else{switchLayer(layer);}
+                    }}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                       {layerPats.map((p)=>{
@@ -3747,9 +3753,13 @@ export default function Tabula(){
                                 document.removeEventListener("pointercancel",onUp);
                                 try{target.releasePointerCapture(pointerId);}catch(_){}
                                 if(!dragging){
+                                  // Clicking an already-active pattern jumps into edit
+                                  // (mirrors mobile). New layer / new pattern: switch + activate.
+                                  const wasActivePattern=isActive&&activeId===p.id;
                                   if(!isActive)switchLayer(dragLayer);
                                   setActiveId(p.id);
                                   if(songView){setSongView(false);setPage("edit");}
+                                  else if(wasActivePattern){setPage("edit");}
                                   return;
                                 }
                                 const el=document.elementFromPoint(ev.clientX,ev.clientY);
@@ -3802,7 +3812,11 @@ export default function Tabula(){
               })}
               {/* DRUMS layer box */}
               <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
-                onClick={()=>{if(songView){setSongView(false);setPage("sound");}switchLayer("drums");}}>
+                onClick={()=>{
+                  if(songView){setSongView(false);setPage("sound");return;}
+                  if(activeLayer==="drums"){setPage("sound");}
+                  else{switchLayer("drums");}
+                }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
                   {drumPats.map((dp)=>{
@@ -3841,9 +3855,13 @@ export default function Tabula(){
                             document.removeEventListener("pointercancel",onUp);
                             try{target.releasePointerCapture(pointerId);}catch(_){}
                             if(!dragging){
+                              // Same rule as synth pillows: clicking the active drum
+                              // pattern enters edit.
+                              const wasActivePattern=activeLayer==="drums"&&activeDrumId===dp.id;
                               if(activeLayer!=="drums")switchLayer("drums");
                               setActiveDrumId(dp.id);
                               if(songView){setSongView(false);setPage("edit");}
+                              else if(wasActivePattern){setPage("edit");}
                               return;
                             }
                             if(songView){
@@ -4538,8 +4556,8 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
                         <KnobSlider label="SEND"   value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
+                        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
                         <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
                         <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
                         <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
@@ -4548,12 +4566,12 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+                        <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                         <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
                         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}     accent={C_REV}/>
                         {/* HF knob: full clockwise = bright (no damp), engine stores damp internally. */}
                         <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
                         <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}        accent={C_REV}/>
-                        <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                       </div>
                     </SynthSection>
                 </div>
@@ -5186,8 +5204,8 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="DELAY" accent={C_DLY}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="TIME"  value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
                               <KnobSlider label="SEND"  value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
+                              <KnobSlider label="TIME"  value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
                               <KnobSlider label="FDBK"  value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
                               <KnobSlider label="HP"    value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
                               <KnobSlider label="LP"    value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
@@ -5196,12 +5214,12 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
+                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                               <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
                               <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
                               {/* HF knob behaves like a low-pass: full clockwise = bright (no damp). Engine semantics keep 0=no damp internally; UI inverts here. */}
                               <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
                               <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
-                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                             </div>
                           </SynthSection>
                         </div>
