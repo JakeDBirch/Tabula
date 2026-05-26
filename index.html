@@ -340,6 +340,9 @@ var mkDrumPat = function mkDrumPat(name) {
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
 // rvSend/dlySend default to 0 — per-channel FX sends are opt-in.
 var DRUM_DEFAULT_LEVEL = 60;
+// Filter modes: "off" disables the filter (passes everything through unity),
+// "lp"/"hp"/"bp" route through the corresponding biquad type. filtCut 0..100
+// maps log-scaled to 20..20000 Hz at runtime. pitch is in semitones, ±24.
 var defaultDrumMix = function defaultDrumMix() {
   return Array.from({
     length: DRUM_ROWS
@@ -348,7 +351,10 @@ var defaultDrumMix = function defaultDrumMix() {
       level: DRUM_DEFAULT_LEVEL,
       pan: 0,
       rvSend: 0,
-      dlySend: 0
+      dlySend: 0,
+      pitch: 0,
+      filt: "off",
+      filtCut: 100
     };
   });
 };
@@ -360,6 +366,11 @@ var fillDrumMix = function fillDrumMix(mix) {
   return out.map(function (d, i) {
     return Object.assign({}, d, mix[i] || {});
   });
+};
+var FILT_MODES = ["off", "lp", "hp", "bp"];
+// Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
+var filtCutHz = function filtCutHz(v) {
+  return 20 * Math.pow(1000, Math.max(0, Math.min(100, v)) / 100);
 };
 var defaultDrums = function defaultDrums() {
   return {
@@ -1835,7 +1846,7 @@ var DrumEngine = /*#__PURE__*/function () {
     key: "init",
     value: function () {
       var _init2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(masterNode, revNode, dlyNode) {
-        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, sendTap;
+        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, filter, sendTap;
         return _regenerator().w(function (_context5) {
           while (1) switch (_context5.n) {
             case 0:
@@ -1867,6 +1878,15 @@ var DrumEngine = /*#__PURE__*/function () {
                 revSend.gain.value = 0;
                 dlySend = this.ctx.createGain();
                 dlySend.gain.value = 0;
+                // Per-voice multimode filter. Default is lowpass at 20kHz which is
+                // effectively bypass; setVoiceMix updates type + cutoff based on the
+                // mix's filt/filtCut. Sits between voice output and lvlGain so the
+                // filter responds to drag-updates without clicking on hits.
+                filter = this.ctx.createBiquadFilter();
+                filter.type = "lowpass";
+                filter.frequency.value = 20000;
+                filter.Q.value = 0.7;
+                filter.connect(lvlGain);
                 if (panner) {
                   panner.pan.value = 0;
                   lvlGain.connect(panner);
@@ -1885,11 +1905,17 @@ var DrumEngine = /*#__PURE__*/function () {
                   sendTap.connect(dlySend);
                   dlySend.connect(this.dlyNode);
                 }
+                // pitch is in semitones; cached on the strip so play() can read it
+                // without traversing React state. Filter type is stored separately so
+                // setVoiceMix only re-assigns when it actually changes.
                 this.voiceStrips[v.key] = {
                   lvlGain: lvlGain,
                   panner: panner,
                   revSend: revSend,
-                  dlySend: dlySend
+                  dlySend: dlySend,
+                  filter: filter,
+                  pitch: 0,
+                  filtMode: "off"
                 };
               }
               this.ready = true;
@@ -1917,6 +1943,28 @@ var DrumEngine = /*#__PURE__*/function () {
       if (mix.pan != null && strip.panner) strip.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, mix.pan / 100)), t, TAU);
       if (mix.rvSend != null) strip.revSend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.rvSend / 100)), t, TAU);
       if (mix.dlySend != null) strip.dlySend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.dlySend / 100)), t, TAU);
+      if (mix.pitch != null) strip.pitch = Math.max(-24, Math.min(24, mix.pitch));
+      // Filter — store mode on the strip and switch the biquad type only when
+      // the mode actually changes. Cut is smoothed; mode change is immediate
+      // but inaudible since the new type's frequency response starts fresh.
+      if (mix.filt != null && mix.filt !== strip.filtMode) {
+        strip.filtMode = mix.filt;
+        if (mix.filt === "off") {
+          strip.filter.type = "lowpass";
+        } else if (mix.filt === "lp") {
+          strip.filter.type = "lowpass";
+        } else if (mix.filt === "hp") {
+          strip.filter.type = "highpass";
+        } else if (mix.filt === "bp") {
+          strip.filter.type = "bandpass";
+        }
+      }
+      if (mix.filt != null || mix.filtCut != null) {
+        var cut = mix.filtCut != null ? mix.filtCut : 100;
+        // "off" pins the cutoff at the top so the biquad is effectively bypass.
+        var targetHz = strip.filtMode === "off" ? 20000 : filtCutHz(cut);
+        strip.filter.frequency.setTargetAtTime(targetHz, t, TAU);
+      }
     }
   }, {
     key: "setMasterLevel",
@@ -2016,13 +2064,18 @@ var DrumEngine = /*#__PURE__*/function () {
       this.setVoiceMix(voice, mix);
       var strip = this.voiceStrips[voice];
       if (!strip) return;
-      var out = strip.lvlGain;
+      // out feeds the strip's filter (and then lvlGain → panner → master).
+      var out = strip.filter;
+      // Pitch ratio applied to every osc frequency in the synth voice paths
+      // below. Samples use playbackRate. Range matches the mix range (-24..+24).
+      var pr = Math.pow(2, (strip.pitch || 0) / 12);
       // User-recorded sample takes precedence over the synthesized voice.
       if (sample) {
         var src = ctx.createBufferSource();
         src.buffer = sample;
         var g = ctx.createGain();
         g.gain.value = v;
+        src.playbackRate.value = pr; // pitch ratio applies to samples
         src.connect(g);
         g.connect(out);
         try {
@@ -2033,21 +2086,23 @@ var DrumEngine = /*#__PURE__*/function () {
         // Track sample-based OH for choke too — duration approximated from buffer.
         if (voice === "OH") this.activeOH = {
           g: g,
-          endT: t + (sample.duration || 0.5)
+          endT: t + (sample.duration || 0.5) / pr
         };
         return;
       }
       if (voice === "BD") {
-        // Tonal body: deep sine sweep
+        // Tonal body: deep sine sweep — pr scales all osc freqs (filters too,
+        // so the timbre tracks the pitch rather than the filter clipping the
+        // pitched sweep).
         var osc = ctx.createOscillator();
         var ws = this._shaper(ctx, 3);
         var _g = ctx.createGain();
         var lp = ctx.createBiquadFilter();
         lp.type = "lowpass";
-        lp.frequency.value = 200;
+        lp.frequency.value = 200 * pr;
         lp.Q.value = 0.7;
-        osc.frequency.setValueAtTime(220, t);
-        osc.frequency.exponentialRampToValueAtTime(28, t + 0.25);
+        osc.frequency.setValueAtTime(220 * pr, t);
+        osc.frequency.exponentialRampToValueAtTime(28 * pr, t + 0.25);
         this._env(_g.gain, t, 1.1 * v, 0.002, 0.18, 0.001, 0.45);
         osc.connect(ws);
         ws.connect(lp);
@@ -2058,8 +2113,8 @@ var DrumEngine = /*#__PURE__*/function () {
         // Punch transient: short high sine burst
         var punch = ctx.createOscillator();
         var pg = ctx.createGain();
-        punch.frequency.setValueAtTime(400, t);
-        punch.frequency.exponentialRampToValueAtTime(60, t + 0.012);
+        punch.frequency.setValueAtTime(400 * pr, t);
+        punch.frequency.exponentialRampToValueAtTime(60 * pr, t + 0.012);
         this._env(pg.gain, t, 0.7 * v, 0.001, 0.01, 0.001, 0.005);
         punch.connect(pg);
         pg.connect(out);
@@ -2070,7 +2125,7 @@ var DrumEngine = /*#__PURE__*/function () {
         var ncg = ctx.createGain();
         var nclp = ctx.createBiquadFilter();
         nclp.type = "lowpass";
-        nclp.frequency.value = 300;
+        nclp.frequency.value = 300 * pr;
         this._env(ncg.gain, t, 0.5 * v, 0.001, 0.005, 0.001, 0.008);
         nc.connect(nclp);
         nclp.connect(ncg);
@@ -2080,8 +2135,8 @@ var DrumEngine = /*#__PURE__*/function () {
         // Tonal body
         var _osc = ctx.createOscillator();
         var og = ctx.createGain();
-        _osc.frequency.setValueAtTime(240, t);
-        _osc.frequency.exponentialRampToValueAtTime(160, t + 0.025);
+        _osc.frequency.setValueAtTime(240 * pr, t);
+        _osc.frequency.exponentialRampToValueAtTime(160 * pr, t + 0.025);
         this._env(og.gain, t, 0.55 * v, 0.001, 0.025, 0.001, 0.06);
         _osc.connect(og);
         og.connect(out);
@@ -2092,7 +2147,7 @@ var DrumEngine = /*#__PURE__*/function () {
         var cg = ctx.createGain();
         var cbp = ctx.createBiquadFilter();
         cbp.type = "bandpass";
-        cbp.frequency.value = 5000;
+        cbp.frequency.value = 5000 * pr;
         cbp.Q.value = 0.3;
         this._env(cg.gain, t, 0.9 * v, 0.0005, 0.006, 0.001, 0.004);
         crack.connect(cbp);
@@ -2104,11 +2159,11 @@ var DrumEngine = /*#__PURE__*/function () {
         var sg = ctx.createGain();
         var sbp = ctx.createBiquadFilter();
         sbp.type = "bandpass";
-        sbp.frequency.value = 2500;
+        sbp.frequency.value = 2500 * pr;
         sbp.Q.value = 0.6;
         var shp = ctx.createBiquadFilter();
         shp.type = "highpass";
-        shp.frequency.value = 800;
+        shp.frequency.value = 800 * pr;
         this._env(sg.gain, t, 0.65 * v, 0.002, 0.05, 0.05, 0.18);
         snare.connect(shp);
         shp.connect(sbp);
@@ -2116,7 +2171,7 @@ var DrumEngine = /*#__PURE__*/function () {
         sg.connect(out);
         snare.start(t);
       } else if (voice === "LT" || voice === "HT") {
-        var freq = voice === "LT" ? 72 : 130;
+        var freq = (voice === "LT" ? 72 : 130) * pr;
         var _osc2 = ctx.createOscillator();
         var _g2 = ctx.createGain();
         var _lp2 = ctx.createBiquadFilter();
@@ -2148,15 +2203,15 @@ var DrumEngine = /*#__PURE__*/function () {
         var n = this._noise(ctx, 0.12);
         var bp1 = ctx.createBiquadFilter();
         bp1.type = "bandpass";
-        bp1.frequency.value = 8400;
+        bp1.frequency.value = 8400 * pr;
         bp1.Q.value = 1.5;
         var bp2 = ctx.createBiquadFilter();
         bp2.type = "bandpass";
-        bp2.frequency.value = 11200;
+        bp2.frequency.value = 11200 * pr;
         bp2.Q.value = 2;
         var hp = ctx.createBiquadFilter();
         hp.type = "highpass";
-        hp.frequency.value = 7000;
+        hp.frequency.value = 7000 * pr;
         var _g3 = ctx.createGain();
         this._env(_g3.gain, t, 0.55 * v, 0.001, 0.018, 0.001, 0.022);
         n.connect(bp1);
@@ -2169,15 +2224,15 @@ var DrumEngine = /*#__PURE__*/function () {
         var _n = this._noise(ctx, 0.9);
         var _bp = ctx.createBiquadFilter();
         _bp.type = "bandpass";
-        _bp.frequency.value = 8400;
+        _bp.frequency.value = 8400 * pr;
         _bp.Q.value = 1.2;
         var _bp2 = ctx.createBiquadFilter();
         _bp2.type = "bandpass";
-        _bp2.frequency.value = 11200;
+        _bp2.frequency.value = 11200 * pr;
         _bp2.Q.value = 1.5;
         var _hp = ctx.createBiquadFilter();
         _hp.type = "highpass";
-        _hp.frequency.value = 6500;
+        _hp.frequency.value = 6500 * pr;
         var _g4 = ctx.createGain();
         this._env(_g4.gain, t, 0.5 * v, 0.001, 0.06, 0.12, 0.55);
         _n.connect(_bp);
@@ -2195,15 +2250,15 @@ var DrumEngine = /*#__PURE__*/function () {
         var _n2 = this._noise(ctx, 1.8);
         var _bp3 = ctx.createBiquadFilter();
         _bp3.type = "bandpass";
-        _bp3.frequency.value = 7800;
+        _bp3.frequency.value = 7800 * pr;
         _bp3.Q.value = 0.5;
         var _bp4 = ctx.createBiquadFilter();
         _bp4.type = "bandpass";
-        _bp4.frequency.value = 12000;
+        _bp4.frequency.value = 12000 * pr;
         _bp4.Q.value = 0.8;
         var _hp2 = ctx.createBiquadFilter();
         _hp2.type = "highpass";
-        _hp2.frequency.value = 5500;
+        _hp2.frequency.value = 5500 * pr;
         var _g5 = ctx.createGain();
         // Initial bright shimmer then settle
         this._env(_g5.gain, t, 0.42 * v, 0.002, 0.3, 0.25, 1.1);
@@ -2220,11 +2275,11 @@ var DrumEngine = /*#__PURE__*/function () {
           var n = _this3._noise(ctx, 0.06);
           var bp = ctx.createBiquadFilter();
           bp.type = "bandpass";
-          bp.frequency.value = 1800 - i * 120;
+          bp.frequency.value = (1800 - i * 120) * pr;
           bp.Q.value = 1.8;
           var hp = ctx.createBiquadFilter();
           hp.type = "highpass";
-          hp.frequency.value = 900;
+          hp.frequency.value = 900 * pr;
           var g = ctx.createGain();
           var pk = i === 0 ? 0.75 * v : i === 3 ? 0.9 * v : 0.55 * v;
           _this3._env(g.gain, t + dl, pk, 0.001, 0.012 + i * 0.005, 0.001, 0.04 + i * 0.02);
@@ -2239,11 +2294,11 @@ var DrumEngine = /*#__PURE__*/function () {
         var _n3 = this._noise(ctx, 0.05);
         var bp = ctx.createBiquadFilter();
         bp.type = "bandpass";
-        bp.frequency.value = 2800;
+        bp.frequency.value = 2800 * pr;
         bp.Q.value = 3;
         var _hp3 = ctx.createBiquadFilter();
         _hp3.type = "highpass";
-        _hp3.frequency.value = 1800;
+        _hp3.frequency.value = 1800 * pr;
         var _g6 = ctx.createGain();
         this._env(_g6.gain, t, 0.8 * v, 0.001, 0.018, 0.001, 0.012);
         _n3.connect(bp);
@@ -2255,7 +2310,7 @@ var DrumEngine = /*#__PURE__*/function () {
         var n2 = this._noise(ctx, 0.02);
         var _bp5 = ctx.createBiquadFilter();
         _bp5.type = "bandpass";
-        _bp5.frequency.value = 3800;
+        _bp5.frequency.value = 3800 * pr;
         _bp5.Q.value = 4;
         var g2 = ctx.createGain();
         this._env(g2.gain, t + 0.004, 0.5 * v, 0.001, 0.008, 0.001, 0.006);
@@ -2269,14 +2324,14 @@ var DrumEngine = /*#__PURE__*/function () {
         freqs.forEach(function (f, i) {
           var osc = ctx.createOscillator();
           osc.type = "square";
-          osc.frequency.value = f;
+          osc.frequency.value = f * pr;
           var bp = ctx.createBiquadFilter();
           bp.type = "bandpass";
-          bp.frequency.value = 700;
+          bp.frequency.value = 700 * pr;
           bp.Q.value = 0.6;
           var hp = ctx.createBiquadFilter();
           hp.type = "highpass";
-          hp.frequency.value = 300;
+          hp.frequency.value = 300 * pr;
           var g = ctx.createGain();
           // Short attack, medium-long metallic decay
           _this3._env(g.gain, t, 0.38 * v * (i === 0 ? 1 : 0.8), 0.001, 0.06, 0.08, 0.42);
@@ -2290,7 +2345,7 @@ var DrumEngine = /*#__PURE__*/function () {
         // Initial ping transient
         var ping = ctx.createOscillator();
         ping.type = "square";
-        ping.frequency.value = 700;
+        ping.frequency.value = 700 * pr;
         var _pg = ctx.createGain();
         this._env(_pg.gain, t, 0.6 * v, 0.001, 0.004, 0.001, 0.003);
         ping.connect(_pg);
@@ -6706,20 +6761,23 @@ function Tabula() {
       });
     });
   };
-  // CH (closed hat) + OH (open hat) are linked on pan, level, AND the FX
-  // sends since they model the same physical hi-hat in any real kit. Sample
-  // slots stay independent so each can hold its own recording.
+  // CH (closed hat) + OH (open hat) are fully linked on the mixer — they
+  // model the same physical hi-hat. The mixer UI hides OH and shows a
+  // single HAT strip that writes to CH; this propagates everything
+  // (pan/level/sends/pitch/filter) to OH so playback stays consistent.
+  // Sample slots stay independent so each can hold its own recording.
   var _CH_ROW = DRUM_VOICES.findIndex(function (v) {
     return v.key === "CH";
   });
   var _OH_ROW = DRUM_VOICES.findIndex(function (v) {
     return v.key === "OH";
   });
+  var _HAT_LINKED_KEYS = new Set(["pan", "level", "rvSend", "dlySend", "pitch", "filt", "filtCut"]);
   var setDrumMix = function setDrumMix(row, key, val) {
     return setDrumPats(function (ps) {
       return ps.map(function (p) {
         if (p.id !== activeDrumId) return p;
-        var linksHat = (key === "pan" || key === "level" || key === "rvSend" || key === "dlySend") && (row === _CH_ROW || row === _OH_ROW);
+        var linksHat = _HAT_LINKED_KEYS.has(key) && (row === _CH_ROW || row === _OH_ROW);
         var linkedRow = linksHat ? row === _CH_ROW ? _OH_ROW : _CH_ROW : -1;
         // fillDrumMix normalizes any partial saves so old voice rows without
         // rvSend/dlySend pick up the default before getting the new value applied.
@@ -9679,6 +9737,9 @@ function Tabula() {
         paddingBottom: 4
       }
     }, DRUM_VOICES.map(function (voice, r) {
+      if (voice.key === "OH") return null; // collapsed into HAT (CH) strip
+      var isHat = voice.key === "CH";
+      var stripLabel = isHat ? "HAT" : voice.full || voice.label;
       var m = mix[r];
       var stripBg = "rgba(30,28,24,0.55)";
       var cell = {
@@ -9703,7 +9764,7 @@ function Tabula() {
             var rect = e.currentTarget.getBoundingClientRect();
             var update = function update(ev) {
               var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-              var v = bipolar ? Math.round(pct * 200 - 100) : Math.round(pct * 100);
+              var v = bipolar ? Math.round(pct * (maxVal - minVal) + minVal) : Math.round(pct * (maxVal - minVal) + minVal);
               setDrumMix(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             update(e);
@@ -9731,8 +9792,8 @@ function Tabula() {
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: val <= 0 ? "".concat(50 + val / 2, "%") : "50%",
-            width: "".concat(Math.abs(val) / 2, "%"),
+            left: val <= 0 ? "".concat(50 + (val - minVal) / (maxVal - minVal) * 100 - 50, "%") : "50%",
+            width: "".concat(Math.abs(val) / (maxVal - minVal) * 100, "%"),
             background: voice.color + "99",
             borderRadius: 3
           }
@@ -9742,7 +9803,7 @@ function Tabula() {
             left: 0,
             top: 0,
             bottom: 0,
-            width: "".concat(val, "%"),
+            width: "".concat((val - minVal) / (maxVal - minVal) * 100, "%"),
             background: voice.color + "99",
             borderRadius: 3
           }
@@ -9752,7 +9813,7 @@ function Tabula() {
             top: -3,
             bottom: -3,
             width: 8,
-            left: bipolar ? "calc(".concat(50 + val / 2, "% - 4px)") : "calc(".concat(val, "% - 4px)"),
+            left: "calc(".concat((val - minVal) / (maxVal - minVal) * 100, "% - 4px)"),
             background: "rgba(255,255,255,0.85)",
             borderRadius: 2,
             boxShadow: "0 0 3px " + voice.color + "88"
@@ -9761,6 +9822,18 @@ function Tabula() {
       };
       var isRec = recordingVoice === voice.key;
       var hasSample = !!voiceSamples[voice.key];
+      var filtMode = m.filt || "off";
+      var cycleFilt = function cycleFilt() {
+        var i = FILT_MODES.indexOf(filtMode);
+        var nx = FILT_MODES[(i + 1) % FILT_MODES.length];
+        setDrumMix(r, "filt", nx);
+      };
+      var filtColors = {
+        off: "rgba(200,185,165,0.3)",
+        lp: "#7aaa96",
+        hp: "#c4a070",
+        bp: "#a890c0"
+      };
       return /*#__PURE__*/React.createElement("div", {
         key: voice.key,
         style: {
@@ -9769,7 +9842,7 @@ function Tabula() {
           minWidth: 62,
           display: "flex",
           flexDirection: "column",
-          gap: 6,
+          gap: 5,
           padding: "6px 4px",
           background: stripBg,
           border: "1px solid " + voice.color + "22",
@@ -9786,7 +9859,54 @@ function Tabula() {
           lineHeight: 1.15,
           minHeight: 12
         }
-      }, voice.full || voice.label), /*#__PURE__*/React.createElement("div", {
+      }, stripLabel), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          letterSpacing: 1,
+          color: "rgba(210,195,175,0.4)",
+          alignSelf: "flex-start"
+        }
+      }, "PITCH"), miniSlider("pitch", m.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          color: "rgba(210,195,175,0.55)"
+        }
+      }, (m.pitch || 0) > 0 ? "+" + m.pitch : m.pitch || 0)), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          gap: 2
+        }
+      }, /*#__PURE__*/React.createElement("button", {
+        onClick: function onClick(e) {
+          e.stopPropagation();
+          cycleFilt();
+        },
+        style: {
+          flex: "0 0 22px",
+          height: 11,
+          fontSize: 6,
+          letterSpacing: 0.5,
+          fontWeight: 700,
+          borderRadius: 2,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          padding: 0,
+          border: "1px solid " + (filtMode === "off" ? "rgba(200,185,165,0.2)" : filtColors[filtMode]),
+          background: filtMode === "off" ? "transparent" : filtColors[filtMode] + "22",
+          color: filtMode === "off" ? "rgba(210,195,175,0.4)" : filtColors[filtMode]
+        }
+      }, filtMode.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1,
+          opacity: filtMode === "off" ? 0.35 : 1
+        }
+      }, miniSlider("filtCut", m.filtCut != null ? m.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -12890,11 +13010,14 @@ function Tabula() {
         gap: 3,
         overflowX: "auto",
         overflowY: "hidden",
-        height: 300,
+        height: 340,
         paddingBottom: 4,
         WebkitOverflowScrolling: "touch"
       }
     }, DRUM_VOICES.map(function (voice, r) {
+      if (voice.key === "OH") return null; // collapsed into HAT (CH) strip
+      var isHat = voice.key === "CH";
+      var stripLabel = isHat ? "HAT" : voice.full || voice.label;
       var m = mix[r];
       var isRec = recordingVoice === voice.key;
       var hasSample = !!voiceSamples[voice.key];
@@ -12904,7 +13027,7 @@ function Tabula() {
         alignItems: "center",
         gap: 1
       };
-      var miniSlider = function miniSlider(key, val, bipolar) {
+      var miniSlider = function miniSlider(key, val, minVal, maxVal, bipolar) {
         return /*#__PURE__*/React.createElement("div", {
           style: {
             width: "100%",
@@ -12918,8 +13041,8 @@ function Tabula() {
             var rect = e.currentTarget.getBoundingClientRect();
             var u = function u(ev) {
               var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-              var v = bipolar ? Math.round(pct * 200 - 100) : Math.round(pct * 100);
-              setDrumMix(r, key, v);
+              var v = Math.round(pct * (maxVal - minVal) + minVal);
+              setDrumMix(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             u(e);
             var _up6 = function up() {
@@ -12946,8 +13069,8 @@ function Tabula() {
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: val <= 0 ? "".concat(50 + val / 2, "%") : "50%",
-            width: "".concat(Math.abs(val) / 2, "%"),
+            left: val <= 0 ? "".concat((val - minVal) / (maxVal - minVal) * 100, "%") : "50%",
+            width: "".concat(Math.abs(val) / (maxVal - minVal) * 100, "%"),
             background: voice.color + "99",
             borderRadius: 3
           }
@@ -12957,7 +13080,7 @@ function Tabula() {
             left: 0,
             top: 0,
             bottom: 0,
-            width: "".concat(val, "%"),
+            width: "".concat((val - minVal) / (maxVal - minVal) * 100, "%"),
             background: voice.color + "99",
             borderRadius: 3
           }
@@ -12967,17 +13090,29 @@ function Tabula() {
             top: -3,
             bottom: -3,
             width: 8,
-            left: bipolar ? "calc(".concat(50 + val / 2, "% - 4px)") : "calc(".concat(val, "% - 4px)"),
+            left: "calc(".concat((val - minVal) / (maxVal - minVal) * 100, "% - 4px)"),
             background: "rgba(255,255,255,0.85)",
             borderRadius: 2
           }
         }));
       };
+      var filtMode = m.filt || "off";
+      var cycleFilt = function cycleFilt() {
+        var i = FILT_MODES.indexOf(filtMode);
+        var nx = FILT_MODES[(i + 1) % FILT_MODES.length];
+        setDrumMix(r, "filt", nx);
+      };
+      var filtColors = {
+        off: "rgba(200,185,165,0.3)",
+        lp: "#7aaa96",
+        hp: "#c4a070",
+        bp: "#a890c0"
+      };
       return /*#__PURE__*/React.createElement("div", {
         key: voice.key,
         style: {
           flexShrink: 0,
-          width: 54,
+          width: 56,
           display: "flex",
           flexDirection: "column",
           gap: 4,
@@ -12997,7 +13132,7 @@ function Tabula() {
           lineHeight: 1.1,
           minHeight: 10
         }
-      }, voice.full || voice.label), /*#__PURE__*/React.createElement("div", {
+      }, stripLabel), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13006,7 +13141,54 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PAN"), miniSlider("pan", m.pan, true), /*#__PURE__*/React.createElement("div", {
+      }, "PITCH"), miniSlider("pitch", m.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          color: "rgba(210,195,175,0.55)"
+        }
+      }, (m.pitch || 0) > 0 ? "+" + m.pitch : m.pitch || 0)), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          gap: 2
+        }
+      }, /*#__PURE__*/React.createElement("button", {
+        onClick: function onClick(e) {
+          e.stopPropagation();
+          cycleFilt();
+        },
+        style: {
+          flex: "0 0 22px",
+          height: 11,
+          fontSize: 6,
+          letterSpacing: 0.5,
+          fontWeight: 700,
+          borderRadius: 2,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          padding: 0,
+          border: "1px solid " + (filtMode === "off" ? "rgba(200,185,165,0.2)" : filtColors[filtMode]),
+          background: filtMode === "off" ? "transparent" : filtColors[filtMode] + "22",
+          color: filtMode === "off" ? "rgba(210,195,175,0.4)" : filtColors[filtMode]
+        }
+      }, filtMode.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1,
+          opacity: filtMode === "off" ? 0.35 : 1
+        }
+      }, miniSlider("filtCut", m.filtCut != null ? m.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          letterSpacing: 1,
+          color: "rgba(210,195,175,0.4)",
+          alignSelf: "flex-start"
+        }
+      }, "PAN"), miniSlider("pan", m.pan, -100, 100, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
@@ -13020,7 +13202,7 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "REV"), miniSlider("rvSend", m.rvSend, false), /*#__PURE__*/React.createElement("div", {
+      }, "REV"), miniSlider("rvSend", m.rvSend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
@@ -13034,7 +13216,7 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "DLY"), miniSlider("dlySend", m.dlySend, false), /*#__PURE__*/React.createElement("div", {
+      }, "DLY"), miniSlider("dlySend", m.dlySend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
