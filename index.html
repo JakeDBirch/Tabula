@@ -960,7 +960,8 @@ function StepLane(_ref5) {
     onChange = _ref5.onChange,
     onDragStart = _ref5.onDragStart,
     tall = _ref5.tall,
-    colHasNote = _ref5.colHasNote;
+    colHasNote = _ref5.colHasNote,
+    onResetCol = _ref5.onResetCol;
   var ref = useRef(null);
   var drag = useRef({
     active: false
@@ -1004,6 +1005,11 @@ function StepLane(_ref5) {
           if (locked) return;
           onDragStart && onDragStart();
           onChange(c, on ? 0 : 1);
+        },
+        onDoubleClick: function onDoubleClick(e) {
+          e.stopPropagation();
+          if (locked) return;
+          onResetCol && onResetCol(c);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -1082,7 +1088,12 @@ function StepLane(_ref5) {
       style: Object.assign({}, S.laneBarWrap, {
         opacity: locked ? 0.15 : 1,
         borderLeft: isQ ? "1px solid rgba(200,185,165,0.15)" : "none"
-      })
+      }),
+      onDoubleClick: function onDoubleClick(e) {
+        e.stopPropagation();
+        if (locked) return;
+        onResetCol && onResetCol(c);
+      }
     }, lane.center != null && /*#__PURE__*/React.createElement("div", {
       style: Object.assign({}, S.laneCenterLine, {
         bottom: cp * 100 + "%",
@@ -6789,6 +6800,25 @@ function Tabula() {
       });
     });
   };
+  // Double-click on any lane cell at column c resets ALL lane values for that
+  // step back to their defaults (one row of defaultStepParams). Faster than
+  // pulling each lane down individually when a step has accumulated edits.
+  var resetStepCol = function resetStepCol(col) {
+    pushHistory();
+    setFollowSeq(false);
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeId) return p;
+        var dflt = defaultStepParams()[0];
+        var params = (p.params || defaultStepParams()).map(function (sp, i) {
+          return i === col ? Object.assign({}, dflt) : sp;
+        });
+        return Object.assign({}, p, {
+          params: params
+        });
+      });
+    });
+  };
   var removeFromChain = function removeFromChain(i) {
     return setChain(function (c) {
       return c.filter(function (_, idx) {
@@ -9773,6 +9803,7 @@ function Tabula() {
         return setStepParam(col, lane.key, val);
       },
       onDragStart: pushHistory,
+      onResetCol: resetStepCol,
       tall: true
     }));
   })), activeLayer !== "drums" && page === "set" && /*#__PURE__*/React.createElement("div", {
@@ -12004,6 +12035,7 @@ function Tabula() {
         return setStepParam(col, lane.key, val);
       },
       onDragStart: pushHistory,
+      onResetCol: resetStepCol,
       tall: true
     }));
   }))), activeSheet === "sound" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {

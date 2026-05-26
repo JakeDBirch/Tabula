@@ -333,7 +333,7 @@ const PARAM_ARMS=[
   {key:"oct", label:"OCT",  color:"#6c9ad6", angle:10,  min:0,    max:4,   discrete:true},
 ];
 
-function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote}){
+function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,onResetCol}){
   const ref=useRef(null);
   const drag=useRef({active:false});
 
@@ -350,7 +350,8 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote})
             return(
               <div key={c} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
                 height:"100%",opacity:locked?0.15:1,cursor:locked?"default":"pointer"}}
-                onPointerDown={e=>{e.stopPropagation();if(locked)return;onDragStart&&onDragStart();onChange(c,on?0:1);}}>
+                onPointerDown={e=>{e.stopPropagation();if(locked)return;onDragStart&&onDragStart();onChange(c,on?0:1);}}
+                onDoubleClick={e=>{e.stopPropagation();if(locked)return;onResetCol&&onResetCol(c);}}>
                 <div style={{width:"70%",aspectRatio:"1",borderRadius:"3px",
                   background:on?(isAct?"#fff":lane.color):lane.color+"22",
                   border:"1px solid "+(on?lane.color:lane.color+"44"),
@@ -400,7 +401,8 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote})
           const pct=isRhy ? Math.max(0.12, (rhyVal-1)/3) : (v-lane.min)/(lane.max-lane.min);
           const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
           return(
-            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}>
+            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}
+              onDoubleClick={e=>{e.stopPropagation();if(locked)return;onResetCol&&onResetCol(c);}}>
               {lane.center!=null&&<div style={Object.assign({},S.laneCenterLine,{bottom:(cp*100)+"%",borderColor:lane.color+"22"})}/>}
               <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none",position:"relative",display:"flex",alignItems:"flex-start",justifyContent:"center"})}>
                 {tall&&isRhy&&<span style={{fontSize:7,fontWeight:700,color:isAct?"#000":"rgba(0,0,0,0.8)",lineHeight:1,paddingTop:1,pointerEvents:"none"}}>{"×"+rhyVal}</span>}
@@ -3529,6 +3531,18 @@ export default function Tabula(){
     }));
   };
   const resetStepAll=()=>setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{params:defaultStepParams()})));
+  // Double-click on any lane cell at column c resets ALL lane values for that
+  // step back to their defaults (one row of defaultStepParams). Faster than
+  // pulling each lane down individually when a step has accumulated edits.
+  const resetStepCol=(col)=>{
+    pushHistory();setFollowSeq(false);
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeId)return p;
+      const dflt=defaultStepParams()[0];
+      const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},dflt):sp);
+      return Object.assign({},p,{params});
+    }));
+  };
   const removeFromChain=i=>setChain(c=>c.filter((_,idx)=>idx!==i));
   const moveSlot=(i,dir)=>{const j=i+dir;if(j<0||j>=chain.length)return;setChain(c=>{const n=[...c];[n[i],n[j]]=[n[j],n[i]];return n;});};
 
@@ -4717,7 +4731,7 @@ export default function Tabula(){
                         </div>
                         <StepLane lane={lane} values={vals} colHasNote={colHasNote}
                           activeStep={playing&&playId===activeId?step:-1}
-                          onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory}
+                          onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory} onResetCol={resetStepCol}
                           tall/>
                       </div>
                     );
@@ -5439,7 +5453,7 @@ export default function Tabula(){
                               </div>
                               <StepLane lane={lane} values={vals} colHasNote={colHasNote}
                                 activeStep={playing&&playId===activeId?step:-1}
-                                onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory}
+                                onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory} onResetCol={resetStepCol}
                                 tall/>
                             </div>
                           );
