@@ -76,16 +76,16 @@ const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,speedMult:1});
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
-  {key:"BD",label:"BD",color:"#e07060"},
-  {key:"SD",label:"SD",color:"#e09050"},
-  {key:"LT",label:"LT",color:"#c8a840"},
-  {key:"HT",label:"HT",color:"#a0b840"},
-  {key:"CH",label:"CH",color:"#60b878"},
-  {key:"OH",label:"OH",color:"#50a8c0"},
-  {key:"CY",label:"CY",color:"#7888d0"},
-  {key:"CP",label:"CP",color:"#c070c0"},
-  {key:"CL",label:"CL",color:"#d4956a"},
-  {key:"CB",label:"CB",color:"#9bbfaa"},
+  {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
+  {key:"SD",label:"SD",full:"SNARE",  color:"#e09050"},
+  {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
+  {key:"HT",label:"HT",full:"HI TOM", color:"#a0b840"},
+  {key:"CH",label:"CH",full:"CL HAT", color:"#60b878"},
+  {key:"OH",label:"OH",full:"OP HAT", color:"#50a8c0"},
+  {key:"CY",label:"CY",full:"CYMBAL", color:"#7888d0"},
+  {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
+  {key:"CL",label:"CL",full:"CLAVES", color:"#d4956a"},
+  {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
 const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
@@ -398,28 +398,35 @@ class Bell{
     // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
     // L/R image). Per-layer send and optional delay-to-reverb feed both land
-    // on rvIn (mono input bus); combs branch to a ChannelMergerNode for
-    // stereo output. Variable size (decay) and damp (HF roll).
+    // on rvIn (mono input bus). Signal flow per comb:
+    //   rvIn → preDelay → comb_delay → highShelf → lowShelf → feedback → comb_delay
+    //                                                       ↘ tap → channel merger
+    // Damping uses SHELF filters (no resonance peaks ever — unlike a biquad LP
+    // which colors the tail like a static EQ). Each pass through the feedback
+    // attenuates HF (and optionally LF) by the shelf gain — that's natural
+    // frequency-dependent decay: HF dies faster than LF.
     const rvIn = this.ctx.createGain(); rvIn.gain.value = 1.0;
-    const rvOut = this.ctx.createGain(); rvOut.gain.value = 0.6; // wet level
+    const rvPreDelay = this.ctx.createDelay(0.5); rvPreDelay.delayTime.value = 0;
+    rvIn.connect(rvPreDelay);
+    const rvOut = this.ctx.createGain(); rvOut.gain.value = 0.6;
     const rvMerger = this.ctx.createChannelMerger(2);
     rvMerger.connect(rvOut); rvOut.connect(m);
     this.rev = rvIn;
     this.rvOut = rvOut;
+    this.rvPreDelay = rvPreDelay;
     const rvCombs = [];
-    // Q kept very low (0.05 ≈ flat) — appreciable Q on a biquad in a feedback
-    // loop accumulates a resonant peak that sounds like ringing tone (the
-    // "runaway feedback" report).
     const mkComb = (delaySec, channel) => {
       const cd = this.ctx.createDelay(1); cd.delayTime.value = delaySec;
       const cfb = this.ctx.createGain(); cfb.gain.value = 0.78;
-      const clp = this.ctx.createBiquadFilter();
-      clp.type="lowpass"; clp.frequency.value = 4500; clp.Q.value = 0.05;
-      rvIn.connect(cd);
-      cd.connect(clp); clp.connect(cfb); cfb.connect(cd);
-      // Each comb's pre-feedback output taps the merger on its channel.
-      cd.connect(rvMerger, 0, channel);
-      rvCombs.push({delay:cd, fb:cfb, lp:clp});
+      const hsh = this.ctx.createBiquadFilter();
+      hsh.type="highshelf"; hsh.frequency.value = 3500; hsh.gain.value = 0; // HF damp (dB cut)
+      const lsh = this.ctx.createBiquadFilter();
+      lsh.type="lowshelf";  lsh.frequency.value = 250;  lsh.gain.value = 0; // LF damp (dB cut)
+      rvPreDelay.connect(cd);
+      cd.connect(hsh); hsh.connect(lsh); lsh.connect(cfb); cfb.connect(cd);
+      // Tap is post-shelves so the output reflects the cumulative damping.
+      lsh.connect(rvMerger, 0, channel);
+      rvCombs.push({delay:cd, fb:cfb, hsh, lsh});
     };
     [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>mkComb(ct, 0)); // left
     [0.0306, 0.0383, 0.0421, 0.0451].forEach(ct=>mkComb(ct, 1)); // right (offset)
@@ -456,16 +463,29 @@ class Bell{
   }
   // Reverb param setters — analogous to setDly* helpers above
   setRvSize(pct){if(!this.ready||!this.rvCombs)return;
-    // Range pushed back up after the Q=0.05 damping fix removed the
-    // resonance accumulation that caused the original runaway. 0.40..0.92
-    // covers small-room to very-long-hall decays musically.
     const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.52; // 0.40..0.92
     for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
   }
+  // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
+  // damp (0 dB), 100 pct = max damp (~-18 dB). Each pass through the comb
+  // attenuates HF by that much, so highs decay faster than lows — that's
+  // natural reverb damping behaviour (no static EQ-coloring of the wet
+  // signal, no resonance, just freq-dependent decay).
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
-    // Higher pct = brighter (less damping). Lower pct = darker tail.
-    const hz=800+(Math.max(0,Math.min(100,pct))/100)*9200;
-    for(const c of this.rvCombs)c.lp.frequency.setTargetAtTime(hz,this.ctx.currentTime,0.02);
+    const gdb=-(Math.max(0,Math.min(100,pct))/100)*18; // 0 → -18 dB
+    for(const c of this.rvCombs)if(c.hsh)c.hsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
+  }
+  // LF damping — low-shelf gain (dB cut). Same idea, applied to lows.
+  // 0 pct = no damp, 100 pct = max damp (~-18 dB).
+  setRvLfDamp(pct){if(!this.ready||!this.rvCombs)return;
+    const gdb=-(Math.max(0,Math.min(100,pct))/100)*18;
+    for(const c of this.rvCombs)if(c.lsh)c.lsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
+  }
+  // Pre-delay — delay between input and reverb combs (initial reflection time).
+  // 0..500 ms.
+  setRvPreDelay(ms){if(!this.ready||!this.rvPreDelay)return;
+    const s=Math.max(0,Math.min(500,ms))/1000;
+    this.rvPreDelay.delayTime.setTargetAtTime(s,this.ctx.currentTime,0.02);
   }
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
@@ -1002,9 +1022,11 @@ export default function Tabula(){
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  const [rvSize,    setRvSize]    = useState(50); // comb feedback (0..100)
-  const [rvDamp,    setRvDamp]    = useState(60); // comb LP cutoff (0=dark, 100=bright)
-  const [dlyToRev,  setDlyToRev]  = useState(0);  // delay output → reverb input send
+  const [rvSize,     setRvSize]     = useState(50); // comb feedback (0..100)
+  const [rvDamp,     setRvDamp]     = useState(40); // HF damp shelf cut (0=none, 100=full)
+  const [rvLfDamp,   setRvLfDamp]   = useState(0);  // LF damp shelf cut (0=none, 100=full)
+  const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
+  const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -1215,6 +1237,8 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setDlyLp(dlyLpVal);},[dlyLpVal]);
   useEffect(()=>{bell.current.setRvSize(rvSize);},[rvSize]);
   useEffect(()=>{bell.current.setRvDamp(rvDamp);},[rvDamp]);
+  useEffect(()=>{bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);},[rvLfDamp]);
+  useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
 
@@ -1252,7 +1276,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -1455,7 +1479,7 @@ export default function Tabula(){
       };
       setLayerParams(migrated);
     }
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -1542,7 +1566,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(60);setDlyToRev(0);setDrumLevel(85);
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setDrumLevel(85);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -1608,7 +1632,7 @@ export default function Tabula(){
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -1657,7 +1681,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -4017,7 +4041,7 @@ export default function Tabula(){
                 <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
                   {DRUM_VOICES.map((voice,r)=>(
                     <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
-                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:8,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3,4,5].map(i=><span key={i}>{voice.label}</span>)}</div>
+                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                       {Array.from({length:COLS},(_,c)=>{
                         const on=dPat?.grid[r]?.[c]||false;
                         const isActive=playing&&c===drumStep;
@@ -4316,9 +4340,11 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SIZE" value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
-                        <KnobSlider label="DAMP" value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
-                        <KnobSlider label="SEND" value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
+                        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
+                        <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={500} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
+                        <KnobSlider label="HF DAMP" value={rvDamp}     min={0} max={100} onChange={setRvDamp}     display={rvDamp+"%"}        accent={C_REV}/>
+                        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
+                        <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                       </div>
                     </SynthSection>
                 </div>
@@ -4693,7 +4719,7 @@ export default function Tabula(){
                       <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
                         {DRUM_VOICES.map((voice,r)=>(
                           <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
-                            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:8,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3,4,5].map(i=><span key={i}>{voice.label}</span>)}</div>
+                            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                             {Array.from({length:COLS},(_,step)=>{
                               const on=dPat?.grid[r]?.[step]||false;
                               const isActive=playing&&step===drumStep;
@@ -4955,9 +4981,11 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SIZE" value={rvSize}   min={0} max={100} onChange={setRvSize}   display={rvSize+"%"}   accent={C_REV}/>
-                              <KnobSlider label="DAMP" value={rvDamp}   min={0} max={100} onChange={setRvDamp}   display={rvDamp+"%"}   accent={C_REV}/>
-                              <KnobSlider label="SEND" value={rvSend}   min={0} max={100} onChange={setRvSend}   display={rvSend+"%"}   accent={C_REV}/>
+                              <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
+                              <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={500} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
+                              <KnobSlider label="HF DAMP" value={rvDamp}     min={0} max={100} onChange={setRvDamp}     display={rvDamp+"%"}      accent={C_REV}/>
+                              <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}    accent={C_REV}/>
+                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}      accent={C_REV}/>
                             </div>
                           </SynthSection>
                         </div>
