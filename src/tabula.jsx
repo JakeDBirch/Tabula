@@ -1468,12 +1468,51 @@ export default function Tabula(){
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{
     varyModeR.current=varyMode;
-    // Clear the cached variation grids on every varyMode toggle. Otherwise a
-    // stale "silent" varied grid from before disable will be reused when
-    // re-enabling, until the next per-layer step 0 regenerates.
+    // Wipe all cached variations on every toggle. Then, if we're enabling,
+    // *synchronously regenerate for every pat in every layer* so the next
+    // scheduler tick already has a populated cache — without this step, the
+    // scheduler runs between cache-clear and the next per-layer step 0, and
+    // can hit useGrid = pat.grid (cache miss fallback) for a few steps; if
+    // a half-played note's params then jitter into silent ranges the user
+    // hears playback "break."
     if(variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
     if(variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
     if(variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
+    if(!varyMode)return;
+    try{
+      const vp=varyParamsR.current;
+      // Synth-type pats: live (active layer) + both stored layers. Wrapping in
+      // a Set by id de-dupes if a pat is somehow listed in both places.
+      const seen=new Set();
+      const synthPats=[
+        ...(patsR.current||[]),
+        ...((layerStoreR.current?.synth?.pats)||[]),
+        ...((layerStoreR.current?.lead?.pats)||[]),
+      ];
+      for(const p of synthPats){
+        if(!p||!p.grid||seen.has(p.id))continue;
+        seen.add(p.id);
+        variedGrids.current.set(p.id,genVariation(p.grid,vp));
+      }
+      // Drum pats: per-pat vRhythm + vVelocity, same shape used at step 0.
+      for(const dp of (drumPatsR.current||[])){
+        if(!dp||!dp.grid)continue;
+        const vRhythm=(dp.vRhythm||0)/100;
+        const vVelocity=(dp.vVelocity||0)/100;
+        const vGrid=dp.grid.map(row=>row.map(on=>{
+          if(on&&Math.random()<vRhythm*0.45)return false;
+          if(!on&&Math.random()<vRhythm*0.18)return true;
+          return on;
+        }));
+        const vVel=(dp.vel||[]).map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50))));
+        variedDrumGrids.current.set(dp.id,vGrid);
+        variedDrumVels.current.set(dp.id,vVel);
+      }
+    }catch(e){
+      // Defensive — if something goes sideways during regen we keep playing
+      // the original pats rather than dropping the audio loop.
+      console.warn("VARY: cache regen failed",e);
+    }
   },[varyMode]);
   useEffect(()=>{
     recModeR.current=recMode;
@@ -4650,7 +4689,7 @@ export default function Tabula(){
               );
             })()}
 
-            {activeLayer==="drums"&&page==="set"&&(()=>{
+            {activeLayer==="drums"&&page==="vary"&&(()=>{
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
               const vRhythm=dPat?.vRhythm||0;
               const vVelocity=dPat?.vVelocity||0;
@@ -4670,16 +4709,22 @@ export default function Tabula(){
                       document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);
                     }}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(210,195,175,0.4)")+"99",borderRadius:3}}/>
-                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(210,195,175,0.5)")}}/> 
+                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(210,195,175,0.5)")}}/>
                   </div>
                 </div>
               );
               return(
               <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"16px 20px",boxSizing:"border-box"}}>
                 <div style={{maxWidth:420}}>
+                  {/* VARY enable toggle — the on/off switch lives at the top of the page now. */}
+                  <button onClick={()=>setVaryMode(v=>!v)}
+                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode?"rgba(201,169,110,0.14)":"transparent",color:varyMode?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode?"0 0 6px #c9a96e":"none"}}/>
+                    VARY {varyMode?"ON":"OFF"}
+                  </button>
                   <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
                   <div style={{padding:"14px 16px",background:"rgba(220,200,180,0.04)",borderRadius:8,border:"1px solid rgba(220,200,180,0.08)",marginBottom:8}}>
-                    <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",marginBottom:12}}>Active when VARY is on. Re-generates each loop.</div>
+                    <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
                     <SliderRow label="RHYTHM" value={vRhythm} onChange={v=>setDrumVary("vRhythm",v)} accent="#c8a840"/>
                     <SliderRow label="VELOCITY" value={vVelocity} onChange={v=>setDrumVary("vVelocity",v)} accent="#7888d0"/>
                   </div>
@@ -4738,9 +4783,15 @@ export default function Tabula(){
                   })}
                 </div>
               )}
-            {/* SETTINGS page */}
-            {activeLayer!=="drums"&&page==="set"&&(
+            {/* VARY page — was "SET", now includes an in-page enable toggle. */}
+            {activeLayer!=="drums"&&page==="vary"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                {/* Enable / disable — at the top so it's the first thing you reach. */}
+                <button onClick={()=>setVaryMode(v=>!v)}
+                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode?"rgba(201,169,110,0.14)":"transparent",color:varyMode?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode?"0 0 6px #c9a96e":"none"}}/>
+                  VARY {varyMode?"ON":"OFF"}
+                </button>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="RHYTHM VARY / MUT8" accent="#c4727a">
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
@@ -4864,15 +4915,16 @@ export default function Tabula(){
             </>)}
           </div>
 
-          {/* Tabs — always visible */}
+          {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
+              moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["set","SET"]].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
+            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
+              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&varyMode?{color:"#c9a96e",borderColor:"#c9a96e"}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
-          {/* Transport — always visible, centered */}
+          {/* Transport — always visible, centered. VARY toggle removed; it lives
+              inside the VARY page now (tab still glows orange while enabled). */}
           <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
-            <button style={Object.assign({},S.loopBtnBottom,varyMode?{border:"1px solid #c9a96e",color:"#c9a96e",background:"rgba(201,169,110,0.12)"}:{})} onClick={()=>setVaryMode(v=>!v)}>VARY</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>

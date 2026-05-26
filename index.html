@@ -3059,12 +3059,73 @@ function Tabula() {
   }, [transpose]);
   useEffect(function () {
     varyModeR.current = varyMode;
-    // Clear the cached variation grids on every varyMode toggle. Otherwise a
-    // stale "silent" varied grid from before disable will be reused when
-    // re-enabling, until the next per-layer step 0 regenerates.
+    // Wipe all cached variations on every toggle. Then, if we're enabling,
+    // *synchronously regenerate for every pat in every layer* so the next
+    // scheduler tick already has a populated cache — without this step, the
+    // scheduler runs between cache-clear and the next per-layer step 0, and
+    // can hit useGrid = pat.grid (cache miss fallback) for a few steps; if
+    // a half-played note's params then jitter into silent ranges the user
+    // hears playback "break."
     if (variedGrids.current && variedGrids.current.clear) variedGrids.current.clear();
     if (variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
     if (variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
+    if (!varyMode) return;
+    try {
+      var _layerStoreR$current, _layerStoreR$current2;
+      var vp = varyParamsR.current;
+      // Synth-type pats: live (active layer) + both stored layers. Wrapping in
+      // a Set by id de-dupes if a pat is somehow listed in both places.
+      var seen = new Set();
+      var synthPats = [].concat(_toConsumableArray(patsR.current || []), _toConsumableArray(((_layerStoreR$current = layerStoreR.current) === null || _layerStoreR$current === void 0 || (_layerStoreR$current = _layerStoreR$current.synth) === null || _layerStoreR$current === void 0 ? void 0 : _layerStoreR$current.pats) || []), _toConsumableArray(((_layerStoreR$current2 = layerStoreR.current) === null || _layerStoreR$current2 === void 0 || (_layerStoreR$current2 = _layerStoreR$current2.lead) === null || _layerStoreR$current2 === void 0 ? void 0 : _layerStoreR$current2.pats) || []));
+      var _iterator7 = _createForOfIteratorHelper(synthPats),
+        _step7;
+      try {
+        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+          var p = _step7.value;
+          if (!p || !p.grid || seen.has(p.id)) continue;
+          seen.add(p.id);
+          variedGrids.current.set(p.id, genVariation(p.grid, vp));
+        }
+        // Drum pats: per-pat vRhythm + vVelocity, same shape used at step 0.
+      } catch (err) {
+        _iterator7.e(err);
+      } finally {
+        _iterator7.f();
+      }
+      var _iterator8 = _createForOfIteratorHelper(drumPatsR.current || []),
+        _step8;
+      try {
+        var _loop = function _loop() {
+          var dp = _step8.value;
+          if (!dp || !dp.grid) return 1; // continue
+          var vRhythm = (dp.vRhythm || 0) / 100;
+          var vVelocity = (dp.vVelocity || 0) / 100;
+          var vGrid = dp.grid.map(function (row) {
+            return row.map(function (on) {
+              if (on && Math.random() < vRhythm * 0.45) return false;
+              if (!on && Math.random() < vRhythm * 0.18) return true;
+              return on;
+            });
+          });
+          var vVel = (dp.vel || []).map(function (v) {
+            return Math.max(1, Math.min(127, Math.round(v + (Math.random() * 2 - 1) * vVelocity * 50)));
+          });
+          variedDrumGrids.current.set(dp.id, vGrid);
+          variedDrumVels.current.set(dp.id, vVel);
+        };
+        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+          if (_loop()) continue;
+        }
+      } catch (err) {
+        _iterator8.e(err);
+      } finally {
+        _iterator8.f();
+      }
+    } catch (e) {
+      // Defensive — if something goes sideways during regen we keep playing
+      // the original pats rather than dropping the audio loop.
+      console.warn("VARY: cache regen failed", e);
+    }
   }, [varyMode]);
   useEffect(function () {
     recModeR.current = recMode;
@@ -4347,7 +4408,7 @@ function Tabula() {
       } else {
         lf.bar = 0;
       }
-      var _loop = function _loop() {
+      var _loop2 = function _loop2() {
         var _pat$gridLen, _pat$speedMult2;
         var pat = resolveLayerPat(_layer, lf.bar);
         if (!pat) {
@@ -4440,7 +4501,7 @@ function Tabula() {
         }
       };
       while (lf.nextAt < ctx.currentTime + LOOKAHEAD) {
-        if (_loop()) break;
+        if (_loop2()) break;
       }
       if (isFree && newCursor[_layer] !== lf.bar) {
         newCursor[_layer] = lf.bar;
@@ -5189,11 +5250,11 @@ function Tabula() {
     // Use a per-touch-identifier map so multi-touch is handled correctly.
     var scrollableStarts = new Map(); // identifier → boolean
     var onTouchStart = function onTouchStart(e) {
-      var _iterator7 = _createForOfIteratorHelper(e.changedTouches),
-        _step7;
+      var _iterator9 = _createForOfIteratorHelper(e.changedTouches),
+        _step9;
       try {
-        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-          var t = _step7.value;
+        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+          var t = _step9.value;
           var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
           while (el && el !== document.body) {
@@ -5207,42 +5268,42 @@ function Tabula() {
           scrollableStarts.set(t.identifier, scrollable);
         }
       } catch (err) {
-        _iterator7.e(err);
+        _iterator9.e(err);
       } finally {
-        _iterator7.f();
+        _iterator9.f();
       }
     };
     var onTouchEnd = function onTouchEnd(e) {
-      var _iterator8 = _createForOfIteratorHelper(e.changedTouches),
-        _step8;
+      var _iterator0 = _createForOfIteratorHelper(e.changedTouches),
+        _step0;
       try {
-        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
-          var t = _step8.value;
+        for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
+          var t = _step0.value;
           scrollableStarts["delete"](t.identifier);
         }
       } catch (err) {
-        _iterator8.e(err);
+        _iterator0.e(err);
       } finally {
-        _iterator8.f();
+        _iterator0.f();
       }
     };
     var noOverscroll = function noOverscroll(e) {
       // Block if ALL active touches started on non-scrollable elements
       var anyScrollable = false;
-      var _iterator9 = _createForOfIteratorHelper(e.touches),
-        _step9;
+      var _iterator1 = _createForOfIteratorHelper(e.touches),
+        _step1;
       try {
-        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-          var t = _step9.value;
+        for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
+          var t = _step1.value;
           if (scrollableStarts.get(t.identifier)) {
             anyScrollable = true;
             break;
           }
         }
       } catch (err) {
-        _iterator9.e(err);
+        _iterator1.e(err);
       } finally {
-        _iterator9.f();
+        _iterator1.f();
       }
       if (!anyScrollable && e.cancelable) e.preventDefault();
     };
@@ -8808,7 +8869,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop2 = function _loop2() {
+      var _loop3 = function _loop3() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params, _p$rhy, _activePat$durs$r$ci, _activePat$durs, _p$vel;
@@ -8935,7 +8996,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop2();
+        _loop3();
       }
       return rects;
     }());
@@ -9570,7 +9631,7 @@ function Tabula() {
         }
       }, "\u2715")));
     })));
-  }(), activeLayer === "drums" && page === "set" && function () {
+  }(), activeLayer === "drums" && page === "vary" && function () {
     var dPat = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
@@ -9669,7 +9730,39 @@ function Tabula() {
       style: {
         maxWidth: 420
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: function onClick() {
+        return setVaryMode(function (v) {
+          return !v;
+        });
+      },
+      style: {
+        width: "100%",
+        padding: "10px 14px",
+        marginBottom: 16,
+        borderRadius: 8,
+        border: "1px solid " + (varyMode ? "#c9a96e" : "rgba(200,185,165,0.18)"),
+        background: varyMode ? "rgba(201,169,110,0.14)" : "transparent",
+        color: varyMode ? "#c9a96e" : "rgba(210,195,175,0.55)",
+        fontSize: 10,
+        letterSpacing: 2.5,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: varyMode ? "#c9a96e" : "rgba(210,195,175,0.25)",
+        boxShadow: varyMode ? "0 0 6px #c9a96e" : "none"
+      }
+    }), "VARY ", varyMode ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 9,
         letterSpacing: 2,
@@ -9692,7 +9785,7 @@ function Tabula() {
         color: "rgba(210,195,175,0.25)",
         marginBottom: 12
       }
-    }, "Active when VARY is on. Re-generates each loop."), /*#__PURE__*/React.createElement(SliderRow, {
+    }, "Re-generates each loop while VARY is on."), /*#__PURE__*/React.createElement(SliderRow, {
       label: "RHYTHM",
       value: vRhythm,
       onChange: function onChange(v) {
@@ -9806,14 +9899,46 @@ function Tabula() {
       onResetCol: resetStepCol,
       tall: true
     }));
-  })), activeLayer !== "drums" && page === "set" && /*#__PURE__*/React.createElement("div", {
+  })), activeLayer !== "drums" && page === "vary" && /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
       minHeight: 0,
       overflowY: "auto",
       padding: "8px 12px 40px"
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVaryMode(function (v) {
+        return !v;
+      });
+    },
+    style: {
+      width: "100%",
+      padding: "10px 14px",
+      marginBottom: 10,
+      borderRadius: 8,
+      border: "1px solid " + (varyMode ? "#c9a96e" : "rgba(200,185,165,0.18)"),
+      background: varyMode ? "rgba(201,169,110,0.14)" : "transparent",
+      color: varyMode ? "#c9a96e" : "rgba(210,195,175,0.55)",
+      fontSize: 10,
+      letterSpacing: 2.5,
+      fontWeight: 700,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: varyMode ? "#c9a96e" : "rgba(210,195,175,0.25)",
+      boxShadow: varyMode ? "0 0 6px #c9a96e" : "none"
+    }
+  }), "VARY ", varyMode ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
@@ -10367,13 +10492,16 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["set", "SET"]].map(function (_ref40) {
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref40) {
     var _ref41 = _slicedToArray(_ref40, 2),
       p = _ref41[0],
       lbl = _ref41[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
-      style: Object.assign({}, S.tab, page === p ? S.tabOn : {}),
+      style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && varyMode ? {
+        color: "#c9a96e",
+        borderColor: "#c9a96e"
+      } : {}),
       onClick: function onClick() {
         setPage(p);
         if (songView) setSongView(false);
@@ -10390,17 +10518,6 @@ function Tabula() {
       borderTop: "1px solid rgba(200,185,165,0.08)"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    style: Object.assign({}, S.loopBtnBottom, varyMode ? {
-      border: "1px solid #c9a96e",
-      color: "#c9a96e",
-      background: "rgba(201,169,110,0.12)"
-    } : {}),
-    onClick: function onClick() {
-      return setVaryMode(function (v) {
-        return !v;
-      });
-    }
-  }, "VARY"), /*#__PURE__*/React.createElement("button", {
     style: Object.assign({}, S.loopBtnBottom, {
       opacity: historyR.current.length ? 1 : 0.35
     }),
@@ -11121,7 +11238,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop3 = function _loop3() {
+      var _loop4 = function _loop4() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs3, _p$vel2;
@@ -11248,7 +11365,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop3();
+        _loop4();
       }
       return rects;
     }());
