@@ -2509,15 +2509,15 @@ function Tabula() {
   });
   var variedGrids = useRef(new Map());
   var prevFreqByRowR = useRef({});
-  var lastPlayedFreqR = useRef(null);
-  var lastGlideEnabledR = useRef(false); // glide is a departure attr — enabled note slides INTO next note
-  // Per-layer glide tracking — lead and bass each track their own previous
-  // played frequency / glide flag so glide works independently across layers
-  // (synth uses lastPlayedFreqR/lastGlideEnabledR above for the synth-track).
+  // Per-layer glide tracking. Each layer's prev played freq + glide flag are
+  // independent so glide works correctly when layers play at different rates
+  // (per-pat speedMult). Synth-track's old single-layer refs were merged in.
   var layerLastFreqR = useRef({
+    synth: null,
     lead: null
   });
   var layerLastGlideR = useRef({
+    synth: false,
     lead: false
   });
   var flashTmr = useRef(null),
@@ -3283,12 +3283,12 @@ function Tabula() {
     stepR.current = 0;
     cposR.current = 0;
     if (prevFreqByRowR) prevFreqByRowR.current = {};
-    if (lastPlayedFreqR) lastPlayedFreqR.current = null;
-    if (lastGlideEnabledR) lastGlideEnabledR.current = false;
     if (layerLastFreqR) layerLastFreqR.current = {
+      synth: null,
       lead: null
     };
     if (layerLastGlideR) layerLastGlideR.current = {
+      synth: false,
       lead: false
     };
     setRecMode(false);
@@ -3611,43 +3611,60 @@ function Tabula() {
   // ── Per-layer playback helpers (used by free-mode scheduler) ────────────
   // Plays one step of a single synth-type layer (synth/lead/bass) through Bell.
   // Caller passes the resolved pat, step index, audio-context start time, and stepDur.
+  // Per-layer step play. Handles glide tracking, vary jitter, ratchet, and
+  // mid-note (FLT/OCT/GLIDE) mods for tied notes — i.e. everything the
+  // synth-track main path used to do, but per-layer so each layer's plays
+  // are independent (and per-pat speedMult can apply correctly).
   var playSynthLayerStep = function playSynthLayerStep(layer, pat, s, at, stepDur) {
     var _sp$rhy;
     if (!pat || !pat.grid) return;
     var layerLP = layerParamsR.current[layer];
     var freqs = SCALES[scaleR.current].freqs;
     var ratio = stR(transpR.current);
+    var useGrid = varyModeR.current ? variedGrids.current.get(pat.id) || pat.grid : pat.grid;
     var rawSp = pat.params && pat.params[s] ? pat.params[s] : null;
     var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
     var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
     var ratch = rhy;
     var subDur = stepDur / ratch;
     for (var r = 0; r < ROWS; r++) {
-      if (!pat.grid[r][s]) continue;
+      var _layerLastFreqR$curre, _pat$speedMult;
+      if (!useGrid[r][s]) continue;
       var dur = pat.durs && pat.durs[r] && pat.durs[r][s] ? Math.max(1, pat.durs[r][s]) : 1;
       var noteDur = stepDur * dur;
       var f = freqs[r] * ratio;
-      if (ratch > 1) {
-        for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, layerLP.dlySend, null, 0, layerLP);
-      } else {
-        // Free-mode tied note mods — same shape as the sync paths.
-        var mods = null;
-        if (dur > 1 && pat.params) {
-          mods = [];
-          var plen = pat.params.length || COLS;
-          for (var i = 1; i < dur; i++) {
-            var subC = (s + i) % plen;
-            var subRaw = pat.params[subC];
-            if (!subRaw) continue;
-            var subSp = varyModeR.current ? jitterStepParam(subRaw, varyParamsR.current) : subRaw;
-            mods.push({
-              at: at + i * stepDur,
-              sp: subSp
-            });
-          }
-          if (mods.length === 0) mods = null;
+      // Glide tracking — departure glide: glide on step N means slide FROM N INTO N+1.
+      // Use actual played frequency (with octaves applied) for comparison so
+      // consecutive same-cell-different-octave notes glide correctly.
+      var stepOct = sp ? sp.oct - 2 : 0;
+      var layerOct = layerLP.octave || 0;
+      var actualF = f * Math.pow(2, stepOct + layerOct);
+      var hasGlide = !!(sp && sp.glide);
+      var prevF = layerLastGlideR.current[layer] ? (_layerLastFreqR$curre = layerLastFreqR.current[layer]) !== null && _layerLastFreqR$curre !== void 0 ? _layerLastFreqR$curre : null : null;
+      var glideTime = prevF && prevF !== actualF ? 60 / bpmR.current / 8 * ((_pat$speedMult = pat === null || pat === void 0 ? void 0 : pat.speedMult) !== null && _pat$speedMult !== void 0 ? _pat$speedMult : 1) : 0;
+      layerLastFreqR.current[layer] = actualF;
+      layerLastGlideR.current[layer] = hasGlide;
+      // Tied-note mods (FLT/OCT/GLIDE schedule mid-note).
+      var mods = null;
+      if (dur > 1 && pat.params && ratch === 1) {
+        mods = [];
+        var plen = pat.params.length || COLS;
+        for (var i = 1; i < dur; i++) {
+          var subC = (s + i) % plen;
+          var subRaw = pat.params[subC];
+          if (!subRaw) continue;
+          var subSp = varyModeR.current ? jitterStepParam(subRaw, varyParamsR.current) : subRaw;
+          mods.push({
+            at: at + i * stepDur,
+            sp: subSp
+          });
         }
-        bell.current.play(f, at, sp, noteDur, layerLP.dlySend, null, 0, layerLP, mods);
+        if (mods.length === 0) mods = null;
+      }
+      if (ratch > 1) {
+        for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, layerLP.dlySend, ri === 0 ? prevF : null, ri === 0 ? glideTime : 0, layerLP);
+      } else {
+        bell.current.play(f, at, sp, noteDur, layerLP.dlySend, prevF, glideTime, layerLP, mods);
       }
     }
   };
@@ -3669,70 +3686,93 @@ function Tabula() {
     }
   };
   var scheduler = useCallback(function () {
-    var _masterPat$speedMult, _masterPat;
     if (!bell.current.ready) return;
     var ctx = bell.current.ctx;
     var LOOKAHEAD = 0.1; // seconds ahead to schedule
-    // Master stepDur is per-pattern. In song mode it follows the song's
-    // currently-playing pat (poly preferred, then mono, then drums) so the
-    // tempo doesn't shift when the user switches to the drum layer for editing.
-    // In pattern mode it follows the active layer's pat. (Free mode below
-    // recomputes per-layer per-pat anyway.)
-    var masterPat;
-    if (songModeR.current && !loopR.current) {
-      var sm = songMatrixR.current;
-      var bar = Math.max(0, songBarR.current || 0);
-      var sId = sm.synth[bar],
-        lId = sm.lead[bar],
-        dId = sm.drums[bar];
-      if (sId != null) {
-        var _data$pats;
-        var data = activeLayerR.current === "synth" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.synth;
-        masterPat = data === null || data === void 0 || (_data$pats = data.pats) === null || _data$pats === void 0 ? void 0 : _data$pats.find(function (x) {
-          return x.id === sId;
+    // Master clock = absolute, BPM-derived. NO per-pat multiplier here.
+    // Each pattern plays at its own speedMult as an independent multiplier
+    // on this clock — see playSynthLayerStep / playDrumStep call sites below.
+    var absStepDur = 60 / bpmR.current / 4;
+    var inLoop = loopR.current;
+    var inSong = songModeR.current && !inLoop;
+    var isFree = inSong && songSyncR.current === "free";
+    var isRandom = inSong && songSyncR.current === "random";
+
+    // ── Layer pat resolution. Same data, different mode-dependent source.
+    var sm = inSong ? songMatrixR.current : null;
+    // Find populated bar range (for song modes).
+    var songFirstBar = -1,
+      songLastBar = -1,
+      songAllEmpty = true;
+    if (inSong) {
+      for (var i = 0; i < 64; i++) {
+        if (sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null) {
+          if (songFirstBar === -1) songFirstBar = i;
+          songLastBar = i;
+          songAllEmpty = false;
+        }
+      }
+      if (songFirstBar === -1) {
+        songFirstBar = 0;
+        songLastBar = 0;
+      }
+    }
+    var layerData = function layerData(layer) {
+      if (layer === "drums") return null;
+      return activeLayerR.current === layer ? {
+        pats: patsR.current,
+        activeId: activeIdR.current
+      } : layerStoreR.current[layer];
+    };
+    var resolveLayerPat = function resolveLayerPat(layer, bar) {
+      if (inLoop) {
+        if (layer !== activeLayerR.current) return null; // loop = solo of active
+        if (layer === "drums") return drumPatsR.current.find(function (x) {
+          return x.id === activeDrumIdR.current;
         });
-      } else if (lId != null) {
-        var _data$pats2;
-        var _data = activeLayerR.current === "lead" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.lead;
-        masterPat = _data === null || _data === void 0 || (_data$pats2 = _data.pats) === null || _data$pats2 === void 0 ? void 0 : _data$pats2.find(function (x) {
-          return x.id === lId;
-        });
-      } else if (dId != null) {
-        masterPat = drumPatsR.current.find(function (x) {
-          return x.id === dId;
+        return patsR.current.find(function (x) {
+          return x.id === activeIdR.current;
         });
       }
-    } else {
-      masterPat = activeLayerR.current === "drums" ? drumPatsR.current.find(function (x) {
+      if (inSong) {
+        var _sm$layer;
+        var id = (_sm$layer = sm[layer]) === null || _sm$layer === void 0 ? void 0 : _sm$layer[bar];
+        if (layer === "drums") return id != null ? drumPatsR.current.find(function (x) {
+          return x.id === id;
+        }) : null;
+        var _data = layerData(layer);
+        if (!_data) return null;
+        // Synth fallback: empty matrix → loop synth's active pat at bar 0.
+        if (layer === "synth" && songAllEmpty) return _data.pats.find(function (x) {
+          return x.id === _data.activeId;
+        });
+        return id != null ? _data.pats.find(function (x) {
+          return x.id === id;
+        }) : null;
+      }
+      // Pattern mode: each layer plays its own active pat.
+      if (layer === "drums") return drumPatsR.current.find(function (x) {
         return x.id === activeDrumIdR.current;
-      }) : patsR.current.find(function (x) {
-        return x.id === activeIdR.current;
       });
-    }
-    var stepDur = 60 / bpmR.current / 4 * ((_masterPat$speedMult = (_masterPat = masterPat) === null || _masterPat === void 0 ? void 0 : _masterPat.speedMult) !== null && _masterPat$speedMult !== void 0 ? _masterPat$speedMult : speedMultR.current);
+      var data = layerData(layer);
+      if (!data) return null;
+      return data.pats.find(function (x) {
+        return x.id === data.activeId;
+      });
+    };
 
-    // ── Free song mode: each layer has its own (step, nextAt, bar) timeline ──────
-    // Layers all start aligned at t=0 but drift apart by gridLen differences. This
-    // path is taken only in song mode + free sync mode; otherwise falls through to
-    // the unified sync scheduler below.
-    if (songModeR.current && !loopR.current && songSyncR.current === "free") {
-      var _sm = songMatrixR.current;
-      // Per-layer firstBar/lastBar (loops within that layer's populated range)
-      var ranges = {};
+    // Free mode per-layer populated ranges.
+    var ranges = null;
+    if (isFree) {
+      ranges = {};
       for (var _i4 = 0, _arr2 = ["synth", "lead", "drums"]; _i4 < _arr2.length; _i4++) {
         var layer = _arr2[_i4];
         var first = -1,
           last = -1;
-        for (var i = 0; i < 64; i++) {
-          if (_sm[layer][i] != null) {
-            if (first === -1) first = i;
-            last = i;
+        for (var _i5 = 0; _i5 < 64; _i5++) {
+          if (sm[layer][_i5] != null) {
+            if (first === -1) first = _i5;
+            last = _i5;
           }
         }
         ranges[layer] = {
@@ -3741,490 +3781,473 @@ function Tabula() {
           empty: first === -1
         };
       }
-      var allEmpty = ranges.synth.empty && ranges.lead.empty && ranges.drums.empty;
-      // Helper: resolve pat for a given layer at a given bar
-      var resolvePat = function resolvePat(layer, bar) {
-        var id = _sm[layer][bar];
-        if (layer === "drums") {
-          return id != null ? drumPatsR.current.find(function (x) {
-            return x.id === id;
-          }) : null;
-        }
-        var layerData = activeLayerR.current === layer ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current[layer];
-        if (!layerData) return null;
-        // Synth fallback: empty matrix everywhere → loop synth's active pat at bar 0
-        if (layer === "synth" && allEmpty && bar === 0) {
-          return layerData.pats.find(function (x) {
-            return x.id === layerData.activeId;
-          });
-        }
-        return id != null ? layerData.pats.find(function (x) {
-          return x.id === id;
-        }) : null;
-      };
-      var newCursor = _objectSpread({}, songBarLayer);
-      var cursorChanged = false;
-      for (var _i5 = 0, _arr3 = ["synth", "lead", "drums"]; _i5 < _arr3.length; _i5++) {
-        var _layer = _arr3[_i5];
+    }
+
+    // ── PER-LAYER SCHEDULING — each layer plays at its own pat's speedMult.
+    // freeR.current[layer] = {step, nextAt, bar} per layer.
+    var cursorChanged = false;
+    var newCursor = _objectSpread({}, songBarLayer);
+    for (var _i6 = 0, _arr3 = ["synth", "lead", "drums"]; _i6 < _arr3.length; _i6++) {
+      var _layer = _arr3[_i6];
+      var lf = freeR.current[_layer];
+      // Free mode: skip silent layers, init bar within range.
+      if (isFree) {
         var r = ranges[_layer];
-        // Skip silent layers (no pats at all in their lane, except synth which has fallback)
-        if (r.empty && !(_layer === "synth" && allEmpty)) continue;
-        var lf = freeR.current[_layer];
-        // Initialize bar at first populated cell
+        if (r.empty && !(_layer === "synth" && songAllEmpty)) continue;
         if (lf.bar < r.first || lf.bar > r.last) {
           lf.bar = r.empty ? 0 : r.first;
           lf.step = 0;
         }
-        while (lf.nextAt < ctx.currentTime + LOOKAHEAD) {
-          var _pat$gridLen, _pat$speedMult;
-          var pat = resolvePat(_layer, lf.bar);
-          var len = pat ? (_pat$gridLen = pat.gridLen) !== null && _pat$gridLen !== void 0 ? _pat$gridLen : 16 : 16;
-          // Per-pat speed in free mode — each layer advances at its own pat's
-          // rate, so songs with mixed-tempo pats actually drift independently.
-          var layerStepDur = 60 / bpmR.current / 4 * ((_pat$speedMult = pat === null || pat === void 0 ? void 0 : pat.speedMult) !== null && _pat$speedMult !== void 0 ? _pat$speedMult : speedMultR.current);
-          var s = lf.step % len;
-          var at = lf.nextAt;
-          if (pat) {
-            if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
-          }
-          // Advance step; on bar boundary advance bar within layer's range
-          var ns = (s + 1) % len;
-          lf.step = ns;
-          lf.nextAt += layerStepDur;
-          if (ns === 0) {
-            var nb = lf.bar + 1;
-            if (nb > r.last) nb = r.empty ? 0 : r.first;
-            lf.bar = nb;
+      } else if (inSong) {
+        // Sync/random: per-layer bar mirrors songBar (kept in sync below).
+        lf.bar = Math.max(0, songBarR.current || 0);
+      } else {
+        lf.bar = 0;
+      }
+      var _loop = function _loop() {
+        var _pat$gridLen, _pat$speedMult2;
+        var pat = resolveLayerPat(_layer, lf.bar);
+        if (!pat) {
+          // Silent layer at this bar — just advance time so we re-check next tick.
+          lf.nextAt += absStepDur;
+          return 1; // break
+        }
+        var len = (_pat$gridLen = pat.gridLen) !== null && _pat$gridLen !== void 0 ? _pat$gridLen : 16;
+        var layerStepDur = absStepDur * ((_pat$speedMult2 = pat.speedMult) !== null && _pat$speedMult2 !== void 0 ? _pat$speedMult2 : 1);
+        var s = lf.step % len;
+        var at = lf.nextAt;
+        // Variation grid generation at this layer's step 0 (pat-keyed, cached).
+        if (s === 0 && varyModeR.current) {
+          if (_layer === "drums") {
+            var vRhythm = (pat.vRhythm || 0) / 100;
+            var vVelocity = (pat.vVelocity || 0) / 100;
+            var vGrid = pat.grid.map(function (row) {
+              return row.map(function (on, ci) {
+                if (ci >= len) return false;
+                if (on && Math.random() < vRhythm * 0.45) return false;
+                if (!on && Math.random() < vRhythm * 0.18) return true;
+                return on;
+              });
+            });
+            var vVel = pat.vel.map(function (v) {
+              return Math.max(1, Math.min(127, Math.round(v + (Math.random() * 2 - 1) * vVelocity * 50)));
+            });
+            variedDrumGrids.current.set(pat.id, vGrid);
+            variedDrumVels.current.set(pat.id, vVel);
+          } else {
+            variedGrids.current.set(pat.id, genVariation(pat.grid, varyParamsR.current));
+            // Self-record (synth-only) — vary the source pat and append.
+            if (_layer === "synth" && recModeR.current && patsR.current.length < 8) {
+              var _src$gridLen, _src$speedMult;
+              var vp = varyParamsR.current;
+              var src = patsR.current.find(function (x) {
+                return x.id === recSourceIdR.current;
+              }) || pat;
+              var rvg = genVariation(src.grid, vp);
+              var newParams = (src.params || defaultStepParams()).map(function (p2) {
+                return jitterStepParam(p2, vp);
+              });
+              var newPat = {
+                id: ++_id,
+                name: symPat(patsR.current.length),
+                grid: rvg,
+                durs: src.durs ? src.durs.map(function (rr) {
+                  return _toConsumableArray(rr);
+                }) : mkDurs(),
+                params: newParams,
+                gridLen: (_src$gridLen = src.gridLen) !== null && _src$gridLen !== void 0 ? _src$gridLen : 16,
+                speedMult: (_src$speedMult = src.speedMult) !== null && _src$speedMult !== void 0 ? _src$speedMult : 1
+              };
+              setPats(function (ps) {
+                if (ps.length >= 8) {
+                  recModeR.current = false;
+                  setRecMode(false);
+                  return ps;
+                }
+                return [].concat(_toConsumableArray(ps), [newPat]);
+              });
+              setChain(function (c) {
+                return [].concat(_toConsumableArray(c), [newPat.id]);
+              });
+            }
           }
         }
-        if (newCursor[_layer] !== lf.bar) {
-          newCursor[_layer] = lf.bar;
-          cursorChanged = true;
+        // Play this layer's step.
+        if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
+        // Update visual playhead for whichever layer is active.
+        if (_layer === activeLayerR.current) {
+          if (_layer === "drums") setDrumStep(s);else setStep(s);
+        }
+        // Update playId — used by FOLLOW + pill highlights — synth-track focused.
+        if (_layer === "synth") setPlayId(pat.id);
+        // Advance step.
+        var ns = (s + 1) % len;
+        lf.step = ns;
+        lf.nextAt += layerStepDur;
+        // Free mode: per-layer bar advances on layer-step wrap.
+        if (isFree && ns === 0) {
+          var _r2 = ranges[_layer];
+          var nb = lf.bar + 1;
+          if (nb > _r2.last) nb = _r2.empty ? 0 : _r2.first;
+          lf.bar = nb;
+          if (newCursor[_layer] !== lf.bar) {
+            newCursor[_layer] = lf.bar;
+            cursorChanged = true;
+          }
+        }
+      };
+      while (lf.nextAt < ctx.currentTime + LOOKAHEAD) {
+        if (_loop()) break;
+      }
+      if (isFree && newCursor[_layer] !== lf.bar) {
+        newCursor[_layer] = lf.bar;
+        cursorChanged = true;
+      }
+    }
+    if (cursorChanged) setSongBarLayer(newCursor);
+
+    // ── MASTER CLOCK — drives songBar (sync/random only) + visual bar position.
+    // Master advances at absStepDur regardless of any pat's speedMult, so a
+    // shared bar boundary lands at 16 absolute steps. Free mode's bars are
+    // per-layer above; sync/random share songBar advanced here.
+    while (nextNoteR.current < ctx.currentTime + LOOKAHEAD) {
+      var masterAt = nextNoteR.current;
+      void masterAt;
+      var ns = (stepR.current + 1) % 16;
+      if (inSong && !isFree && ns === 0) {
+        // Shared bar boundary — advance songBar and snap all per-layer cursors.
+        var nextBar = void 0;
+        if (isRandom) {
+          var candidates = [];
+          for (var _i7 = songFirstBar; _i7 <= songLastBar; _i7++) {
+            if (sm.synth[_i7] != null || sm.lead[_i7] != null || sm.drums[_i7] != null) candidates.push(_i7);
+          }
+          nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
+        } else {
+          var cur = songBarR.current;
+          if (cur < songFirstBar || cur > songLastBar) cur = songFirstBar;
+          nextBar = cur + 1;
+          if (nextBar > songLastBar) nextBar = songFirstBar;
+        }
+        songBarR.current = nextBar;
+        setSongBar(nextBar);
+        setSongBarLayer({
+          synth: nextBar,
+          lead: nextBar,
+          drums: nextBar
+        });
+        // Reset per-layer step index so each layer starts new bar from step 0.
+        for (var _i8 = 0, _arr4 = ["synth", "lead", "drums"]; _i8 < _arr4.length; _i8++) {
+          var l = _arr4[_i8];
+          freeR.current[l].step = 0;
+          // Realign nextAt to bar boundary so layers re-sync after bar advance.
+          freeR.current[l].nextAt = nextNoteR.current + absStepDur;
         }
       }
-      if (cursorChanged) setSongBarLayer(newCursor);
-      return;
+      stepR.current = ns;
+      nextNoteR.current += absStepDur;
     }
-    var _loop = function _loop() {
-      var s_ = stepR.current;
-      var swingOffset = s_ % 2 === 1 ? stepDur * (swingR.current / 100) * 0.33 : 0;
-      var at = nextNoteR.current + swingOffset;
+  }, []);
 
+  // ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
+  /* OLD_SCHEDULER_BODY_BEGIN
+  
       // ── Song-mode pat resolution ─────────────────────────────────────────
       // When songMode is on, all four layers advance together through songMatrix.
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
       // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      var inSong = songModeR.current && !loopR.current;
-      var songSyn = null,
-        songLead = null,
-        songDrum = null;
-      var songBarLen = 16,
-        songFirstBar = 0,
-        songLastBar = 0,
-        songCurBar = 0;
-      if (inSong) {
-        var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songDrum$gridLen;
-        var _sm2 = songMatrixR.current;
-        var firstBar = -1,
-          lastBar = -1;
-        for (var _i6 = 0; _i6 < 64; _i6++) {
-          if (_sm2.synth[_i6] != null || _sm2.lead[_i6] != null || _sm2.drums[_i6] != null) {
-            if (firstBar === -1) firstBar = _i6;
-            lastBar = _i6;
+      const inSong = songModeR.current && !loopR.current;
+      let songSyn=null, songLead=null, songDrum=null;
+      let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
+      if(inSong){
+        const sm=songMatrixR.current;
+        let firstBar=-1, lastBar=-1;
+        for(let i=0;i<64;i++){
+          if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){
+            if(firstBar===-1)firstBar=i;
+            lastBar=i;
           }
         }
-        var empty = firstBar === -1;
-        if (empty) {
-          firstBar = 0;
-          lastBar = 0;
-        }
-        var _bar = songBarR.current;
-        if (_bar < firstBar || _bar > lastBar) _bar = firstBar;
-        songFirstBar = firstBar;
-        songLastBar = lastBar;
-        songCurBar = _bar;
-        var _sId = _sm2.synth[_bar],
-          _lId = _sm2.lead[_bar],
-          _dId = _sm2.drums[_bar];
-        var synthData = activeLayerR.current === "synth" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.synth;
-        var leadData = activeLayerR.current === "lead" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.lead;
-        var sIdEff = _sId != null ? _sId : empty ? (_synthData$activeId = synthData === null || synthData === void 0 ? void 0 : synthData.activeId) !== null && _synthData$activeId !== void 0 ? _synthData$activeId : null : null;
-        songSyn = sIdEff != null && synthData ? synthData.pats.find(function (x) {
-          return x.id === sIdEff;
-        }) : null;
-        songLead = _lId != null && leadData ? leadData.pats.find(function (x) {
-          return x.id === _lId;
-        }) : null;
-        songDrum = _dId != null ? drumPatsR.current.find(function (x) {
-          return x.id === _dId;
-        }) : null;
-        var lens = [];
-        if (songSyn) lens.push((_songSyn$gridLen = songSyn.gridLen) !== null && _songSyn$gridLen !== void 0 ? _songSyn$gridLen : 16);
-        if (songLead) lens.push((_songLead$gridLen = songLead.gridLen) !== null && _songLead$gridLen !== void 0 ? _songLead$gridLen : 16);
-        if (songDrum) lens.push((_songDrum$gridLen = songDrum.gridLen) !== null && _songDrum$gridLen !== void 0 ? _songDrum$gridLen : 16);
-        songBarLen = lens.length ? Math.min.apply(Math, lens) : 16;
-        if (songCurBar !== songBarR.current) {
-          songBarR.current = songCurBar;
-          setSongBar(songCurBar);
+        const empty=firstBar===-1;
+        if(empty){firstBar=0;lastBar=0;}
+        let bar=songBarR.current;
+        if(bar<firstBar||bar>lastBar)bar=firstBar;
+        songFirstBar=firstBar; songLastBar=lastBar; songCurBar=bar;
+        const sId=sm.synth[bar], lId=sm.lead[bar], dId=sm.drums[bar];
+        const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
+        const leadData  = activeLayerR.current==="lead"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
+        const sIdEff = sId!=null ? sId : (empty ? (synthData?.activeId ?? null) : null);
+        songSyn  = sIdEff!=null && synthData ? synthData.pats.find(x=>x.id===sIdEff) : null;
+        songLead = lId!=null && leadData ? leadData.pats.find(x=>x.id===lId) : null;
+        songDrum = dId!=null ? drumPatsR.current.find(x=>x.id===dId) : null;
+        const lens=[];
+        if(songSyn) lens.push(songSyn.gridLen??16);
+        if(songLead) lens.push(songLead.gridLen??16);
+        if(songDrum) lens.push(songDrum.gridLen??16);
+        songBarLen = lens.length ? Math.min(...lens) : 16;
+        if(songCurBar!==songBarR.current){
+          songBarR.current=songCurBar;setSongBar(songCurBar);
           // Sync mode: all four cursors equal songBar
-          setSongBarLayer({
-            synth: songCurBar,
-            lead: songCurBar,
-            drums: songCurBar
-          });
+          setSongBarLayer({synth:songCurBar,lead:songCurBar,drums:songCurBar});
         }
       }
-
-      // ── Synth-track pat resolution ──────────────────────────────────────
+        // ── Synth-track pat resolution ──────────────────────────────────────
       // Three modes:
       //  1. Song mode: matrix dictates per-bar pattern (songSyn already resolved above)
       //  2. Loop mode: solo the ACTIVE layer's active pat through the main path (when the
       //     active layer is bass/lead, that voice plays through the main path with synth's
       //     params — quirky but matches "solo this layer" intent for editing)
       //  3. Default: main track plays synth layer's active pattern
-      var pid, p, activeLen;
-      if (inSong) {
-        p = songSyn;
-        pid = p ? p.id : -1;
-        activeLen = songBarLen;
-      } else if (loopR.current) {
-        var _p$gridLen;
+      let pid, p, activeLen;
+      if(inSong){
+        p = songSyn; pid = p?p.id:-1; activeLen = songBarLen;
+      } else if(loopR.current){
         pid = activeIdR.current;
-        p = patsR.current.find(function (x) {
-          return x.id === pid;
-        });
-        activeLen = p ? (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16 : 16;
+        p = patsR.current.find(x=>x.id===pid);
+        activeLen = p?(p.gridLen??16):16;
       } else {
-        var _synthData$activeId2, _aPat$gridLen;
         // Default pattern mode: synth voice plays from synth, but the master loop
         // length follows the ACTIVE LAYER's pat. Otherwise a 12-step bass gets
         // truncated by synth's 16-step default and the bass loops 12-4-12-4.
-        var _synthData = activeLayerR.current === "synth" ? {
-          pats: patsR.current,
-          activeId: activeIdR.current
-        } : layerStoreR.current.synth;
-        pid = (_synthData$activeId2 = _synthData === null || _synthData === void 0 ? void 0 : _synthData.activeId) !== null && _synthData$activeId2 !== void 0 ? _synthData$activeId2 : -1;
-        p = _synthData ? _synthData.pats.find(function (x) {
-          return x.id === pid;
-        }) : null;
-        var aPat;
-        if (activeLayerR.current === "drums") aPat = drumPatsR.current.find(function (x) {
-          return x.id === activeDrumIdR.current;
-        });else if (activeLayerR.current === "synth") aPat = p;else aPat = patsR.current.find(function (x) {
-          return x.id === activeIdR.current;
-        }); // lead/bass: live pats
-        activeLen = aPat ? (_aPat$gridLen = aPat.gridLen) !== null && _aPat$gridLen !== void 0 ? _aPat$gridLen : 16 : 16;
+        const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
+        pid = synthData?.activeId ?? -1;
+        p = synthData ? synthData.pats.find(x=>x.id===pid) : null;
+        let aPat;
+        if(activeLayerR.current==="drums") aPat = drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
+        else if(activeLayerR.current==="synth") aPat = p;
+        else aPat = patsR.current.find(x=>x.id===activeIdR.current); // lead/bass: live pats
+        activeLen = aPat?(aPat.gridLen??16):16;
       }
       // Run the scheduler unconditionally — lead/bass/drums may have content even if synth pat is missing.
       {
-        var _sp$rhy2;
-        var cp = cposR.current,
-          _s = s_;
-        if (_s === 0 && varyModeR.current && p) {
-          var vg = genVariation(p.grid, varyParamsR.current);
-          variedGrids.current.set(pid, vg);
+        const cp=cposR.current,s=s_;
+        if(s===0&&varyModeR.current&&p){
+          let vg=genVariation(p.grid,varyParamsR.current);
+          variedGrids.current.set(pid,vg);
           // Self-record: always vary the original source pattern, not the current playing one
-          if (recModeR.current && patsR.current.length < 8) {
-            var _src$gridLen;
-            var vp = varyParamsR.current;
-            var src = patsR.current.find(function (x) {
-              return x.id === recSourceIdR.current;
-            }) || p;
-            var rvg = genVariation(src.grid, vp);
-            var newParams = (src.params || defaultStepParams()).map(function (sp) {
-              return jitterStepParam(sp, vp);
+          if(recModeR.current&&patsR.current.length<8){
+            const vp=varyParamsR.current;
+            const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
+            let rvg=genVariation(src.grid,vp);
+            const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
+            const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:newParams,gridLen:src.gridLen??16};
+            setPats(ps=>{
+              if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
+              return [...ps,newPat];
             });
-            var newPat = {
-              id: ++_id,
-              name: symPat(patsR.current.length),
-              grid: rvg,
-              durs: src.durs ? src.durs.map(function (r) {
-                return _toConsumableArray(r);
-              }) : mkDurs(),
-              params: newParams,
-              gridLen: (_src$gridLen = src.gridLen) !== null && _src$gridLen !== void 0 ? _src$gridLen : 16
-            };
-            setPats(function (ps) {
-              if (ps.length >= 8) {
-                recModeR.current = false;
-                setRecMode(false);
-                return ps;
-              }
-              return [].concat(_toConsumableArray(ps), [newPat]);
-            });
-            setChain(function (c) {
-              return [].concat(_toConsumableArray(c), [newPat.id]);
-            });
+            setChain(c=>[...c,newPat.id]);
           }
         }
-        var grid = varyModeR.current ? variedGrids.current.get(pid) || p && p.grid : p && p.grid;
-        var durs = p && p.durs;
-        var freqs = SCALES[scaleR.current].freqs;
-        var ratio = stR(transpR.current);
-        var rawSp = p && p.params && p.params[_s] ? p.params[_s] : null;
-        var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
-        var rhy = sp ? Math.max(1, Math.round((_sp$rhy2 = sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1)) : 1;
-        var ratch = rhy;
-        var subDur = stepDur / ratch;
-        if (grid) for (var _r2 = 0; _r2 < ROWS; _r2++) {
-          var _lastPlayedFreqR$curr, _p$speedMult, _p;
-          if (!grid[_r2][_s]) continue;
+        const grid=varyModeR.current?(variedGrids.current.get(pid)||(p&&p.grid)):(p&&p.grid);
+        const durs=p&&p.durs;
+        const freqs=SCALES[scaleR.current].freqs;
+        const ratio=stR(transpR.current);
+        const rawSp=(p&&p.params&&p.params[s])?p.params[s]:null;
+        const sp=varyModeR.current&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
+          const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
+        const ratch = rhy;
+        const subDur = stepDur / ratch;
+          if(grid)for(let r=0;r<ROWS;r++){
+          if(!grid[r][s])continue;
           // Per-row duration. durs[r][s] = number of step cells this note covers.
-          var dur = durs && durs[_r2] && durs[_r2][_s] ? Math.max(1, durs[_r2][_s]) : 1;
-          var noteDur = stepDur * dur;
+          const dur = (durs&&durs[r]&&durs[r][s])?Math.max(1,durs[r][s]):1;
+          const noteDur = stepDur * dur;
           // In loop mode the synth-track plays the active layer's grid; route it
           // through THAT layer's params so the user hears bass-as-bass etc. In
           // song or default mode the synth-track is synth's, so use synth params.
-          var synthLP = loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current) >= 0 ? layerParamsR.current[activeLayerR.current] : layerParamsR.current.synth;
-          var f = freqs[_r2] * ratio;
+          const synthLP = (loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current)>=0)
+            ? layerParamsR.current[activeLayerR.current]
+            : layerParamsR.current.synth;
+          const f=freqs[r]*ratio;
           // For glide tracking we need the actual played frequency (Bell will apply
           // both step and layer octaves; mirror that here).
-          var stepOct = sp ? sp.oct - 2 : 0;
-          var sLayerOct = synthLP.octave || 0;
-          var actualF = f * Math.pow(2, stepOct + sLayerOct);
-          var hasGlide = !!(sp && sp.glide);
+          const stepOct=sp?(sp.oct-2):0;
+          const sLayerOct = synthLP.octave||0;
+          const actualF=f*Math.pow(2,stepOct+sLayerOct);
+          const hasGlide=!!(sp&&sp.glide);
           // Departure glide: glide on step N means slide FROM step N INTO step N+1
           // So we glide if the PREVIOUS step had glide enabled
-          var prevF = lastGlideEnabledR.current ? (_lastPlayedFreqR$curr = lastPlayedFreqR.current) !== null && _lastPlayedFreqR$curr !== void 0 ? _lastPlayedFreqR$curr : null : null;
-          var glideTime = prevF && prevF !== actualF ? 60 / bpmR.current / 8 * ((_p$speedMult = (_p = p) === null || _p === void 0 ? void 0 : _p.speedMult) !== null && _p$speedMult !== void 0 ? _p$speedMult : speedMultR.current) : 0;
-          lastPlayedFreqR.current = actualF;
-          lastGlideEnabledR.current = hasGlide; // store for next step to read
-          if (ratch > 1) {
-            for (var ri = 0; ri < ratch; ri++) bell.current.play(f, at + ri * subDur, sp, subDur * 0.9, synthLP.dlySend, ri === 0 ? prevF : null, ri === 0 ? glideTime : 0, synthLP);
+          const prevF=lastGlideEnabledR.current?(lastPlayedFreqR.current??null):null;
+          const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*(p?.speedMult??speedMultR.current):0;
+          lastPlayedFreqR.current=actualF;
+          lastGlideEnabledR.current=hasGlide; // store for next step to read
+          if(ratch>1){
+            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,synthLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,synthLP);
           } else {
             // For tied notes, build the mid-note FLT modulation list — each
             // subsequent step within the tie contributes a sub-step entry.
             // Bell.play() schedules cutoff approaches at those times.
-            var mods = null;
-            if (dur > 1 && p && p.params) {
-              mods = [];
-              var plen = p.params.length || COLS;
-              for (var _i7 = 1; _i7 < dur; _i7++) {
-                var subC = (_s + _i7) % plen;
-                var subRaw = p.params[subC];
-                if (!subRaw) continue;
-                var subSp = varyModeR.current ? jitterStepParam(subRaw, varyParamsR.current) : subRaw;
-                mods.push({
-                  at: at + _i7 * stepDur,
-                  sp: subSp
-                });
+            let mods=null;
+            if(dur>1&&p&&p.params){
+              mods=[];
+              const plen=p.params.length||COLS;
+              for(let i=1;i<dur;i++){
+                const subC=(s+i)%plen;
+                const subRaw=p.params[subC];
+                if(!subRaw)continue;
+                const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+                mods.push({at:at+i*stepDur,sp:subSp});
               }
-              if (mods.length === 0) mods = null;
+              if(mods.length===0)mods=null;
             }
-            bell.current.play(f, at, sp, noteDur, synthLP.dlySend, prevF, glideTime, synthLP, mods);
+            bell.current.play(f,at,sp,noteDur,synthLP.dlySend,prevF,glideTime,synthLP,mods);
           }
         }
         // Lead & Bass — play their currently-active pattern through the same Bell.
         // Loop mode is strict solo of the active layer (the synth-track path above
         // already covers it through the active layer's params), so skip the
         // lead/bass loop in loop+non-song mode to avoid octave-doubling artifacts.
-        var playSubLayers = inSong || !loopR.current;
-        if (playSubLayers) {
-          var _loop2 = function _loop2() {
-              var _lSp$rhy;
-              var layer = _arr4[_i8];
-              var lp, lLen;
-              if (inSong) {
-                lp = songLead; // layer is "lead" only after the bass collapse
-                if (!lp || !lp.grid) return 0; // continue
-                lLen = songBarLen;
-              } else {
-                var _lp$gridLen;
-                var lData = activeLayerR.current === layer ? {
-                  pats: patsR.current,
-                  activeId: activeIdR.current
-                } : layerStoreR.current[layer];
-                if (!lData) return 0; // continue
-                lp = lData.pats.find(function (x) {
-                  return x.id === lData.activeId;
-                });
-                if (!lp || !lp.grid) return 0; // continue
-                lLen = (_lp$gridLen = lp.gridLen) !== null && _lp$gridLen !== void 0 ? _lp$gridLen : 16;
-              }
-              var ls = _s % lLen;
-              var lRawSp = lp.params && lp.params[ls] ? lp.params[ls] : null;
-              var lSp = varyModeR.current && lRawSp ? jitterStepParam(lRawSp, varyParamsR.current) : lRawSp;
-              var lRhyRaw = lSp ? Math.round((_lSp$rhy = lSp.rhy) !== null && _lSp$rhy !== void 0 ? _lSp$rhy : 1) : 1;
-              var lRhy = Math.max(1, lRhyRaw);
-              var lSubDur = stepDur / lRhy;
-              for (var _r3 = 0; _r3 < ROWS; _r3++) {
-                var _layerLastFreqR$curre, _lp$speedMult, _lp3;
-                if (!lp.grid[_r3][ls]) continue;
-                var lDur = lp.durs && lp.durs[_r3] && lp.durs[_r3][ls] ? Math.max(1, lp.durs[_r3][ls]) : 1;
-                var lNoteDur = stepDur * lDur;
-                var layerLP = layerParamsR.current[layer];
-                // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
-                // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
-                var lF = freqs[_r3] * ratio;
-                // Glide tracking — same pattern as the synth-track path: glide on
-                // step N means slide FROM N INTO N+1, so check the PREVIOUS step's
-                // glide flag. Compares actual played frequencies (oct applied) so
-                // octave changes on the same row trigger glide.
-                var lStepOct = lSp ? lSp.oct - 2 : 0;
-                var lLayerOct = layerLP.octave || 0;
-                var lActualF = lF * Math.pow(2, lStepOct + lLayerOct);
-                var lHasGlide = !!(lSp && lSp.glide);
-                var lPrevF = layerLastGlideR.current[layer] ? (_layerLastFreqR$curre = layerLastFreqR.current[layer]) !== null && _layerLastFreqR$curre !== void 0 ? _layerLastFreqR$curre : null : null;
-                var lGlideTime = lPrevF && lPrevF !== lActualF ? 60 / bpmR.current / 8 * ((_lp$speedMult = (_lp3 = lp) === null || _lp3 === void 0 ? void 0 : _lp3.speedMult) !== null && _lp$speedMult !== void 0 ? _lp$speedMult : speedMultR.current) : 0;
-                layerLastFreqR.current[layer] = lActualF;
-                layerLastGlideR.current[layer] = lHasGlide;
-                if (lRhy > 1) {
-                  for (var _ri = 0; _ri < lRhy; _ri++) bell.current.play(lF, at + _ri * lSubDur, lSp, lSubDur * 0.9, layerLP.dlySend, _ri === 0 ? lPrevF : null, _ri === 0 ? lGlideTime : 0, layerLP);
-                } else {
-                  // Mid-note FLT modulation for tied notes — same shape as the
-                  // synth-track path above, sourcing per-sub-step params from this
-                  // layer's own pat.
-                  var lMods = null;
-                  if (lDur > 1 && lp && lp.params) {
-                    lMods = [];
-                    var lplen = lp.params.length || COLS;
-                    for (var _i9 = 1; _i9 < lDur; _i9++) {
-                      var _subC = (ls + _i9) % lplen;
-                      var _subRaw = lp.params[_subC];
-                      if (!_subRaw) continue;
-                      var _subSp = varyModeR.current ? jitterStepParam(_subRaw, varyParamsR.current) : _subRaw;
-                      lMods.push({
-                        at: at + _i9 * stepDur,
-                        sp: _subSp
-                      });
-                    }
-                    if (lMods.length === 0) lMods = null;
-                  }
-                  bell.current.play(lF, at, lSp, lNoteDur, layerLP.dlySend, lPrevF, lGlideTime, layerLP, lMods);
+        const playSubLayers = inSong || !loopR.current;
+        if(playSubLayers) for(const layer of ["lead"]){
+          let lp, lLen;
+          if(inSong){
+            lp = songLead; // layer is "lead" only after the bass collapse
+            if(!lp||!lp.grid)continue;
+            lLen = songBarLen;
+          } else {
+            const lData=activeLayerR.current===layer
+              ?{pats:patsR.current,activeId:activeIdR.current}
+              :layerStoreR.current[layer];
+            if(!lData)continue;
+            lp=lData.pats.find(x=>x.id===lData.activeId);
+            if(!lp||!lp.grid)continue;
+            lLen=lp.gridLen??16;
+          }
+          const ls=s%lLen;
+          const lRawSp=(lp.params&&lp.params[ls])?lp.params[ls]:null;
+          const lSp=varyModeR.current&&lRawSp?jitterStepParam(lRawSp,varyParamsR.current):lRawSp;
+          const lRhyRaw=lSp?Math.round(lSp.rhy??1):1;
+          const lRhy=Math.max(1,lRhyRaw);
+          const lSubDur=stepDur/lRhy;
+          for(let r=0;r<ROWS;r++){
+            if(!lp.grid[r][ls])continue;
+            const lDur = (lp.durs&&lp.durs[r]&&lp.durs[r][ls])?Math.max(1,lp.durs[r][ls]):1;
+            const lNoteDur = stepDur * lDur;
+            const layerLP = layerParamsR.current[layer];
+            // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
+            // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
+            const lF=freqs[r]*ratio;
+            // Glide tracking — same pattern as the synth-track path: glide on
+            // step N means slide FROM N INTO N+1, so check the PREVIOUS step's
+            // glide flag. Compares actual played frequencies (oct applied) so
+            // octave changes on the same row trigger glide.
+            const lStepOct=lSp?(lSp.oct-2):0;
+            const lLayerOct=layerLP.octave||0;
+            const lActualF=lF*Math.pow(2,lStepOct+lLayerOct);
+            const lHasGlide=!!(lSp&&lSp.glide);
+            const lPrevF=layerLastGlideR.current[layer]?(layerLastFreqR.current[layer]??null):null;
+            const lGlideTime=lPrevF&&lPrevF!==lActualF?(60/bpmR.current/8)*(lp?.speedMult??speedMultR.current):0;
+            layerLastFreqR.current[layer]=lActualF;
+            layerLastGlideR.current[layer]=lHasGlide;
+            if(lRhy>1){
+              for(let ri=0;ri<lRhy;ri++)bell.current.play(lF,at+ri*lSubDur,lSp,lSubDur*0.9,layerLP.dlySend,ri===0?lPrevF:null,ri===0?lGlideTime:0,layerLP);
+            } else {
+              // Mid-note FLT modulation for tied notes — same shape as the
+              // synth-track path above, sourcing per-sub-step params from this
+              // layer's own pat.
+              let lMods=null;
+              if(lDur>1&&lp&&lp.params){
+                lMods=[];
+                const lplen=lp.params.length||COLS;
+                for(let i=1;i<lDur;i++){
+                  const subC=(ls+i)%lplen;
+                  const subRaw=lp.params[subC];
+                  if(!subRaw)continue;
+                  const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+                  lMods.push({at:at+i*stepDur,sp:subSp});
                 }
+                if(lMods.length===0)lMods=null;
               }
-            },
-            _ret;
-          for (var _i8 = 0, _arr4 = ["lead"]; _i8 < _arr4.length; _i8++) {
-            _ret = _loop2();
-            if (_ret === 0) continue;
+              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,lPrevF,lGlideTime,layerLP,lMods);
+            }
           }
         }
         // Drum layer — uses drumChain for sequencing (or song matrix in song mode).
         // In loop mode, drums only play if drums is the active (soloed) layer.
-        var playDrums = inSong || !loopR.current || activeLayerR.current === "drums";
-        if (playDrums && drumEngine.current.ready) {
-          var dPat,
-            dLen,
-            ds,
-            dChain = null,
-            dcp = 0;
-          if (inSong) {
+        const playDrums = inSong || !loopR.current || activeLayerR.current==="drums";
+        if(playDrums && drumEngine.current.ready){
+          let dPat, dLen, ds, dChain=null, dcp=0;
+          if(inSong){
             dPat = songDrum;
-            if (dPat) {
-              dLen = songBarLen;
-              ds = _s % dLen;
-            }
+            if(dPat){ dLen=songBarLen; ds=s%dLen; }
           } else {
-            dChain = drumChainR.current;
-            dcp = drumCposR.current;
-            var dPatId = dChain.length ? dChain[dcp % dChain.length] : activeDrumIdR.current;
-            dPat = drumPatsR.current.find(function (x) {
-              return x.id === dPatId;
-            }) || drumPatsR.current[0];
-            if (dPat) {
-              var _dPat$gridLen;
-              dLen = (_dPat$gridLen = dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
-              ds = _s % dLen;
-            }
+            dChain=drumChainR.current;
+            dcp=drumCposR.current;
+            const dPatId=dChain.length?dChain[dcp%dChain.length]:activeDrumIdR.current;
+            dPat=drumPatsR.current.find(x=>x.id===dPatId)||drumPatsR.current[0];
+            if(dPat){ dLen=dPat.gridLen??16; ds=s%dLen; }
           }
-          if (dPat) {
+          if(dPat){
             // Advance drum chain position at loop boundary (skip in song mode)
-            if (!inSong && ds === dLen - 1 && dChain && dChain.length > 1) {
-              var next = (dcp + 1) % dChain.length;
-              drumCposR.current = next;
-              setDrumCpos(next);
+            if(!inSong && ds===dLen-1 && dChain && dChain.length>1){
+              const next=(dcp+1)%dChain.length;
+              drumCposR.current=next;setDrumCpos(next);
             }
             // Generate drum variation at loop start (step 0)
-            if (ds === 0 && varyModeR.current) {
-              var vRhythm = (dPat.vRhythm || 0) / 100;
-              var vVelocity = (dPat.vVelocity || 0) / 100;
+            if(ds===0&&varyModeR.current){
+              const vRhythm=(dPat.vRhythm||0)/100;
+              const vVelocity=(dPat.vVelocity||0)/100;
               // Varied grid: drop hits (rate=vRhythm*0.5) and ghost new ones (rate=vRhythm*0.25)
-              var vGrid = dPat.grid.map(function (row) {
-                return row.map(function (on, ci) {
-                  if (ci >= dLen) return false;
-                  if (on && Math.random() < vRhythm * 0.45) return false; // drop
-                  if (!on && Math.random() < vRhythm * 0.18) return true; // ghost
-                  return on;
-                });
-              });
+              const vGrid=dPat.grid.map(row=>row.map((on,ci)=>{
+                if(ci>=dLen)return false;
+                if(on&&Math.random()<vRhythm*0.45)return false; // drop
+                if(!on&&Math.random()<vRhythm*0.18)return true;  // ghost
+                return on;
+              }));
               // Varied vel: jitter each step's velocity within ±50% of vVelocity range
-              var vVel = dPat.vel.map(function (v) {
-                return Math.max(1, Math.min(127, Math.round(v + (Math.random() * 2 - 1) * vVelocity * 50)));
-              });
-              variedDrumGrids.current.set(dPat.id, vGrid);
-              variedDrumVels.current.set(dPat.id, vVel);
+              const vVel=dPat.vel.map(v=>Math.max(1,Math.min(127,
+                Math.round(v+(Math.random()*2-1)*vVelocity*50)
+              )));
+              variedDrumGrids.current.set(dPat.id,vGrid);
+              variedDrumVels.current.set(dPat.id,vVel);
             }
-            var useGrid = varyModeR.current ? variedDrumGrids.current.get(dPat.id) || dPat.grid : dPat.grid;
-            var useVel = varyModeR.current ? variedDrumVels.current.get(dPat.id) || dPat.vel : dPat.vel;
-            for (var _r4 = 0; _r4 < DRUM_ROWS; _r4++) {
-              if (useGrid[_r4] && useGrid[_r4][ds]) {
-                var _useVel$ds;
-                var dVel = (_useVel$ds = useVel === null || useVel === void 0 ? void 0 : useVel[ds]) !== null && _useVel$ds !== void 0 ? _useVel$ds : 100;
-                var dMix = (dPat.mix || defaultDrumMix())[_r4] || {
-                  level: 100,
-                  pan: 0
-                };
-                drumEngine.current.play(DRUM_VOICES[_r4].key, at, dVel, dMix.level, dMix.pan, voiceSamplesR.current[DRUM_VOICES[_r4].key]);
+            const useGrid=varyModeR.current?(variedDrumGrids.current.get(dPat.id)||dPat.grid):dPat.grid;
+            const useVel=varyModeR.current?(variedDrumVels.current.get(dPat.id)||dPat.vel):dPat.vel;
+            for(let r=0;r<DRUM_ROWS;r++){
+              if(useGrid[r]&&useGrid[r][ds]){
+                const dVel=useVel?.[ds]??100;
+                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:100,pan:0};
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key]);
               }
             }
             setDrumStep(ds);
           }
         }
-        setStep(_s);
-        setCpos(cp);
-        setPlayId(pid);
-        var _ns = (_s + 1) % activeLen;
-        stepR.current = _ns;
-        if (_ns === 0) {
-          if (inSong) {
-            var nextBar;
-            if (songSyncR.current === "random") {
+        setStep(s);setCpos(cp);setPlayId(pid);
+        const ns=(s+1)%activeLen;stepR.current=ns;
+        if(ns===0){
+          if(inSong){
+            let nextBar;
+            if(songSyncR.current==="random"){
               // Random mode: pick a random populated bar from any layer's lane.
               // Allows the same bar to be picked twice in a row — that's fine,
               // each pick is independent. Falls back to firstBar on empty matrix.
-              var _sm3 = songMatrixR.current;
-              var candidates = [];
-              for (var _i0 = songFirstBar; _i0 <= songLastBar; _i0++) {
-                if (_sm3.synth[_i0] != null || _sm3.lead[_i0] != null || _sm3.drums[_i0] != null) candidates.push(_i0);
+              const sm=songMatrixR.current;
+              const candidates=[];
+              for(let i=songFirstBar;i<=songLastBar;i++){
+                if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)candidates.push(i);
               }
-              nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
+              nextBar=candidates.length?candidates[Math.floor(Math.random()*candidates.length)]:songFirstBar;
             } else {
               // Sync (default): sequential bar advance, wrapping at end.
-              nextBar = songCurBar + 1;
-              if (nextBar > songLastBar) nextBar = songFirstBar;
+              nextBar=songCurBar+1;
+              if(nextBar>songLastBar)nextBar=songFirstBar;
             }
-            songBarR.current = nextBar;
-            setSongBar(nextBar);
+            songBarR.current=nextBar;setSongBar(nextBar);
             // Sync mode: all four cursors track songBar
-            setSongBarLayer({
-              synth: nextBar,
-              lead: nextBar,
-              drums: nextBar
-            });
+            setSongBarLayer({synth:nextBar,lead:nextBar,drums:nextBar});
           }
           // Non-song mode: single pat loops on its own — nothing to advance.
         }
       }
-      nextNoteR.current += stepDur;
-    };
-    while (nextNoteR.current < ctx.currentTime + LOOKAHEAD) {
-      _loop();
+      nextNoteR.current+=stepDur;
     }
-  }, []);
+  OLD_SCHEDULER_BODY_END */
+
   var _startStop = /*#__PURE__*/function () {
     var _ref11 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, sm, t0, layerFirst, _i1, _arr5, layer, f, i, firstBar, _i10, _t4;
+      var dlyT, t0, _i9, _arr5, layer, sm, layerFirst, _i0, _arr6, _layer2, f, i, firstBar, _i1, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -4245,12 +4268,12 @@ function Tabula() {
               drums: -1
             });
             prevFreqByRowR.current = {};
-            lastPlayedFreqR.current = null;
-            lastGlideEnabledR.current = false;
             layerLastFreqR.current = {
+              synth: null,
               lead: null
             };
             layerLastGlideR.current = {
+              synth: false,
               lead: false
             };
             setRecMode(false);
@@ -4328,20 +4351,29 @@ function Tabula() {
             }
             stepR.current = 0;
             cposR.current = 0;
+            t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
+            // song mode also sets each layer's bar to its first populated cell.
+            for (_i9 = 0, _arr5 = ["synth", "lead", "drums"]; _i9 < _arr5.length; _i9++) {
+              layer = _arr5[_i9];
+              freeR.current[layer] = {
+                step: 0,
+                nextAt: t0,
+                bar: 0
+              };
+            }
             if (!songMode) {
               _context9.n = 20;
               break;
             }
-            sm = songMatrix; // Per-layer first populated bar — used for free mode init
-            t0 = bell.current.ctx.currentTime + 0.05;
+            sm = songMatrix;
             layerFirst = {};
-            _i1 = 0, _arr5 = ["synth", "lead", "drums"];
+            _i0 = 0, _arr6 = ["synth", "lead", "drums"];
           case 11:
-            if (!(_i1 < _arr5.length)) {
+            if (!(_i0 < _arr6.length)) {
               _context9.n = 16;
               break;
             }
-            layer = _arr5[_i1];
+            _layer2 = _arr6[_i0];
             f = -1;
             i = 0;
           case 12:
@@ -4349,7 +4381,7 @@ function Tabula() {
               _context9.n = 14;
               break;
             }
-            if (!(sm[layer][i] != null)) {
+            if (!(sm[_layer2][i] != null)) {
               _context9.n = 13;
               break;
             }
@@ -4360,32 +4392,28 @@ function Tabula() {
             _context9.n = 12;
             break;
           case 14:
-            layerFirst[layer] = f === -1 ? 0 : f;
-            freeR.current[layer] = {
-              step: 0,
-              nextAt: t0,
-              bar: layerFirst[layer]
-            };
+            layerFirst[_layer2] = f === -1 ? 0 : f;
+            freeR.current[_layer2].bar = layerFirst[_layer2];
           case 15:
-            _i1++;
+            _i0++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i10 = 0;
+            _i1 = 0;
           case 17:
-            if (!(_i10 < 64)) {
+            if (!(_i1 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i10] != null || sm.lead[_i10] != null || sm.drums[_i10] != null)) {
+            if (!(sm.synth[_i1] != null || sm.lead[_i1] != null || sm.drums[_i1] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i10;
+            firstBar = _i1;
             return _context9.a(3, 19);
           case 18:
-            _i10++;
+            _i1++;
             _context9.n = 17;
             break;
           case 19:
@@ -4398,7 +4426,7 @@ function Tabula() {
               drums: layerFirst.drums
             });
           case 20:
-            nextNoteR.current = bell.current.ctx.currentTime + 0.05; // small initial offset
+            nextNoteR.current = t0; // master clock for visual playhead + bar advance
             tmrR.current = setInterval(scheduler, 25);
             setPlaying(true);
           case 21:
@@ -5774,7 +5802,7 @@ function Tabula() {
           case 2:
             ONSET_THRESH = 0.08; // peak deviation from center (0..1)
             SILENCE_THRESH = 0.025;
-            SILENCE_HOLD_MS = 600;
+            SILENCE_HOLD_MS = 300;
             ARM_TIMEOUT_MS = 10000; // if no onset in 10s, bail out
             _context12.p = 3;
             _context12.n = 4;
@@ -6948,7 +6976,7 @@ function Tabula() {
                 };
                 var targetPats = targetData.pats || [];
                 if (targetPats.length < 8) {
-                  var _p$gridLen2;
+                  var _p$gridLen;
                   pushHistory();
                   var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
                     grid: p.grid.map(function (r) {
@@ -6960,7 +6988,7 @@ function Tabula() {
                     params: (p.params || defaultStepParams()).map(function (s) {
                       return Object.assign({}, s);
                     }),
-                    gridLen: (_p$gridLen2 = p.gridLen) !== null && _p$gridLen2 !== void 0 ? _p$gridLen2 : 16
+                    gridLen: (_p$gridLen = p.gridLen) !== null && _p$gridLen !== void 0 ? _p$gridLen : 16
                   });
                   layerStoreR.current[tl] = _objectSpread(_objectSpread({}, targetData), {}, {
                     pats: [].concat(_toConsumableArray(targetPats), [newPat]),
@@ -7922,7 +7950,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop3 = function _loop3() {
+      var _loop2 = function _loop2() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params, _p$rhy, _activePat$durs$r$ci, _activePat$durs, _p$vel;
@@ -8049,7 +8077,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop3();
+        _loop2();
       }
       return rects;
     }());
@@ -8120,11 +8148,11 @@ function Tabula() {
       letterSpacing: 1,
       pointerEvents: "none"
     }
-  }, gridLen)))), activeLayer === "drums" && page === "edit" && function (_dPat$gridLen2, _drumPats$find) {
+  }, gridLen)))), activeLayer === "drums" && page === "edit" && function (_dPat$gridLen, _drumPats$find) {
     var dPat = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
-    var dLen = (_dPat$gridLen2 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen2 !== void 0 ? _dPat$gridLen2 : 16;
+    var dLen = (_dPat$gridLen = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
     var dw = gridPx || null;
     var dh = dw ? Math.floor(dw * DRUM_ROWS / COLS) : null;
     return /*#__PURE__*/React.createElement("div", {
@@ -8803,10 +8831,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r5 = 0; _r5 < ROWS; _r5++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r5][c2]) {
-          var _activePat$durs$_r5$c, _activePat$durs2;
-          var span = Math.max(1, (_activePat$durs$_r5$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r5]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r5$c !== void 0 ? _activePat$durs$_r5$c : 1);
+      for (var _r3 = 0; _r3 < ROWS; _r3++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r3][c2]) {
+          var _activePat$durs$_r3$c, _activePat$durs2;
+          var span = Math.max(1, (_activePat$durs$_r3$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r3]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r3$c !== void 0 ? _activePat$durs$_r3$c : 1);
           if (c < c2 + span) return true;
         }
       }
@@ -9625,7 +9653,7 @@ function Tabula() {
               };
               var targetPats = targetData.pats || [];
               if (targetPats.length < 8) {
-                var _p$gridLen3, _p$speedMult2;
+                var _p$gridLen2, _p$speedMult;
                 pushHistory();
                 var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
                   grid: p.grid.map(function (r) {
@@ -9637,8 +9665,8 @@ function Tabula() {
                   params: (p.params || defaultStepParams()).map(function (s) {
                     return Object.assign({}, s);
                   }),
-                  gridLen: (_p$gridLen3 = p.gridLen) !== null && _p$gridLen3 !== void 0 ? _p$gridLen3 : 16,
-                  speedMult: (_p$speedMult2 = p.speedMult) !== null && _p$speedMult2 !== void 0 ? _p$speedMult2 : 1
+                  gridLen: (_p$gridLen2 = p.gridLen) !== null && _p$gridLen2 !== void 0 ? _p$gridLen2 : 16,
+                  speedMult: (_p$speedMult = p.speedMult) !== null && _p$speedMult !== void 0 ? _p$speedMult : 1
                 });
                 layerStoreR.current[tl] = _objectSpread(_objectSpread({}, targetData), {}, {
                   pats: [].concat(_toConsumableArray(targetPats), [newPat]),
@@ -10013,7 +10041,7 @@ function Tabula() {
     }), function () {
       var rects = [];
       var ci = 0;
-      var _loop4 = function _loop4() {
+      var _loop3 = function _loop3() {
         var on = activePat ? activePat.grid[r][ci] : false;
         if (on) {
           var _activePat$params2, _p$rhy2, _activePat$durs$r$ci2, _activePat$durs3, _p$vel2;
@@ -10140,7 +10168,7 @@ function Tabula() {
         }
       };
       while (ci < COLS) {
-        _loop4();
+        _loop3();
       }
       return rects;
     }());
@@ -10221,11 +10249,11 @@ function Tabula() {
       boxSizing: "border-box",
       overflow: "hidden"
     }
-  }, function (_dPat$gridLen3) {
+  }, function (_dPat$gridLen2) {
     var dPat = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
-    var dLen = (_dPat$gridLen3 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen3 !== void 0 ? _dPat$gridLen3 : 16;
+    var dLen = (_dPat$gridLen2 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen2 !== void 0 ? _dPat$gridLen2 : 16;
     var GAP = 2;
     // Drum grid is now oriented to match the synth grid: voices
     // run vertically as rows, steps horizontally as columns. Time
@@ -10874,10 +10902,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r6 = 0; _r6 < ROWS; _r6++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r6][c2]) {
-          var _activePat$durs$_r6$c, _activePat$durs4;
-          var span = Math.max(1, (_activePat$durs$_r6$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r6]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r6$c !== void 0 ? _activePat$durs$_r6$c : 1);
+      for (var _r4 = 0; _r4 < ROWS; _r4++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r4][c2]) {
+          var _activePat$durs$_r4$c, _activePat$durs4;
+          var span = Math.max(1, (_activePat$durs$_r4$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r4]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r4$c !== void 0 ? _activePat$durs$_r4$c : 1);
           if (c < c2 + span) return true;
         }
       }
