@@ -1545,10 +1545,15 @@ var Bell = /*#__PURE__*/function () {
       if (spreadAmt > 0) {
         spreadMerger = this.ctx.createChannelMerger(2);
         var spreadComp = this.ctx.createGain();
-        // Power-preserving compensation: per-channel power = comp² × (1 + (1-s)²).
-        // Solving for power = 2 (the no-spread value) gives this formula.
-        // At s=0: comp = 1.0 (no boost). At s=1: comp = √2 ≈ 1.414 (+3 dB).
-        spreadComp.gain.value = Math.sqrt(2 / (1 + (1 - spreadAmt) * (1 - spreadAmt)));
+        // Compensation gain — linear from 1.0 at s=0 to 2.0 at s=1 (+6 dB max).
+        // Sized for the coherent case: at small detunes (default 8 cents) the
+        // two oscillators ride mostly in-phase during the beat cycle, so the
+        // unspread sum peaks at ~2× single. Splitting them to separate channels
+        // costs that 6 dB unless we boost back. For highly-detuned (incoherent)
+        // oscillators this slightly overshoots, which we prefer to undershoot.
+        // Earlier attempt used sqrt(2/(1+(1-s)²)) which assumed incoherence and
+        // only delivered +3 dB at full spread — user heard that as attenuation.
+        spreadComp.gain.value = 1 + spreadAmt;
         spreadMerger.connect(spreadComp);
         spreadComp.connect(vcf);
       }
@@ -1591,11 +1596,10 @@ var Bell = /*#__PURE__*/function () {
         } else {
           o2.frequency.value = playFreq;
         }
-        // Detune widens with spread — 1× at s=0 (matches no-spread sound) up to
-        // 2.5× at s=1. With small base detune (e.g. 8 cents), spread alone gave
-        // a barely-perceptible stereo image; this multiplier makes it actually
-        // sound wide.
-        o2.detune.value = p.detune * (1 + spreadAmt * 1.5);
+        // No automatic detune widening — SPREAD is purely a pan operation on
+        // the existing dual-osc stack. The user controls the detune cents on
+        // its own knob; SPREAD just decides how L/R-distributed the stack is.
+        o2.detune.value = p.detune;
         panOsc(o2, +spreadAmt);
         o2.start(t);
         o2.stop(t + end + .05);
