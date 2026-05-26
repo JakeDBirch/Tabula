@@ -3836,12 +3836,22 @@ export default function Tabula(){
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              {/* Speed — CSS grid forces equal cell width regardless of content */}
-              <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(5,1fr)":"repeat(auto-fill,minmax(30px,1fr))",gap:3,marginBottom:winW>900?8:4}}>
-                {SPEED_OPTS.map(({label,mult})=>(
-                  <button key={label} style={Object.assign({},S.speedBtn,{padding:winW>900?"6px 2px":"4px 1px",fontSize:winW>900?10:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
-                    onClick={()=>setActivePatSpeed(mult)}>{label}</button>
-                ))}
+              {/* Global TEMPO / PITCH / SWING — vertical drag scrubbers, mirror
+                  the mobile widgets. SPEED moved out of here because it's per-
+                  pattern; these three actually are global, so they own this slot. */}
+              <div style={{display:"flex",gap:3,marginBottom:winW>900?8:4}}>
+                <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                  <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{bpm}</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>BPM</span>
+                </div>
+                <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                  <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{stLabel}</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>ST</span>
+                </div>
+                <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                  <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{swing}</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>SWG</span>
+                </div>
               </div>
             </>
           )}
@@ -4052,7 +4062,10 @@ export default function Tabula(){
                   {drumPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba(196,114,122,0.3)",background:"transparent",color:"rgba(196,114,122,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addDrumPat();}}>＋</button>}
                 </div>
               </div>
-              {/* Action buttons — context-sensitive to active layer */}
+              {/* Action buttons — context-sensitive to active layer.
+                  SPEED selector sits inside this block because it's a per-pattern
+                  control (writes to pat.speedMult); putting it here next to the
+                  other pattern ops makes that scoping visible. */}
               {activeLayer!=="drums"&&(()=>{
                 const targetId=activeId;const isOnlyPat=pats.length<=1;
                 return(
@@ -4065,6 +4078,13 @@ export default function Tabula(){
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
                       {[["CPY",()=>copyPatId(targetId),false,false],["PST",()=>pastePatId(targetId),!clipboard,false],["DUP",()=>dupPatId(targetId),pats.length>=8,false],["DEL",()=>delPatId(targetId),isOnlyPat,true]].map(([l,f,d,danger])=>(
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                      ))}
+                    </div>
+                    {/* Per-pattern SPEED selector */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
+                      {SPEED_OPTS.map(({label,mult})=>(
+                        <button key={label} style={Object.assign({},S.speedBtn,{padding:"4px 0",fontSize:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
+                          onClick={()=>setActivePatSpeed(mult)}>{label}</button>
                       ))}
                     </div>
                   </div>
@@ -4082,6 +4102,13 @@ export default function Tabula(){
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
                       {[["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,isOnlyDrum,true]].map(([l,f,d,danger])=>(
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                      ))}
+                    </div>
+                    {/* Per-pattern SPEED selector — drums layer */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
+                      {SPEED_OPTS.map(({label,mult})=>(
+                        <button key={label} style={Object.assign({},S.speedBtn,{padding:"4px 0",fontSize:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
+                          onClick={()=>setActivePatSpeed(mult)}>{label}</button>
                       ))}
                     </div>
                   </div>
