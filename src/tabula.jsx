@@ -108,10 +108,12 @@ const DRUM_VOICES=[
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
 const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
-// Default drum voice level — sits at 75% so users have headroom to boost
-// individual voices instead of only being able to attenuate from a ceiling.
+// Default drum voice level — 60% sits well below the "unity" mark so users
+// have plenty of headroom to push voices up rather than only being able to
+// pull them down. Earlier 75% still felt too hot in stacks of voices.
 // rvSend/dlySend default to 0 — per-channel FX sends are opt-in.
-const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({level:75,pan:0,rvSend:0,dlySend:0}));
+const DRUM_DEFAULT_LEVEL = 60;
+const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0}));
 // Backfill any missing fields on loaded drum mix arrays — older saves only had
 // {level,pan}, so we need to pad new fields with their defaults.
 const fillDrumMix=(mix)=>{
@@ -2134,7 +2136,7 @@ export default function Tabula(){
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
-        const dMix=(pat.mix||defaultDrumMix())[r]||{level:100,pan:0,rvSend:0,dlySend:0};
+        const dMix=(pat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
         drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
       }
     }
@@ -2583,7 +2585,7 @@ export default function Tabula(){
             for(let r=0;r<DRUM_ROWS;r++){
               if(useGrid[r]&&useGrid[r][ds]){
                 const dVel=useVel?.[ds]??100;
-                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:100,pan:0,rvSend:0,dlySend:0};
+                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
                 drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
               }
             }
@@ -2642,9 +2644,17 @@ export default function Tabula(){
     // Pass Bell's reverb + delay inputs so DrumEngine voices can have per-
     // channel sends. Without these refs, send knobs in the drum mixer no-op.
     await drumEngine.current.init(bell.current.master, bell.current.rev, bell.current.dly);
-    // Apply the current drum master level — the useEffect that syncs drumLevel
-    // can run before drumEngine is ready (e.g. on session load) and the setter
-    // no-ops if !ready. Re-apply after init so saved levels take effect.
+    // Re-apply the engine-side state for anything that wasn't passed into
+    // bell.init's arglist. The state useEffects fire before init runs (e.g.
+    // on session load) and the engine-side setters no-op while !ready, so
+    // a loaded rvSize of 80 would silently stay at the engine's hard-coded
+    // default of 0.78 until the user nudged the slider. Re-applying here
+    // catches all of them on every play start.
+    bell.current.setRvSize&&bell.current.setRvSize(rvSize);
+    bell.current.setRvDamp&&bell.current.setRvDamp(rvDamp);
+    bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);
+    bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
+    bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
     if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
@@ -3378,11 +3388,22 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
   }));}
+  // CH (closed hat) + OH (open hat) are linked on pan + level since they
+  // model the same physical hi-hat in any real kit — independent placement
+  // or balance would sound off. Sends and samples stay independent so users
+  // can still e.g. reverb the open hat alone.
+  const _CH_ROW=DRUM_VOICES.findIndex(v=>v.key==="CH");
+  const _OH_ROW=DRUM_VOICES.findIndex(v=>v.key==="OH");
   const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
+    const linksHat=(key==="pan"||key==="level")&&(row===_CH_ROW||row===_OH_ROW);
+    const linkedRow=linksHat?(row===_CH_ROW?_OH_ROW:_CH_ROW):-1;
     // fillDrumMix normalizes any partial saves so old voice rows without
     // rvSend/dlySend pick up the default before getting the new value applied.
-    const mix=fillDrumMix(p.mix).map((m,i)=>i===row?Object.assign({},m,{[key]:val}):m);
+    const mix=fillDrumMix(p.mix).map((m,i)=>{
+      if(i===row||i===linkedRow)return Object.assign({},m,{[key]:val});
+      return m;
+    });
     return Object.assign({},p,{mix});
   }));
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
