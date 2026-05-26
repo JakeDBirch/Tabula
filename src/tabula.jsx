@@ -624,11 +624,33 @@ class Bell{
     }
     vca.gain.exponentialRampToValueAtTime(0.0001,t+end);
 
-    // Stereo spread of the detune stack — when both oscillators are running,
-    // pan them opposite sides by spread/100 (0 = mono center, 1 = hard L/R).
-    // The pan nodes precede vcf+vca; since biquad and gain process per-channel
-    // on stereo inputs, separation survives all the way to master.
+    // Stereo spread of the detune stack — pan o1 left and o2 right by spread/100.
+    // Implementation: explicit ChannelMerger + per-channel Gain nodes (not
+    // StereoPanner). StereoPanner uses constant-power panning (cos/sin law)
+    // which over-attenuates when two oscillators are panned to opposite sides
+    // — each ear only gets half the unison stack so per-channel level drops by
+    // ~6 dB at full spread, which is heard as the spread "thinning" the sound
+    // rather than widening it. The explicit linear-pan approach keeps each
+    // oscillator at unity on its target side and gradually attenuates it on
+    // the other side: at spread=0 both osc fill both channels (no change from
+    // mono); at spread=1 each osc is hard-routed to one side; intermediate
+    // values give a continuous widening.
     const spreadAmt=(p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
+    let spreadMerger=null;
+    if(spreadAmt>0){
+      spreadMerger=this.ctx.createChannelMerger(2);
+      spreadMerger.connect(vcf);
+    }
+    // Linear pan: pan=-1 → gL=1, gR=0; pan=0 → gL=gR=1 (center, both sides at
+    // unity, no attenuation); pan=+1 → gL=0, gR=1. Saturating at 1 keeps the
+    // center signal at full level rather than collapsing it like cosine law.
+    const panOsc=(osc,panVal)=>{
+      if(!spreadMerger){osc.connect(vcf);return;}
+      const gL=this.ctx.createGain();gL.gain.value=Math.min(1,1-panVal);
+      const gR=this.ctx.createGain();gR.gain.value=Math.min(1,1+panVal);
+      osc.connect(gL);gL.connect(spreadMerger,0,0);
+      osc.connect(gR);gR.connect(spreadMerger,0,1);
+    };
     const o1=this.ctx.createOscillator();
     o1.type=p.waveform;
     if(prevFreq&&glideTime>0){
@@ -638,15 +660,9 @@ class Bell{
     } else {
       o1.frequency.value=playFreq;
     }
-    let pan1=null;
-    if(spreadAmt>0&&this.ctx.createStereoPanner){
-      pan1=this.ctx.createStereoPanner();pan1.pan.value=-spreadAmt;
-      o1.connect(pan1);pan1.connect(vcf);
-    } else {
-      o1.connect(vcf);
-    }
+    panOsc(o1,-spreadAmt);
     o1.start(t);o1.stop(t+end+.05);
-    let o2=null,pan2=null;
+    let o2=null;
     if(p.detune>2){
       o2=this.ctx.createOscillator();
       o2.type=p.waveform;
@@ -657,12 +673,7 @@ class Bell{
         o2.frequency.value=playFreq;
       }
       o2.detune.value=p.detune;
-      if(spreadAmt>0&&this.ctx.createStereoPanner){
-        pan2=this.ctx.createStereoPanner();pan2.pan.value=+spreadAmt;
-        o2.connect(pan2);pan2.connect(vcf);
-      } else {
-        o2.connect(vcf);
-      }
+      panOsc(o2,+spreadAmt);
       o2.start(t);o2.stop(t+end+.05);
     }
     // Sub-oscillator — 1 octave below playFreq, sine for clean low end. Level

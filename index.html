@@ -1360,7 +1360,10 @@ var Bell = /*#__PURE__*/function () {
   }, {
     key: "play",
     value: function play(freq, at, sp, noteDur, globalSend, prevFreq, glideTime, layerP, mods) {
-      var _sp$flt, _sp$rev2, _sp$rev3;
+      var _sp$flt,
+        _this2 = this,
+        _sp$rev2,
+        _sp$rev3;
       if (!this.ready || this.ctx.state !== "running") return;
       var t = at != null ? at : this.ctx.currentTime,
         p = layerP || this.p;
@@ -1455,11 +1458,40 @@ var Bell = /*#__PURE__*/function () {
       }
       vca.gain.exponentialRampToValueAtTime(0.0001, t + end);
 
-      // Stereo spread of the detune stack — when both oscillators are running,
-      // pan them opposite sides by spread/100 (0 = mono center, 1 = hard L/R).
-      // The pan nodes precede vcf+vca; since biquad and gain process per-channel
-      // on stereo inputs, separation survives all the way to master.
+      // Stereo spread of the detune stack — pan o1 left and o2 right by spread/100.
+      // Implementation: explicit ChannelMerger + per-channel Gain nodes (not
+      // StereoPanner). StereoPanner uses constant-power panning (cos/sin law)
+      // which over-attenuates when two oscillators are panned to opposite sides
+      // — each ear only gets half the unison stack so per-channel level drops by
+      // ~6 dB at full spread, which is heard as the spread "thinning" the sound
+      // rather than widening it. The explicit linear-pan approach keeps each
+      // oscillator at unity on its target side and gradually attenuates it on
+      // the other side: at spread=0 both osc fill both channels (no change from
+      // mono); at spread=1 each osc is hard-routed to one side; intermediate
+      // values give a continuous widening.
       var spreadAmt = p && p.spread != null && p.detune > 2 ? Math.max(0, Math.min(100, p.spread)) / 100 : 0;
+      var spreadMerger = null;
+      if (spreadAmt > 0) {
+        spreadMerger = this.ctx.createChannelMerger(2);
+        spreadMerger.connect(vcf);
+      }
+      // Linear pan: pan=-1 → gL=1, gR=0; pan=0 → gL=gR=1 (center, both sides at
+      // unity, no attenuation); pan=+1 → gL=0, gR=1. Saturating at 1 keeps the
+      // center signal at full level rather than collapsing it like cosine law.
+      var panOsc = function panOsc(osc, panVal) {
+        if (!spreadMerger) {
+          osc.connect(vcf);
+          return;
+        }
+        var gL = _this2.ctx.createGain();
+        gL.gain.value = Math.min(1, 1 - panVal);
+        var gR = _this2.ctx.createGain();
+        gR.gain.value = Math.min(1, 1 + panVal);
+        osc.connect(gL);
+        gL.connect(spreadMerger, 0, 0);
+        osc.connect(gR);
+        gR.connect(spreadMerger, 0, 1);
+      };
       var o1 = this.ctx.createOscillator();
       o1.type = p.waveform;
       if (prevFreq && glideTime > 0) {
@@ -1469,19 +1501,10 @@ var Bell = /*#__PURE__*/function () {
       } else {
         o1.frequency.value = playFreq;
       }
-      var pan1 = null;
-      if (spreadAmt > 0 && this.ctx.createStereoPanner) {
-        pan1 = this.ctx.createStereoPanner();
-        pan1.pan.value = -spreadAmt;
-        o1.connect(pan1);
-        pan1.connect(vcf);
-      } else {
-        o1.connect(vcf);
-      }
+      panOsc(o1, -spreadAmt);
       o1.start(t);
       o1.stop(t + end + .05);
-      var o2 = null,
-        pan2 = null;
+      var o2 = null;
       if (p.detune > 2) {
         o2 = this.ctx.createOscillator();
         o2.type = p.waveform;
@@ -1492,14 +1515,7 @@ var Bell = /*#__PURE__*/function () {
           o2.frequency.value = playFreq;
         }
         o2.detune.value = p.detune;
-        if (spreadAmt > 0 && this.ctx.createStereoPanner) {
-          pan2 = this.ctx.createStereoPanner();
-          pan2.pan.value = +spreadAmt;
-          o2.connect(pan2);
-          pan2.connect(vcf);
-        } else {
-          o2.connect(vcf);
-        }
+        panOsc(o2, +spreadAmt);
         o2.start(t);
         o2.stop(t + end + .05);
       }
@@ -1775,7 +1791,7 @@ var DrumEngine = /*#__PURE__*/function () {
   }, {
     key: "play",
     value: function play(voice, t, vel) {
-      var _this2 = this;
+      var _this3 = this;
       var level = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : 100;
       var pan = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : 0;
       var sample = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : null;
@@ -2014,7 +2030,7 @@ var DrumEngine = /*#__PURE__*/function () {
         // 4 noise bursts with increasing delay and slight pitch shift
         var delays = [0, 0.010, 0.022, 0.038];
         delays.forEach(function (dl, i) {
-          var n = _this2._noise(ctx, 0.06);
+          var n = _this3._noise(ctx, 0.06);
           var bp = ctx.createBiquadFilter();
           bp.type = "bandpass";
           bp.frequency.value = 1800 - i * 120;
@@ -2024,7 +2040,7 @@ var DrumEngine = /*#__PURE__*/function () {
           hp.frequency.value = 900;
           var g = ctx.createGain();
           var pk = i === 0 ? 0.75 * v : i === 3 ? 0.9 * v : 0.55 * v;
-          _this2._env(g.gain, t + dl, pk, 0.001, 0.012 + i * 0.005, 0.001, 0.04 + i * 0.02);
+          _this3._env(g.gain, t + dl, pk, 0.001, 0.012 + i * 0.005, 0.001, 0.04 + i * 0.02);
           n.connect(bp);
           bp.connect(hp);
           hp.connect(g);
@@ -2076,7 +2092,7 @@ var DrumEngine = /*#__PURE__*/function () {
           hp.frequency.value = 300;
           var g = ctx.createGain();
           // Short attack, medium-long metallic decay
-          _this2._env(g.gain, t, 0.38 * v * (i === 0 ? 1 : 0.8), 0.001, 0.06, 0.08, 0.42);
+          _this3._env(g.gain, t, 0.38 * v * (i === 0 ? 1 : 0.8), 0.001, 0.06, 0.08, 0.42);
           osc.connect(bp);
           bp.connect(hp);
           hp.connect(g);
