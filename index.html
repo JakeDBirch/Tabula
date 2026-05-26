@@ -146,7 +146,7 @@ var symSec = function symSec(i) {
 // Device detection — multiple signals for reliability across browsers and iframe contexts
 var IS_MOBILE = function () {
   try {
-    return navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches || window.screen.width < 768 || window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
+    return navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches || window.screen.width < 768 || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch (e) {
     return false;
   }
@@ -2439,135 +2439,131 @@ function Tabula() {
     _useState20 = _slicedToArray(_useState19, 2),
     step = _useState20[0],
     setStep = _useState20[1];
-  var _useState21 = useState(0),
+  var _useState21 = useState(null),
     _useState22 = _slicedToArray(_useState21, 2),
-    cpos = _useState22[0],
-    setCpos = _useState22[1];
-  var _useState23 = useState(null),
+    playId = _useState22[0],
+    setPlayId = _useState22[1];
+  var _useState23 = useState(false),
     _useState24 = _slicedToArray(_useState23, 2),
-    playId = _useState24[0],
-    setPlayId = _useState24[1];
+    loopMode = _useState24[0],
+    setLoopMode = _useState24[1];
   var _useState25 = useState(false),
     _useState26 = _slicedToArray(_useState25, 2),
-    loopMode = _useState26[0],
-    setLoopMode = _useState26[1];
-  var _useState27 = useState(false),
+    followSeq = _useState26[0],
+    setFollowSeq = _useState26[1];
+  var _useState27 = useState(0),
     _useState28 = _slicedToArray(_useState27, 2),
-    followSeq = _useState28[0],
-    setFollowSeq = _useState28[1];
-  var _useState29 = useState(0),
+    transpose = _useState28[0],
+    setTranspose = _useState28[1];
+  var _useState29 = useState(null),
     _useState30 = _slicedToArray(_useState29, 2),
-    transpose = _useState30[0],
-    setTranspose = _useState30[1];
-  var _useState31 = useState(null),
-    _useState32 = _slicedToArray(_useState31, 2),
-    clipboard = _useState32[0],
-    setClipboard = _useState32[1];
-  var _useState33 = useState({
+    clipboard = _useState30[0],
+    setClipboard = _useState30[1];
+  var _useState31 = useState({
       S1: null,
       S2: null,
       S3: null,
       S4: null
     }),
-    _useState34 = _slicedToArray(_useState33, 2),
-    slotData = _useState34[0],
-    setSlotData = _useState34[1];
+    _useState32 = _slicedToArray(_useState31, 2),
+    slotData = _useState32[0],
+    setSlotData = _useState32[1];
   // Most recently loaded/saved slot — shown highlighted so the user can see
   // which slot's project is currently in memory and avoid overwriting the
   // wrong one. Resets to null on page reload (not persisted).
-  var _useState35 = useState(null),
+  var _useState33 = useState(null),
+    _useState34 = _slicedToArray(_useState33, 2),
+    activeSlot = _useState34[0],
+    setActiveSlot = _useState34[1];
+  var _useState35 = useState(""),
     _useState36 = _slicedToArray(_useState35, 2),
-    activeSlot = _useState36[0],
-    setActiveSlot = _useState36[1];
-  var _useState37 = useState(""),
+    flash = _useState36[0],
+    setFlash = _useState36[1];
+  var _useState37 = useState(null),
     _useState38 = _slicedToArray(_useState37, 2),
-    flash = _useState38[0],
-    setFlash = _useState38[1];
+    confirmAction = _useState38[0],
+    setConfirmAction = _useState38[1];
   var _useState39 = useState(null),
     _useState40 = _slicedToArray(_useState39, 2),
-    confirmAction = _useState40[0],
-    setConfirmAction = _useState40[1];
+    activeSheet = _useState40[0],
+    setActiveSheet = _useState40[1]; // "tempo"|"pattern"|"sound"|"project"|"vary"
   var _useState41 = useState(null),
     _useState42 = _slicedToArray(_useState41, 2),
-    activeSheet = _useState42[0],
-    setActiveSheet = _useState42[1]; // "tempo"|"pattern"|"sound"|"project"|"vary"
+    seqDrag = _useState42[0],
+    setSeqDrag = _useState42[1]; // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
   var _useState43 = useState(null),
     _useState44 = _slicedToArray(_useState43, 2),
-    seqDrag = _useState44[0],
-    setSeqDrag = _useState44[1]; // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
-  var _useState45 = useState(null),
-    _useState46 = _slicedToArray(_useState45, 2),
-    sheetDrag = _useState46[0],
-    setSheetDrag = _useState46[1]; // mobile sequence drawer drag: {type, id, name, color, x, y}
+    sheetDrag = _useState44[0],
+    setSheetDrag = _useState44[1]; // mobile sequence drawer drag: {type, id, name, color, x, y}
   var seqDragR = useRef(null);
   var seqTrackRef = useRef(null);
-  var _useState47 = useState(""),
-    _useState48 = _slicedToArray(_useState47, 2),
-    shareFlash = _useState48[0],
-    setShareFlash = _useState48[1];
+  var _useState45 = useState(""),
+    _useState46 = _slicedToArray(_useState45, 2),
+    shareFlash = _useState46[0],
+    setShareFlash = _useState46[1];
   var importRef = useRef(null);
+  var _useState47 = useState(false),
+    _useState48 = _slicedToArray(_useState47, 2),
+    shifting = _useState48[0],
+    setShifting = _useState48[1];
   var _useState49 = useState(false),
     _useState50 = _slicedToArray(_useState49, 2),
-    shifting = _useState50[0],
-    setShifting = _useState50[1];
+    varyMode = _useState50[0],
+    setVaryMode = _useState50[1];
   var _useState51 = useState(false),
     _useState52 = _slicedToArray(_useState51, 2),
-    varyMode = _useState52[0],
-    setVaryMode = _useState52[1];
-  var _useState53 = useState(false),
-    _useState54 = _slicedToArray(_useState53, 2),
-    recMode = _useState54[0],
-    setRecMode = _useState54[1];
+    recMode = _useState52[0],
+    setRecMode = _useState52[1];
   // Internal sampler — per-drum-voice user-recorded AudioBuffer. Stored in
   // state so the UI can show "loaded" indicators; mirrored to voiceSamplesR
   // for the scheduler to read without stale-closure issues. Session-only —
   // not persisted to save slots (would bloat them with binary audio data).
-  var _useState55 = useState({}),
-    _useState56 = _slicedToArray(_useState55, 2),
-    voiceSamples = _useState56[0],
-    setVoiceSamples = _useState56[1];
+  var _useState53 = useState({}),
+    _useState54 = _slicedToArray(_useState53, 2),
+    voiceSamples = _useState54[0],
+    setVoiceSamples = _useState54[1];
   var voiceSamplesR = useRef({});
-  var _useState57 = useState(null),
-    _useState58 = _slicedToArray(_useState57, 2),
-    recordingVoice = _useState58[0],
-    setRecordingVoice = _useState58[1];
+  var _useState55 = useState(null),
+    _useState56 = _slicedToArray(_useState55, 2),
+    recordingVoice = _useState56[0],
+    setRecordingVoice = _useState56[1];
   var recorderRef = useRef(null);
   var recordStreamRef = useRef(null);
-  var _useState59 = useState(0),
-    _useState60 = _slicedToArray(_useState59, 2),
-    swing = _useState60[0],
-    setSwing = _useState60[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState57 = useState(0),
+    _useState58 = _slicedToArray(_useState57, 2),
+    swing = _useState58[0],
+    setSwing = _useState58[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState61 = useState(1),
-    _useState62 = _slicedToArray(_useState61, 2),
-    speedMult = _useState62[0],
-    setSpeedMult = _useState62[1];
+  var _useState59 = useState(1),
+    _useState60 = _slicedToArray(_useState59, 2),
+    speedMult = _useState60[0],
+    setSpeedMult = _useState60[1];
   var speedMultR = useRef(1);
+  var _useState61 = useState(false),
+    _useState62 = _slicedToArray(_useState61, 2),
+    showMenu = _useState62[0],
+    setShowMenu = _useState62[1];
   var _useState63 = useState(false),
     _useState64 = _slicedToArray(_useState63, 2),
-    showMenu = _useState64[0],
-    setShowMenu = _useState64[1];
+    topTrayOpen = _useState64[0],
+    setTopTrayOpen = _useState64[1];
   var _useState65 = useState(false),
     _useState66 = _slicedToArray(_useState65, 2),
-    topTrayOpen = _useState66[0],
-    setTopTrayOpen = _useState66[1];
-  var _useState67 = useState(false),
+    bottomTrayOpen = _useState66[0],
+    setBottomTrayOpen = _useState66[1];
+  var _useState67 = useState(null),
     _useState68 = _slicedToArray(_useState67, 2),
-    bottomTrayOpen = _useState68[0],
-    setBottomTrayOpen = _useState68[1];
+    patMenu = _useState68[0],
+    setPatMenu = _useState68[1]; // {id, x, y}
   var _useState69 = useState(null),
     _useState70 = _slicedToArray(_useState69, 2),
-    patMenu = _useState70[0],
-    setPatMenu = _useState70[1]; // {id, x, y}
+    drumMenu = _useState70[0],
+    setDrumMenu = _useState70[1]; // {id, x, y}
   var _useState71 = useState(null),
     _useState72 = _slicedToArray(_useState71, 2),
-    drumMenu = _useState72[0],
-    setDrumMenu = _useState72[1]; // {id, x, y}
-  var _useState73 = useState(null),
-    _useState74 = _slicedToArray(_useState73, 2),
-    paramPopup = _useState74[0],
-    setParamPopup = _useState74[1]; // {col,x,y,activeArm,values}
+    paramPopup = _useState72[0],
+    setParamPopup = _useState72[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var varyLongPressR = useRef(null);
@@ -2576,69 +2572,69 @@ function Tabula() {
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState75 = useState(null),
-    _useState76 = _slicedToArray(_useState75, 2),
-    chainDrag = _useState76[0],
-    setChainDrag = _useState76[1]; // {type,id,fromIdx,x,y}
+  var _useState73 = useState(null),
+    _useState74 = _slicedToArray(_useState73, 2),
+    chainDrag = _useState74[0],
+    setChainDrag = _useState74[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
-  var _useState77 = useState(null),
-    _useState78 = _slicedToArray(_useState77, 2),
-    patternDrag = _useState78[0],
-    setPatternDrag = _useState78[1]; // {patId, name, accent, x, y, overDrop}
+  var _useState75 = useState(null),
+    _useState76 = _slicedToArray(_useState75, 2),
+    patternDrag = _useState76[0],
+    setPatternDrag = _useState76[1]; // {patId, name, accent, x, y, overDrop}
   // Vary params
-  var _useState79 = useState(13),
+  var _useState77 = useState(13),
+    _useState78 = _slicedToArray(_useState77, 2),
+    vDropRate = _useState78[0],
+    setVDropRate = _useState78[1];
+  var _useState79 = useState(17),
     _useState80 = _slicedToArray(_useState79, 2),
-    vDropRate = _useState80[0],
-    setVDropRate = _useState80[1];
-  var _useState81 = useState(17),
+    vShiftRate = _useState80[0],
+    setVShiftRate = _useState80[1];
+  var _useState81 = useState(1),
     _useState82 = _slicedToArray(_useState81, 2),
-    vShiftRate = _useState82[0],
-    setVShiftRate = _useState82[1];
-  var _useState83 = useState(1),
+    vShiftRange = _useState82[0],
+    setVShiftRange = _useState82[1];
+  var _useState83 = useState(0),
     _useState84 = _slicedToArray(_useState83, 2),
-    vShiftRange = _useState84[0],
-    setVShiftRange = _useState84[1];
-  var _useState85 = useState(0),
+    vPitchRate = _useState84[0],
+    setVPitchRate = _useState84[1];
+  var _useState85 = useState(1),
     _useState86 = _slicedToArray(_useState85, 2),
-    vPitchRate = _useState86[0],
-    setVPitchRate = _useState86[1];
-  var _useState87 = useState(1),
+    vPitchRange = _useState86[0],
+    setVPitchRange = _useState86[1];
+  var _useState87 = useState(0),
     _useState88 = _slicedToArray(_useState87, 2),
-    vPitchRange = _useState88[0],
-    setVPitchRange = _useState88[1];
+    vGhostRate = _useState88[0],
+    setVGhostRate = _useState88[1];
   var _useState89 = useState(0),
     _useState90 = _slicedToArray(_useState89, 2),
-    vGhostRate = _useState90[0],
-    setVGhostRate = _useState90[1];
+    vVelJitter = _useState90[0],
+    setVVelJitter = _useState90[1];
   var _useState91 = useState(0),
     _useState92 = _slicedToArray(_useState91, 2),
-    vVelJitter = _useState92[0],
-    setVVelJitter = _useState92[1];
+    vFltJitter = _useState92[0],
+    setVFltJitter = _useState92[1];
   var _useState93 = useState(0),
     _useState94 = _slicedToArray(_useState93, 2),
-    vFltJitter = _useState94[0],
-    setVFltJitter = _useState94[1];
+    vDlyJitter = _useState94[0],
+    setVDlyJitter = _useState94[1];
   var _useState95 = useState(0),
     _useState96 = _slicedToArray(_useState95, 2),
-    vDlyJitter = _useState96[0],
-    setVDlyJitter = _useState96[1];
+    vRhyJitter = _useState96[0],
+    setVRhyJitter = _useState96[1];
   var _useState97 = useState(0),
     _useState98 = _slicedToArray(_useState97, 2),
-    vRhyJitter = _useState98[0],
-    setVRhyJitter = _useState98[1];
+    vOctJitter = _useState98[0],
+    setVOctJitter = _useState98[1];
   var _useState99 = useState(0),
     _useState100 = _slicedToArray(_useState99, 2),
-    vOctJitter = _useState100[0],
-    setVOctJitter = _useState100[1];
+    vGlideJitter = _useState100[0],
+    setVGlideJitter = _useState100[1];
   var _useState101 = useState(0),
     _useState102 = _slicedToArray(_useState101, 2),
-    vGlideJitter = _useState102[0],
-    setVGlideJitter = _useState102[1];
-  var _useState103 = useState(0),
-    _useState104 = _slicedToArray(_useState103, 2),
-    vDurJitter = _useState104[0],
-    setVDurJitter = _useState104[1];
+    vDurJitter = _useState102[0],
+    setVDurJitter = _useState102[1];
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -2704,13 +2700,13 @@ function Tabula() {
       })
     };
   };
-  var _useState105 = useState({
+  var _useState103 = useState({
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
-    _useState106 = _slicedToArray(_useState105, 2),
-    layerParams = _useState106[0],
-    setLayerParams = _useState106[1];
+    _useState104 = _slicedToArray(_useState103, 2),
+    layerParams = _useState104[0],
+    setLayerParams = _useState104[1];
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
@@ -2770,70 +2766,70 @@ function Tabula() {
     setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
-  var _useState107 = useState(3),
+  var _useState105 = useState(3),
+    _useState106 = _slicedToArray(_useState105, 2),
+    dlyIdx = _useState106[0],
+    setDlyIdx = _useState106[1];
+  var _useState107 = useState(45),
     _useState108 = _slicedToArray(_useState107, 2),
-    dlyIdx = _useState108[0],
-    setDlyIdx = _useState108[1];
-  var _useState109 = useState(45),
+    dlyFbPct = _useState108[0],
+    setDlyFbPct = _useState108[1];
+  var _useState109 = useState(8),
     _useState110 = _slicedToArray(_useState109, 2),
-    dlyFbPct = _useState110[0],
-    setDlyFbPct = _useState110[1];
-  var _useState111 = useState(8),
+    dlyHpVal = _useState110[0],
+    setDlyHpVal = _useState110[1];
+  var _useState111 = useState(78),
     _useState112 = _slicedToArray(_useState111, 2),
-    dlyHpVal = _useState112[0],
-    setDlyHpVal = _useState112[1];
-  var _useState113 = useState(78),
-    _useState114 = _slicedToArray(_useState113, 2),
-    dlyLpVal = _useState114[0],
-    setDlyLpVal = _useState114[1];
+    dlyLpVal = _useState112[0],
+    setDlyLpVal = _useState112[1];
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  var _useState115 = useState(50),
+  var _useState113 = useState(50),
+    _useState114 = _slicedToArray(_useState113, 2),
+    rvSize = _useState114[0],
+    setRvSize = _useState114[1]; // comb feedback (0..100)
+  var _useState115 = useState(40),
     _useState116 = _slicedToArray(_useState115, 2),
-    rvSize = _useState116[0],
-    setRvSize = _useState116[1]; // comb feedback (0..100)
-  var _useState117 = useState(40),
+    rvDamp = _useState116[0],
+    setRvDamp = _useState116[1]; // HF damp shelf cut (0=none, 100=full)
+  var _useState117 = useState(0),
     _useState118 = _slicedToArray(_useState117, 2),
-    rvDamp = _useState118[0],
-    setRvDamp = _useState118[1]; // HF damp shelf cut (0=none, 100=full)
+    rvLfDamp = _useState118[0],
+    setRvLfDamp = _useState118[1]; // LF damp shelf cut (0=none, 100=full)
   var _useState119 = useState(0),
     _useState120 = _slicedToArray(_useState119, 2),
-    rvLfDamp = _useState120[0],
-    setRvLfDamp = _useState120[1]; // LF damp shelf cut (0=none, 100=full)
+    rvPreDelay = _useState120[0],
+    setRvPreDelay = _useState120[1]; // pre-delay (ms, 0..500)
   var _useState121 = useState(0),
     _useState122 = _slicedToArray(_useState121, 2),
-    rvPreDelay = _useState122[0],
-    setRvPreDelay = _useState122[1]; // pre-delay (ms, 0..500)
-  var _useState123 = useState(0),
-    _useState124 = _slicedToArray(_useState123, 2),
-    dlyToRev = _useState124[0],
-    setDlyToRev = _useState124[1]; // delay output → reverb input send
+    dlyToRev = _useState122[0],
+    setDlyToRev = _useState122[1]; // delay output → reverb input send
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState125 = useState(85),
-    _useState126 = _slicedToArray(_useState125, 2),
-    drumLevel = _useState126[0],
-    setDrumLevel = _useState126[1];
+  var _useState123 = useState(85),
+    _useState124 = _slicedToArray(_useState123, 2),
+    drumLevel = _useState124[0],
+    setDrumLevel = _useState124[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
+  var _useState125 = useState({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
+    _useState126 = _slicedToArray(_useState125, 2),
+    trackMute = _useState126[0],
+    setTrackMute = _useState126[1];
   var _useState127 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
     _useState128 = _slicedToArray(_useState127, 2),
-    trackMute = _useState128[0],
-    setTrackMute = _useState128[1];
-  var _useState129 = useState({
-      synth: false,
-      lead: false,
-      drums: false
-    }),
-    _useState130 = _slicedToArray(_useState129, 2),
-    trackSolo = _useState130[0],
-    setTrackSolo = _useState130[1];
+    trackSolo = _useState128[0],
+    setTrackSolo = _useState128[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -2861,68 +2857,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState131 = useState([initDrum]),
+  var _useState129 = useState([initDrum]),
+    _useState130 = _slicedToArray(_useState129, 2),
+    drumPats = _useState130[0],
+    setDrumPats = _useState130[1];
+  var _useState131 = useState(initDrum.id),
     _useState132 = _slicedToArray(_useState131, 2),
-    drumPats = _useState132[0],
-    setDrumPats = _useState132[1];
-  var _useState133 = useState(initDrum.id),
+    activeDrumId = _useState132[0],
+    setActiveDrumId = _useState132[1];
+  var _useState133 = useState([initDrum.id]),
     _useState134 = _slicedToArray(_useState133, 2),
-    activeDrumId = _useState134[0],
-    setActiveDrumId = _useState134[1];
-  var _useState135 = useState([initDrum.id]),
+    drumChain = _useState134[0],
+    setDrumChain = _useState134[1];
+  var _useState135 = useState(null),
     _useState136 = _slicedToArray(_useState135, 2),
-    drumChain = _useState136[0],
-    setDrumChain = _useState136[1];
-  var _useState137 = useState(0),
-    _useState138 = _slicedToArray(_useState137, 2),
-    drumCpos = _useState138[0],
-    setDrumCpos = _useState138[1];
-  var _useState139 = useState(null),
-    _useState140 = _slicedToArray(_useState139, 2),
-    drumClipboard = _useState140[0],
-    setDrumClipboard = _useState140[1];
+    drumClipboard = _useState136[0],
+    setDrumClipboard = _useState136[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState141 = useState([{
+  var _useState137 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState142 = _slicedToArray(_useState141, 2),
-    synthPhrases = _useState142[0],
-    setSynthPhrases = _useState142[1];
-  var _useState143 = useState([{
+    _useState138 = _slicedToArray(_useState137, 2),
+    synthPhrases = _useState138[0],
+    setSynthPhrases = _useState138[1];
+  var _useState139 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState144 = _slicedToArray(_useState143, 2),
-    drumPhrases = _useState144[0],
-    setDrumPhrases = _useState144[1];
-  var _useState145 = useState([{
+    _useState140 = _slicedToArray(_useState139, 2),
+    drumPhrases = _useState140[0],
+    setDrumPhrases = _useState140[1];
+  var _useState141 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
+    _useState142 = _slicedToArray(_useState141, 2),
+    sections = _useState142[0],
+    setSections = _useState142[1];
+  var _useState143 = useState("SP1"),
+    _useState144 = _slicedToArray(_useState143, 2),
+    activeSynthPhraseId = _useState144[0],
+    setActiveSynthPhraseId = _useState144[1];
+  var _useState145 = useState("DP1"),
     _useState146 = _slicedToArray(_useState145, 2),
-    sections = _useState146[0],
-    setSections = _useState146[1];
-  var _useState147 = useState("SP1"),
+    activeDrumPhraseId = _useState146[0],
+    setActiveDrumPhraseId = _useState146[1];
+  var _useState147 = useState("SC1"),
     _useState148 = _slicedToArray(_useState147, 2),
-    activeSynthPhraseId = _useState148[0],
-    setActiveSynthPhraseId = _useState148[1];
-  var _useState149 = useState("DP1"),
+    activeSectionId = _useState148[0],
+    setActiveSectionId = _useState148[1];
+  var _useState149 = useState("patterns"),
     _useState150 = _slicedToArray(_useState149, 2),
-    activeDrumPhraseId = _useState150[0],
-    setActiveDrumPhraseId = _useState150[1];
-  var _useState151 = useState("SC1"),
-    _useState152 = _slicedToArray(_useState151, 2),
-    activeSectionId = _useState152[0],
-    setActiveSectionId = _useState152[1];
-  var _useState153 = useState("patterns"),
-    _useState154 = _slicedToArray(_useState153, 2),
-    seqTab = _useState154[0],
-    setSeqTab = _useState154[1]; // "patterns"|"phrases"|"sections"
+    seqTab = _useState150[0],
+    setSeqTab = _useState150[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -2975,57 +2967,57 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState155 = useState("sequence"),
-    _useState156 = _slicedToArray(_useState155, 2),
-    seqPage = _useState156[0],
-    setSeqPage = _useState156[1]; // "sequence"|"step"
+  var _useState151 = useState("sequence"),
+    _useState152 = _slicedToArray(_useState151, 2),
+    seqPage = _useState152[0],
+    setSeqPage = _useState152[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState157 = useState(false),
-    _useState158 = _slicedToArray(_useState157, 2),
-    songMode = _useState158[0],
-    setSongMode = _useState158[1];
+  var _useState153 = useState(false),
+    _useState154 = _slicedToArray(_useState153, 2),
+    songMode = _useState154[0],
+    setSongMode = _useState154[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState159 = useState(false),
-    _useState160 = _slicedToArray(_useState159, 2),
-    songView = _useState160[0],
-    setSongView = _useState160[1];
+  var _useState155 = useState(false),
+    _useState156 = _slicedToArray(_useState155, 2),
+    songView = _useState156[0],
+    setSongView = _useState156[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
   // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
   // paths migrate via _normalizeSongSyncMode below.
-  var _useState161 = useState("sync"),
-    _useState162 = _slicedToArray(_useState161, 2),
-    songSyncMode = _useState162[0],
-    setSongSyncMode = _useState162[1];
-  var _useState163 = useState({
+  var _useState157 = useState("sync"),
+    _useState158 = _slicedToArray(_useState157, 2),
+    songSyncMode = _useState158[0],
+    setSongSyncMode = _useState158[1];
+  var _useState159 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState164 = _slicedToArray(_useState163, 2),
-    songMatrix = _useState164[0],
-    setSongMatrix = _useState164[1];
-  var _useState165 = useState(-1),
-    _useState166 = _slicedToArray(_useState165, 2),
-    songBar = _useState166[0],
-    setSongBar = _useState166[1]; // sync mode current bar; -1 when stopped
+    _useState160 = _slicedToArray(_useState159, 2),
+    songMatrix = _useState160[0],
+    setSongMatrix = _useState160[1];
+  var _useState161 = useState(-1),
+    _useState162 = _slicedToArray(_useState161, 2),
+    songBar = _useState162[0],
+    setSongBar = _useState162[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState167 = useState({
+  var _useState163 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState168 = _slicedToArray(_useState167, 2),
-    songBarLayer = _useState168[0],
-    setSongBarLayer = _useState168[1];
+    _useState164 = _slicedToArray(_useState163, 2),
+    songBarLayer = _useState164[0],
+    setSongBarLayer = _useState164[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -3078,19 +3070,12 @@ function Tabula() {
   var variedDrumVels = useRef(new Map());
   var drumPillLongPressR = useRef(null);
   var drumChainR = useRef([initDrum.id]);
-  var drumCposR = useRef(0);
   useEffect(function () {
     drumChainR.current = drumChain;
   }, [drumChain]);
-
-  // Note: the legacy `chain` (synth-track) and `drumChain` are vestigial in non-song mode.
-  // The song matrix is the arrangement primitive now. Non-song-non-loop playback below
-  // just plays each layer's active pattern, ignoring chain.
-  useEffect(function () {
-    drumCposR.current = drumCpos;
-  }, [drumCpos]);
+  // Note: the legacy `chain` (synth-track) and `drumChain` are vestigial in
+  // non-song mode. The song matrix is the arrangement primitive now.
   var stepR = useRef(0),
-    cposR = useRef(0),
     tmrR = useRef(null),
     nextNoteR = useRef(0);
   var patsR = useRef(pats),
@@ -3119,7 +3104,8 @@ function Tabula() {
     durJitter: 0
   });
   var variedGrids = useRef(new Map());
-  var prevFreqByRowR = useRef({});
+  // (prevFreqByRowR and cposR were used by the legacy unified scheduler;
+  //  per-layer scheduling tracks last freq via layerLastFreqR instead.)
   // Per-layer glide tracking. Each layer's prev played freq + glide flag are
   // independent so glide works correctly when layers play at different rates
   // (per-pat speedMult). Synth-track's old single-layer refs were merged in.
@@ -3348,7 +3334,7 @@ function Tabula() {
       glideJitter: vGlideJitter,
       durJitter: vDurJitter
     };
-  }, [vDropRate, vShiftRate, vShiftRange, vPitchRate, vPitchRange, vGhostRate, vVelJitter, vFltJitter, vDlyJitter, vRhyJitter, vOctJitter, vGlideJitter, vDurJitter, vGlideJitter, vDurJitter]);
+  }, [vDropRate, vShiftRate, vShiftRange, vPitchRate, vPitchRange, vGhostRate, vVelJitter, vFltJitter, vDlyJitter, vRhyJitter, vOctJitter, vGlideJitter, vDurJitter]);
   // Per-layer params snapshot for the scheduler. Bell.play() now takes the layerP per call.
   var layerParamsR = useRef(layerParams);
   useEffect(function () {
@@ -3484,6 +3470,8 @@ function Tabula() {
       drumLevel: drumLevel,
       trackMute: _objectSpread({}, trackMute),
       trackSolo: _objectSpread({}, trackSolo),
+      varyMode: varyMode,
+      loopMode: loopMode,
       vDropRate: vDropRate,
       vShiftRate: vShiftRate,
       vShiftRange: vShiftRange,
@@ -3584,6 +3572,8 @@ function Tabula() {
       lead: false,
       drums: false
     });
+    setVaryMode(s.varyMode != null ? s.varyMode : SESSION_DEFAULTS.varyMode);
+    setLoopMode(s.loopMode != null ? s.loopMode : SESSION_DEFAULTS.loopMode);
   };
   // Stable function references — read live state via the refs above
   var pushHistoryR = useRef(function () {});
@@ -4133,8 +4123,6 @@ function Tabula() {
     setVDurJitter(0);
     // Transient scheduler/UI state — clear so the next play starts fresh.
     stepR.current = 0;
-    cposR.current = 0;
-    if (prevFreqByRowR) prevFreqByRowR.current = {};
     if (layerLastFreqR) layerLastFreqR.current = {
       synth: null,
       lead: null
@@ -4218,14 +4206,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState169 = useState(null),
-    _useState170 = _slicedToArray(_useState169, 2),
-    gridPx = _useState170[0],
-    setGridPx = _useState170[1];
-  var _useState171 = useState(null),
-    _useState172 = _slicedToArray(_useState171, 2),
-    editOuter = _useState172[0],
-    setEditOuter = _useState172[1];
+  var _useState165 = useState(null),
+    _useState166 = _slicedToArray(_useState165, 2),
+    gridPx = _useState166[0],
+    setGridPx = _useState166[1];
+  var _useState167 = useState(null),
+    _useState168 = _slicedToArray(_useState167, 2),
+    editOuter = _useState168[0],
+    setEditOuter = _useState168[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4317,7 +4305,8 @@ function Tabula() {
     setScale(s.scale != null ? s.scale : SESSION_DEFAULTS.scale);
     setTranspose(s.transpose != null ? s.transpose : SESSION_DEFAULTS.transpose);
     setSwing(s.swing != null ? s.swing : SESSION_DEFAULTS.swing);
-    if (s.gridLen != null) setGridLen(s.gridLen);
+    // s.gridLen was per-pattern in legacy shares; new shares carry it on
+    // each pat directly. The global setGridLen doesn't exist any more.
     setSpeedMult(s.speedMult != null ? s.speedMult : SESSION_DEFAULTS.speedMult);
     if (s.activeId) setActiveId(s.activeId);
     if (s.layerParams) setLayerParams(fillLayerParams(s.layerParams));else if (s.waveform != null || s.attack != null) {
@@ -4856,299 +4845,7 @@ function Tabula() {
   }, []);
 
   // ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
-  /* OLD_SCHEDULER_BODY_BEGIN
-        // ── Song-mode pat resolution ─────────────────────────────────────────
-      // When songMode is on, all four layers advance together through songMatrix.
-      // Bar duration = min(gridLen) of populated pats this bar, default 16.
-      // Loops between firstPopulatedBar..lastPopulatedBar (option B).
-      // Empty matrix → falls back to looping the active synth pattern at bar 0.
-      const inSong = songModeR.current && !loopR.current;
-      let songSyn=null, songLead=null, songDrum=null;
-      let songBarLen=16, songFirstBar=0, songLastBar=0, songCurBar=0;
-      if(inSong){
-        const sm=songMatrixR.current;
-        let firstBar=-1, lastBar=-1;
-        for(let i=0;i<64;i++){
-          if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){
-            if(firstBar===-1)firstBar=i;
-            lastBar=i;
-          }
-        }
-        const empty=firstBar===-1;
-        if(empty){firstBar=0;lastBar=0;}
-        let bar=songBarR.current;
-        if(bar<firstBar||bar>lastBar)bar=firstBar;
-        songFirstBar=firstBar; songLastBar=lastBar; songCurBar=bar;
-        const sId=sm.synth[bar], lId=sm.lead[bar], dId=sm.drums[bar];
-        const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
-        const leadData  = activeLayerR.current==="lead"  ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.lead;
-        const sIdEff = sId!=null ? sId : (empty ? (synthData?.activeId ?? null) : null);
-        songSyn  = sIdEff!=null && synthData ? synthData.pats.find(x=>x.id===sIdEff) : null;
-        songLead = lId!=null && leadData ? leadData.pats.find(x=>x.id===lId) : null;
-        songDrum = dId!=null ? drumPatsR.current.find(x=>x.id===dId) : null;
-        const lens=[];
-        if(songSyn) lens.push(songSyn.gridLen??16);
-        if(songLead) lens.push(songLead.gridLen??16);
-        if(songDrum) lens.push(songDrum.gridLen??16);
-        songBarLen = lens.length ? Math.min(...lens) : 16;
-        if(songCurBar!==songBarR.current){
-          songBarR.current=songCurBar;setSongBar(songCurBar);
-          // Sync mode: all four cursors equal songBar
-          setSongBarLayer({synth:songCurBar,lead:songCurBar,drums:songCurBar});
-        }
-      }
-       // ── Synth-track pat resolution ──────────────────────────────────────
-      // Three modes:
-      //  1. Song mode: matrix dictates per-bar pattern (songSyn already resolved above)
-      //  2. Loop mode: solo the ACTIVE layer's active pat through the main path (when the
-      //     active layer is bass/lead, that voice plays through the main path with synth's
-      //     params — quirky but matches "solo this layer" intent for editing)
-      //  3. Default: main track plays synth layer's active pattern
-      let pid, p, activeLen;
-      if(inSong){
-        p = songSyn; pid = p?p.id:-1; activeLen = songBarLen;
-      } else if(loopR.current){
-        pid = activeIdR.current;
-        p = patsR.current.find(x=>x.id===pid);
-        activeLen = p?(p.gridLen??16):16;
-      } else {
-        // Default pattern mode: synth voice plays from synth, but the master loop
-        // length follows the ACTIVE LAYER's pat. Otherwise a 12-step bass gets
-        // truncated by synth's 16-step default and the bass loops 12-4-12-4.
-        const synthData = activeLayerR.current==="synth" ? {pats:patsR.current,activeId:activeIdR.current} : layerStoreR.current.synth;
-        pid = synthData?.activeId ?? -1;
-        p = synthData ? synthData.pats.find(x=>x.id===pid) : null;
-        let aPat;
-        if(activeLayerR.current==="drums") aPat = drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
-        else if(activeLayerR.current==="synth") aPat = p;
-        else aPat = patsR.current.find(x=>x.id===activeIdR.current); // lead/bass: live pats
-        activeLen = aPat?(aPat.gridLen??16):16;
-      }
-      // Run the scheduler unconditionally — lead/bass/drums may have content even if synth pat is missing.
-      {
-        const cp=cposR.current,s=s_;
-        if(s===0&&varyModeR.current&&p){
-          let vg=genVariation(p.grid,varyParamsR.current);
-          variedGrids.current.set(pid,vg);
-          // Self-record: always vary the original source pattern, not the current playing one
-          if(recModeR.current&&patsR.current.length<8){
-            const vp=varyParamsR.current;
-            const src=patsR.current.find(x=>x.id===recSourceIdR.current)||p;
-            let rvg=genVariation(src.grid,vp);
-            const newParams=(src.params||defaultStepParams()).map(sp=>jitterStepParam(sp,vp));
-            const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:newParams,gridLen:src.gridLen??16};
-            setPats(ps=>{
-              if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}
-              return [...ps,newPat];
-            });
-            setChain(c=>[...c,newPat.id]);
-          }
-        }
-        const grid=varyModeR.current?(variedGrids.current.get(pid)||(p&&p.grid)):(p&&p.grid);
-        const durs=p&&p.durs;
-        const freqs=SCALES[scaleR.current].freqs;
-        const ratio=stR(transpR.current);
-        const rawSp=(p&&p.params&&p.params[s])?p.params[s]:null;
-        const sp=varyModeR.current&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
-         const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
-        const ratch = rhy;
-        const subDur = stepDur / ratch;
-         if(grid)for(let r=0;r<ROWS;r++){
-          if(!grid[r][s])continue;
-          // Per-row duration. durs[r][s] = number of step cells this note covers.
-          const dur = (durs&&durs[r]&&durs[r][s])?Math.max(1,durs[r][s]):1;
-          const noteDur = stepDur * dur;
-          // In loop mode the synth-track plays the active layer's grid; route it
-          // through THAT layer's params so the user hears bass-as-bass etc. In
-          // song or default mode the synth-track is synth's, so use synth params.
-          const synthLP = (loopR.current && SYNTH_LAYERS.indexOf(activeLayerR.current)>=0)
-            ? layerParamsR.current[activeLayerR.current]
-            : layerParamsR.current.synth;
-          const f=freqs[r]*ratio;
-          // For glide tracking we need the actual played frequency (Bell will apply
-          // both step and layer octaves; mirror that here).
-          const stepOct=sp?(sp.oct-2):0;
-          const sLayerOct = synthLP.octave||0;
-          const actualF=f*Math.pow(2,stepOct+sLayerOct);
-          const hasGlide=!!(sp&&sp.glide);
-          // Departure glide: glide on step N means slide FROM step N INTO step N+1
-          // So we glide if the PREVIOUS step had glide enabled
-          const prevF=lastGlideEnabledR.current?(lastPlayedFreqR.current??null):null;
-          const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*(p?.speedMult??speedMultR.current):0;
-          lastPlayedFreqR.current=actualF;
-          lastGlideEnabledR.current=hasGlide; // store for next step to read
-          if(ratch>1){
-            for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,synthLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,synthLP);
-          } else {
-            // For tied notes, build the mid-note FLT modulation list — each
-            // subsequent step within the tie contributes a sub-step entry.
-            // Bell.play() schedules cutoff approaches at those times.
-            let mods=null;
-            if(dur>1&&p&&p.params){
-              mods=[];
-              const plen=p.params.length||COLS;
-              for(let i=1;i<dur;i++){
-                const subC=(s+i)%plen;
-                const subRaw=p.params[subC];
-                if(!subRaw)continue;
-                const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
-                mods.push({at:at+i*stepDur,sp:subSp});
-              }
-              if(mods.length===0)mods=null;
-            }
-            bell.current.play(f,at,sp,noteDur,synthLP.dlySend,prevF,glideTime,synthLP,mods);
-          }
-        }
-        // Lead & Bass — play their currently-active pattern through the same Bell.
-        // Loop mode is strict solo of the active layer (the synth-track path above
-        // already covers it through the active layer's params), so skip the
-        // lead/bass loop in loop+non-song mode to avoid octave-doubling artifacts.
-        const playSubLayers = inSong || !loopR.current;
-        if(playSubLayers) for(const layer of ["lead"]){
-          let lp, lLen;
-          if(inSong){
-            lp = songLead; // layer is "lead" only after the bass collapse
-            if(!lp||!lp.grid)continue;
-            lLen = songBarLen;
-          } else {
-            const lData=activeLayerR.current===layer
-              ?{pats:patsR.current,activeId:activeIdR.current}
-              :layerStoreR.current[layer];
-            if(!lData)continue;
-            lp=lData.pats.find(x=>x.id===lData.activeId);
-            if(!lp||!lp.grid)continue;
-            lLen=lp.gridLen??16;
-          }
-          const ls=s%lLen;
-          const lRawSp=(lp.params&&lp.params[ls])?lp.params[ls]:null;
-          const lSp=varyModeR.current&&lRawSp?jitterStepParam(lRawSp,varyParamsR.current):lRawSp;
-          const lRhyRaw=lSp?Math.round(lSp.rhy??1):1;
-          const lRhy=Math.max(1,lRhyRaw);
-          const lSubDur=stepDur/lRhy;
-          for(let r=0;r<ROWS;r++){
-            if(!lp.grid[r][ls])continue;
-            const lDur = (lp.durs&&lp.durs[r]&&lp.durs[r][ls])?Math.max(1,lp.durs[r][ls]):1;
-            const lNoteDur = stepDur * lDur;
-            const layerLP = layerParamsR.current[layer];
-            // Pass unshifted frequency — Bell.play() applies both step octave (from sp.oct)
-            // and layer octave (from layerLP.octave). Layer's dlySend → globalSend arg.
-            const lF=freqs[r]*ratio;
-            // Glide tracking — same pattern as the synth-track path: glide on
-            // step N means slide FROM N INTO N+1, so check the PREVIOUS step's
-            // glide flag. Compares actual played frequencies (oct applied) so
-            // octave changes on the same row trigger glide.
-            const lStepOct=lSp?(lSp.oct-2):0;
-            const lLayerOct=layerLP.octave||0;
-            const lActualF=lF*Math.pow(2,lStepOct+lLayerOct);
-            const lHasGlide=!!(lSp&&lSp.glide);
-            const lPrevF=layerLastGlideR.current[layer]?(layerLastFreqR.current[layer]??null):null;
-            const lGlideTime=lPrevF&&lPrevF!==lActualF?(60/bpmR.current/8)*(lp?.speedMult??speedMultR.current):0;
-            layerLastFreqR.current[layer]=lActualF;
-            layerLastGlideR.current[layer]=lHasGlide;
-            if(lRhy>1){
-              for(let ri=0;ri<lRhy;ri++)bell.current.play(lF,at+ri*lSubDur,lSp,lSubDur*0.9,layerLP.dlySend,ri===0?lPrevF:null,ri===0?lGlideTime:0,layerLP);
-            } else {
-              // Mid-note FLT modulation for tied notes — same shape as the
-              // synth-track path above, sourcing per-sub-step params from this
-              // layer's own pat.
-              let lMods=null;
-              if(lDur>1&&lp&&lp.params){
-                lMods=[];
-                const lplen=lp.params.length||COLS;
-                for(let i=1;i<lDur;i++){
-                  const subC=(ls+i)%lplen;
-                  const subRaw=lp.params[subC];
-                  if(!subRaw)continue;
-                  const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
-                  lMods.push({at:at+i*stepDur,sp:subSp});
-                }
-                if(lMods.length===0)lMods=null;
-              }
-              bell.current.play(lF,at,lSp,lNoteDur,layerLP.dlySend,lPrevF,lGlideTime,layerLP,lMods);
-            }
-          }
-        }
-        // Drum layer — uses drumChain for sequencing (or song matrix in song mode).
-        // In loop mode, drums only play if drums is the active (soloed) layer.
-        const playDrums = inSong || !loopR.current || activeLayerR.current==="drums";
-        if(playDrums && drumEngine.current.ready){
-          let dPat, dLen, ds, dChain=null, dcp=0;
-          if(inSong){
-            dPat = songDrum;
-            if(dPat){ dLen=songBarLen; ds=s%dLen; }
-          } else {
-            dChain=drumChainR.current;
-            dcp=drumCposR.current;
-            const dPatId=dChain.length?dChain[dcp%dChain.length]:activeDrumIdR.current;
-            dPat=drumPatsR.current.find(x=>x.id===dPatId)||drumPatsR.current[0];
-            if(dPat){ dLen=dPat.gridLen??16; ds=s%dLen; }
-          }
-          if(dPat){
-            // Advance drum chain position at loop boundary (skip in song mode)
-            if(!inSong && ds===dLen-1 && dChain && dChain.length>1){
-              const next=(dcp+1)%dChain.length;
-              drumCposR.current=next;setDrumCpos(next);
-            }
-            // Generate drum variation at loop start (step 0)
-            if(ds===0&&varyModeR.current){
-              const vRhythm=(dPat.vRhythm||0)/100;
-              const vVelocity=(dPat.vVelocity||0)/100;
-              // Varied grid: drop hits (rate=vRhythm*0.5) and ghost new ones (rate=vRhythm*0.25)
-              const vGrid=dPat.grid.map(row=>row.map((on,ci)=>{
-                if(ci>=dLen)return false;
-                if(on&&Math.random()<vRhythm*0.45)return false; // drop
-                if(!on&&Math.random()<vRhythm*0.18)return true;  // ghost
-                return on;
-              }));
-              // Varied vel: jitter each step's velocity within ±50% of vVelocity range
-              const vVel=dPat.vel.map(v=>Math.max(1,Math.min(127,
-                Math.round(v+(Math.random()*2-1)*vVelocity*50)
-              )));
-              variedDrumGrids.current.set(dPat.id,vGrid);
-              variedDrumVels.current.set(dPat.id,vVel);
-            }
-            const useGrid=varyModeR.current?(variedDrumGrids.current.get(dPat.id)||dPat.grid):dPat.grid;
-            const useVel=varyModeR.current?(variedDrumVels.current.get(dPat.id)||dPat.vel):dPat.vel;
-            for(let r=0;r<DRUM_ROWS;r++){
-              if(useGrid[r]&&useGrid[r][ds]){
-                const dVel=useVel?.[ds]??100;
-                const dMix=(dPat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key]);
-              }
-            }
-            setDrumStep(ds);
-          }
-        }
-        setStep(s);setCpos(cp);setPlayId(pid);
-        const ns=(s+1)%activeLen;stepR.current=ns;
-        if(ns===0){
-          if(inSong){
-            let nextBar;
-            if(songSyncR.current==="random"){
-              // Random mode: pick a random populated bar from any layer's lane.
-              // Allows the same bar to be picked twice in a row — that's fine,
-              // each pick is independent. Falls back to firstBar on empty matrix.
-              const sm=songMatrixR.current;
-              const candidates=[];
-              for(let i=songFirstBar;i<=songLastBar;i++){
-                if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)candidates.push(i);
-              }
-              nextBar=candidates.length?candidates[Math.floor(Math.random()*candidates.length)]:songFirstBar;
-            } else {
-              // Sync (default): sequential bar advance, wrapping at end.
-              nextBar=songCurBar+1;
-              if(nextBar>songLastBar)nextBar=songFirstBar;
-            }
-            songBarR.current=nextBar;setSongBar(nextBar);
-            // Sync mode: all four cursors track songBar
-            setSongBarLayer({synth:nextBar,lead:nextBar,drums:nextBar});
-          }
-          // Non-song mode: single pat loops on its own — nothing to advance.
-        }
-      }
-      nextNoteR.current+=stepDur;
-    }
-  OLD_SCHEDULER_BODY_END */
+  /* legacy unified sync scheduler — body removed in the per-layer rewrite */
 
   var _startStop = /*#__PURE__*/function () {
     var _ref13 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
@@ -5172,7 +4869,6 @@ function Tabula() {
               lead: -1,
               drums: -1
             });
-            prevFreqByRowR.current = {};
             layerLastFreqR.current = {
               synth: null,
               lead: null
@@ -5269,7 +4965,6 @@ function Tabula() {
               } catch (e) {}
             }
             stepR.current = 0;
-            cposR.current = 0;
             t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
             // song mode also sets each layer's bar to its first populated cell.
             for (_i0 = 0, _arr5 = ["synth", "lead", "drums"]; _i0 < _arr5.length; _i0++) {
@@ -7225,10 +6920,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState173 = useState(false),
-    _useState174 = _slicedToArray(_useState173, 2),
-    bpmDragging = _useState174[0],
-    setBpmDragging = _useState174[1];
+  var _useState169 = useState(false),
+    _useState170 = _slicedToArray(_useState169, 2),
+    bpmDragging = _useState170[0],
+    setBpmDragging = _useState170[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -7257,10 +6952,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState175 = useState(false),
-    _useState176 = _slicedToArray(_useState175, 2),
-    stDragging = _useState176[0],
-    setStDragging = _useState176[1];
+  var _useState171 = useState(false),
+    _useState172 = _slicedToArray(_useState171, 2),
+    stDragging = _useState172[0],
+    setStDragging = _useState172[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -7289,10 +6984,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState177 = useState(false),
-    _useState178 = _slicedToArray(_useState177, 2),
-    swingDragging = _useState178[0],
-    setSwingDragging = _useState178[1];
+  var _useState173 = useState(false),
+    _useState174 = _slicedToArray(_useState173, 2),
+    swingDragging = _useState174[0],
+    setSwingDragging = _useState174[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -8234,8 +7929,13 @@ function Tabula() {
       alignItems: "center"
     }
   }, drumPats.map(function (dp) {
+    var _songMatrix$drums;
     var isA = dp.id === activeDrumId && activeLayer === "drums";
-    var isP = playing && drumCpos >= 0 && drumChain[drumCpos] === dp.id;
+    // "Currently playing" highlight: song mode reads the matrix
+    // at the drum lane's current bar; otherwise the active pat
+    // is the one being fired by the scheduler.
+    var _playingDrumId = songMode ? (_songMatrix$drums = songMatrix.drums) === null || _songMatrix$drums === void 0 ? void 0 : _songMatrix$drums[songBarLayer.drums] : activeDrumId;
+    var isP = playing && _playingDrumId === dp.id;
     var isDragging = patternDrag && patternDrag.patId === dp.id;
     return /*#__PURE__*/React.createElement("div", {
       key: dp.id,
@@ -8359,9 +8059,14 @@ function Tabula() {
         document.addEventListener("pointercancel", _onUp2);
       },
       onContextMenu: function onContextMenu(e) {
+        e.preventDefault();
         e.stopPropagation();
         setActiveDrumId(dp.id);
-        handleDrumPillCtx(e, dp.id);
+        setDrumMenu({
+          id: dp.id,
+          x: e.clientX,
+          y: e.clientY
+        });
       }
     }, isP && /*#__PURE__*/React.createElement("span", {
       style: {
