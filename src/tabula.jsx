@@ -846,6 +846,14 @@ class DrumEngine{
     // Active open-hat gain ref for CH choke. Cleared when CH cuts it or the
     // sample ends naturally. Holds {g, endT}.
     this.activeOH=null;
+    // Persistent per-voice mixer strips. Each entry: {lvlGain, panner,
+    // revSend, dlySend}. Built in init and reused for every hit so that
+    // live slider drags update the AudioParams of in-flight audio instead
+    // of being captured per-hit at scheduling time. Without this the
+    // 100 ms scheduler lookahead would freeze the slider value of each
+    // queued hit and the user would hear their drag as a sequence of
+    // discrete pans across the next few hits.
+    this.voiceStrips={};
   }
   async init(masterNode, revNode, dlyNode){
     if(this.ready)return;
@@ -858,7 +866,42 @@ class DrumEngine{
     this.master=this.masterIn;
     this.revNode=revNode||null;
     this.dlyNode=dlyNode||null;
+    // Build a persistent strip per voice. Voice keys are read off DRUM_VOICES
+    // which is in module scope. lvlGain starts at the mixer default (0.6) so
+    // hits sound right even before any setVoiceMix call comes in.
+    for(const v of DRUM_VOICES){
+      const lvlGain=this.ctx.createGain();lvlGain.gain.value=DRUM_DEFAULT_LEVEL/100;
+      const panner=this.ctx.createStereoPanner?this.ctx.createStereoPanner():null;
+      const revSend=this.ctx.createGain();revSend.gain.value=0;
+      const dlySend=this.ctx.createGain();dlySend.gain.value=0;
+      if(panner){
+        panner.pan.value=0;
+        lvlGain.connect(panner);
+        panner.connect(this.masterIn);
+      } else {
+        lvlGain.connect(this.masterIn);
+      }
+      // Sends tap post-pan when there's a panner so the wet signal inherits
+      // the same stereo placement as the dry.
+      const sendTap=panner||lvlGain;
+      if(this.revNode){sendTap.connect(revSend);revSend.connect(this.revNode);}
+      if(this.dlyNode){sendTap.connect(dlySend);dlySend.connect(this.dlyNode);}
+      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend};
+    }
     this.ready=true;
+  }
+  // Update the persistent strip for a voice. Uses setTargetAtTime with a tight
+  // time constant so live drags fold smoothly into audio without clicks, and
+  // pat-switches in song mode crossfade rather than snap.
+  setVoiceMix(voice,mix){
+    if(!this.ready)return;
+    const strip=this.voiceStrips[voice];if(!strip)return;
+    const t=this.ctx.currentTime;
+    const TAU=0.008;
+    if(mix.level!=null)strip.lvlGain.gain.setTargetAtTime(Math.max(0,Math.min(2,mix.level/100)),t,TAU);
+    if(mix.pan!=null&&strip.panner)strip.panner.pan.setTargetAtTime(Math.max(-1,Math.min(1,mix.pan/100)),t,TAU);
+    if(mix.rvSend!=null)strip.revSend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.rvSend/100)),t,TAU);
+    if(mix.dlySend!=null)strip.dlySend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.dlySend/100)),t,TAU);
   }
   setMasterLevel(pct){
     if(this.ready&&this.masterIn)this.masterIn.gain.setTargetAtTime(Math.max(0,Math.min(150,pct))/100,this.ctx.currentTime,0.02);
@@ -898,30 +941,19 @@ class DrumEngine{
     const s=ctx.createBufferSource();s.buffer=b;return s;
   }
 
-  play(voice,t,vel,level=100,pan=0,sample=null,rvSend=0,dlySend=0){
+  play(voice,t,vel,mix={},sample=null){
     if(!this.ready)return;
     const ctx=this.ctx;
     const v=Math.max(0.001,vel/127);
     // Closed-hat chokes any currently-sounding open hat.
     if(voice==="CH")this.chokeOH(t);
-    // Level + pan routing
-    const lvlGain=ctx.createGain();lvlGain.gain.value=Math.max(0,level/100);
-    const panner=ctx.createStereoPanner?ctx.createStereoPanner():null;
-    // Tap point for FX sends — post-pan so the wet signal inherits the same
-    // stereo placement as the dry. Falls back to lvlGain if no panner.
-    const sendTap=panner||lvlGain;
-    if(panner){panner.pan.value=Math.max(-1,Math.min(1,pan/100));lvlGain.connect(panner);panner.connect(this.master);}
-    else{lvlGain.connect(this.master);}
-    // Per-channel FX sends route into Bell's reverb + delay inputs.
-    if(rvSend>0&&this.revNode){
-      const rg=ctx.createGain();rg.gain.value=Math.max(0,Math.min(100,rvSend))/100;
-      sendTap.connect(rg);rg.connect(this.revNode);
-    }
-    if(dlySend>0&&this.dlyNode){
-      const dg=ctx.createGain();dg.gain.value=Math.max(0,Math.min(100,dlySend))/100;
-      sendTap.connect(dg);dg.connect(this.dlyNode);
-    }
-    const out=lvlGain;
+    // Apply this pat's mix to the voice strip. setTargetAtTime smooths between
+    // the previous and new values so song-mode pat switches and live slider
+    // drags both crossfade rather than snap. All hits go through the persistent
+    // strip; nothing about the mix is baked into the per-hit nodes.
+    this.setVoiceMix(voice,mix);
+    const strip=this.voiceStrips[voice];if(!strip)return;
+    const out=strip.lvlGain;
     // User-recorded sample takes precedence over the synthesized voice.
     if(sample){
       const src=ctx.createBufferSource();src.buffer=sample;
@@ -1550,6 +1582,19 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
+  // Push the active drum pat's mix to the engine whenever it changes. Per-hit
+  // mix application (inside DrumEngine.play) handles song-mode pat switches;
+  // this effect handles live mixer slider drags so even silent voices respond
+  // immediately and so users hear the slider's final value when they release
+  // (no more "movement got recorded into the upcoming hits" feel).
+  useEffect(()=>{
+    if(!drumEngine.current.ready)return;
+    const dPat=drumPats.find(p=>p.id===activeDrumId);
+    const mix=fillDrumMix(dPat?.mix);
+    for(let r=0;r<DRUM_ROWS;r++){
+      drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,mix[r]);
+    }
+  },[drumPats,activeDrumId]);
 
   useEffect(()=>{
     (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
@@ -2145,7 +2190,7 @@ export default function Tabula(){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
         const dMix=(pat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
+        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key]);
       }
     }
   };
@@ -2594,7 +2639,7 @@ export default function Tabula(){
               if(useGrid[r]&&useGrid[r][ds]){
                 const dVel=useVel?.[ds]??100;
                 const dMix=(dPat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key]);
               }
             }
             setDrumStep(ds);

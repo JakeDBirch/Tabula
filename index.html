@@ -1778,12 +1778,20 @@ var DrumEngine = /*#__PURE__*/function () {
     // Active open-hat gain ref for CH choke. Cleared when CH cuts it or the
     // sample ends naturally. Holds {g, endT}.
     this.activeOH = null;
+    // Persistent per-voice mixer strips. Each entry: {lvlGain, panner,
+    // revSend, dlySend}. Built in init and reused for every hit so that
+    // live slider drags update the AudioParams of in-flight audio instead
+    // of being captured per-hit at scheduling time. Without this the
+    // 100 ms scheduler lookahead would freeze the slider value of each
+    // queued hit and the user would hear their drag as a sequence of
+    // discrete pans across the next few hits.
+    this.voiceStrips = {};
   }
   return _createClass(DrumEngine, [{
     key: "init",
     value: function () {
       var _init2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(masterNode, revNode, dlyNode) {
-        var AudioContext;
+        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, sendTap;
         return _regenerator().w(function (_context5) {
           while (1) switch (_context5.n) {
             case 0:
@@ -1803,6 +1811,43 @@ var DrumEngine = /*#__PURE__*/function () {
               this.master = this.masterIn;
               this.revNode = revNode || null;
               this.dlyNode = dlyNode || null;
+              // Build a persistent strip per voice. Voice keys are read off DRUM_VOICES
+              // which is in module scope. lvlGain starts at the mixer default (0.6) so
+              // hits sound right even before any setVoiceMix call comes in.
+              for (_i = 0, _DRUM_VOICES = DRUM_VOICES; _i < _DRUM_VOICES.length; _i++) {
+                v = _DRUM_VOICES[_i];
+                lvlGain = this.ctx.createGain();
+                lvlGain.gain.value = DRUM_DEFAULT_LEVEL / 100;
+                panner = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
+                revSend = this.ctx.createGain();
+                revSend.gain.value = 0;
+                dlySend = this.ctx.createGain();
+                dlySend.gain.value = 0;
+                if (panner) {
+                  panner.pan.value = 0;
+                  lvlGain.connect(panner);
+                  panner.connect(this.masterIn);
+                } else {
+                  lvlGain.connect(this.masterIn);
+                }
+                // Sends tap post-pan when there's a panner so the wet signal inherits
+                // the same stereo placement as the dry.
+                sendTap = panner || lvlGain;
+                if (this.revNode) {
+                  sendTap.connect(revSend);
+                  revSend.connect(this.revNode);
+                }
+                if (this.dlyNode) {
+                  sendTap.connect(dlySend);
+                  dlySend.connect(this.dlyNode);
+                }
+                this.voiceStrips[v.key] = {
+                  lvlGain: lvlGain,
+                  panner: panner,
+                  revSend: revSend,
+                  dlySend: dlySend
+                };
+              }
               this.ready = true;
             case 2:
               return _context5.a(2);
@@ -1813,7 +1858,22 @@ var DrumEngine = /*#__PURE__*/function () {
         return _init2.apply(this, arguments);
       }
       return init;
-    }()
+    }() // Update the persistent strip for a voice. Uses setTargetAtTime with a tight
+    // time constant so live drags fold smoothly into audio without clicks, and
+    // pat-switches in song mode crossfade rather than snap.
+  }, {
+    key: "setVoiceMix",
+    value: function setVoiceMix(voice, mix) {
+      if (!this.ready) return;
+      var strip = this.voiceStrips[voice];
+      if (!strip) return;
+      var t = this.ctx.currentTime;
+      var TAU = 0.008;
+      if (mix.level != null) strip.lvlGain.gain.setTargetAtTime(Math.max(0, Math.min(2, mix.level / 100)), t, TAU);
+      if (mix.pan != null && strip.panner) strip.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, mix.pan / 100)), t, TAU);
+      if (mix.rvSend != null) strip.revSend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.rvSend / 100)), t, TAU);
+      if (mix.dlySend != null) strip.dlySend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.dlySend / 100)), t, TAU);
+    }
   }, {
     key: "setMasterLevel",
     value: function setMasterLevel(pct) {
@@ -1898,44 +1958,21 @@ var DrumEngine = /*#__PURE__*/function () {
     key: "play",
     value: function play(voice, t, vel) {
       var _this3 = this;
-      var level = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : 100;
-      var pan = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : 0;
-      var sample = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : null;
-      var rvSend = arguments.length > 6 && arguments[6] !== undefined ? arguments[6] : 0;
-      var dlySend = arguments.length > 7 && arguments[7] !== undefined ? arguments[7] : 0;
+      var mix = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
+      var sample = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : null;
       if (!this.ready) return;
       var ctx = this.ctx;
       var v = Math.max(0.001, vel / 127);
       // Closed-hat chokes any currently-sounding open hat.
       if (voice === "CH") this.chokeOH(t);
-      // Level + pan routing
-      var lvlGain = ctx.createGain();
-      lvlGain.gain.value = Math.max(0, level / 100);
-      var panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-      // Tap point for FX sends — post-pan so the wet signal inherits the same
-      // stereo placement as the dry. Falls back to lvlGain if no panner.
-      var sendTap = panner || lvlGain;
-      if (panner) {
-        panner.pan.value = Math.max(-1, Math.min(1, pan / 100));
-        lvlGain.connect(panner);
-        panner.connect(this.master);
-      } else {
-        lvlGain.connect(this.master);
-      }
-      // Per-channel FX sends route into Bell's reverb + delay inputs.
-      if (rvSend > 0 && this.revNode) {
-        var rg = ctx.createGain();
-        rg.gain.value = Math.max(0, Math.min(100, rvSend)) / 100;
-        sendTap.connect(rg);
-        rg.connect(this.revNode);
-      }
-      if (dlySend > 0 && this.dlyNode) {
-        var dg = ctx.createGain();
-        dg.gain.value = Math.max(0, Math.min(100, dlySend)) / 100;
-        sendTap.connect(dg);
-        dg.connect(this.dlyNode);
-      }
-      var out = lvlGain;
+      // Apply this pat's mix to the voice strip. setTargetAtTime smooths between
+      // the previous and new values so song-mode pat switches and live slider
+      // drags both crossfade rather than snap. All hits go through the persistent
+      // strip; nothing about the mix is baked into the per-hit nodes.
+      this.setVoiceMix(voice, mix);
+      var strip = this.voiceStrips[voice];
+      if (!strip) return;
+      var out = strip.lvlGain;
       // User-recorded sample takes precedence over the synthesized voice.
       if (sample) {
         var src = ctx.createBufferSource();
@@ -3202,6 +3239,21 @@ function Tabula() {
   useEffect(function () {
     drumEngine.current.setMasterLevel && drumEngine.current.setMasterLevel(drumLevel);
   }, [drumLevel]);
+  // Push the active drum pat's mix to the engine whenever it changes. Per-hit
+  // mix application (inside DrumEngine.play) handles song-mode pat switches;
+  // this effect handles live mixer slider drags so even silent voices respond
+  // immediately and so users hear the slider's final value when they release
+  // (no more "movement got recorded into the upcoming hits" feel).
+  useEffect(function () {
+    if (!drumEngine.current.ready) return;
+    var dPat = drumPats.find(function (p) {
+      return p.id === activeDrumId;
+    });
+    var mix = fillDrumMix(dPat === null || dPat === void 0 ? void 0 : dPat.mix);
+    for (var r = 0; r < DRUM_ROWS; r++) {
+      drumEngine.current.setVoiceMix(DRUM_VOICES[r].key, mix[r]);
+    }
+  }, [drumPats, activeDrumId]);
   useEffect(function () {
     _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7() {
       var v;
@@ -3321,8 +3373,8 @@ function Tabula() {
     };
     if (s.layerStore) {
       // Restore non-active layers to the store
-      for (var _i = 0, _SYNTH_LAYERS = SYNTH_LAYERS; _i < _SYNTH_LAYERS.length; _i++) {
-        var layer = _SYNTH_LAYERS[_i];
+      for (var _i2 = 0, _SYNTH_LAYERS = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS.length; _i2++) {
+        var layer = _SYNTH_LAYERS[_i2];
         if (s.layerStore[layer] && layer !== (s.activeLayer || activeLayer)) {
           layerStoreR.current[layer] = JSON.parse(JSON.stringify(s.layerStore[layer]));
         }
@@ -3615,8 +3667,8 @@ function Tabula() {
       }
     };
     if (s.layerStore) {
-      for (var _i2 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS2.length; _i2++) {
-        var layer = _SYNTH_LAYERS2[_i2];
+      for (var _i3 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i3 < _SYNTH_LAYERS2.length; _i3++) {
+        var layer = _SYNTH_LAYERS2[_i3];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
           if (ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
@@ -3896,8 +3948,8 @@ function Tabula() {
     if (variedDrumGrids && variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
     if (variedDrumVels && variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
     if (freeR && freeR.current) {
-      for (var _i3 = 0, _arr = ["synth", "lead", "drums"]; _i3 < _arr.length; _i3++) {
-        var l = _arr[_i3];
+      for (var _i4 = 0, _arr = ["synth", "lead", "drums"]; _i4 < _arr.length; _i4++) {
+        var l = _arr[_i4];
         if (freeR.current[l]) freeR.current[l] = {
           step: 0,
           nextAt: 0,
@@ -4295,7 +4347,7 @@ function Tabula() {
           rvSend: 0,
           dlySend: 0
         };
-        drumEngine.current.play(DRUM_VOICES[r].key, at, dVel, dMix.level, dMix.pan, voiceSamplesR.current[DRUM_VOICES[r].key], dMix.rvSend || 0, dMix.dlySend || 0);
+        drumEngine.current.play(DRUM_VOICES[r].key, at, dVel, dMix, voiceSamplesR.current[DRUM_VOICES[r].key]);
       }
     }
   };
@@ -4379,14 +4431,14 @@ function Tabula() {
     var ranges = null;
     if (isFree) {
       ranges = {};
-      for (var _i4 = 0, _arr2 = ["synth", "lead", "drums"]; _i4 < _arr2.length; _i4++) {
-        var layer = _arr2[_i4];
+      for (var _i5 = 0, _arr2 = ["synth", "lead", "drums"]; _i5 < _arr2.length; _i5++) {
+        var layer = _arr2[_i5];
         var first = -1,
           last = -1;
-        for (var _i5 = 0; _i5 < 64; _i5++) {
-          if (sm[layer][_i5] != null) {
-            if (first === -1) first = _i5;
-            last = _i5;
+        for (var _i6 = 0; _i6 < 64; _i6++) {
+          if (sm[layer][_i6] != null) {
+            if (first === -1) first = _i6;
+            last = _i6;
           }
         }
         ranges[layer] = {
@@ -4401,8 +4453,8 @@ function Tabula() {
     // freeR.current[layer] = {step, nextAt, bar} per layer.
     var cursorChanged = false;
     var newCursor = _objectSpread({}, songBarLayer);
-    for (var _i6 = 0, _arr3 = ["synth", "lead", "drums"]; _i6 < _arr3.length; _i6++) {
-      var _layer = _arr3[_i6];
+    for (var _i7 = 0, _arr3 = ["synth", "lead", "drums"]; _i7 < _arr3.length; _i7++) {
+      var _layer = _arr3[_i7];
       var lf = freeR.current[_layer];
       // Free mode: skip silent layers, init bar within range.
       if (isFree) {
@@ -4533,8 +4585,8 @@ function Tabula() {
         var nextBar = void 0;
         if (isRandom) {
           var candidates = [];
-          for (var _i7 = songFirstBar; _i7 <= songLastBar; _i7++) {
-            if (sm.synth[_i7] != null || sm.lead[_i7] != null || sm.drums[_i7] != null) candidates.push(_i7);
+          for (var _i8 = songFirstBar; _i8 <= songLastBar; _i8++) {
+            if (sm.synth[_i8] != null || sm.lead[_i8] != null || sm.drums[_i8] != null) candidates.push(_i8);
           }
           nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
         } else {
@@ -4551,8 +4603,8 @@ function Tabula() {
           drums: nextBar
         });
         // Reset per-layer step index so each layer starts new bar from step 0.
-        for (var _i8 = 0, _arr4 = ["synth", "lead", "drums"]; _i8 < _arr4.length; _i8++) {
-          var l = _arr4[_i8];
+        for (var _i9 = 0, _arr4 = ["synth", "lead", "drums"]; _i9 < _arr4.length; _i9++) {
+          var l = _arr4[_i9];
           freeR.current[l].step = 0;
           // Realign nextAt to bar boundary so layers re-sync after bar advance.
           freeR.current[l].nextAt = nextNoteR.current + absStepDur;
@@ -4821,7 +4873,7 @@ function Tabula() {
               if(useGrid[r]&&useGrid[r][ds]){
                 const dVel=useVel?.[ds]??100;
                 const dMix=(dPat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix.level,dMix.pan,voiceSamplesR.current[DRUM_VOICES[r].key],dMix.rvSend||0,dMix.dlySend||0);
+                drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key]);
               }
             }
             setDrumStep(ds);
@@ -4860,7 +4912,7 @@ function Tabula() {
 
   var _startStop = /*#__PURE__*/function () {
     var _ref13 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, t0, _i9, _arr5, layer, sm, layerFirst, _i0, _arr6, _layer2, f, i, firstBar, _i1, _t4;
+      var dlyT, t0, _i0, _arr5, layer, sm, layerFirst, _i1, _arr6, _layer2, f, i, firstBar, _i10, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -4980,8 +5032,8 @@ function Tabula() {
             cposR.current = 0;
             t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
             // song mode also sets each layer's bar to its first populated cell.
-            for (_i9 = 0, _arr5 = ["synth", "lead", "drums"]; _i9 < _arr5.length; _i9++) {
-              layer = _arr5[_i9];
+            for (_i0 = 0, _arr5 = ["synth", "lead", "drums"]; _i0 < _arr5.length; _i0++) {
+              layer = _arr5[_i0];
               freeR.current[layer] = {
                 step: 0,
                 nextAt: t0,
@@ -4994,13 +5046,13 @@ function Tabula() {
             }
             sm = songMatrix;
             layerFirst = {};
-            _i0 = 0, _arr6 = ["synth", "lead", "drums"];
+            _i1 = 0, _arr6 = ["synth", "lead", "drums"];
           case 11:
-            if (!(_i0 < _arr6.length)) {
+            if (!(_i1 < _arr6.length)) {
               _context9.n = 16;
               break;
             }
-            _layer2 = _arr6[_i0];
+            _layer2 = _arr6[_i1];
             f = -1;
             i = 0;
           case 12:
@@ -5022,25 +5074,25 @@ function Tabula() {
             layerFirst[_layer2] = f === -1 ? 0 : f;
             freeR.current[_layer2].bar = layerFirst[_layer2];
           case 15:
-            _i0++;
+            _i1++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i1 = 0;
+            _i10 = 0;
           case 17:
-            if (!(_i1 < 64)) {
+            if (!(_i10 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i1] != null || sm.lead[_i1] != null || sm.drums[_i1] != null)) {
+            if (!(sm.synth[_i10] != null || sm.lead[_i10] != null || sm.drums[_i10] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i1;
+            firstBar = _i10;
             return _context9.a(3, 19);
           case 18:
-            _i1++;
+            _i10++;
             _context9.n = 17;
             break;
           case 19:
