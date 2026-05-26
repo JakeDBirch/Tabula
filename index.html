@@ -297,12 +297,14 @@ var mkDrumPat = function mkDrumPat(name) {
     speedMult: 1
   };
 };
+// Default drum voice level — sits at 75% so users have headroom to boost
+// individual voices instead of only being able to attenuate from a ceiling.
 var defaultDrumMix = function defaultDrumMix() {
   return Array.from({
     length: DRUM_ROWS
   }, function () {
     return {
-      level: 100,
+      level: 75,
       pan: 0
     };
   });
@@ -1071,11 +1073,15 @@ var Bell = /*#__PURE__*/function () {
                 var cd = _this.ctx.createDelay(1);
                 cd.delayTime.value = ct;
                 var cfb = _this.ctx.createGain();
-                cfb.gain.value = 0.84;
+                cfb.gain.value = 0.78;
+                // Q kept very low — a biquad lowpass with appreciable Q places a
+                // resonant peak at the cutoff frequency. Inside a feedback loop
+                // that peak accumulates and sounds like a ringing tone (the user's
+                // "runaway feedback" complaint). 0.05 ≈ flat rolloff, no peak.
                 var clp = _this.ctx.createBiquadFilter();
                 clp.type = "lowpass";
                 clp.frequency.value = 4500;
-                clp.Q.value = 0.5;
+                clp.Q.value = 0.05;
                 // Loop: rvIn → cd → clp → cfb → cd  (recirculation)
                 rvIn.connect(cd);
                 cd.connect(clp);
@@ -1150,10 +1156,10 @@ var Bell = /*#__PURE__*/function () {
     key: "setRvSize",
     value: function setRvSize(pct) {
       if (!this.ready || !this.rvCombs) return;
-      // Cap below 0.9 — at the old 0.99 with continuous input the combs would
-      // accumulate energy faster than the damping LP removed it, producing a
-      // runaway feedback loop on busy patterns.
-      var fb = 0.45 + Math.max(0, Math.min(100, pct)) / 100 * 0.4; // 0.45..0.85
+      // Capped well below unity — even with the LP damping, busy patterns
+      // were producing the user's "runaway" tail at higher values. The new
+      // 0.40..0.78 range gives a long-but-stable musical decay.
+      var fb = 0.40 + Math.max(0, Math.min(100, pct)) / 100 * 0.38; // 0.40..0.78
       var _iterator2 = _createForOfIteratorHelper(this.rvCombs),
         _step2;
       try {
@@ -3181,9 +3187,22 @@ function Tabula() {
     setDrumPats([dp0]);
     setActiveDrumId(dp0.id);
     setDrumChain([dp0.id]);
+    // Seed the lead store with a fresh empty pat so switching to MONO after
+    // NEW doesn't carry over POLY's live pats (which would look like stale
+    // "orphaned" pills on the mono layer).
+    var _newLeadPat = mkPat(symPat(0));
     layerStoreR.current = {
       synth: null,
-      lead: null
+      lead: {
+        pats: [_newLeadPat],
+        activeId: _newLeadPat.id,
+        phrases: [{
+          id: "LP1",
+          name: symPhr(0),
+          chain: [_newLeadPat.id]
+        }],
+        activePhraseId: "LP1"
+      }
     };
     setActiveLayer("synth");
     setLoopMode(false);
@@ -3621,25 +3640,60 @@ function Tabula() {
     }
   };
   var scheduler = useCallback(function () {
-    var _masterPat$speedMult;
+    var _masterPat$speedMult, _masterPat;
     if (!bell.current.ready) return;
     var ctx = bell.current.ctx;
     var LOOKAHEAD = 0.1; // seconds ahead to schedule
-    // Master stepDur is now per-pattern: it follows the ACTIVE LAYER's pat's
-    // speedMult. (Free mode below recomputes per-layer per-pat.)
-    var masterPat = activeLayerR.current === "drums" ? drumPatsR.current.find(function (x) {
-      return x.id === activeDrumIdR.current;
-    }) : patsR.current.find(function (x) {
-      return x.id === activeIdR.current;
-    });
-    var stepDur = 60 / bpmR.current / 4 * ((_masterPat$speedMult = masterPat === null || masterPat === void 0 ? void 0 : masterPat.speedMult) !== null && _masterPat$speedMult !== void 0 ? _masterPat$speedMult : speedMultR.current);
+    // Master stepDur is per-pattern. In song mode it follows the song's
+    // currently-playing pat (poly preferred, then mono, then drums) so the
+    // tempo doesn't shift when the user switches to the drum layer for editing.
+    // In pattern mode it follows the active layer's pat. (Free mode below
+    // recomputes per-layer per-pat anyway.)
+    var masterPat;
+    if (songModeR.current && !loopR.current) {
+      var sm = songMatrixR.current;
+      var bar = Math.max(0, songBarR.current || 0);
+      var sId = sm.synth[bar],
+        lId = sm.lead[bar],
+        dId = sm.drums[bar];
+      if (sId != null) {
+        var _data$pats;
+        var data = activeLayerR.current === "synth" ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current.synth;
+        masterPat = data === null || data === void 0 || (_data$pats = data.pats) === null || _data$pats === void 0 ? void 0 : _data$pats.find(function (x) {
+          return x.id === sId;
+        });
+      } else if (lId != null) {
+        var _data$pats2;
+        var _data = activeLayerR.current === "lead" ? {
+          pats: patsR.current,
+          activeId: activeIdR.current
+        } : layerStoreR.current.lead;
+        masterPat = _data === null || _data === void 0 || (_data$pats2 = _data.pats) === null || _data$pats2 === void 0 ? void 0 : _data$pats2.find(function (x) {
+          return x.id === lId;
+        });
+      } else if (dId != null) {
+        masterPat = drumPatsR.current.find(function (x) {
+          return x.id === dId;
+        });
+      }
+    } else {
+      masterPat = activeLayerR.current === "drums" ? drumPatsR.current.find(function (x) {
+        return x.id === activeDrumIdR.current;
+      }) : patsR.current.find(function (x) {
+        return x.id === activeIdR.current;
+      });
+    }
+    var stepDur = 60 / bpmR.current / 4 * ((_masterPat$speedMult = (_masterPat = masterPat) === null || _masterPat === void 0 ? void 0 : _masterPat.speedMult) !== null && _masterPat$speedMult !== void 0 ? _masterPat$speedMult : speedMultR.current);
 
     // ── Free song mode: each layer has its own (step, nextAt, bar) timeline ──────
     // Layers all start aligned at t=0 but drift apart by gridLen differences. This
     // path is taken only in song mode + free sync mode; otherwise falls through to
     // the unified sync scheduler below.
     if (songModeR.current && !loopR.current && songSyncR.current === "free") {
-      var sm = songMatrixR.current;
+      var _sm = songMatrixR.current;
       // Per-layer firstBar/lastBar (loops within that layer's populated range)
       var ranges = {};
       for (var _i4 = 0, _arr2 = ["synth", "lead", "drums"]; _i4 < _arr2.length; _i4++) {
@@ -3647,7 +3701,7 @@ function Tabula() {
         var first = -1,
           last = -1;
         for (var i = 0; i < 64; i++) {
-          if (sm[layer][i] != null) {
+          if (_sm[layer][i] != null) {
             if (first === -1) first = i;
             last = i;
           }
@@ -3661,7 +3715,7 @@ function Tabula() {
       var allEmpty = ranges.synth.empty && ranges.lead.empty && ranges.drums.empty;
       // Helper: resolve pat for a given layer at a given bar
       var resolvePat = function resolvePat(layer, bar) {
-        var id = sm[layer][bar];
+        var id = _sm[layer][bar];
         if (layer === "drums") {
           return id != null ? drumPatsR.current.find(function (x) {
             return x.id === id;
@@ -3745,11 +3799,11 @@ function Tabula() {
         songCurBar = 0;
       if (inSong) {
         var _synthData$activeId, _songSyn$gridLen, _songLead$gridLen, _songDrum$gridLen;
-        var _sm = songMatrixR.current;
+        var _sm2 = songMatrixR.current;
         var firstBar = -1,
           lastBar = -1;
         for (var _i6 = 0; _i6 < 64; _i6++) {
-          if (_sm.synth[_i6] != null || _sm.lead[_i6] != null || _sm.drums[_i6] != null) {
+          if (_sm2.synth[_i6] != null || _sm2.lead[_i6] != null || _sm2.drums[_i6] != null) {
             if (firstBar === -1) firstBar = _i6;
             lastBar = _i6;
           }
@@ -3759,14 +3813,14 @@ function Tabula() {
           firstBar = 0;
           lastBar = 0;
         }
-        var bar = songBarR.current;
-        if (bar < firstBar || bar > lastBar) bar = firstBar;
+        var _bar = songBarR.current;
+        if (_bar < firstBar || _bar > lastBar) _bar = firstBar;
         songFirstBar = firstBar;
         songLastBar = lastBar;
-        songCurBar = bar;
-        var sId = _sm.synth[bar],
-          lId = _sm.lead[bar],
-          dId = _sm.drums[bar];
+        songCurBar = _bar;
+        var _sId = _sm2.synth[_bar],
+          _lId = _sm2.lead[_bar],
+          _dId = _sm2.drums[_bar];
         var synthData = activeLayerR.current === "synth" ? {
           pats: patsR.current,
           activeId: activeIdR.current
@@ -3775,15 +3829,15 @@ function Tabula() {
           pats: patsR.current,
           activeId: activeIdR.current
         } : layerStoreR.current.lead;
-        var sIdEff = sId != null ? sId : empty ? (_synthData$activeId = synthData === null || synthData === void 0 ? void 0 : synthData.activeId) !== null && _synthData$activeId !== void 0 ? _synthData$activeId : null : null;
+        var sIdEff = _sId != null ? _sId : empty ? (_synthData$activeId = synthData === null || synthData === void 0 ? void 0 : synthData.activeId) !== null && _synthData$activeId !== void 0 ? _synthData$activeId : null : null;
         songSyn = sIdEff != null && synthData ? synthData.pats.find(function (x) {
           return x.id === sIdEff;
         }) : null;
-        songLead = lId != null && leadData ? leadData.pats.find(function (x) {
-          return x.id === lId;
+        songLead = _lId != null && leadData ? leadData.pats.find(function (x) {
+          return x.id === _lId;
         }) : null;
-        songDrum = dId != null ? drumPatsR.current.find(function (x) {
-          return x.id === dId;
+        songDrum = _dId != null ? drumPatsR.current.find(function (x) {
+          return x.id === _dId;
         }) : null;
         var lens = [];
         if (songSyn) lens.push((_songSyn$gridLen = songSyn.gridLen) !== null && _songSyn$gridLen !== void 0 ? _songSyn$gridLen : 16);
@@ -4110,10 +4164,10 @@ function Tabula() {
               // Random mode: pick a random populated bar from any layer's lane.
               // Allows the same bar to be picked twice in a row — that's fine,
               // each pick is independent. Falls back to firstBar on empty matrix.
-              var _sm2 = songMatrixR.current;
+              var _sm3 = songMatrixR.current;
               var candidates = [];
               for (var _i0 = songFirstBar; _i0 <= songLastBar; _i0++) {
-                if (_sm2.synth[_i0] != null || _sm2.lead[_i0] != null || _sm2.drums[_i0] != null) candidates.push(_i0);
+                if (_sm3.synth[_i0] != null || _sm3.lead[_i0] != null || _sm3.drums[_i0] != null) candidates.push(_i0);
               }
               nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
             } else {
@@ -7926,18 +7980,23 @@ function Tabula() {
       }, /*#__PURE__*/React.createElement("div", {
         style: {
           position: "absolute",
-          left: 6,
-          top: "50%",
-          transform: "translateY(-50%)",
-          fontSize: 9,
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-around",
+          pointerEvents: "none",
+          zIndex: 2,
+          fontSize: 8,
           fontWeight: 700,
           color: voice.color,
-          opacity: 0.5,
-          letterSpacing: 1,
-          pointerEvents: "none",
-          zIndex: 2
+          opacity: 0.22,
+          letterSpacing: 1
         }
-      }, voice.label), Array.from({
+      }, [0, 1, 2, 3, 4, 5].map(function (i) {
+        return /*#__PURE__*/React.createElement("span", {
+          key: i
+        }, voice.label);
+      })), Array.from({
         length: COLS
       }, function (_, c) {
         var _dPat$grid$r;
@@ -9158,12 +9217,13 @@ function Tabula() {
       cf = _ref40[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
+      "data-layer-box": lyr,
       style: {
         flex: 1,
         padding: "7px 0",
-        border: "1px solid " + (activeLayer === lyr ? c + "99)" : cf + "0.15)"),
+        border: "1px solid " + ((patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overLayerBox) === lyr ? c + "FF)" : activeLayer === lyr ? c + "99)" : cf + "0.15)"),
         borderRadius: 8,
-        background: activeLayer === lyr ? cf + "0.1)" : "transparent",
+        background: (patternDrag === null || patternDrag === void 0 ? void 0 : patternDrag.overLayerBox) === lyr ? cf + "0.18)" : activeLayer === lyr ? cf + "0.1)" : "transparent",
         color: activeLayer === lyr ? c : cf + "0.4)",
         fontSize: 8,
         letterSpacing: 1.2,
@@ -9253,10 +9313,10 @@ function Tabula() {
             var rect = phraseDropRef.current.getBoundingClientRect();
             overDrop = ev.clientY >= rect.top && ev.clientY <= rect.bottom && ev.clientX >= rect.left && ev.clientX <= rect.right;
           }
+          var el = document.elementFromPoint(ev.clientX, ev.clientY);
           // hit-test song-matrix cells (only valid if cell.layer === dragLayer)
           var overSongCell = null;
           if (songView) {
-            var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var cell = el && el.closest && el.closest('[data-song-cell="1"]');
             if (cell && cell.dataset.songLayer === dragLayer) {
               overSongCell = {
@@ -9265,12 +9325,20 @@ function Tabula() {
               };
             }
           }
+          // hit-test mobile layer bar — cross-layer drag between synth-type layers
+          var overLayerBox = null;
+          var boxEl = el && el.closest && el.closest('[data-layer-box]');
+          if (boxEl) {
+            var tl = boxEl.dataset.layerBox;
+            if (SYNTH_LAYERS.indexOf(tl) >= 0 && SYNTH_LAYERS.indexOf(dragLayer) >= 0 && tl !== dragLayer) overLayerBox = tl;
+          }
           setPatternDrag(function (d) {
             return d ? _objectSpread(_objectSpread({}, d), {}, {
               x: ev.clientX,
               y: ev.clientY,
               overDrop: overDrop,
-              overSongCell: overSongCell
+              overSongCell: overSongCell,
+              overLayerBox: overLayerBox
             }) : null;
           });
         };
@@ -9303,9 +9371,9 @@ function Tabula() {
             }
             return;
           }
+          var el = document.elementFromPoint(ev.clientX, ev.clientY);
           // Drop on song-matrix cell — same-layer only
           if (songView) {
-            var el = document.elementFromPoint(ev.clientX, ev.clientY);
             var cell = el && el.closest && el.closest('[data-song-cell="1"]');
             if (cell && cell.dataset.songLayer === dragLayer) {
               var barIdx = parseInt(cell.dataset.songBar, 10);
@@ -9317,6 +9385,43 @@ function Tabula() {
               });
               setPatternDrag(null);
               return;
+            }
+          }
+          // Drop on another synth-type layer's bar button — copy pat across layers
+          var boxEl = el && el.closest && el.closest('[data-layer-box]');
+          if (boxEl) {
+            var tl = boxEl.dataset.layerBox;
+            if (SYNTH_LAYERS.indexOf(tl) >= 0 && SYNTH_LAYERS.indexOf(dragLayer) >= 0 && tl !== dragLayer) {
+              var targetData = layerStoreR.current[tl] || {
+                pats: [],
+                activeId: null
+              };
+              var targetPats = targetData.pats || [];
+              if (targetPats.length < 8) {
+                var _p$gridLen3, _p$speedMult2;
+                pushHistory();
+                var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
+                  grid: p.grid.map(function (r) {
+                    return _toConsumableArray(r);
+                  }),
+                  durs: p.durs ? p.durs.map(function (r) {
+                    return _toConsumableArray(r);
+                  }) : mkDurs(),
+                  params: (p.params || defaultStepParams()).map(function (s) {
+                    return Object.assign({}, s);
+                  }),
+                  gridLen: (_p$gridLen3 = p.gridLen) !== null && _p$gridLen3 !== void 0 ? _p$gridLen3 : 16,
+                  speedMult: (_p$speedMult2 = p.speedMult) !== null && _p$speedMult2 !== void 0 ? _p$speedMult2 : 1
+                });
+                layerStoreR.current[tl] = _objectSpread(_objectSpread({}, targetData), {}, {
+                  pats: [].concat(_toConsumableArray(targetPats), [newPat]),
+                  activeId: newPat.id
+                });
+                switchLayer(tl);
+                setActiveSheet(null);
+                setPatternDrag(null);
+                return;
+              }
             }
           }
           if (phraseDropRef.current) {
@@ -9929,18 +10034,23 @@ function Tabula() {
       }, /*#__PURE__*/React.createElement("div", {
         style: {
           position: "absolute",
-          left: 6,
-          top: "50%",
-          transform: "translateY(-50%)",
-          fontSize: 9,
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-around",
+          pointerEvents: "none",
+          zIndex: 2,
+          fontSize: 8,
           fontWeight: 700,
           color: voice.color,
-          opacity: 0.5,
-          letterSpacing: 1,
-          pointerEvents: "none",
-          zIndex: 2
+          opacity: 0.22,
+          letterSpacing: 1
         }
-      }, voice.label), Array.from({
+      }, [0, 1, 2, 3, 4, 5].map(function (i) {
+        return /*#__PURE__*/React.createElement("span", {
+          key: i
+        }, voice.label);
+      })), Array.from({
         length: COLS
       }, function (_, step) {
         var _dPat$grid$r2;
