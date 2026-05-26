@@ -753,10 +753,19 @@ class Bell{
       panOsc(o2,+spreadAmt);
       o2.start(t);o2.stop(t+end+.05);
     }
-    // Sub-oscillator — 1 octave below playFreq, sine for clean low end. Level
-    // is post-VCA shaping (still goes through vcf+vca for envelope match), so
-    // it's tied to the note's amplitude profile. Used primarily on MONO; POLY
-    // panel doesn't expose this knob but the field is honored if present.
+    // Sub-oscillator — 1 octave below playFreq, sine for clean low end. Used
+    // primarily on MONO; POLY panel doesn't expose this knob but the field
+    // is honored if present.
+    //
+    // Routes the sub directly to vca (post-filter) instead of vcf. The lead's
+    // default cutoff is high so it usually doesn't matter, but if the user
+    // closes the filter the sub would disappear with it — bypassing vcf lets
+    // the sub keep punching through. It still goes through vca so the note
+    // envelope still shapes it.
+    //
+    // Gain: linear 0..1 with the knob. Earlier cap of 0.55 was too low — at
+    // 50% knob the sub was only ~13% of the main osc level after vca, so
+    // users couldn't tell it was on.
     const subLvl=(p&&p.subLevel!=null)?Math.max(0,Math.min(100,p.subLevel))/100:0;
     let subOsc=null;
     if(subLvl>0){
@@ -769,9 +778,8 @@ class Bell{
         subOsc.frequency.value=playFreq/2;
       }
       const subG=this.ctx.createGain();
-      // Cap at ~0.55 to keep the sub from dominating; user dials 0..100.
-      subG.gain.value=subLvl*0.55;
-      subOsc.connect(subG);subG.connect(vcf);
+      subG.gain.value=subLvl; // 0..1 linear, no extra attenuation
+      subOsc.connect(subG);subG.connect(vca);
       subOsc.start(t);subOsc.stop(t+end+.05);
     }
     // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
