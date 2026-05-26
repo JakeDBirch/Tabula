@@ -522,7 +522,10 @@ class Bell{
     }
 
     const vca=this.ctx.createGain();
-    const peak=(p.detune>2?0.28:0.42)*velMul;
+    // Per-layer mixer multiplier (0..100 from layerParams.mix); default 0.85
+    // if missing for backward-compat with legacy saves.
+    const mixMul=(p&&p.mix!=null)?(p.mix/100):0.85;
+    const peak=(p.detune>2?0.28:0.42)*velMul*mixMul;
     // gainAtGate must be computed AFTER peak is defined
     const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
@@ -613,13 +616,20 @@ class Bell{
 
 // ─── Drum Engine (808-style synthesis) ───────────────────────────────────────
 class DrumEngine{
-  constructor(){this.ctx=null;this.master=null;this.ready=false;}
+  constructor(){this.ctx=null;this.master=null;this.masterIn=null;this.ready=false;}
   async init(masterNode){
     if(this.ready)return;
     const AudioContext=window.AudioContext||window.webkitAudioContext;
     this.ctx=masterNode.context||new AudioContext();
-    this.master=masterNode;
+    // Internal master-input gain — voices connect here, then through to the
+    // shared Bell master. Lets the mixer scale the entire drum bus.
+    this.masterIn=this.ctx.createGain();this.masterIn.gain.value=0.85;
+    this.masterIn.connect(masterNode);
+    this.master=this.masterIn;
     this.ready=true;
+  }
+  setMasterLevel(pct){
+    if(this.ready&&this.masterIn)this.masterIn.gain.setTargetAtTime(Math.max(0,Math.min(150,pct))/100,this.ctx.currentTime,0.02);
   }
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
 
@@ -928,6 +938,7 @@ export default function Tabula(){
     octave: octave,    // -2..+2; lead defaults +1, bass -1, synth 0
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
     rvSend: 30,        // 0..100; per-layer send into the global reverb bus
+    mix: 85,           // 0..100; mixer level multiplier on this layer's voices
   });
   // Backfill missing fields when loading legacy layerParams. Returns a new
   // layerParams object with all fields populated. Three-layer pare-down:
@@ -961,6 +972,7 @@ export default function Tabula(){
   const octaveLP = _lp.octave,           setOctaveLP = _setLP("octave");
   const dlySend = _lp.dlySend,           setDlySend = _setLP("dlySend");
   const rvSend  = _lp.rvSend??0,         setRvSend  = _setLP("rvSend");
+  const mixLvl  = _lp.mix??85,           setMixLvl  = _setLP("mix");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   const [dlyIdx,    setDlyIdx]    = useState(3);
@@ -973,6 +985,9 @@ export default function Tabula(){
   const [rvSize,    setRvSize]    = useState(50); // comb feedback (0..100)
   const [rvDamp,    setRvDamp]    = useState(60); // comb LP cutoff (0=dark, 100=bright)
   const [dlyToRev,  setDlyToRev]  = useState(0);  // delay output → reverb input send
+  // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
+  // bus is global because all drum voices share one engine).
+  const [drumLevel, setDrumLevel] = useState(85);
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
@@ -1175,6 +1190,7 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setRvSize(rvSize);},[rvSize]);
   useEffect(()=>{bell.current.setRvDamp(rvDamp);},[rvDamp]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
+  useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
 
   useEffect(()=>{
     (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
@@ -1210,7 +1226,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,drumLevel,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -1396,7 +1412,7 @@ export default function Tabula(){
       };
       setLayerParams(migrated);
     }
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -1483,7 +1499,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(60);setDlyToRev(0);
+    setRvSize(50);setRvDamp(60);setDlyToRev(0);setDrumLevel(85);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -1551,7 +1567,7 @@ export default function Tabula(){
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,dlyToRev,drumLevel,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -1600,7 +1616,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2807,24 +2823,40 @@ export default function Tabula(){
   // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
   // store it per drum voice. Drum playback paths read voiceSamplesR.current
   // and substitute the sample for the synthesized voice when present.
+  // Sampler: auto-arm on onset, auto-stop on silence. The recorder doesn't
+  // start capturing until the input level crosses ONSET_THRESH — so the
+  // resulting sample begins at the first transient, not from a silent lead-in.
+  // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
   const startRecord=async(voiceKey)=>{
     if(recordingVoice)return; // serialize — one voice at a time
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined"){
       showFlash("MIC UNSUPPORTED");return;
     }
+    const ONSET_THRESH=0.08;     // peak deviation from center (0..1)
+    const SILENCE_THRESH=0.025;
+    const SILENCE_HOLD_MS=600;
+    const ARM_TIMEOUT_MS=10000;  // if no onset in 10s, bail out
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true});
       recordStreamRef.current=stream;
-      const recorder=new MediaRecorder(stream);
-      const chunks=[];
-      recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
-      recorder.onstop=async()=>{
+      const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx);
+      if(!ctx){
+        stream.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;
+        showFlash("AUDIO INIT");return;
+      }
+      const source=ctx.createMediaStreamSource(stream);
+      const analyser=ctx.createAnalyser();analyser.fftSize=512;source.connect(analyser);
+      const buf=new Uint8Array(analyser.fftSize);
+      let recorder=null;let chunks=[];
+      let armed=true;let silentSince=null;let stopped=false;
+      const armedStart=performance.now();
+      const finishWith=async()=>{
+        stopped=true;
         try{
-          const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
-          const buf=await blob.arrayBuffer();
-          const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx);
-          if(ctx){
-            const audioBuf=await ctx.decodeAudioData(buf);
+          if(chunks.length){
+            const blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)||"audio/webm"});
+            const ab=await blob.arrayBuffer();
+            const audioBuf=await ctx.decodeAudioData(ab);
             setVoiceSamples(prev=>({...prev,[voiceKey]:audioBuf}));
             showFlash("REC OK "+voiceKey);
           }
@@ -2833,9 +2865,45 @@ export default function Tabula(){
         recorderRef.current=null;
         setRecordingVoice(null);
       };
-      recorder.start();
-      recorderRef.current=recorder;
+      const tick=()=>{
+        if(stopped)return;
+        analyser.getByteTimeDomainData(buf);
+        let peak=0;
+        for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]-128)/128;if(v>peak)peak=v;}
+        const now=performance.now();
+        if(armed){
+          if(now-armedStart>ARM_TIMEOUT_MS){
+            // Timed out waiting for onset
+            stopped=true;
+            if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
+            recorderRef.current=null;
+            setRecordingVoice(null);
+            showFlash("NO INPUT");
+            return;
+          }
+          if(peak>ONSET_THRESH){
+            recorder=new MediaRecorder(stream);
+            recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
+            recorder.onstop=finishWith;
+            recorder.start();
+            recorderRef.current=recorder;
+            armed=false;silentSince=null;
+          }
+        } else {
+          if(peak<SILENCE_THRESH){
+            if(silentSince==null)silentSince=now;
+            else if(now-silentSince>SILENCE_HOLD_MS){
+              if(recorder&&recorder.state==="recording")recorder.stop();
+              return;
+            }
+          } else silentSince=null;
+        }
+        if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
+        else setTimeout(tick,30);
+      };
       setRecordingVoice(voiceKey);
+      if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
+      else setTimeout(tick,30);
     }catch(err){
       console.error("Mic denied:",err);
       showFlash("MIC DENIED");
@@ -2844,7 +2912,11 @@ export default function Tabula(){
   };
   const stopRecord=()=>{
     const r=recorderRef.current;
-    if(r&&r.state==="recording")r.stop();
+    if(r&&r.state==="recording"){r.stop();return;}
+    // Armed-but-not-recording (waiting for onset). Tear everything down.
+    if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
+    recorderRef.current=null;
+    setRecordingVoice(null);
   };
   const clearVoiceSample=(voiceKey)=>{
     setVoiceSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
@@ -3492,6 +3564,33 @@ export default function Tabula(){
               </button>
             </div>
           )}
+
+          {/* MIXER — per-layer level balancing (poly/mono in layerParams.mix, drums global) */}
+          {!IS_MOBILE&&(()=>{
+            const polyMix=layerParams.synth?.mix??85;
+            const monoMix=layerParams.lead?.mix??85;
+            const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
+            const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
+            const fader=(label,val,color,onChange)=>(
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
+                <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                  onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
+                  <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
+                </div>
+                <span style={{width:20,fontSize:7,color:"rgba(210,195,175,0.5)",textAlign:"right",flexShrink:0}}>{val}</span>
+              </div>
+            );
+            return(
+              <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
+                <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIX</div>
+                {fader("POLY",polyMix,"#a8c5a0",setSynthMix)}
+                {fader("MONO",monoMix,"#6c9ad6",setLeadMix)}
+                {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel)}
+              </div>
+            );
+          })()}
 
           {/* Sequence/chain UI removed from desktop — SONG matrix replaces it */}
           {!IS_MOBILE&&<div style={{flex:1,minHeight:0}}/>}
@@ -4768,6 +4867,32 @@ export default function Tabula(){
                         <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
                       </div>
                     )}
+                    {/* MIXER — per-layer level balancing */}
+                    {(()=>{
+                      const polyMix=layerParams.synth?.mix??85;
+                      const monoMix=layerParams.lead?.mix??85;
+                      const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
+                      const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
+                      const fader=(label,val,color,onChange)=>(
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
+                          <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"pointer"}}
+                            onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                            <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
+                            <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
+                          </div>
+                          <span style={{width:24,fontSize:8,color:"rgba(210,195,175,0.55)",textAlign:"right",flexShrink:0}}>{val}</span>
+                        </div>
+                      );
+                      return(
+                        <div style={{marginBottom:16}}>
+                          <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>MIX</div>
+                          {fader("POLY",polyMix,"#a8c5a0",setSynthMix)}
+                          {fader("MONO",monoMix,"#6c9ad6",setLeadMix)}
+                          {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel)}
+                        </div>
+                      );
+                    })()}
                     {/* NEW PROJECT — discards in-memory work and resets to defaults */}
                     <button style={{width:"100%",padding:"10px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:6,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:14,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
