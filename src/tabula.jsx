@@ -564,7 +564,31 @@ class Bell{
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=layerP||this.p;
     const hasMods=!!(mods&&mods.length);
-    const velMul   = sp ? (sp.vel/127) : 1;
+    const velRaw   = sp ? (sp.vel/127) : 1;
+    // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
+    // filter coupling. Each section has its own velSensitivity (0..100) and
+    // invert flag in the layer params, dialed by the user in the sound panel.
+    //
+    //   velMix(val, inv) = 1 - (val/100) * (1 - velFactor)
+    //
+    //   where velFactor = inv ? (1 - velRaw) : velRaw.
+    //
+    // At val=0: result is 1 regardless of velocity (no effect).
+    // At val=100, normal: result = velRaw → low-vel scales down to 0.
+    // At val=100, inverted: result = 1 - velRaw → high-vel scales down to 0.
+    const velMix = (val, inv)=>{
+      const k = Math.max(0,Math.min(100,val??0))/100;
+      const vf = inv ? (1 - velRaw) : velRaw;
+      return 1 - k * (1 - vf);
+    };
+    const velMulAmp = velMix(p.velAmp??100, p.velAmpInv);
+    const velMulFlt = velMix(p.velFlt??100, p.velFltInv);
+    // Decay scaling: at velEnv=100, low-vel notes shrink dec/rel down to 30%
+    // of nominal (clamp so things don't reach zero). Invert → high-vel notes
+    // become the short ones, low-vel notes become long.
+    const decayK = Math.max(0,Math.min(100,p.velEnv??0))/100;
+    const decayVF = (p.velEnvInv) ? velRaw : (1 - velRaw);
+    const decayScale = 1 - decayK * decayVF * 0.7; // 0.7 = max 70% shorter
     const fltDev  = sp ? (((sp.flt??50)-50)/50) : 0; // -1..+1
     const cutOff   = fltDev * 0.3 * 40;               // 30% → ±12 semitone cutoff offset
     const envScale = 1 + fltDev * 0.7;                // 70% → scale filter env amount
@@ -576,7 +600,10 @@ class Bell{
     const layerOct = (p && p.octave!=null) ? p.octave : 0;
     const playFreq = freq * Math.pow(2, stepOct + layerOct);
     const durMod   = (sp && sp.dur!=null) ? sp.dur/100 : 0;
-    const atk=ms(p.attack),dec=ms(p.decay),sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay);
+    // Apply decay velocity scaling to both decay (dec) and release (rel) so
+    // the whole back half of the envelope shortens together — matches the
+    // "low-vel notes feel shorter" mental model the user described.
+    const atk=ms(p.attack),dec=ms(p.decay)*decayScale,sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay)*decayScale;
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
     const modDur=rawDur*(1+durMod);
     const dur=Math.max(atk+0.015, modDur);
@@ -588,7 +615,7 @@ class Bell{
     const rawCut=Math.max(0,Math.min(100,p.vcfCutoff+cutOff));
     const baseHz=vcfHz(rawCut);
     vcf.Q.value=Math.max(0.01, p.vcfRes*0.28);
-    const envAmt=(p.filterEnvAmt/100)*velMul*Math.max(0,envScale);
+    const envAmt=(p.filterEnvAmt/100)*velMulFlt*Math.max(0,envScale);
     const peakHz=envAmt>0.001?baseHz*Math.pow(20000/Math.max(20,baseHz),envAmt):baseHz;
     const susHz=Math.max(20,baseHz+(peakHz-baseHz)*sus);
     const freqAtGate = decayFraction>=1 ? susHz : Math.max(20, peakHz*Math.pow(Math.max(20,susHz)/Math.max(20,peakHz), decayFraction));
@@ -619,7 +646,7 @@ class Bell{
         const mEnvScale=1+mFltDev*0.7;
         const mRawCut=Math.max(0,Math.min(100,p.vcfCutoff+mCutOff));
         const mBaseHz=vcfHz(mRawCut);
-        const mEnvAmt=(p.filterEnvAmt/100)*velMul*Math.max(0,mEnvScale);
+        const mEnvAmt=(p.filterEnvAmt/100)*velMulFlt*Math.max(0,mEnvScale);
         const mPeakHz=mEnvAmt>0.001?mBaseHz*Math.pow(20000/Math.max(20,mBaseHz),mEnvAmt):mBaseHz;
         const mSusHz=Math.max(20,mBaseHz+(mPeakHz-mBaseHz)*sus);
         vcf.frequency.setTargetAtTime(mSusHz,m.at,0.015);
@@ -632,7 +659,7 @@ class Bell{
     const mixMul=(p&&p.mix!=null)?(p.mix/100):0.85;
     // monoSingle short-circuits the dual-osc check below — peak gain follows the
     // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
-    const peak=((p.detune>2&&!(p&&p.monoSingle))?0.28:0.42)*velMul*mixMul;
+    const peak=((p.detune>2&&!(p&&p.monoSingle))?0.28:0.42)*velMulAmp*mixMul;
     // gainAtGate must be computed AFTER peak is defined
     const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
@@ -1157,6 +1184,13 @@ export default function Tabula(){
     mix: 85,           // 0..100; mixer level multiplier on this layer's voices
     subLevel: 0,       // 0..100; MONO-only sub-oscillator (1 octave down)
     spread: 0,         // 0..100; POLY-only stereo spread of detune stack
+    // Per-section velocity tracking. 0 = velocity has no effect on that
+    // section; 100 = full sensitivity (low-vel notes fully attenuated /
+    // shortened / un-filtered, depending on which section). Each section
+    // has its own invert flag so users can flip the polarity.
+    velAmp: 100,   velAmpInv: false,   // VCA peak responds to velocity (matches old behaviour)
+    velFlt: 100,   velFltInv: false,   // Filter env amount responds to velocity (matches old behaviour)
+    velEnv: 0,     velEnvInv: false,   // Decay time responds to velocity (NEW — off by default)
   });
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
   // tells Bell.play to skip the o2 stack even if a saved project had detune
@@ -1202,6 +1236,12 @@ export default function Tabula(){
   const mixLvl  = _lp.mix??85,           setMixLvl  = _setLP("mix");
   const subLvl  = _lp.subLevel??0,       setSubLvl  = _setLP("subLevel");
   const spread  = _lp.spread??0,         setSpread  = _setLP("spread");
+  const velAmp     = _lp.velAmp??100,    setVelAmp    = _setLP("velAmp");
+  const velAmpInv  = !!_lp.velAmpInv,    setVelAmpInv = _setLP("velAmpInv");
+  const velFlt     = _lp.velFlt??100,    setVelFlt    = _setLP("velFlt");
+  const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLP("velFltInv");
+  const velEnv     = _lp.velEnv??0,      setVelEnv    = _setLP("velEnv");
+  const velEnvInv  = !!_lp.velEnvInv,    setVelEnvInv = _setLP("velEnvInv");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   const [dlyIdx,    setDlyIdx]    = useState(3);
@@ -4631,7 +4671,7 @@ export default function Tabula(){
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
-                      <div style={{display:"flex",gap:12,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
+                      <div style={{display:"flex",gap:10,padding:"8px 10px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
                         {activeLayer==="synth"&&(
                           <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
@@ -4642,6 +4682,11 @@ export default function Tabula(){
                         {activeLayer==="lead"&&(
                           <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
                         )}
+                        {/* OSC velocity knob = global VCA velocity sensitivity. */}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                          <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
+                          <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                        </div>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
@@ -4665,17 +4710,27 @@ export default function Tabula(){
                       </div>
                     </SynthSection>
                     <SynthSection title="ENV" accent={C_ENV}>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                      <div style={{display:"flex",gap:10,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                         <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                         <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                        {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                          <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
+                          <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                        </div>
                       </div>
                     </SynthSection>
                     <SynthSection title="FILTER" accent={C_FILT}>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
+                      <div style={{display:"flex",gap:10,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
                         <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                         <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
+                        {/* FILTER velocity = scales filter envelope amount with velocity. */}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                          <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
+                          <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                        </div>
                       </div>
                     </SynthSection>
                     <SynthSection title="DELAY" accent={C_DLY}>
@@ -4693,8 +4748,10 @@ export default function Tabula(){
                         <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                         <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
                         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}     accent={C_REV}/>
-                        {/* HF knob: full clockwise = bright (no damp), engine stores damp internally. */}
-                        <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
+                        {/* HF DAMP: slider position is "openness" (right = bright = 0 damp,
+                            left = dark = 100 damp). Displayed value is the damping amount so
+                            the number matches the label semantics. */}
+                        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"}       accent={C_REV}/>
                         <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}        accent={C_REV}/>
                       </div>
                     </SynthSection>
@@ -5300,6 +5357,10 @@ export default function Tabula(){
                               {activeLayer==="lead"&&(
                                 <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
                               )}
+                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
+                                <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                              </div>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
                                   <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
@@ -5320,17 +5381,25 @@ export default function Tabula(){
                             </div>
                           </SynthSection>
                           <SynthSection title="ENV" accent={C_ENV}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
+                            <div style={{display:"flex",gap:6,padding:"6px 8px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                               <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                               <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
+                                <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                              </div>
                             </div>
                           </SynthSection>
                           <SynthSection title="FILTER" accent={C_FILT}>
-                            <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch"}}>
+                            <div style={{display:"flex",gap:6,padding:"6px 8px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
                               <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                               <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
+                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
+                                <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                              </div>
                             </div>
                           </SynthSection>
                           <SynthSection title="DELAY" accent={C_DLY}>
@@ -5348,8 +5417,9 @@ export default function Tabula(){
                               <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
                               <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
                               <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
-                              {/* HF knob behaves like a low-pass: full clockwise = bright (no damp). Engine semantics keep 0=no damp internally; UI inverts here. */}
-                              <KnobSlider label="HF"      value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={(100-rvDamp)+"%"} accent={C_REV}/>
+                              {/* HF DAMP: slider position is openness (right=bright=0 damp,
+                                  left=dark=100 damp). Display reads the damping amount. */}
+                              <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"}       accent={C_REV}/>
                               <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
                             </div>
                           </SynthSection>

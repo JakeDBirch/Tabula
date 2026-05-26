@@ -1388,7 +1388,10 @@ var Bell = /*#__PURE__*/function () {
   }, {
     key: "play",
     value: function play(freq, at, sp, noteDur, globalSend, prevFreq, glideTime, layerP, mods) {
-      var _sp$flt,
+      var _p$velAmp,
+        _p$velFlt,
+        _p$velEnv,
+        _sp$flt,
         _this2 = this,
         _sp$rev2,
         _sp$rev3;
@@ -1396,7 +1399,31 @@ var Bell = /*#__PURE__*/function () {
       var t = at != null ? at : this.ctx.currentTime,
         p = layerP || this.p;
       var hasMods = !!(mods && mods.length);
-      var velMul = sp ? sp.vel / 127 : 1;
+      var velRaw = sp ? sp.vel / 127 : 1;
+      // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
+      // filter coupling. Each section has its own velSensitivity (0..100) and
+      // invert flag in the layer params, dialed by the user in the sound panel.
+      //
+      //   velMix(val, inv) = 1 - (val/100) * (1 - velFactor)
+      //
+      //   where velFactor = inv ? (1 - velRaw) : velRaw.
+      //
+      // At val=0: result is 1 regardless of velocity (no effect).
+      // At val=100, normal: result = velRaw → low-vel scales down to 0.
+      // At val=100, inverted: result = 1 - velRaw → high-vel scales down to 0.
+      var velMix = function velMix(val, inv) {
+        var k = Math.max(0, Math.min(100, val !== null && val !== void 0 ? val : 0)) / 100;
+        var vf = inv ? 1 - velRaw : velRaw;
+        return 1 - k * (1 - vf);
+      };
+      var velMulAmp = velMix((_p$velAmp = p.velAmp) !== null && _p$velAmp !== void 0 ? _p$velAmp : 100, p.velAmpInv);
+      var velMulFlt = velMix((_p$velFlt = p.velFlt) !== null && _p$velFlt !== void 0 ? _p$velFlt : 100, p.velFltInv);
+      // Decay scaling: at velEnv=100, low-vel notes shrink dec/rel down to 30%
+      // of nominal (clamp so things don't reach zero). Invert → high-vel notes
+      // become the short ones, low-vel notes become long.
+      var decayK = Math.max(0, Math.min(100, (_p$velEnv = p.velEnv) !== null && _p$velEnv !== void 0 ? _p$velEnv : 0)) / 100;
+      var decayVF = p.velEnvInv ? velRaw : 1 - velRaw;
+      var decayScale = 1 - decayK * decayVF * 0.7; // 0.7 = max 70% shorter
       var fltDev = sp ? (((_sp$flt = sp.flt) !== null && _sp$flt !== void 0 ? _sp$flt : 50) - 50) / 50 : 0; // -1..+1
       var cutOff = fltDev * 0.3 * 40; // 30% → ±12 semitone cutoff offset
       var envScale = 1 + fltDev * 0.7; // 70% → scale filter env amount
@@ -1408,10 +1435,13 @@ var Bell = /*#__PURE__*/function () {
       var layerOct = p && p.octave != null ? p.octave : 0;
       var playFreq = freq * Math.pow(2, stepOct + layerOct);
       var durMod = sp && sp.dur != null ? sp.dur / 100 : 0;
+      // Apply decay velocity scaling to both decay (dec) and release (rel) so
+      // the whole back half of the envelope shortens together — matches the
+      // "low-vel notes feel shorter" mental model the user described.
       var atk = ms(p.attack),
-        dec = ms(p.decay),
+        dec = ms(p.decay) * decayScale,
         sus = Math.max(0.001, p.sustain / 100),
-        rel = ms(p.decay);
+        rel = ms(p.decay) * decayScale;
       var rawDur = noteDur != null ? noteDur : this.stepDur;
       var modDur = rawDur * (1 + durMod);
       var dur = Math.max(atk + 0.015, modDur);
@@ -1422,7 +1452,7 @@ var Bell = /*#__PURE__*/function () {
       var rawCut = Math.max(0, Math.min(100, p.vcfCutoff + cutOff));
       var baseHz = vcfHz(rawCut);
       vcf.Q.value = Math.max(0.01, p.vcfRes * 0.28);
-      var envAmt = p.filterEnvAmt / 100 * velMul * Math.max(0, envScale);
+      var envAmt = p.filterEnvAmt / 100 * velMulFlt * Math.max(0, envScale);
       var peakHz = envAmt > 0.001 ? baseHz * Math.pow(20000 / Math.max(20, baseHz), envAmt) : baseHz;
       var susHz = Math.max(20, baseHz + (peakHz - baseHz) * sus);
       var freqAtGate = decayFraction >= 1 ? susHz : Math.max(20, peakHz * Math.pow(Math.max(20, susHz) / Math.max(20, peakHz), decayFraction));
@@ -1458,7 +1488,7 @@ var Bell = /*#__PURE__*/function () {
             var mEnvScale = 1 + mFltDev * 0.7;
             var mRawCut = Math.max(0, Math.min(100, p.vcfCutoff + mCutOff));
             var mBaseHz = vcfHz(mRawCut);
-            var mEnvAmt = p.filterEnvAmt / 100 * velMul * Math.max(0, mEnvScale);
+            var mEnvAmt = p.filterEnvAmt / 100 * velMulFlt * Math.max(0, mEnvScale);
             var mPeakHz = mEnvAmt > 0.001 ? mBaseHz * Math.pow(20000 / Math.max(20, mBaseHz), mEnvAmt) : mBaseHz;
             var mSusHz = Math.max(20, mBaseHz + (mPeakHz - mBaseHz) * sus);
             vcf.frequency.setTargetAtTime(mSusHz, m.at, 0.015);
@@ -1475,7 +1505,7 @@ var Bell = /*#__PURE__*/function () {
       var mixMul = p && p.mix != null ? p.mix / 100 : 0.85;
       // monoSingle short-circuits the dual-osc check below — peak gain follows the
       // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
-      var peak = (p.detune > 2 && !(p && p.monoSingle) ? 0.28 : 0.42) * velMul * mixMul;
+      var peak = (p.detune > 2 && !(p && p.monoSingle) ? 0.28 : 0.42) * velMulAmp * mixMul;
       // gainAtGate must be computed AFTER peak is defined
       var gainAtGate = decayFraction >= 1 ? sus * peak : Math.max(0.001, peak * Math.pow(Math.max(0.001, sus), decayFraction));
       vca.gain.setValueAtTime(0, t);
@@ -2183,7 +2213,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _lp$rvSend, _lp$mix, _lp$subLevel, _lp$spread, _activePat$gridLen, _activePatForSpeed$sp;
+  var _lp$rvSend, _lp$mix, _lp$subLevel, _lp$spread, _lp$velAmp, _lp$velFlt, _lp$velEnv, _activePat$gridLen, _activePatForSpeed$sp;
   var _useState = useState(function () {
       var a = mkPat(symPat(0));
       return [a];
@@ -2471,7 +2501,20 @@ function Tabula() {
       // 0..100; mixer level multiplier on this layer's voices
       subLevel: 0,
       // 0..100; MONO-only sub-oscillator (1 octave down)
-      spread: 0 // 0..100; POLY-only stereo spread of detune stack
+      spread: 0,
+      // 0..100; POLY-only stereo spread of detune stack
+      // Per-section velocity tracking. 0 = velocity has no effect on that
+      // section; 100 = full sensitivity (low-vel notes fully attenuated /
+      // shortened / un-filtered, depending on which section). Each section
+      // has its own invert flag so users can flip the polarity.
+      velAmp: 100,
+      velAmpInv: false,
+      // VCA peak responds to velocity (matches old behaviour)
+      velFlt: 100,
+      velFltInv: false,
+      // Filter env amount responds to velocity (matches old behaviour)
+      velEnv: 0,
+      velEnvInv: false // Decay time responds to velocity (NEW — off by default)
     };
   };
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
@@ -2546,6 +2589,18 @@ function Tabula() {
     setSubLvl = _setLP("subLevel");
   var spread = (_lp$spread = _lp.spread) !== null && _lp$spread !== void 0 ? _lp$spread : 0,
     setSpread = _setLP("spread");
+  var velAmp = (_lp$velAmp = _lp.velAmp) !== null && _lp$velAmp !== void 0 ? _lp$velAmp : 100,
+    setVelAmp = _setLP("velAmp");
+  var velAmpInv = !!_lp.velAmpInv,
+    setVelAmpInv = _setLP("velAmpInv");
+  var velFlt = (_lp$velFlt = _lp.velFlt) !== null && _lp$velFlt !== void 0 ? _lp$velFlt : 100,
+    setVelFlt = _setLP("velFlt");
+  var velFltInv = !!_lp.velFltInv,
+    setVelFltInv = _setLP("velFltInv");
+  var velEnv = (_lp$velEnv = _lp.velEnv) !== null && _lp$velEnv !== void 0 ? _lp$velEnv : 0,
+    setVelEnv = _setLP("velEnv");
+  var velEnvInv = !!_lp.velEnvInv,
+    setVelEnvInv = _setLP("velEnvInv");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   var _useState107 = useState(3),
@@ -9689,8 +9744,8 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 12,
-      padding: "8px 12px 10px",
+      gap: 10,
+      padding: "8px 10px 10px",
       height: 160,
       alignItems: "stretch",
       justifyContent: "center"
@@ -9723,6 +9778,38 @@ function Tabula() {
     display: subLvl + "%",
     accent: C_OSC
   }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 3
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velAmp,
+    min: 0,
+    max: 100,
+    onChange: setVelAmp,
+    display: velAmp + "%",
+    accent: C_OSC
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelAmpInv(!velAmpInv);
+    },
+    style: {
+      padding: "2px 6px",
+      fontSize: 7,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_OSC + (velAmpInv ? "" : "22"),
+      background: velAmpInv ? C_OSC + "14" : "transparent",
+      color: velAmpInv ? C_OSC : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
@@ -9791,10 +9878,11 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 12,
-      padding: "8px 16px 10px",
+      gap: 10,
+      padding: "8px 12px 10px",
       height: 160,
-      alignItems: "stretch"
+      alignItems: "stretch",
+      justifyContent: "center"
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
@@ -9823,16 +9911,49 @@ function Tabula() {
     onChange: setSustain,
     display: sustain + "%",
     accent: C_ENV
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 3
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velEnv,
+    min: 0,
+    max: 100,
+    onChange: setVelEnv,
+    display: velEnv + "%",
+    accent: C_ENV
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelEnvInv(!velEnvInv);
+    },
+    style: {
+      padding: "2px 6px",
+      fontSize: 7,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_ENV + (velEnvInv ? "" : "22"),
+      background: velEnvInv ? C_ENV + "14" : "transparent",
+      color: velEnvInv ? C_ENV : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "FILTER",
     accent: C_FILT
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 12,
-      padding: "8px 16px 10px",
+      gap: 10,
+      padding: "8px 12px 10px",
       height: 160,
-      alignItems: "stretch"
+      alignItems: "stretch",
+      justifyContent: "center"
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
@@ -9861,7 +9982,39 @@ function Tabula() {
     onChange: setFilterEnvAmt,
     display: filterEnvAmt + "%",
     accent: C_FILT
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 3
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velFlt,
+    min: 0,
+    max: 100,
+    onChange: setVelFlt,
+    display: velFlt + "%",
+    accent: C_FILT
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelFltInv(!velFltInv);
+    },
+    style: {
+      padding: "2px 6px",
+      fontSize: 7,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_FILT + (velFltInv ? "" : "22"),
+      background: velFltInv ? C_FILT + "14" : "transparent",
+      color: velFltInv ? C_FILT : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "DELAY",
     accent: C_DLY
   }, /*#__PURE__*/React.createElement("div", {
@@ -9954,14 +10107,14 @@ function Tabula() {
     display: rvPreDelay + "ms",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF",
+    label: "HF DAMP",
     value: 100 - rvDamp,
     min: 0,
     max: 100,
     onChange: function onChange(v) {
       return setRvDamp(100 - v);
     },
-    display: 100 - rvDamp + "%",
+    display: rvDamp + "%",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "LF DAMP",
@@ -11688,6 +11841,38 @@ function Tabula() {
     style: {
       display: "flex",
       flexDirection: "column",
+      alignItems: "center",
+      gap: 2
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velAmp,
+    min: 0,
+    max: 100,
+    onChange: setVelAmp,
+    display: velAmp + "%",
+    accent: C_OSC
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelAmpInv(!velAmpInv);
+    },
+    style: {
+      padding: "2px 5px",
+      fontSize: 6,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_OSC + (velAmpInv ? "" : "22"),
+      background: velAmpInv ? C_OSC + "14" : "transparent",
+      color: velAmpInv ? C_OSC : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
       gap: 3,
       flex: "0 1 40%",
       minWidth: 44
@@ -11752,10 +11937,11 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 8,
-      padding: "6px 10px 8px",
+      gap: 6,
+      padding: "6px 8px 8px",
       height: 120,
-      alignItems: "stretch"
+      alignItems: "stretch",
+      justifyContent: "center"
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
@@ -11784,16 +11970,49 @@ function Tabula() {
     onChange: setSustain,
     display: sustain + "%",
     accent: C_ENV
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 2
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velEnv,
+    min: 0,
+    max: 100,
+    onChange: setVelEnv,
+    display: velEnv + "%",
+    accent: C_ENV
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelEnvInv(!velEnvInv);
+    },
+    style: {
+      padding: "2px 5px",
+      fontSize: 6,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_ENV + (velEnvInv ? "" : "22"),
+      background: velEnvInv ? C_ENV + "14" : "transparent",
+      color: velEnvInv ? C_ENV : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "FILTER",
     accent: C_FILT
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 8,
-      padding: "6px 10px 8px",
+      gap: 6,
+      padding: "6px 8px 8px",
       height: 120,
-      alignItems: "stretch"
+      alignItems: "stretch",
+      justifyContent: "center"
     }
   }, /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
@@ -11822,7 +12041,39 @@ function Tabula() {
     onChange: setFilterEnvAmt,
     display: filterEnvAmt + "%",
     accent: C_FILT
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 2
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "VEL",
+    value: velFlt,
+    min: 0,
+    max: 100,
+    onChange: setVelFlt,
+    display: velFlt + "%",
+    accent: C_FILT
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setVelFltInv(!velFltInv);
+    },
+    style: {
+      padding: "2px 5px",
+      fontSize: 6,
+      letterSpacing: 1,
+      fontWeight: 600,
+      border: "1px solid " + C_FILT + (velFltInv ? "" : "22"),
+      background: velFltInv ? C_FILT + "14" : "transparent",
+      color: velFltInv ? C_FILT : "rgba(210,195,175,0.4)",
+      borderRadius: 3,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "INV")))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "DELAY",
     accent: C_DLY
   }, /*#__PURE__*/React.createElement("div", {
@@ -11915,14 +12166,14 @@ function Tabula() {
     display: rvPreDelay + "ms",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF",
+    label: "HF DAMP",
     value: 100 - rvDamp,
     min: 0,
     max: 100,
     onChange: function onChange(v) {
       return setRvDamp(100 - v);
     },
-    display: 100 - rvDamp + "%",
+    display: rvDamp + "%",
     accent: C_REV
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "LF DAMP",
