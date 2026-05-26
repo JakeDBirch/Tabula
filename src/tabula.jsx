@@ -440,6 +440,12 @@ class Bell{
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;
+    // Last-played voice for the MONO layer — choked when a new MONO note
+    // triggers, so notes don't ring out on top of each other (true mono
+    // behaviour). Holds {vca, oscs:[]}. Single slot is fine while there's
+    // one MONO layer; future-proof to a Map keyed by layer name if more
+    // mono-style layers get added.
+    this.monoActiveVoice=null;
   }
   async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -568,6 +574,22 @@ class Bell{
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=layerP||this.p;
     const hasMods=!!(mods&&mods.length);
+    // Choke the previous MONO voice before scheduling this one — true mono
+    // behaviour, otherwise notes ring out over each other. Fast-fade the
+    // previous vca to silence at this note's start time and stop its oscs
+    // shortly after. 5ms TC + 30ms stop lag is enough to avoid clicks while
+    // staying inaudible against the new note's attack.
+    if(p&&p.monoSingle&&this.monoActiveVoice){
+      const prev=this.monoActiveVoice;
+      try{
+        prev.vca.gain.cancelScheduledValues(t);
+        prev.vca.gain.setTargetAtTime(0.0001,t,0.005);
+      }catch(e){}
+      for(const osc of (prev.oscs||[])){
+        try{osc.stop(t+0.03);}catch(e){}
+      }
+      this.monoActiveVoice=null;
+    }
     const velRaw   = sp ? (sp.vel/127) : 1;
     // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
     // filter coupling. Each section has its own velSensitivity (0..100) and
@@ -781,6 +803,14 @@ class Bell{
       subG.gain.value=subLvl; // 0..1 linear, no extra attenuation
       subOsc.connect(subG);subG.connect(vca);
       subOsc.start(t);subOsc.stop(t+end+.05);
+    }
+    // Register this voice as the active MONO voice so the next MONO trigger
+    // can choke it. Done after osc creation so the oscs array is complete.
+    if(p&&p.monoSingle){
+      const oscs=[o1];
+      if(o2)oscs.push(o2);
+      if(subOsc)oscs.push(subOsc);
+      this.monoActiveVoice={vca,oscs};
     }
     // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
     // oct (relative to row) is scheduled on the oscillators while the single
@@ -1243,10 +1273,14 @@ export default function Tabula(){
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
   // tells Bell.play to skip the o2 stack even if a saved project had detune
   // on this layer. Keeps MONO sounding lean and pure.
+  // glide: 0..100; per-layer portamento amount. At 0, glide only happens
+  // when a step's glide flag is on (the step-level behaviour). At >0, every
+  // mono note glides into the next over a knob-scaled time.
   const DEFAULT_LP_MONO = (octave)=>({
     ...DEFAULT_LP(octave),
     detune:0,
     monoSingle:true,
+    glide:0,
   });
   // Backfill missing fields when loading legacy layerParams. Returns a new
   // layerParams object with all fields populated. Three-layer pare-down:
@@ -1290,6 +1324,7 @@ export default function Tabula(){
   const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLP("velFltInv");
   const velEnv     = _lp.velEnv??0,      setVelEnv    = _setLP("velEnv");
   const velEnvInv  = !!_lp.velEnvInv,    setVelEnvInv = _setLP("velEnvInv");
+  const glideLP    = _lp.glide??0,       setGlideLP   = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   const [dlyIdx,    setDlyIdx]    = useState(3);
@@ -2167,10 +2202,21 @@ export default function Tabula(){
       const layerOct=layerLP.octave||0;
       const actualF=f*Math.pow(2,stepOct+layerOct);
       const hasGlide=!!(sp&&sp.glide);
-      const prevF=layerLastGlideR.current[layer]?(layerLastFreqR.current[layer]??null):null;
-      const glideTime=prevF&&prevF!==actualF?(60/bpmR.current/8)*(pat?.speedMult??1):0;
+      // Per-layer glide knob (0..100). When >0, every note glides into the
+      // next regardless of step-level glide flags. Step glide stacks on top —
+      // a step-glide note uses whichever glide time is longer.
+      const layerGlide01=Math.max(0,Math.min(100,layerLP.glide||0))/100;
+      const stepGlideTime=(60/bpmR.current/8)*(pat?.speedMult??1); // ~1/32 note
+      const layerGlideTime=layerGlide01*(60/bpmR.current); // up to ~1 beat
+      const usePrev=layerLastGlideR.current[layer]||layerGlide01>0;
+      const prevF=usePrev?(layerLastFreqR.current[layer]??null):null;
+      const glideTime=(prevF&&prevF!==actualF)
+        ?Math.max(stepGlideTime,layerGlideTime)
+        :0;
       layerLastFreqR.current[layer]=actualF;
-      layerLastGlideR.current[layer]=hasGlide;
+      // Mark the slot as "glide-able" if either step glide was on or the
+      // layer glide knob is engaged — so the next note also picks up prevF.
+      layerLastGlideR.current[layer]=hasGlide||layerGlide01>0;
       // Tied-note mods (FLT/OCT/GLIDE schedule mid-note).
       let mods=null;
       if(dur>1&&pat.params&&ratch===1){
@@ -4921,6 +4967,9 @@ export default function Tabula(){
                         {activeLayer==="lead"&&(
                           <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
                         )}
+                        {activeLayer==="lead"&&(
+                          <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
+                        )}
                         {/* OSC velocity knob = global VCA velocity sensitivity. */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
@@ -5616,6 +5665,9 @@ export default function Tabula(){
                               )}
                               {activeLayer==="lead"&&(
                                 <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
+                              )}
+                              {activeLayer==="lead"&&(
+                                <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                               )}
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>

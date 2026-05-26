@@ -1165,6 +1165,12 @@ var Bell = /*#__PURE__*/function () {
     };
     this.stepDur = 0.125;
     this.ready = false;
+    // Last-played voice for the MONO layer — choked when a new MONO note
+    // triggers, so notes don't ring out on top of each other (true mono
+    // behaviour). Holds {vca, oscs:[]}. Single slot is fine while there's
+    // one MONO layer; future-proof to a Map keyed by layer name if more
+    // mono-style layers get added.
+    this.monoActiveVoice = null;
   }
   return _createClass(Bell, [{
     key: "init",
@@ -1412,6 +1418,33 @@ var Bell = /*#__PURE__*/function () {
       var t = at != null ? at : this.ctx.currentTime,
         p = layerP || this.p;
       var hasMods = !!(mods && mods.length);
+      // Choke the previous MONO voice before scheduling this one — true mono
+      // behaviour, otherwise notes ring out over each other. Fast-fade the
+      // previous vca to silence at this note's start time and stop its oscs
+      // shortly after. 5ms TC + 30ms stop lag is enough to avoid clicks while
+      // staying inaudible against the new note's attack.
+      if (p && p.monoSingle && this.monoActiveVoice) {
+        var prev = this.monoActiveVoice;
+        try {
+          prev.vca.gain.cancelScheduledValues(t);
+          prev.vca.gain.setTargetAtTime(0.0001, t, 0.005);
+        } catch (e) {}
+        var _iterator5 = _createForOfIteratorHelper(prev.oscs || []),
+          _step5;
+        try {
+          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+            var osc = _step5.value;
+            try {
+              osc.stop(t + 0.03);
+            } catch (e) {}
+          }
+        } catch (err) {
+          _iterator5.e(err);
+        } finally {
+          _iterator5.f();
+        }
+        this.monoActiveVoice = null;
+      }
       var velRaw = sp ? sp.vel / 127 : 1;
       // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
       // filter coupling. Each section has its own velSensitivity (0..100) and
@@ -1489,12 +1522,12 @@ var Bell = /*#__PURE__*/function () {
       // each sub-step time so the filter "animates" through the held note. Each
       // entry's flt produces a target sustain cutoff; setTargetAtTime smooths it.
       if (hasMods && envAmt > 0.01) {
-        var _iterator5 = _createForOfIteratorHelper(mods),
-          _step5;
+        var _iterator6 = _createForOfIteratorHelper(mods),
+          _step6;
         try {
-          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+          for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
             var _m$sp$flt;
-            var m = _step5.value;
+            var m = _step6.value;
             if (m.at <= t + atk + dec || m.at >= t + dur) continue; // only inside the sustain window
             var mFltDev = m.sp ? (((_m$sp$flt = m.sp.flt) !== null && _m$sp$flt !== void 0 ? _m$sp$flt : 50) - 50) / 50 : 0;
             var mCutOff = mFltDev * 0.3 * 40;
@@ -1507,9 +1540,9 @@ var Bell = /*#__PURE__*/function () {
             vcf.frequency.setTargetAtTime(mSusHz, m.at, 0.015);
           }
         } catch (err) {
-          _iterator5.e(err);
+          _iterator6.e(err);
         } finally {
-          _iterator5.f();
+          _iterator6.f();
         }
       }
       var vca = this.ctx.createGain();
@@ -1648,6 +1681,17 @@ var Bell = /*#__PURE__*/function () {
         subOsc.start(t);
         subOsc.stop(t + end + .05);
       }
+      // Register this voice as the active MONO voice so the next MONO trigger
+      // can choke it. Done after osc creation so the oscs array is complete.
+      if (p && p.monoSingle) {
+        var oscs = [o1];
+        if (o2) oscs.push(o2);
+        if (subOsc) oscs.push(subOsc);
+        this.monoActiveVoice = {
+          vca: vca,
+          oscs: oscs
+        };
+      }
       // Mid-note OCT/GLIDE pitch automation. For tied notes, each sub-step's
       // oct (relative to row) is scheduled on the oscillators while the single
       // envelope keeps holding — giving mono-legato behavior. GLIDE on a sub-
@@ -1657,11 +1701,11 @@ var Bell = /*#__PURE__*/function () {
       if (hasMods) {
         var prevModFreq = playFreq;
         var prevModGlide = !!(sp && sp.glide);
-        var _iterator6 = _createForOfIteratorHelper(mods),
-          _step6;
+        var _iterator7 = _createForOfIteratorHelper(mods),
+          _step7;
         try {
-          for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
-            var _m = _step6.value;
+          for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+            var _m = _step7.value;
             if (_m.at <= t || _m.at >= t + dur) continue;
             var mStepOct = _m.sp ? _m.sp.oct - 2 : 0;
             var mPlayFreq = freq * Math.pow(2, mStepOct + layerOct);
@@ -1680,9 +1724,9 @@ var Bell = /*#__PURE__*/function () {
             prevModGlide = !!(_m.sp && _m.sp.glide);
           }
         } catch (err) {
-          _iterator6.e(err);
+          _iterator7.e(err);
         } finally {
-          _iterator6.f();
+          _iterator7.f();
         }
       }
       vcf.connect(vca);
@@ -2275,7 +2319,7 @@ function SynthSection(_ref6) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function Tabula() {
-  var _lp$rvSend, _lp$mix, _lp$subLevel, _lp$spread, _lp$velAmp, _lp$velFlt, _lp$velEnv, _activePat$gridLen, _activePatForSpeed$sp;
+  var _lp$rvSend, _lp$mix, _lp$subLevel, _lp$spread, _lp$velAmp, _lp$velFlt, _lp$velEnv, _lp$glide, _activePat$gridLen, _activePatForSpeed$sp;
   var _useState = useState(function () {
       var a = mkPat(symPat(0));
       return [a];
@@ -2582,10 +2626,14 @@ function Tabula() {
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
   // tells Bell.play to skip the o2 stack even if a saved project had detune
   // on this layer. Keeps MONO sounding lean and pure.
+  // glide: 0..100; per-layer portamento amount. At 0, glide only happens
+  // when a step's glide flag is on (the step-level behaviour). At >0, every
+  // mono note glides into the next over a knob-scaled time.
   var DEFAULT_LP_MONO = function DEFAULT_LP_MONO(octave) {
     return _objectSpread(_objectSpread({}, DEFAULT_LP(octave)), {}, {
       detune: 0,
-      monoSingle: true
+      monoSingle: true,
+      glide: 0
     });
   };
   // Backfill missing fields when loading legacy layerParams. Returns a new
@@ -2663,6 +2711,8 @@ function Tabula() {
     setVelEnv = _setLP("velEnv");
   var velEnvInv = !!_lp.velEnvInv,
     setVelEnvInv = _setLP("velEnvInv");
+  var glideLP = (_lp$glide = _lp.glide) !== null && _lp$glide !== void 0 ? _lp$glide : 0,
+    setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
   var _useState107 = useState(3),
@@ -3124,26 +3174,26 @@ function Tabula() {
       // a Set by id de-dupes if a pat is somehow listed in both places.
       var seen = new Set();
       var synthPats = [].concat(_toConsumableArray(patsR.current || []), _toConsumableArray(((_layerStoreR$current = layerStoreR.current) === null || _layerStoreR$current === void 0 || (_layerStoreR$current = _layerStoreR$current.synth) === null || _layerStoreR$current === void 0 ? void 0 : _layerStoreR$current.pats) || []), _toConsumableArray(((_layerStoreR$current2 = layerStoreR.current) === null || _layerStoreR$current2 === void 0 || (_layerStoreR$current2 = _layerStoreR$current2.lead) === null || _layerStoreR$current2 === void 0 ? void 0 : _layerStoreR$current2.pats) || []));
-      var _iterator7 = _createForOfIteratorHelper(synthPats),
-        _step7;
+      var _iterator8 = _createForOfIteratorHelper(synthPats),
+        _step8;
       try {
-        for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-          var p = _step7.value;
+        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+          var p = _step8.value;
           if (!p || !p.grid || seen.has(p.id)) continue;
           seen.add(p.id);
           variedGrids.current.set(p.id, genVariation(p.grid, vp));
         }
         // Drum pats: per-pat vRhythm + vVelocity, same shape used at step 0.
       } catch (err) {
-        _iterator7.e(err);
+        _iterator8.e(err);
       } finally {
-        _iterator7.f();
+        _iterator8.f();
       }
-      var _iterator8 = _createForOfIteratorHelper(drumPatsR.current || []),
-        _step8;
+      var _iterator9 = _createForOfIteratorHelper(drumPatsR.current || []),
+        _step9;
       try {
         var _loop = function _loop() {
-          var dp = _step8.value;
+          var dp = _step9.value;
           if (!dp || !dp.grid) return 1; // continue
           var vRhythm = (dp.vRhythm || 0) / 100;
           var vVelocity = (dp.vVelocity || 0) / 100;
@@ -3160,13 +3210,13 @@ function Tabula() {
           variedDrumGrids.current.set(dp.id, vGrid);
           variedDrumVels.current.set(dp.id, vVel);
         };
-        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
           if (_loop()) continue;
         }
       } catch (err) {
-        _iterator8.e(err);
+        _iterator9.e(err);
       } finally {
-        _iterator8.f();
+        _iterator9.f();
       }
     } catch (e) {
       // Defensive — if something goes sideways during regen we keep playing
@@ -4303,7 +4353,7 @@ function Tabula() {
     var ratch = rhy;
     var subDur = stepDur / ratch;
     for (var r = 0; r < ROWS; r++) {
-      var _layerLastFreqR$curre, _pat$speedMult;
+      var _pat$speedMult, _layerLastFreqR$curre;
       if (!useGrid[r][s]) continue;
       var dur = pat.durs && pat.durs[r] && pat.durs[r][s] ? Math.max(1, pat.durs[r][s]) : 1;
       var noteDur = stepDur * dur;
@@ -4315,10 +4365,19 @@ function Tabula() {
       var layerOct = layerLP.octave || 0;
       var actualF = f * Math.pow(2, stepOct + layerOct);
       var hasGlide = !!(sp && sp.glide);
-      var prevF = layerLastGlideR.current[layer] ? (_layerLastFreqR$curre = layerLastFreqR.current[layer]) !== null && _layerLastFreqR$curre !== void 0 ? _layerLastFreqR$curre : null : null;
-      var glideTime = prevF && prevF !== actualF ? 60 / bpmR.current / 8 * ((_pat$speedMult = pat === null || pat === void 0 ? void 0 : pat.speedMult) !== null && _pat$speedMult !== void 0 ? _pat$speedMult : 1) : 0;
+      // Per-layer glide knob (0..100). When >0, every note glides into the
+      // next regardless of step-level glide flags. Step glide stacks on top —
+      // a step-glide note uses whichever glide time is longer.
+      var layerGlide01 = Math.max(0, Math.min(100, layerLP.glide || 0)) / 100;
+      var stepGlideTime = 60 / bpmR.current / 8 * ((_pat$speedMult = pat === null || pat === void 0 ? void 0 : pat.speedMult) !== null && _pat$speedMult !== void 0 ? _pat$speedMult : 1); // ~1/32 note
+      var layerGlideTime = layerGlide01 * (60 / bpmR.current); // up to ~1 beat
+      var usePrev = layerLastGlideR.current[layer] || layerGlide01 > 0;
+      var prevF = usePrev ? (_layerLastFreqR$curre = layerLastFreqR.current[layer]) !== null && _layerLastFreqR$curre !== void 0 ? _layerLastFreqR$curre : null : null;
+      var glideTime = prevF && prevF !== actualF ? Math.max(stepGlideTime, layerGlideTime) : 0;
       layerLastFreqR.current[layer] = actualF;
-      layerLastGlideR.current[layer] = hasGlide;
+      // Mark the slot as "glide-able" if either step glide was on or the
+      // layer glide knob is engaged — so the next note also picks up prevF.
+      layerLastGlideR.current[layer] = hasGlide || layerGlide01 > 0;
       // Tied-note mods (FLT/OCT/GLIDE schedule mid-note).
       var mods = null;
       if (dur > 1 && pat.params && ratch === 1) {
@@ -5331,11 +5390,11 @@ function Tabula() {
     // Use a per-touch-identifier map so multi-touch is handled correctly.
     var scrollableStarts = new Map(); // identifier → boolean
     var onTouchStart = function onTouchStart(e) {
-      var _iterator9 = _createForOfIteratorHelper(e.changedTouches),
-        _step9;
+      var _iterator0 = _createForOfIteratorHelper(e.changedTouches),
+        _step0;
       try {
-        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-          var t = _step9.value;
+        for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
+          var t = _step0.value;
           var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
           while (el && el !== document.body) {
@@ -5349,42 +5408,42 @@ function Tabula() {
           scrollableStarts.set(t.identifier, scrollable);
         }
       } catch (err) {
-        _iterator9.e(err);
-      } finally {
-        _iterator9.f();
-      }
-    };
-    var onTouchEnd = function onTouchEnd(e) {
-      var _iterator0 = _createForOfIteratorHelper(e.changedTouches),
-        _step0;
-      try {
-        for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
-          var t = _step0.value;
-          scrollableStarts["delete"](t.identifier);
-        }
-      } catch (err) {
         _iterator0.e(err);
       } finally {
         _iterator0.f();
       }
     };
-    var noOverscroll = function noOverscroll(e) {
-      // Block if ALL active touches started on non-scrollable elements
-      var anyScrollable = false;
-      var _iterator1 = _createForOfIteratorHelper(e.touches),
+    var onTouchEnd = function onTouchEnd(e) {
+      var _iterator1 = _createForOfIteratorHelper(e.changedTouches),
         _step1;
       try {
         for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
           var t = _step1.value;
+          scrollableStarts["delete"](t.identifier);
+        }
+      } catch (err) {
+        _iterator1.e(err);
+      } finally {
+        _iterator1.f();
+      }
+    };
+    var noOverscroll = function noOverscroll(e) {
+      // Block if ALL active touches started on non-scrollable elements
+      var anyScrollable = false;
+      var _iterator10 = _createForOfIteratorHelper(e.touches),
+        _step10;
+      try {
+        for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
+          var t = _step10.value;
           if (scrollableStarts.get(t.identifier)) {
             anyScrollable = true;
             break;
           }
         }
       } catch (err) {
-        _iterator1.e(err);
+        _iterator10.e(err);
       } finally {
-        _iterator1.f();
+        _iterator10.f();
       }
       if (!anyScrollable && e.cancelable) e.preventDefault();
     };
@@ -10234,6 +10293,15 @@ function Tabula() {
     onChange: setSubLvl,
     display: subLvl + "%",
     accent: C_OSC
+  }), activeLayer === "lead" && /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "GLIDE",
+    value: glideLP,
+    min: 0,
+    max: 100,
+    onChange: setGlideLP,
+    display: glideLP + "%",
+    accent: C_OSC
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -12305,6 +12373,15 @@ function Tabula() {
     max: 100,
     onChange: setSubLvl,
     display: subLvl + "%",
+    accent: C_OSC
+  }), activeLayer === "lead" && /*#__PURE__*/React.createElement(KnobSlider, {
+    vertical: true,
+    label: "GLIDE",
+    value: glideLP,
+    min: 0,
+    max: 100,
+    onChange: setGlideLP,
+    display: glideLP + "%",
     accent: C_OSC
   }), /*#__PURE__*/React.createElement("div", {
     style: {
