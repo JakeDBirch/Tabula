@@ -33,16 +33,16 @@ function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLim
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
 function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
+function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */ var e, t, r = "function" == typeof Symbol ? Symbol : {}, n = r.iterator || "@@iterator", o = r.toStringTag || "@@toStringTag"; function i(r, n, o, i) { var c = n && n.prototype instanceof Generator ? n : Generator, u = Object.create(c.prototype); return _regeneratorDefine2(u, "_invoke", function (r, n, o) { var i, c, u, f = 0, p = o || [], y = !1, G = { p: 0, n: 0, v: e, a: d, f: d.bind(e, 4), d: function d(t, r) { return i = t, c = 0, u = e, G.n = r, a; } }; function d(r, n) { for (c = r, u = n, t = 0; !y && f && !o && t < p.length; t++) { var o, i = p[t], d = G.p, l = i[2]; r > 3 ? (o = l === n) && (u = i[(c = i[4]) ? 5 : (c = 3, 3)], i[4] = i[5] = e) : i[0] <= d && ((o = r < 2 && d < i[1]) ? (c = 0, G.v = n, G.n = i[1]) : d < l && (o = r < 3 || i[0] > n || n > l) && (i[4] = r, i[5] = n, G.n = l, c = 0)); } if (o || r > 1) return a; throw y = !0, n; } return function (o, p, l) { if (f > 1) throw TypeError("Generator is already running"); for (y && 1 === p && d(p, l), c = p, u = l; (t = c < 2 ? e : u) || !y;) { i || (c ? c < 3 ? (c > 1 && (G.n = -1), d(c, u)) : G.n = u : G.v = u); try { if (f = 2, i) { if (c || (o = "next"), t = i[o]) { if (!(t = t.call(i, u))) throw TypeError("iterator result is not an object"); if (!t.done) return t; u = t.value, c < 2 && (c = 0); } else 1 === c && (t = i["return"]) && t.call(i), c < 2 && (u = TypeError("The iterator does not provide a '" + o + "' method"), c = 1); i = e; } else if ((t = (y = G.n < 0) ? u : r.call(n, G)) !== a) break; } catch (t) { i = e, c = 1, u = t; } finally { f = 1; } } return { value: t, done: y }; }; }(r, o, i), !0), u; } var a = {}; function Generator() {} function GeneratorFunction() {} function GeneratorFunctionPrototype() {} t = Object.getPrototypeOf; var c = [][n] ? t(t([][n]())) : (_regeneratorDefine2(t = {}, n, function () { return this; }), t), u = GeneratorFunctionPrototype.prototype = Generator.prototype = Object.create(c); function f(e) { return Object.setPrototypeOf ? Object.setPrototypeOf(e, GeneratorFunctionPrototype) : (e.__proto__ = GeneratorFunctionPrototype, _regeneratorDefine2(e, o, "GeneratorFunction")), e.prototype = Object.create(u), e; } return GeneratorFunction.prototype = GeneratorFunctionPrototype, _regeneratorDefine2(u, "constructor", GeneratorFunctionPrototype), _regeneratorDefine2(GeneratorFunctionPrototype, "constructor", GeneratorFunction), GeneratorFunction.displayName = "GeneratorFunction", _regeneratorDefine2(GeneratorFunctionPrototype, o, "GeneratorFunction"), _regeneratorDefine2(u), _regeneratorDefine2(u, o, "Generator"), _regeneratorDefine2(u, n, function () { return this; }), _regeneratorDefine2(u, "toString", function () { return "[object Generator]"; }), (_regenerator = function _regenerator() { return { w: i, m: f }; })(); }
+function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
+function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
+function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
 function _toConsumableArray(r) { return _arrayWithoutHoles(r) || _iterableToArray(r) || _unsupportedIterableToArray(r) || _nonIterableSpread(); }
 function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
 function _iterableToArray(r) { if ("undefined" != typeof Symbol && null != r[Symbol.iterator] || null != r["@@iterator"]) return Array.from(r); }
 function _arrayWithoutHoles(r) { if (Array.isArray(r)) return _arrayLikeToArray(r); }
 function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */ var e, t, r = "function" == typeof Symbol ? Symbol : {}, n = r.iterator || "@@iterator", o = r.toStringTag || "@@toStringTag"; function i(r, n, o, i) { var c = n && n.prototype instanceof Generator ? n : Generator, u = Object.create(c.prototype); return _regeneratorDefine2(u, "_invoke", function (r, n, o) { var i, c, u, f = 0, p = o || [], y = !1, G = { p: 0, n: 0, v: e, a: d, f: d.bind(e, 4), d: function d(t, r) { return i = t, c = 0, u = e, G.n = r, a; } }; function d(r, n) { for (c = r, u = n, t = 0; !y && f && !o && t < p.length; t++) { var o, i = p[t], d = G.p, l = i[2]; r > 3 ? (o = l === n) && (u = i[(c = i[4]) ? 5 : (c = 3, 3)], i[4] = i[5] = e) : i[0] <= d && ((o = r < 2 && d < i[1]) ? (c = 0, G.v = n, G.n = i[1]) : d < l && (o = r < 3 || i[0] > n || n > l) && (i[4] = r, i[5] = n, G.n = l, c = 0)); } if (o || r > 1) return a; throw y = !0, n; } return function (o, p, l) { if (f > 1) throw TypeError("Generator is already running"); for (y && 1 === p && d(p, l), c = p, u = l; (t = c < 2 ? e : u) || !y;) { i || (c ? c < 3 ? (c > 1 && (G.n = -1), d(c, u)) : G.n = u : G.v = u); try { if (f = 2, i) { if (c || (o = "next"), t = i[o]) { if (!(t = t.call(i, u))) throw TypeError("iterator result is not an object"); if (!t.done) return t; u = t.value, c < 2 && (c = 0); } else 1 === c && (t = i["return"]) && t.call(i), c < 2 && (u = TypeError("The iterator does not provide a '" + o + "' method"), c = 1); i = e; } else if ((t = (y = G.n < 0) ? u : r.call(n, G)) !== a) break; } catch (t) { i = e, c = 1, u = t; } finally { f = 1; } } return { value: t, done: y }; }; }(r, o, i), !0), u; } var a = {}; function Generator() {} function GeneratorFunction() {} function GeneratorFunctionPrototype() {} t = Object.getPrototypeOf; var c = [][n] ? t(t([][n]())) : (_regeneratorDefine2(t = {}, n, function () { return this; }), t), u = GeneratorFunctionPrototype.prototype = Generator.prototype = Object.create(c); function f(e) { return Object.setPrototypeOf ? Object.setPrototypeOf(e, GeneratorFunctionPrototype) : (e.__proto__ = GeneratorFunctionPrototype, _regeneratorDefine2(e, o, "GeneratorFunction")), e.prototype = Object.create(u), e; } return GeneratorFunction.prototype = GeneratorFunctionPrototype, _regeneratorDefine2(u, "constructor", GeneratorFunctionPrototype), _regeneratorDefine2(GeneratorFunctionPrototype, "constructor", GeneratorFunction), GeneratorFunction.displayName = "GeneratorFunction", _regeneratorDefine2(GeneratorFunctionPrototype, o, "GeneratorFunction"), _regeneratorDefine2(u), _regeneratorDefine2(u, o, "Generator"), _regeneratorDefine2(u, n, function () { return this; }), _regeneratorDefine2(u, "toString", function () { return "[object Generator]"; }), (_regenerator = function _regenerator() { return { w: i, m: f }; })(); }
-function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
-function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
-function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
 // ─── Scales — all 7 church modes, root C3 at row 15 (bottom) ─────────────────
 // Ascending from C3: each mode built from C so tonal center stays fixed
 var SCALES = {
@@ -231,6 +231,34 @@ var mkPat = function mkPat(name) {
     params: defaultStepParams(),
     gridLen: 16,
     speedMult: 1
+  };
+};
+// Cull a pattern down to monophonic — at most one active note per column.
+// Used when copying a POLY (multi-row-per-col) pattern onto the MONO layer:
+// without this, dragging a chord onto MONO would still try to play every
+// note. Keeps the TOP-MOST note (lowest row index = highest pitch — that's
+// usually the melody line in a chord). Returns new grid+durs arrays; doesn't
+// mutate inputs.
+var cullPatToMono = function cullPatToMono(grid, durs) {
+  var g = grid.map(function (row) {
+    return _toConsumableArray(row);
+  });
+  var d = durs ? durs.map(function (row) {
+    return _toConsumableArray(row);
+  }) : mkDurs();
+  for (var c = 0; c < COLS; c++) {
+    var kept = false;
+    for (var r = 0; r < ROWS; r++) {
+      if (!g[r][c]) continue;
+      if (kept) {
+        g[r][c] = false;
+        if (d[r]) d[r][c] = 1;
+      } else kept = true;
+    }
+  }
+  return {
+    grid: g,
+    durs: d
   };
 };
 // ─── Drum layer ───────────────────────────────────────────────────────────────
@@ -1445,7 +1473,9 @@ var Bell = /*#__PURE__*/function () {
       // Per-layer mixer multiplier (0..100 from layerParams.mix); default 0.85
       // if missing for backward-compat with legacy saves.
       var mixMul = p && p.mix != null ? p.mix / 100 : 0.85;
-      var peak = (p.detune > 2 ? 0.28 : 0.42) * velMul * mixMul;
+      // monoSingle short-circuits the dual-osc check below — peak gain follows the
+      // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
+      var peak = (p.detune > 2 && !(p && p.monoSingle) ? 0.28 : 0.42) * velMul * mixMul;
       // gainAtGate must be computed AFTER peak is defined
       var gainAtGate = decayFraction >= 1 ? sus * peak : Math.max(0.001, peak * Math.pow(Math.max(0.001, sus), decayFraction));
       vca.gain.setValueAtTime(0, t);
@@ -1476,7 +1506,11 @@ var Bell = /*#__PURE__*/function () {
       //      spread=1. The user dials a base detune; SPREAD then widens AND pans.
       //
       // Topology: o1 → gL, gR → merger (ch0+ch1) → comp → vcf. Same for o2.
-      var spreadAmt = p && p.spread != null && p.detune > 2 ? Math.max(0, Math.min(100, p.spread)) / 100 : 0;
+      // monoSingle: skip the o2 detune stack and any spread/pan plumbing entirely
+      // — MONO is a single oscillator regardless of saved detune. Tested below
+      // wherever the dual-osc / spread path is gated.
+      var isMonoSingle = !!(p && p.monoSingle);
+      var spreadAmt = !isMonoSingle && p && p.spread != null && p.detune > 2 ? Math.max(0, Math.min(100, p.spread)) / 100 : 0;
       var spreadMerger = null;
       if (spreadAmt > 0) {
         spreadMerger = this.ctx.createChannelMerger(2);
@@ -1518,7 +1552,7 @@ var Bell = /*#__PURE__*/function () {
       o1.start(t);
       o1.stop(t + end + .05);
       var o2 = null;
-      if (p.detune > 2) {
+      if (p.detune > 2 && !isMonoSingle) {
         o2 = this.ctx.createOscillator();
         o2.type = p.waveform;
         if (prevFreq && glideTime > 0) {
@@ -2440,19 +2474,31 @@ function Tabula() {
       spread: 0 // 0..100; POLY-only stereo spread of detune stack
     };
   };
+  // Default for the MONO layer — single-oscillator engine. monoSingle: true
+  // tells Bell.play to skip the o2 stack even if a saved project had detune
+  // on this layer. Keeps MONO sounding lean and pure.
+  var DEFAULT_LP_MONO = function DEFAULT_LP_MONO(octave) {
+    return _objectSpread(_objectSpread({}, DEFAULT_LP(octave)), {}, {
+      detune: 0,
+      monoSingle: true
+    });
+  };
   // Backfill missing fields when loading legacy layerParams. Returns a new
   // layerParams object with all fields populated. Three-layer pare-down:
   // legacy "bass" slot is dropped from the output (bass params discarded;
   // bass pats are merged into lead pats by the load paths separately).
+  // Lead always gets monoSingle:true forced — older saves predate the rule.
   var fillLayerParams = function fillLayerParams(lp) {
     return {
       synth: _objectSpread(_objectSpread({}, DEFAULT_LP(0)), lp && lp.synth ? lp.synth : {}),
-      lead: _objectSpread(_objectSpread({}, DEFAULT_LP(0)), lp && lp.lead ? lp.lead : {})
+      lead: _objectSpread(_objectSpread(_objectSpread({}, DEFAULT_LP_MONO(0)), lp && lp.lead ? lp.lead : {}), {}, {
+        monoSingle: true
+      })
     };
   };
   var _useState105 = useState({
       synth: DEFAULT_LP(0),
-      lead: DEFAULT_LP(0) // mono layer; user adjusts octave to taste
+      lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
     _useState106 = _slicedToArray(_useState105, 2),
     layerParams = _useState106[0],
@@ -2871,6 +2917,43 @@ function Tabula() {
       });
     });
   };
+
+  // Apply note-move gesture: rebuild from the pre-move snapshot and re-place
+  // the dragged note at newRow. Duration travels with the note; column params
+  // are unchanged. Idempotent — every move recomputes from the snapshot so
+  // dragging through intermediate rows doesn't accumulate stale state.
+  var applyNoteMoveR = useRef(function () {
+    return null;
+  });
+  applyNoteMoveR.current = function (newRow) {
+    var g = gesture.current;
+    if (!g.preMoveGrid || g.moveStartCol == null) return;
+    var startR = g.moveStartRow,
+      startC = g.moveStartCol;
+    var span = g.preMoveDurs && g.preMoveDurs[startR] ? g.preMoveDurs[startR][startC] : 1;
+    setPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeIdR.current) return p;
+        var grid = g.preMoveGrid.map(function (row) {
+          return _toConsumableArray(row);
+        });
+        var durs = (g.preMoveDurs || mkDurs()).map(function (row) {
+          return _toConsumableArray(row);
+        });
+        // Clear the original cell + reset its duration.
+        grid[startR][startC] = false;
+        if (durs[startR]) durs[startR][startC] = 1;
+        // Place the note at the new row, preserving the duration span.
+        grid[newRow][startC] = true;
+        if (durs[newRow]) durs[newRow][startC] = span;
+        return Object.assign({}, p, {
+          grid: grid,
+          durs: durs
+        });
+      });
+    });
+    g.moveCurrentRow = newRow;
+  };
   useEffect(function () {
     patsR.current = pats;
   }, [pats]);
@@ -3135,7 +3218,7 @@ function Tabula() {
     setSpeedMult(s.speedMult != null ? s.speedMult : SESSION_DEFAULTS.speedMult);
     setLayerParams(s.layerParams ? fillLayerParams(s.layerParams) : {
       synth: DEFAULT_LP(0),
-      lead: DEFAULT_LP(0)
+      lead: DEFAULT_LP_MONO(0)
     });
     [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref8) {
       var _ref9 = _slicedToArray(_ref8, 2),
@@ -3448,13 +3531,13 @@ function Tabula() {
         } : {}), s.dlyWetPct != null ? {
           dlySend: s.dlyWetPct
         } : {}),
-        lead: DEFAULT_LP(0)
+        lead: DEFAULT_LP_MONO(0)
       };
       setLayerParams(migrated);
     } else {
       setLayerParams({
         synth: DEFAULT_LP(0),
-        lead: DEFAULT_LP(0)
+        lead: DEFAULT_LP_MONO(0)
       });
     }
     // Default-fallback on load: every key gets either the saved value or the
@@ -3629,7 +3712,7 @@ function Tabula() {
     setSpeedMult(1);
     setLayerParams({
       synth: DEFAULT_LP(0),
-      lead: DEFAULT_LP(0)
+      lead: DEFAULT_LP_MONO(0)
     });
     setDlyIdx(3);
     setDlyFbPct(45);
@@ -3869,7 +3952,7 @@ function Tabula() {
     } else {
       setLayerParams({
         synth: DEFAULT_LP(0),
-        lead: DEFAULT_LP(0)
+        lead: DEFAULT_LP_MONO(0)
       });
     }
     setLoopMode(s.loopMode != null ? s.loopMode : SESSION_DEFAULTS.loopMode);
@@ -4341,8 +4424,7 @@ function Tabula() {
 
   // ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
   /* OLD_SCHEDULER_BODY_BEGIN
-  
-      // ── Song-mode pat resolution ─────────────────────────────────────────
+        // ── Song-mode pat resolution ─────────────────────────────────────────
       // When songMode is on, all four layers advance together through songMatrix.
       // Bar duration = min(gridLen) of populated pats this bar, default 16.
       // Loops between firstPopulatedBar..lastPopulatedBar (option B).
@@ -4382,7 +4464,7 @@ function Tabula() {
           setSongBarLayer({synth:songCurBar,lead:songCurBar,drums:songCurBar});
         }
       }
-        // ── Synth-track pat resolution ──────────────────────────────────────
+       // ── Synth-track pat resolution ──────────────────────────────────────
       // Three modes:
       //  1. Song mode: matrix dictates per-bar pattern (songSyn already resolved above)
       //  2. Loop mode: solo the ACTIVE layer's active pat through the main path (when the
@@ -4435,10 +4517,10 @@ function Tabula() {
         const ratio=stR(transpR.current);
         const rawSp=(p&&p.params&&p.params[s])?p.params[s]:null;
         const sp=varyModeR.current&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
-          const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
+         const rhy   = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
         const ratch = rhy;
         const subDur = stepDur / ratch;
-          if(grid)for(let r=0;r<ROWS;r++){
+         if(grid)for(let r=0;r<ROWS;r++){
           if(!grid[r][s])continue;
           // Per-row duration. durs[r][s] = number of step cells this note covers.
           const dur = (durs&&durs[r]&&durs[r][s])?Math.max(1,durs[r][s]):1;
@@ -5468,21 +5550,49 @@ function Tabula() {
         longPressR.current = null;
         var startCell = g.paintStartCell;
 
+        // Note-move gesture: tap on existing note + drag vertically. Moves
+        // that single note up/down the column. Duration travels with the note.
+        // Triggered before dur-edit because dy-dominant means "move up/down"
+        // — horizontal drag is still dur-edit (rightward) or paint/erase.
+        if (startCell && startCell.wasOn && Math.abs(dy) > Math.abs(dx)) {
+          var _snapPat = patsR.current.find(function (p) {
+            return p.id === activeIdR.current;
+          });
+          g.preMoveGrid = _snapPat ? _snapPat.grid.map(function (row) {
+            return _toConsumableArray(row);
+          }) : null;
+          g.preMoveDurs = _snapPat ? _snapPat.durs ? _snapPat.durs.map(function (row) {
+            return _toConsumableArray(row);
+          }) : mkDurs() : mkDurs();
+          g.moveStartRow = startCell.r;
+          g.moveStartCol = startCell.c;
+          g.moveCurrentRow = startCell.r;
+          g.state = "note-move";
+          var gridEl2 = gridRef.current;
+          if (gridEl2) {
+            var rect = gridEl2.getBoundingClientRect();
+            var cellH = rect.height / ROWS;
+            var newRow = Math.max(0, Math.min(ROWS - 1, Math.floor((e.clientY - rect.top) / cellH)));
+            applyNoteMoveR.current(newRow);
+          }
+          return;
+        }
+
         // Duration-edit gesture: tap on existing note + drag horizontally rightward.
         // Per-row monophony: only same-row notes after the head can be cannibalized.
         // The grid + durs snapshot is preserved during the gesture so walking back
         // restores cannibalized notes as long as the user hasn't released yet.
         if (startCell && startCell.wasOn && dx > 0 && Math.abs(dx) > Math.abs(dy)) {
-          var _snapPat = patsR.current.find(function (p) {
+          var _snapPat2 = patsR.current.find(function (p) {
             return p.id === activeIdR.current;
           });
           // Snapshot grid + durs as the gesture-base. We restore from this every move
           // so the gesture always operates on the original state, never on its own
           // partial output. This prevents ghost extensions accumulating.
-          var baseGrid = _snapPat ? _snapPat.grid.map(function (row) {
+          var baseGrid = _snapPat2 ? _snapPat2.grid.map(function (row) {
             return _toConsumableArray(row);
           }) : null;
-          var baseDurs = _snapPat ? _snapPat.durs ? _snapPat.durs.map(function (row) {
+          var baseDurs = _snapPat2 ? _snapPat2.durs ? _snapPat2.durs.map(function (row) {
             return _toConsumableArray(row);
           }) : mkDurs() : mkDurs();
           // Reset the head's own duration to 1 in the baseline so the gesture starts
@@ -5495,11 +5605,11 @@ function Tabula() {
           g.durStartRow = startCell.r;
           g.state = "dur-edit";
           // Apply initial extent based on current pointer x
-          var gridEl2 = gridRef.current;
-          if (gridEl2) {
-            var rect = gridEl2.getBoundingClientRect();
-            var cellW = rect.width / COLS;
-            var targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / cellW)));
+          var _gridEl = gridRef.current;
+          if (_gridEl) {
+            var _rect3 = _gridEl.getBoundingClientRect();
+            var cellW = _rect3.width / COLS;
+            var targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - _rect3.left) / cellW)));
             g.lastDurTarget = targetCol;
             applyDurEditR.current(targetCol);
           }
@@ -5578,10 +5688,10 @@ function Tabula() {
     if (g.state === "paint") {
       var gridEl = gridRef.current;
       if (!gridEl) return;
-      var _rect3 = gridEl.getBoundingClientRect();
-      if (e.clientX <= _rect3.left || e.clientX >= _rect3.right || e.clientY <= _rect3.top || e.clientY >= _rect3.bottom) return;
-      var cr = Math.floor((e.clientY - _rect3.top) / (_rect3.height / ROWS));
-      var cc = Math.floor((e.clientX - _rect3.left) / (_rect3.width / COLS));
+      var _rect4 = gridEl.getBoundingClientRect();
+      if (e.clientX <= _rect4.left || e.clientX >= _rect4.right || e.clientY <= _rect4.top || e.clientY >= _rect4.bottom) return;
+      var cr = Math.floor((e.clientY - _rect4.top) / (_rect4.height / ROWS));
+      var cc = Math.floor((e.clientX - _rect4.left) / (_rect4.width / COLS));
       if (cr < 0 || cr >= ROWS || cc < 0 || cc >= COLS) return;
       var _key = "".concat(cr, ",").concat(cc);
       if (g.paintedCells.has(_key)) return;
@@ -5660,19 +5770,28 @@ function Tabula() {
     }
     if (g.state === "dur-edit") {
       var _activePat$gridLen2;
-      var _gridEl = gridRef.current;
-      if (!_gridEl) return;
-      var _rect4 = _gridEl.getBoundingClientRect();
-      var _cellW = _rect4.width / COLS;
+      var _gridEl2 = gridRef.current;
+      if (!_gridEl2) return;
+      var _rect5 = _gridEl2.getBoundingClientRect();
+      var _cellW = _rect5.width / COLS;
       // Clamp targetCol to active pat's gridLen-1 (don't extend past the loop end)
       var _activePat = patsR.current.find(function (p) {
         return p.id === activeIdR.current;
       });
       var maxCol = ((_activePat$gridLen2 = _activePat === null || _activePat === void 0 ? void 0 : _activePat.gridLen) !== null && _activePat$gridLen2 !== void 0 ? _activePat$gridLen2 : COLS) - 1;
-      var _targetCol = Math.max(g.durStartCol, Math.min(maxCol, Math.floor((e.clientX - _rect4.left) / _cellW)));
+      var _targetCol = Math.max(g.durStartCol, Math.min(maxCol, Math.floor((e.clientX - _rect5.left) / _cellW)));
       if (g.lastDurTarget === _targetCol) return;
       g.lastDurTarget = _targetCol;
       applyDurEditR.current(_targetCol);
+      return;
+    }
+    if (g.state === "note-move") {
+      var _gridEl3 = gridRef.current;
+      if (!_gridEl3) return;
+      var _rect6 = _gridEl3.getBoundingClientRect();
+      var _cellH = _rect6.height / ROWS;
+      var _newRow = Math.max(0, Math.min(ROWS - 1, Math.floor((e.clientY - _rect6.top) / _cellH)));
+      if (_newRow !== g.moveCurrentRow) applyNoteMoveR.current(_newRow);
       return;
     }
     if (g.state === "shift" && g.baseGrid && g.baseParams) {
@@ -5722,6 +5841,16 @@ function Tabula() {
       g.lastDurTarget = null;
       g.preTieGrid = null;
       g.preTieDurs = null;
+      setShifting(false);
+      return;
+    }
+    if (g.state === "note-move") {
+      g.state = "idle";
+      g.preMoveGrid = null;
+      g.preMoveDurs = null;
+      g.moveStartRow = null;
+      g.moveStartCol = null;
+      g.moveCurrentRow = null;
       setShifting(false);
       return;
     }
@@ -7384,6 +7513,9 @@ function Tabula() {
             }
             // Drop on a different synth-type layer box — copy pattern across layers.
             // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
+            // Dropping a POLY pattern onto MONO ("lead") culls the grid down to
+            // one note per column — otherwise a chord would try to play through
+            // the mono engine.
             var boxEl = el && el.closest && el.closest('[data-layer-box]');
             if (boxEl) {
               var tl = boxEl.dataset.layerBox;
@@ -7396,13 +7528,19 @@ function Tabula() {
                 if (targetPats.length < 8) {
                   var _p$gridLen;
                   pushHistory();
+                  var srcGrid = p.grid.map(function (r) {
+                    return _toConsumableArray(r);
+                  });
+                  var srcDurs = p.durs ? p.durs.map(function (r) {
+                    return _toConsumableArray(r);
+                  }) : mkDurs();
+                  var culled = tl === "lead" ? cullPatToMono(srcGrid, srcDurs) : {
+                    grid: srcGrid,
+                    durs: srcDurs
+                  };
                   var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
-                    grid: p.grid.map(function (r) {
-                      return _toConsumableArray(r);
-                    }),
-                    durs: p.durs ? p.durs.map(function (r) {
-                      return _toConsumableArray(r);
-                    }) : mkDurs(),
+                    grid: culled.grid,
+                    durs: culled.durs,
                     params: (p.params || defaultStepParams()).map(function (s) {
                       return Object.assign({}, s);
                     }),
@@ -9557,7 +9695,7 @@ function Tabula() {
       alignItems: "stretch",
       justifyContent: "center"
     }
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
+  }, activeLayer === "synth" && /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "DETUNE",
     value: detune,
@@ -10167,7 +10305,8 @@ function Tabula() {
               return;
             }
           }
-          // Drop on another synth-type layer's bar button — copy pat across layers
+          // Drop on another synth-type layer's bar button — copy pat across layers.
+          // Same mono-cull rule as the desktop drop: POLY→MONO collapses chords.
           var boxEl = el && el.closest && el.closest('[data-layer-box]');
           if (boxEl) {
             var tl = boxEl.dataset.layerBox;
@@ -10180,13 +10319,19 @@ function Tabula() {
               if (targetPats.length < 8) {
                 var _p$gridLen2, _p$speedMult;
                 pushHistory();
+                var srcGrid = p.grid.map(function (r) {
+                  return _toConsumableArray(r);
+                });
+                var srcDurs = p.durs ? p.durs.map(function (r) {
+                  return _toConsumableArray(r);
+                }) : mkDurs();
+                var culled = tl === "lead" ? cullPatToMono(srcGrid, srcDurs) : {
+                  grid: srcGrid,
+                  durs: srcDurs
+                };
                 var newPat = Object.assign({}, mkPat(symPat(targetPats.length)), {
-                  grid: p.grid.map(function (r) {
-                    return _toConsumableArray(r);
-                  }),
-                  durs: p.durs ? p.durs.map(function (r) {
-                    return _toConsumableArray(r);
-                  }) : mkDurs(),
+                  grid: culled.grid,
+                  durs: culled.durs,
                   params: (p.params || defaultStepParams()).map(function (s) {
                     return Object.assign({}, s);
                   }),
@@ -11512,7 +11657,7 @@ function Tabula() {
       alignItems: "stretch",
       justifyContent: "center"
     }
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
+  }, activeLayer === "synth" && /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "DETUNE",
     value: detune,

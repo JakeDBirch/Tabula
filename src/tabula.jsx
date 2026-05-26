@@ -74,6 +74,25 @@ const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
 const mkDurs=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(1));
 const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0}));
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,speedMult:1});
+// Cull a pattern down to monophonic — at most one active note per column.
+// Used when copying a POLY (multi-row-per-col) pattern onto the MONO layer:
+// without this, dragging a chord onto MONO would still try to play every
+// note. Keeps the TOP-MOST note (lowest row index = highest pitch — that's
+// usually the melody line in a chord). Returns new grid+durs arrays; doesn't
+// mutate inputs.
+const cullPatToMono=(grid,durs)=>{
+  const g=grid.map(row=>[...row]);
+  const d=durs?durs.map(row=>[...row]):mkDurs();
+  for(let c=0;c<COLS;c++){
+    let kept=false;
+    for(let r=0;r<ROWS;r++){
+      if(!g[r][c])continue;
+      if(kept){g[r][c]=false; if(d[r])d[r][c]=1;}
+      else kept=true;
+    }
+  }
+  return{grid:g,durs:d};
+};
 // ─── Drum layer ───────────────────────────────────────────────────────────────
 const DRUM_VOICES=[
   {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
@@ -611,7 +630,9 @@ class Bell{
     // Per-layer mixer multiplier (0..100 from layerParams.mix); default 0.85
     // if missing for backward-compat with legacy saves.
     const mixMul=(p&&p.mix!=null)?(p.mix/100):0.85;
-    const peak=(p.detune>2?0.28:0.42)*velMul*mixMul;
+    // monoSingle short-circuits the dual-osc check below — peak gain follows the
+    // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
+    const peak=((p.detune>2&&!(p&&p.monoSingle))?0.28:0.42)*velMul*mixMul;
     // gainAtGate must be computed AFTER peak is defined
     const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
@@ -642,7 +663,11 @@ class Bell{
     //      spread=1. The user dials a base detune; SPREAD then widens AND pans.
     //
     // Topology: o1 → gL, gR → merger (ch0+ch1) → comp → vcf. Same for o2.
-    const spreadAmt=(p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
+    // monoSingle: skip the o2 detune stack and any spread/pan plumbing entirely
+    // — MONO is a single oscillator regardless of saved detune. Tested below
+    // wherever the dual-osc / spread path is gated.
+    const isMonoSingle = !!(p && p.monoSingle);
+    const spreadAmt=(!isMonoSingle&&p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
     let spreadMerger=null;
     if(spreadAmt>0){
       spreadMerger=this.ctx.createChannelMerger(2);
@@ -676,7 +701,7 @@ class Bell{
     panOsc(o1,-spreadAmt);
     o1.start(t);o1.stop(t+end+.05);
     let o2=null;
-    if(p.detune>2){
+    if(p.detune>2&&!isMonoSingle){
       o2=this.ctx.createOscillator();
       o2.type=p.waveform;
       if(prevFreq&&glideTime>0){
@@ -1133,17 +1158,26 @@ export default function Tabula(){
     subLevel: 0,       // 0..100; MONO-only sub-oscillator (1 octave down)
     spread: 0,         // 0..100; POLY-only stereo spread of detune stack
   });
+  // Default for the MONO layer — single-oscillator engine. monoSingle: true
+  // tells Bell.play to skip the o2 stack even if a saved project had detune
+  // on this layer. Keeps MONO sounding lean and pure.
+  const DEFAULT_LP_MONO = (octave)=>({
+    ...DEFAULT_LP(octave),
+    detune:0,
+    monoSingle:true,
+  });
   // Backfill missing fields when loading legacy layerParams. Returns a new
   // layerParams object with all fields populated. Three-layer pare-down:
   // legacy "bass" slot is dropped from the output (bass params discarded;
   // bass pats are merged into lead pats by the load paths separately).
+  // Lead always gets monoSingle:true forced — older saves predate the rule.
   const fillLayerParams=(lp)=>({
     synth:{...DEFAULT_LP(0), ...(lp&&lp.synth?lp.synth:{})},
-    lead: {...DEFAULT_LP(0), ...(lp&&lp.lead ?lp.lead :{})}
+    lead: {...DEFAULT_LP_MONO(0), ...(lp&&lp.lead ?lp.lead :{}), monoSingle:true}
   });
   const [layerParams, setLayerParams] = useState({
     synth: DEFAULT_LP(0),
-    lead:  DEFAULT_LP(0)   // mono layer; user adjusts octave to taste
+    lead:  DEFAULT_LP_MONO(0)   // mono layer; user adjusts octave to taste
   });
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
@@ -1348,6 +1382,31 @@ export default function Tabula(){
     }));
   };
 
+  // Apply note-move gesture: rebuild from the pre-move snapshot and re-place
+  // the dragged note at newRow. Duration travels with the note; column params
+  // are unchanged. Idempotent — every move recomputes from the snapshot so
+  // dragging through intermediate rows doesn't accumulate stale state.
+  const applyNoteMoveR = useRef(()=>null);
+  applyNoteMoveR.current = (newRow)=>{
+    const g=gesture.current;
+    if(!g.preMoveGrid||g.moveStartCol==null)return;
+    const startR=g.moveStartRow, startC=g.moveStartCol;
+    const span=(g.preMoveDurs&&g.preMoveDurs[startR])?g.preMoveDurs[startR][startC]:1;
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeIdR.current)return p;
+      const grid=g.preMoveGrid.map(row=>[...row]);
+      const durs=(g.preMoveDurs||mkDurs()).map(row=>[...row]);
+      // Clear the original cell + reset its duration.
+      grid[startR][startC]=false;
+      if(durs[startR])durs[startR][startC]=1;
+      // Place the note at the new row, preserving the duration span.
+      grid[newRow][startC]=true;
+      if(durs[newRow])durs[newRow][startC]=span;
+      return Object.assign({},p,{grid,durs});
+    }));
+    g.moveCurrentRow=newRow;
+  };
+
   useEffect(()=>{patsR.current=pats;},[pats]);
   useEffect(()=>{chainR.current=chain;},[chain]);
   useEffect(()=>{bpmR.current=bpm;bell.current.stepDur=60/bpm/4*speedMultR.current;},[bpm]);
@@ -1471,7 +1530,7 @@ export default function Tabula(){
     setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
     setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
-    setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
+    setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
@@ -1652,11 +1711,11 @@ export default function Tabula(){
           ...(s.vcfRes!=null?{vcfRes:s.vcfRes}:{}),
           ...(s.filterEnvAmt!=null?{filterEnvAmt:s.filterEnvAmt}:{}),
           ...(s.dlyWetPct!=null?{dlySend:s.dlyWetPct}:{})},
-        lead:DEFAULT_LP(0)
+        lead:DEFAULT_LP_MONO(0)
       };
       setLayerParams(migrated);
     }else{
-      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
+      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     }
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
@@ -1748,7 +1807,7 @@ export default function Tabula(){
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
-    setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
+    setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setDrumLevel(85);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
@@ -1856,7 +1915,7 @@ export default function Tabula(){
           ...(s.dlyWetPct!=null?{dlySend:s.dlyWetPct}:{})}
       }));
     }else{
-      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP(0)});
+      setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
@@ -2876,6 +2935,28 @@ export default function Tabula(){
         clearTimeout(longPressR.current);longPressR.current=null;
         const startCell=g.paintStartCell;
 
+        // Note-move gesture: tap on existing note + drag vertically. Moves
+        // that single note up/down the column. Duration travels with the note.
+        // Triggered before dur-edit because dy-dominant means "move up/down"
+        // — horizontal drag is still dur-edit (rightward) or paint/erase.
+        if(startCell&&startCell.wasOn&&Math.abs(dy)>Math.abs(dx)){
+          const snapPat=patsR.current.find(p=>p.id===activeIdR.current);
+          g.preMoveGrid=snapPat?snapPat.grid.map(row=>[...row]):null;
+          g.preMoveDurs=snapPat?(snapPat.durs?snapPat.durs.map(row=>[...row]):mkDurs()):mkDurs();
+          g.moveStartRow=startCell.r;
+          g.moveStartCol=startCell.c;
+          g.moveCurrentRow=startCell.r;
+          g.state="note-move";
+          const gridEl2=gridRef.current;
+          if(gridEl2){
+            const rect=gridEl2.getBoundingClientRect();
+            const cellH=rect.height/ROWS;
+            const newRow=Math.max(0,Math.min(ROWS-1,Math.floor((e.clientY-rect.top)/cellH)));
+            applyNoteMoveR.current(newRow);
+          }
+          return;
+        }
+
         // Duration-edit gesture: tap on existing note + drag horizontally rightward.
         // Per-row monophony: only same-row notes after the head can be cannibalized.
         // The grid + durs snapshot is preserved during the gesture so walking back
@@ -3013,6 +3094,15 @@ export default function Tabula(){
       return;
     }
 
+    if(g.state==="note-move"){
+      const gridEl=gridRef.current;if(!gridEl)return;
+      const rect=gridEl.getBoundingClientRect();
+      const cellH=rect.height/ROWS;
+      const newRow=Math.max(0,Math.min(ROWS-1,Math.floor((e.clientY-rect.top)/cellH)));
+      if(newRow!==g.moveCurrentRow)applyNoteMoveR.current(newRow);
+      return;
+    }
+
     if(g.state==="shift"&&g.baseGrid&&g.baseParams){
       if(e.pointerId!==g.shiftPointerID)return; // ignore first finger
       const ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);
@@ -3037,6 +3127,14 @@ export default function Tabula(){
 
     if(g.state==="dur-edit"){
       g.state="idle";g.lastDurTarget=null;g.preTieGrid=null;g.preTieDurs=null;setShifting(false);
+      return;
+    }
+
+    if(g.state==="note-move"){
+      g.state="idle";
+      g.preMoveGrid=null;g.preMoveDurs=null;
+      g.moveStartRow=null;g.moveStartCol=null;g.moveCurrentRow=null;
+      setShifting(false);
       return;
     }
 
@@ -3793,6 +3891,9 @@ export default function Tabula(){
                                 }
                                 // Drop on a different synth-type layer box — copy pattern across layers.
                                 // Pre-stage target's updated pats in layerStoreR so switchLayer loads them.
+                                // Dropping a POLY pattern onto MONO ("lead") culls the grid down to
+                                // one note per column — otherwise a chord would try to play through
+                                // the mono engine.
                                 const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
                                 if(boxEl){
                                   const tl=boxEl.dataset.layerBox;
@@ -3801,9 +3902,12 @@ export default function Tabula(){
                                     const targetPats=targetData.pats||[];
                                     if(targetPats.length<8){
                                       pushHistory();
+                                      const srcGrid=p.grid.map(r=>[...r]);
+                                      const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs();
+                                      const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
                                       const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
-                                        grid:p.grid.map(r=>[...r]),
-                                        durs:p.durs?p.durs.map(r=>[...r]):mkDurs(),
+                                        grid:culled.grid,
+                                        durs:culled.durs,
                                         params:(p.params||defaultStepParams()).map(s=>Object.assign({},s)),
                                         gridLen:p.gridLen??16
                                       });
@@ -4528,7 +4632,10 @@ export default function Tabula(){
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
                       <div style={{display:"flex",gap:12,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
-                        <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                        {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
+                        {activeLayer==="synth"&&(
+                          <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                        )}
                         {activeLayer==="synth"&&(
                           <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                         )}
@@ -4734,7 +4841,8 @@ export default function Tabula(){
                           return;
                         }
                       }
-                      // Drop on another synth-type layer's bar button — copy pat across layers
+                      // Drop on another synth-type layer's bar button — copy pat across layers.
+                      // Same mono-cull rule as the desktop drop: POLY→MONO collapses chords.
                       const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
                       if(boxEl){
                         const tl=boxEl.dataset.layerBox;
@@ -4743,9 +4851,12 @@ export default function Tabula(){
                           const targetPats=targetData.pats||[];
                           if(targetPats.length<8){
                             pushHistory();
+                            const srcGrid=p.grid.map(r=>[...r]);
+                            const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs();
+                            const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
                             const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
-                              grid:p.grid.map(r=>[...r]),
-                              durs:p.durs?p.durs.map(r=>[...r]):mkDurs(),
+                              grid:culled.grid,
+                              durs:culled.durs,
                               params:(p.params||defaultStepParams()).map(s=>Object.assign({},s)),
                               gridLen:p.gridLen??16,
                               speedMult:p.speedMult??1,
@@ -5179,7 +5290,10 @@ export default function Tabula(){
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                           <SynthSection title="OSCILLATOR" accent={C_OSC}>
                             <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
-                              <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                              {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
+                              {activeLayer==="synth"&&(
+                                <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                              )}
                               {activeLayer==="synth"&&(
                                 <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                               )}
