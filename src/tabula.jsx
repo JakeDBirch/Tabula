@@ -1886,7 +1886,13 @@ export default function Tabula(){
       // (mono playback can only carry one of them per bar).
       const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
       const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
-      const synthPats=s.pats||[];
+      // Synth pats live in s.layerStore.synth.pats regardless of which layer
+      // was active at save time. Pulling from s.pats only works when active
+      // was synth — saves made from MONO or DRUMS had s.pats holding the
+      // last-touched synth-type pats (often lead's), so filtering the synth
+      // lane against it dropped every valid synth id and the lane came back
+      // blank. Fall back to s.pats for very old saves that predate layerStore.
+      const synthPats=(s.layerStore?.synth?.pats)||(s.pats||[]);
       // Lead now also covers legacy bass content.
       const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
       const drumPats=s.drumPats||[];
@@ -2077,13 +2083,18 @@ export default function Tabula(){
     if(s.songMatrix){
       const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
       const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
+      // Synth pats live in s.layerStore.synth.pats regardless of active layer
+      // at save — same fix as doLoad. s.pats only matches synth when active
+      // was synth; on MONO or DRUMS saves the synth lane would otherwise come
+      // back blank.
+      const synthPats=(s.layerStore?.synth?.pats)||(s.pats||[]);
       // Fold legacy bass lane into lead where lead is null.
       const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
       const leadLane=padTo64(s.songMatrix.lead);
       const bassLane=padTo64(s.songMatrix.bass);
       const mergedLead=leadLane.map((v,i)=>v!=null?v:bassLane[i]);
       setSongMatrix({
-        synth: filterIds(padTo64(s.songMatrix.synth),s.pats||[]),
+        synth: filterIds(padTo64(s.songMatrix.synth),synthPats),
         lead:  filterIds(mergedLead,leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums),s.drumPats||[])
       });

@@ -3760,7 +3760,7 @@ function Tabula() {
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
     if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
     if (s.songMatrix) {
-      var _s$layerStore, _s$layerStore2;
+      var _s$layerStore, _s$layerStore2, _s$layerStore3;
       // Sanitize each lane against its layer's current pats. Drop entries
       // referencing pat IDs that no longer exist; pad to 64. Legacy "bass"
       // lane is folded into the lead lane where lead is null at that bar
@@ -3778,9 +3778,15 @@ function Tabula() {
           return v != null && ids.has(v) ? v : null;
         });
       };
-      var synthPats = s.pats || [];
+      // Synth pats live in s.layerStore.synth.pats regardless of which layer
+      // was active at save time. Pulling from s.pats only works when active
+      // was synth — saves made from MONO or DRUMS had s.pats holding the
+      // last-touched synth-type pats (often lead's), so filtering the synth
+      // lane against it dropped every valid synth id and the lane came back
+      // blank. Fall back to s.pats for very old saves that predate layerStore.
+      var synthPats = ((_s$layerStore = s.layerStore) === null || _s$layerStore === void 0 || (_s$layerStore = _s$layerStore.synth) === null || _s$layerStore === void 0 ? void 0 : _s$layerStore.pats) || s.pats || [];
       // Lead now also covers legacy bass content.
-      var leadPats = [].concat(_toConsumableArray(((_s$layerStore = s.layerStore) === null || _s$layerStore === void 0 || (_s$layerStore = _s$layerStore.lead) === null || _s$layerStore === void 0 ? void 0 : _s$layerStore.pats) || []), _toConsumableArray(((_s$layerStore2 = s.layerStore) === null || _s$layerStore2 === void 0 || (_s$layerStore2 = _s$layerStore2.bass) === null || _s$layerStore2 === void 0 ? void 0 : _s$layerStore2.pats) || [])).slice(0, 8);
+      var leadPats = [].concat(_toConsumableArray(((_s$layerStore2 = s.layerStore) === null || _s$layerStore2 === void 0 || (_s$layerStore2 = _s$layerStore2.lead) === null || _s$layerStore2 === void 0 ? void 0 : _s$layerStore2.pats) || []), _toConsumableArray(((_s$layerStore3 = s.layerStore) === null || _s$layerStore3 === void 0 || (_s$layerStore3 = _s$layerStore3.bass) === null || _s$layerStore3 === void 0 ? void 0 : _s$layerStore3.pats) || [])).slice(0, 8);
       var _drumPats = s.drumPats || [];
       var leadLane = padTo64(s.songMatrix.lead);
       var bassLane = padTo64(s.songMatrix.bass);
@@ -4170,7 +4176,7 @@ function Tabula() {
       fn(s[k] != null ? s[k] : SESSION_DEFAULTS[k]);
     });
     if (s.songMatrix) {
-      var _s$layerStore3, _s$layerStore4;
+      var _s$layerStore4, _s$layerStore5, _s$layerStore6;
       var padTo64 = function padTo64(arr) {
         var a = Array.isArray(arr) ? arr.slice(0, 64) : [];
         while (a.length < 64) a.push(null);
@@ -4184,15 +4190,20 @@ function Tabula() {
           return v != null && ids.has(v) ? v : null;
         });
       };
+      // Synth pats live in s.layerStore.synth.pats regardless of active layer
+      // at save — same fix as doLoad. s.pats only matches synth when active
+      // was synth; on MONO or DRUMS saves the synth lane would otherwise come
+      // back blank.
+      var synthPats = ((_s$layerStore4 = s.layerStore) === null || _s$layerStore4 === void 0 || (_s$layerStore4 = _s$layerStore4.synth) === null || _s$layerStore4 === void 0 ? void 0 : _s$layerStore4.pats) || s.pats || [];
       // Fold legacy bass lane into lead where lead is null.
-      var leadPats = [].concat(_toConsumableArray(((_s$layerStore3 = s.layerStore) === null || _s$layerStore3 === void 0 || (_s$layerStore3 = _s$layerStore3.lead) === null || _s$layerStore3 === void 0 ? void 0 : _s$layerStore3.pats) || []), _toConsumableArray(((_s$layerStore4 = s.layerStore) === null || _s$layerStore4 === void 0 || (_s$layerStore4 = _s$layerStore4.bass) === null || _s$layerStore4 === void 0 ? void 0 : _s$layerStore4.pats) || [])).slice(0, 8);
+      var leadPats = [].concat(_toConsumableArray(((_s$layerStore5 = s.layerStore) === null || _s$layerStore5 === void 0 || (_s$layerStore5 = _s$layerStore5.lead) === null || _s$layerStore5 === void 0 ? void 0 : _s$layerStore5.pats) || []), _toConsumableArray(((_s$layerStore6 = s.layerStore) === null || _s$layerStore6 === void 0 || (_s$layerStore6 = _s$layerStore6.bass) === null || _s$layerStore6 === void 0 ? void 0 : _s$layerStore6.pats) || [])).slice(0, 8);
       var leadLane = padTo64(s.songMatrix.lead);
       var bassLane = padTo64(s.songMatrix.bass);
       var mergedLead = leadLane.map(function (v, i) {
         return v != null ? v : bassLane[i];
       });
       setSongMatrix({
-        synth: filterIds(padTo64(s.songMatrix.synth), s.pats || []),
+        synth: filterIds(padTo64(s.songMatrix.synth), synthPats),
         lead: filterIds(mergedLead, leadPats),
         drums: filterIds(padTo64(s.songMatrix.drums), s.drumPats || [])
       });
