@@ -499,6 +499,26 @@ var genVariation = function genVariation(grid) {
       _iterator.f();
     }
   }
+  // Safety guard: if the input grid had notes but the varied output is now
+  // empty (extreme slider combinations can land here — e.g. heavy drop with
+  // adds happening to land on row/cols outside the active gridLen), restore
+  // one note from the input so the pattern doesn't go fully silent on the
+  // user. They can still toggle VARY off if they want the original.
+  var hadInput = false,
+    hasOut = false;
+  for (var _r2 = 0; _r2 < ROWS; _r2++) for (var _c2 = 0; _c2 < COLS; _c2++) {
+    if (grid[_r2][_c2]) hadInput = true;
+    if (g[_r2][_c2]) hasOut = true;
+    if (hadInput && hasOut) break;
+  }
+  if (hadInput && !hasOut) {
+    outer: for (var _r3 = 0; _r3 < ROWS; _r3++) for (var _c3 = 0; _c3 < COLS; _c3++) {
+      if (grid[_r3][_c3]) {
+        g[_r3][_c3] = true;
+        break outer;
+      }
+    }
+  }
   return g;
 };
 
@@ -2611,6 +2631,12 @@ function Tabula() {
   }, [transpose]);
   useEffect(function () {
     varyModeR.current = varyMode;
+    // Clear the cached variation grids on every varyMode toggle. Otherwise a
+    // stale "silent" varied grid from before disable will be reused when
+    // re-enabling, until the next per-layer step 0 regenerates.
+    if (variedGrids.current && variedGrids.current.clear) variedGrids.current.clear();
+    if (variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
+    if (variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
   }, [varyMode]);
   useEffect(function () {
     recModeR.current = recMode;
@@ -3929,9 +3955,9 @@ function Tabula() {
         lf.nextAt += layerStepDur;
         // Free mode: per-layer bar advances on layer-step wrap.
         if (isFree && ns === 0) {
-          var _r2 = ranges[_layer];
+          var _r4 = ranges[_layer];
           var nb = lf.bar + 1;
-          if (nb > _r2.last) nb = _r2.empty ? 0 : _r2.first;
+          if (nb > _r4.last) nb = _r4.empty ? 0 : _r4.first;
           lf.bar = nb;
           if (newCursor[_layer] !== lf.bar) {
             newCursor[_layer] = lf.bar;
@@ -8886,10 +8912,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r3 = 0; _r3 < ROWS; _r3++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r3][c2]) {
-          var _activePat$durs$_r3$c, _activePat$durs2;
-          var span = Math.max(1, (_activePat$durs$_r3$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r3]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r3$c !== void 0 ? _activePat$durs$_r3$c : 1);
+      for (var _r5 = 0; _r5 < ROWS; _r5++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r5][c2]) {
+          var _activePat$durs$_r5$c, _activePat$durs2;
+          var span = Math.max(1, (_activePat$durs$_r5$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r5]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r5$c !== void 0 ? _activePat$durs$_r5$c : 1);
           if (c < c2 + span) return true;
         }
       }
@@ -10957,10 +10983,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r4 = 0; _r4 < ROWS; _r4++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r4][c2]) {
-          var _activePat$durs$_r4$c, _activePat$durs4;
-          var span = Math.max(1, (_activePat$durs$_r4$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r4]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r4$c !== void 0 ? _activePat$durs$_r4$c : 1);
+      for (var _r6 = 0; _r6 < ROWS; _r6++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r6][c2]) {
+          var _activePat$durs$_r6$c, _activePat$durs4;
+          var span = Math.max(1, (_activePat$durs$_r6$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r6]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r6$c !== void 0 ? _activePat$durs$_r6$c : 1);
           if (c < c2 + span) return true;
         }
       }

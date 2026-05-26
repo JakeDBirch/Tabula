@@ -161,6 +161,22 @@ const genVariation=(grid,vp={})=>{
       }
     }
   }
+  // Safety guard: if the input grid had notes but the varied output is now
+  // empty (extreme slider combinations can land here — e.g. heavy drop with
+  // adds happening to land on row/cols outside the active gridLen), restore
+  // one note from the input so the pattern doesn't go fully silent on the
+  // user. They can still toggle VARY off if they want the original.
+  let hadInput=false,hasOut=false;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    if(grid[r][c])hadInput=true;
+    if(g[r][c])hasOut=true;
+    if(hadInput&&hasOut)break;
+  }
+  if(hadInput&&!hasOut){
+    outer:for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      if(grid[r][c]){g[r][c]=true;break outer;}
+    }
+  }
   return g;
 };
 
@@ -1168,7 +1184,15 @@ export default function Tabula(){
   useEffect(()=>{if(followSeq&&playing&&playId&&activeLayer==="synth")setActiveId(playId);},[playId,followSeq,playing,activeLayer]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
-  useEffect(()=>{varyModeR.current=varyMode;},[varyMode]);
+  useEffect(()=>{
+    varyModeR.current=varyMode;
+    // Clear the cached variation grids on every varyMode toggle. Otherwise a
+    // stale "silent" varied grid from before disable will be reused when
+    // re-enabling, until the next per-layer step 0 regenerates.
+    if(variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
+    if(variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
+    if(variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
+  },[varyMode]);
   useEffect(()=>{
     recModeR.current=recMode;
     if(recMode) recSourceIdR.current=activeId; // lock source to active pattern at record start
