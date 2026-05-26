@@ -340,6 +340,41 @@ var mkDrumPat = function mkDrumPat(name) {
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
 // rvSend/dlySend default to 0 — per-channel FX sends are opt-in.
 var DRUM_DEFAULT_LEVEL = 60;
+
+// ─── Curated drum kits ───────────────────────────────────────────────────────
+// Each non-"synth" kit maps every DRUM_VOICES key to a relative URL that will
+// be fetched and decoded when the kit is selected. Add new kits here; paths
+// are relative to the deployed root so samples/kit-name/file.wav will resolve
+// correctly on GitHub Pages. Missing keys fall back to the synth voice.
+//
+// File layout convention:
+//   samples/<kit-id>/<voice-key>.wav   e.g. samples/707/BD.wav
+//
+// To add a kit: copy the template, fill in the id/label/samples map, and put
+// your audio files at the listed paths in the repo.
+var DRUM_KITS = [{
+  id: "synth",
+  label: "SYNTH"
+  // no samples — engine falls through to the built-in synthesizer
+}
+// ── Add your kits below. Template: ─────────────────────────────────────────
+// {
+//   id:    "my-kit",
+//   label: "MY KIT",
+//   samples: {
+//     BD: "samples/my-kit/BD.wav",
+//     SD: "samples/my-kit/SD.wav",
+//     LT: "samples/my-kit/LT.wav",
+//     HT: "samples/my-kit/HT.wav",
+//     CH: "samples/my-kit/CH.wav",
+//     OH: "samples/my-kit/OH.wav",
+//     CY: "samples/my-kit/CY.wav",
+//     CP: "samples/my-kit/CP.wav",
+//     CL: "samples/my-kit/CL.wav",
+//     CB: "samples/my-kit/CB.wav",
+//   },
+// },
+];
 // Filter modes: "off" disables the filter (passes everything through unity),
 // "lp"/"hp"/"bp" route through the corresponding biquad type. filtCut 0..100
 // maps log-scaled to 20..20000 Hz at runtime. pitch is in semitones, ±24.
@@ -412,6 +447,7 @@ var SESSION_DEFAULTS = Object.freeze({
   rvPreDelay: 0,
   dlyToRev: 0,
   drumLevel: 85,
+  activeKit: "synth",
   vDropRate: 13,
   vShiftRate: 17,
   vShiftRange: 1,
@@ -2527,43 +2563,54 @@ function Tabula() {
     _useState56 = _slicedToArray(_useState55, 2),
     recordingVoice = _useState56[0],
     setRecordingVoice = _useState56[1];
+  // Active kit id ("synth" = no samples, use synthesizer; any other id loads
+  // from DRUM_KITS. "user" is the implicit id for individual mic recordings
+  // that don't come from a kit — loading a kit replaces them all.
+  var _useState57 = useState("synth"),
+    _useState58 = _slicedToArray(_useState57, 2),
+    activeKit = _useState58[0],
+    setActiveKit = _useState58[1];
+  var _useState59 = useState(false),
+    _useState60 = _slicedToArray(_useState59, 2),
+    kitLoading = _useState60[0],
+    setKitLoading = _useState60[1];
   var recorderRef = useRef(null);
   var recordStreamRef = useRef(null);
-  var _useState57 = useState(0),
-    _useState58 = _slicedToArray(_useState57, 2),
-    swing = _useState58[0],
-    setSwing = _useState58[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState61 = useState(0),
+    _useState62 = _slicedToArray(_useState61, 2),
+    swing = _useState62[0],
+    setSwing = _useState62[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState59 = useState(1),
-    _useState60 = _slicedToArray(_useState59, 2),
-    speedMult = _useState60[0],
-    setSpeedMult = _useState60[1];
-  var speedMultR = useRef(1);
-  var _useState61 = useState(false),
-    _useState62 = _slicedToArray(_useState61, 2),
-    showMenu = _useState62[0],
-    setShowMenu = _useState62[1];
-  var _useState63 = useState(false),
+  var _useState63 = useState(1),
     _useState64 = _slicedToArray(_useState63, 2),
-    topTrayOpen = _useState64[0],
-    setTopTrayOpen = _useState64[1];
+    speedMult = _useState64[0],
+    setSpeedMult = _useState64[1];
+  var speedMultR = useRef(1);
   var _useState65 = useState(false),
     _useState66 = _slicedToArray(_useState65, 2),
-    bottomTrayOpen = _useState66[0],
-    setBottomTrayOpen = _useState66[1];
-  var _useState67 = useState(null),
+    showMenu = _useState66[0],
+    setShowMenu = _useState66[1];
+  var _useState67 = useState(false),
     _useState68 = _slicedToArray(_useState67, 2),
-    patMenu = _useState68[0],
-    setPatMenu = _useState68[1]; // {id, x, y}
-  var _useState69 = useState(null),
+    topTrayOpen = _useState68[0],
+    setTopTrayOpen = _useState68[1];
+  var _useState69 = useState(false),
     _useState70 = _slicedToArray(_useState69, 2),
-    drumMenu = _useState70[0],
-    setDrumMenu = _useState70[1]; // {id, x, y}
+    bottomTrayOpen = _useState70[0],
+    setBottomTrayOpen = _useState70[1];
   var _useState71 = useState(null),
     _useState72 = _slicedToArray(_useState71, 2),
-    paramPopup = _useState72[0],
-    setParamPopup = _useState72[1]; // {col,x,y,activeArm,values}
+    patMenu = _useState72[0],
+    setPatMenu = _useState72[1]; // {id, x, y}
+  var _useState73 = useState(null),
+    _useState74 = _slicedToArray(_useState73, 2),
+    drumMenu = _useState74[0],
+    setDrumMenu = _useState74[1]; // {id, x, y}
+  var _useState75 = useState(null),
+    _useState76 = _slicedToArray(_useState75, 2),
+    paramPopup = _useState76[0],
+    setParamPopup = _useState76[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var varyLongPressR = useRef(null);
@@ -2572,69 +2619,69 @@ function Tabula() {
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState73 = useState(null),
-    _useState74 = _slicedToArray(_useState73, 2),
-    chainDrag = _useState74[0],
-    setChainDrag = _useState74[1]; // {type,id,fromIdx,x,y}
+  var _useState77 = useState(null),
+    _useState78 = _slicedToArray(_useState77, 2),
+    chainDrag = _useState78[0],
+    setChainDrag = _useState78[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
-  var _useState75 = useState(null),
-    _useState76 = _slicedToArray(_useState75, 2),
-    patternDrag = _useState76[0],
-    setPatternDrag = _useState76[1]; // {patId, name, accent, x, y, overDrop}
-  // Vary params
-  var _useState77 = useState(13),
-    _useState78 = _slicedToArray(_useState77, 2),
-    vDropRate = _useState78[0],
-    setVDropRate = _useState78[1];
-  var _useState79 = useState(17),
+  var _useState79 = useState(null),
     _useState80 = _slicedToArray(_useState79, 2),
-    vShiftRate = _useState80[0],
-    setVShiftRate = _useState80[1];
-  var _useState81 = useState(1),
+    patternDrag = _useState80[0],
+    setPatternDrag = _useState80[1]; // {patId, name, accent, x, y, overDrop}
+  // Vary params
+  var _useState81 = useState(13),
     _useState82 = _slicedToArray(_useState81, 2),
-    vShiftRange = _useState82[0],
-    setVShiftRange = _useState82[1];
-  var _useState83 = useState(0),
+    vDropRate = _useState82[0],
+    setVDropRate = _useState82[1];
+  var _useState83 = useState(17),
     _useState84 = _slicedToArray(_useState83, 2),
-    vPitchRate = _useState84[0],
-    setVPitchRate = _useState84[1];
+    vShiftRate = _useState84[0],
+    setVShiftRate = _useState84[1];
   var _useState85 = useState(1),
     _useState86 = _slicedToArray(_useState85, 2),
-    vPitchRange = _useState86[0],
-    setVPitchRange = _useState86[1];
+    vShiftRange = _useState86[0],
+    setVShiftRange = _useState86[1];
   var _useState87 = useState(0),
     _useState88 = _slicedToArray(_useState87, 2),
-    vGhostRate = _useState88[0],
-    setVGhostRate = _useState88[1];
-  var _useState89 = useState(0),
+    vPitchRate = _useState88[0],
+    setVPitchRate = _useState88[1];
+  var _useState89 = useState(1),
     _useState90 = _slicedToArray(_useState89, 2),
-    vVelJitter = _useState90[0],
-    setVVelJitter = _useState90[1];
+    vPitchRange = _useState90[0],
+    setVPitchRange = _useState90[1];
   var _useState91 = useState(0),
     _useState92 = _slicedToArray(_useState91, 2),
-    vFltJitter = _useState92[0],
-    setVFltJitter = _useState92[1];
+    vGhostRate = _useState92[0],
+    setVGhostRate = _useState92[1];
   var _useState93 = useState(0),
     _useState94 = _slicedToArray(_useState93, 2),
-    vDlyJitter = _useState94[0],
-    setVDlyJitter = _useState94[1];
+    vVelJitter = _useState94[0],
+    setVVelJitter = _useState94[1];
   var _useState95 = useState(0),
     _useState96 = _slicedToArray(_useState95, 2),
-    vRhyJitter = _useState96[0],
-    setVRhyJitter = _useState96[1];
+    vFltJitter = _useState96[0],
+    setVFltJitter = _useState96[1];
   var _useState97 = useState(0),
     _useState98 = _slicedToArray(_useState97, 2),
-    vOctJitter = _useState98[0],
-    setVOctJitter = _useState98[1];
+    vDlyJitter = _useState98[0],
+    setVDlyJitter = _useState98[1];
   var _useState99 = useState(0),
     _useState100 = _slicedToArray(_useState99, 2),
-    vGlideJitter = _useState100[0],
-    setVGlideJitter = _useState100[1];
+    vRhyJitter = _useState100[0],
+    setVRhyJitter = _useState100[1];
   var _useState101 = useState(0),
     _useState102 = _slicedToArray(_useState101, 2),
-    vDurJitter = _useState102[0],
-    setVDurJitter = _useState102[1];
+    vOctJitter = _useState102[0],
+    setVOctJitter = _useState102[1];
+  var _useState103 = useState(0),
+    _useState104 = _slicedToArray(_useState103, 2),
+    vGlideJitter = _useState104[0],
+    setVGlideJitter = _useState104[1];
+  var _useState105 = useState(0),
+    _useState106 = _slicedToArray(_useState105, 2),
+    vDurJitter = _useState106[0],
+    setVDurJitter = _useState106[1];
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -2700,13 +2747,13 @@ function Tabula() {
       })
     };
   };
-  var _useState103 = useState({
+  var _useState107 = useState({
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
-    _useState104 = _slicedToArray(_useState103, 2),
-    layerParams = _useState104[0],
-    setLayerParams = _useState104[1];
+    _useState108 = _slicedToArray(_useState107, 2),
+    layerParams = _useState108[0],
+    setLayerParams = _useState108[1];
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
@@ -2766,70 +2813,70 @@ function Tabula() {
     setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
-  var _useState105 = useState(3),
-    _useState106 = _slicedToArray(_useState105, 2),
-    dlyIdx = _useState106[0],
-    setDlyIdx = _useState106[1];
-  var _useState107 = useState(45),
-    _useState108 = _slicedToArray(_useState107, 2),
-    dlyFbPct = _useState108[0],
-    setDlyFbPct = _useState108[1];
-  var _useState109 = useState(8),
+  var _useState109 = useState(3),
     _useState110 = _slicedToArray(_useState109, 2),
-    dlyHpVal = _useState110[0],
-    setDlyHpVal = _useState110[1];
-  var _useState111 = useState(78),
+    dlyIdx = _useState110[0],
+    setDlyIdx = _useState110[1];
+  var _useState111 = useState(45),
     _useState112 = _slicedToArray(_useState111, 2),
-    dlyLpVal = _useState112[0],
-    setDlyLpVal = _useState112[1];
+    dlyFbPct = _useState112[0],
+    setDlyFbPct = _useState112[1];
+  var _useState113 = useState(8),
+    _useState114 = _slicedToArray(_useState113, 2),
+    dlyHpVal = _useState114[0],
+    setDlyHpVal = _useState114[1];
+  var _useState115 = useState(78),
+    _useState116 = _slicedToArray(_useState115, 2),
+    dlyLpVal = _useState116[0],
+    setDlyLpVal = _useState116[1];
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  var _useState113 = useState(50),
-    _useState114 = _slicedToArray(_useState113, 2),
-    rvSize = _useState114[0],
-    setRvSize = _useState114[1]; // comb feedback (0..100)
-  var _useState115 = useState(40),
-    _useState116 = _slicedToArray(_useState115, 2),
-    rvDamp = _useState116[0],
-    setRvDamp = _useState116[1]; // HF damp shelf cut (0=none, 100=full)
-  var _useState117 = useState(0),
+  var _useState117 = useState(50),
     _useState118 = _slicedToArray(_useState117, 2),
-    rvLfDamp = _useState118[0],
-    setRvLfDamp = _useState118[1]; // LF damp shelf cut (0=none, 100=full)
-  var _useState119 = useState(0),
+    rvSize = _useState118[0],
+    setRvSize = _useState118[1]; // comb feedback (0..100)
+  var _useState119 = useState(40),
     _useState120 = _slicedToArray(_useState119, 2),
-    rvPreDelay = _useState120[0],
-    setRvPreDelay = _useState120[1]; // pre-delay (ms, 0..500)
+    rvDamp = _useState120[0],
+    setRvDamp = _useState120[1]; // HF damp shelf cut (0=none, 100=full)
   var _useState121 = useState(0),
     _useState122 = _slicedToArray(_useState121, 2),
-    dlyToRev = _useState122[0],
-    setDlyToRev = _useState122[1]; // delay output → reverb input send
+    rvLfDamp = _useState122[0],
+    setRvLfDamp = _useState122[1]; // LF damp shelf cut (0=none, 100=full)
+  var _useState123 = useState(0),
+    _useState124 = _slicedToArray(_useState123, 2),
+    rvPreDelay = _useState124[0],
+    setRvPreDelay = _useState124[1]; // pre-delay (ms, 0..500)
+  var _useState125 = useState(0),
+    _useState126 = _slicedToArray(_useState125, 2),
+    dlyToRev = _useState126[0],
+    setDlyToRev = _useState126[1]; // delay output → reverb input send
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState123 = useState(85),
-    _useState124 = _slicedToArray(_useState123, 2),
-    drumLevel = _useState124[0],
-    setDrumLevel = _useState124[1];
+  var _useState127 = useState(85),
+    _useState128 = _slicedToArray(_useState127, 2),
+    drumLevel = _useState128[0],
+    setDrumLevel = _useState128[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
-  var _useState125 = useState({
+  var _useState129 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
-    _useState126 = _slicedToArray(_useState125, 2),
-    trackMute = _useState126[0],
-    setTrackMute = _useState126[1];
-  var _useState127 = useState({
+    _useState130 = _slicedToArray(_useState129, 2),
+    trackMute = _useState130[0],
+    setTrackMute = _useState130[1];
+  var _useState131 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
-    _useState128 = _slicedToArray(_useState127, 2),
-    trackSolo = _useState128[0],
-    setTrackSolo = _useState128[1];
+    _useState132 = _slicedToArray(_useState131, 2),
+    trackSolo = _useState132[0],
+    setTrackSolo = _useState132[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -2857,64 +2904,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState129 = useState([initDrum]),
-    _useState130 = _slicedToArray(_useState129, 2),
-    drumPats = _useState130[0],
-    setDrumPats = _useState130[1];
-  var _useState131 = useState(initDrum.id),
-    _useState132 = _slicedToArray(_useState131, 2),
-    activeDrumId = _useState132[0],
-    setActiveDrumId = _useState132[1];
-  var _useState133 = useState([initDrum.id]),
+  var _useState133 = useState([initDrum]),
     _useState134 = _slicedToArray(_useState133, 2),
-    drumChain = _useState134[0],
-    setDrumChain = _useState134[1];
-  var _useState135 = useState(null),
+    drumPats = _useState134[0],
+    setDrumPats = _useState134[1];
+  var _useState135 = useState(initDrum.id),
     _useState136 = _slicedToArray(_useState135, 2),
-    drumClipboard = _useState136[0],
-    setDrumClipboard = _useState136[1];
+    activeDrumId = _useState136[0],
+    setActiveDrumId = _useState136[1];
+  var _useState137 = useState([initDrum.id]),
+    _useState138 = _slicedToArray(_useState137, 2),
+    drumChain = _useState138[0],
+    setDrumChain = _useState138[1];
+  var _useState139 = useState(null),
+    _useState140 = _slicedToArray(_useState139, 2),
+    drumClipboard = _useState140[0],
+    setDrumClipboard = _useState140[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState137 = useState([{
+  var _useState141 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState138 = _slicedToArray(_useState137, 2),
-    synthPhrases = _useState138[0],
-    setSynthPhrases = _useState138[1];
-  var _useState139 = useState([{
+    _useState142 = _slicedToArray(_useState141, 2),
+    synthPhrases = _useState142[0],
+    setSynthPhrases = _useState142[1];
+  var _useState143 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState140 = _slicedToArray(_useState139, 2),
-    drumPhrases = _useState140[0],
-    setDrumPhrases = _useState140[1];
-  var _useState141 = useState([{
+    _useState144 = _slicedToArray(_useState143, 2),
+    drumPhrases = _useState144[0],
+    setDrumPhrases = _useState144[1];
+  var _useState145 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
-    _useState142 = _slicedToArray(_useState141, 2),
-    sections = _useState142[0],
-    setSections = _useState142[1];
-  var _useState143 = useState("SP1"),
-    _useState144 = _slicedToArray(_useState143, 2),
-    activeSynthPhraseId = _useState144[0],
-    setActiveSynthPhraseId = _useState144[1];
-  var _useState145 = useState("DP1"),
     _useState146 = _slicedToArray(_useState145, 2),
-    activeDrumPhraseId = _useState146[0],
-    setActiveDrumPhraseId = _useState146[1];
-  var _useState147 = useState("SC1"),
+    sections = _useState146[0],
+    setSections = _useState146[1];
+  var _useState147 = useState("SP1"),
     _useState148 = _slicedToArray(_useState147, 2),
-    activeSectionId = _useState148[0],
-    setActiveSectionId = _useState148[1];
-  var _useState149 = useState("patterns"),
+    activeSynthPhraseId = _useState148[0],
+    setActiveSynthPhraseId = _useState148[1];
+  var _useState149 = useState("DP1"),
     _useState150 = _slicedToArray(_useState149, 2),
-    seqTab = _useState150[0],
-    setSeqTab = _useState150[1]; // "patterns"|"phrases"|"sections"
+    activeDrumPhraseId = _useState150[0],
+    setActiveDrumPhraseId = _useState150[1];
+  var _useState151 = useState("SC1"),
+    _useState152 = _slicedToArray(_useState151, 2),
+    activeSectionId = _useState152[0],
+    setActiveSectionId = _useState152[1];
+  var _useState153 = useState("patterns"),
+    _useState154 = _slicedToArray(_useState153, 2),
+    seqTab = _useState154[0],
+    setSeqTab = _useState154[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -2967,57 +3014,57 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState151 = useState("sequence"),
-    _useState152 = _slicedToArray(_useState151, 2),
-    seqPage = _useState152[0],
-    setSeqPage = _useState152[1]; // "sequence"|"step"
+  var _useState155 = useState("sequence"),
+    _useState156 = _slicedToArray(_useState155, 2),
+    seqPage = _useState156[0],
+    setSeqPage = _useState156[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState153 = useState(false),
-    _useState154 = _slicedToArray(_useState153, 2),
-    songMode = _useState154[0],
-    setSongMode = _useState154[1];
+  var _useState157 = useState(false),
+    _useState158 = _slicedToArray(_useState157, 2),
+    songMode = _useState158[0],
+    setSongMode = _useState158[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState155 = useState(false),
-    _useState156 = _slicedToArray(_useState155, 2),
-    songView = _useState156[0],
-    setSongView = _useState156[1];
+  var _useState159 = useState(false),
+    _useState160 = _slicedToArray(_useState159, 2),
+    songView = _useState160[0],
+    setSongView = _useState160[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
   // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
   // paths migrate via _normalizeSongSyncMode below.
-  var _useState157 = useState("sync"),
-    _useState158 = _slicedToArray(_useState157, 2),
-    songSyncMode = _useState158[0],
-    setSongSyncMode = _useState158[1];
-  var _useState159 = useState({
+  var _useState161 = useState("sync"),
+    _useState162 = _slicedToArray(_useState161, 2),
+    songSyncMode = _useState162[0],
+    setSongSyncMode = _useState162[1];
+  var _useState163 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState160 = _slicedToArray(_useState159, 2),
-    songMatrix = _useState160[0],
-    setSongMatrix = _useState160[1];
-  var _useState161 = useState(-1),
-    _useState162 = _slicedToArray(_useState161, 2),
-    songBar = _useState162[0],
-    setSongBar = _useState162[1]; // sync mode current bar; -1 when stopped
+    _useState164 = _slicedToArray(_useState163, 2),
+    songMatrix = _useState164[0],
+    setSongMatrix = _useState164[1];
+  var _useState165 = useState(-1),
+    _useState166 = _slicedToArray(_useState165, 2),
+    songBar = _useState166[0],
+    setSongBar = _useState166[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState163 = useState({
+  var _useState167 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState164 = _slicedToArray(_useState163, 2),
-    songBarLayer = _useState164[0],
-    setSongBarLayer = _useState164[1];
+    _useState168 = _slicedToArray(_useState167, 2),
+    songBarLayer = _useState168[0],
+    setSongBarLayer = _useState168[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -3676,6 +3723,7 @@ function Tabula() {
               rvPreDelay: rvPreDelay,
               dlyToRev: dlyToRev,
               drumLevel: drumLevel,
+              activeKit: activeKit,
               trackMute: _objectSpread({}, trackMute),
               trackSolo: _objectSpread({}, trackSolo),
               varyMode: varyMode,
@@ -3979,6 +4027,13 @@ function Tabula() {
     setSongSyncMode(s.songSyncMode != null ? _normalizeSongSyncMode(s.songSyncMode) : SESSION_DEFAULTS.songSyncMode);
     setActiveSlot(slot);
     showFlash("LOADED " + slot);
+    // Load the saved kit — must come after setVoiceSamples({}) earlier in
+    // doLoad so the previous kit's samples are cleared before the new fetch.
+    var savedKit = s.activeKit || "synth";
+    if (savedKit !== "synth") loadKit(savedKit)["catch"](function () {});else {
+      setActiveKit("synth");
+      setVoiceSamples({});
+    }
   };
   var saveSlot = function saveSlot(slot) {
     if (slotData[slot]) {
@@ -4164,6 +4219,7 @@ function Tabula() {
     recorderRef.current = null;
     setRecordingVoice(null);
     setVoiceSamples({});
+    setActiveKit("synth");
     showFlash("NEW PROJECT");
   };
   var newProject = function newProject() {
@@ -4206,14 +4262,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState165 = useState(null),
-    _useState166 = _slicedToArray(_useState165, 2),
-    gridPx = _useState166[0],
-    setGridPx = _useState166[1];
-  var _useState167 = useState(null),
-    _useState168 = _slicedToArray(_useState167, 2),
-    editOuter = _useState168[0],
-    setEditOuter = _useState168[1];
+  var _useState169 = useState(null),
+    _useState170 = _slicedToArray(_useState169, 2),
+    gridPx = _useState170[0],
+    setGridPx = _useState170[1];
+  var _useState171 = useState(null),
+    _useState172 = _slicedToArray(_useState171, 2),
+    editOuter = _useState172[0],
+    setEditOuter = _useState172[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -6510,6 +6566,104 @@ function Tabula() {
   };
 
   // ── Internal sampler ─────────────────────────────────────────────────
+  // Load a named kit from DRUM_KITS. "synth" clears all samples; any other
+  // id fetches + decodes each voice's audio file. Uses OfflineAudioContext so
+  // kits can be pre-loaded before the user hits play (the live AudioContext
+  // may not exist yet). Individual mic recordings are replaced entirely.
+  var loadKit = /*#__PURE__*/function () {
+    var _ref17 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(kitId) {
+      var kit, newSamples, errors;
+      return _regenerator().w(function (_context12) {
+        while (1) switch (_context12.n) {
+          case 0:
+            kit = DRUM_KITS.find(function (k) {
+              return k.id === kitId;
+            });
+            if (kit) {
+              _context12.n = 1;
+              break;
+            }
+            return _context12.a(2);
+          case 1:
+            setKitLoading(true);
+            if (kit.samples) {
+              _context12.n = 2;
+              break;
+            }
+            // "synth" kit — drop all samples, engine falls through to synthesizer.
+            setVoiceSamples({});
+            setActiveKit("synth");
+            setKitLoading(false);
+            showFlash("SYNTH ENGINE");
+            return _context12.a(2);
+          case 2:
+            newSamples = {};
+            errors = [];
+            _context12.n = 3;
+            return Promise.all(Object.entries(kit.samples).map(/*#__PURE__*/function () {
+              var _ref19 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11(_ref18) {
+                var _ref20, voiceKey, url, _bell$current, _drumEngine$current, res, ab, ctx, buf, _t1;
+                return _regenerator().w(function (_context11) {
+                  while (1) switch (_context11.p = _context11.n) {
+                    case 0:
+                      _ref20 = _slicedToArray(_ref18, 2), voiceKey = _ref20[0], url = _ref20[1];
+                      _context11.p = 1;
+                      _context11.n = 2;
+                      return fetch(url);
+                    case 2:
+                      res = _context11.v;
+                      if (res.ok) {
+                        _context11.n = 3;
+                        break;
+                      }
+                      throw new Error(res.statusText);
+                    case 3:
+                      _context11.n = 4;
+                      return res.arrayBuffer();
+                    case 4:
+                      ab = _context11.v;
+                      // Prefer the live AudioContext so the buffer is compatible with the
+                      // engine; fall back to a temporary OfflineAudioContext for pre-loading.
+                      ctx = ((_bell$current = bell.current) === null || _bell$current === void 0 ? void 0 : _bell$current.ctx) || ((_drumEngine$current = drumEngine.current) === null || _drumEngine$current === void 0 ? void 0 : _drumEngine$current.ctx) || function () {
+                        var o = new OfflineAudioContext(1, 1, 44100);
+                        return o;
+                      }();
+                      _context11.n = 5;
+                      return ctx.decodeAudioData(ab);
+                    case 5:
+                      buf = _context11.v;
+                      newSamples[voiceKey] = buf;
+                      _context11.n = 7;
+                      break;
+                    case 6:
+                      _context11.p = 6;
+                      _t1 = _context11.v;
+                      errors.push(voiceKey);
+                      console.warn("Kit sample load failed:", url, _t1);
+                    case 7:
+                      return _context11.a(2);
+                  }
+                }, _callee11, null, [[1, 6]]);
+              }));
+              return function (_x13) {
+                return _ref19.apply(this, arguments);
+              };
+            }()));
+          case 3:
+            setVoiceSamples(newSamples);
+            setActiveKit(kitId);
+            setKitLoading(false);
+            showFlash(errors.length ? "".concat(kit.label, " (").concat(errors.length, " MISSING)") : kit.label);
+          case 4:
+            return _context12.a(2);
+        }
+      }, _callee12);
+    }));
+    return function loadKit(_x12) {
+      return _ref17.apply(this, arguments);
+    };
+  }();
+
   // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
   // store it per drum voice. Drum playback paths read voiceSamplesR.current
   // and substitute the sample for the synthesized voice when present.
@@ -6518,39 +6672,39 @@ function Tabula() {
   // resulting sample begins at the first transient, not from a silent lead-in.
   // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
   var startRecord = /*#__PURE__*/function () {
-    var _ref17 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(voiceKey) {
-      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t10;
-      return _regenerator().w(function (_context12) {
-        while (1) switch (_context12.p = _context12.n) {
+    var _ref21 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee14(voiceKey) {
+      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t11;
+      return _regenerator().w(function (_context14) {
+        while (1) switch (_context14.p = _context14.n) {
           case 0:
             if (!recordingVoice) {
-              _context12.n = 1;
+              _context14.n = 1;
               break;
             }
-            return _context12.a(2);
+            return _context14.a(2);
           case 1:
             if (!(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined")) {
-              _context12.n = 2;
+              _context14.n = 2;
               break;
             }
             showFlash("MIC UNSUPPORTED");
-            return _context12.a(2);
+            return _context14.a(2);
           case 2:
             ONSET_THRESH = 0.08; // peak deviation from center (0..1)
             SILENCE_THRESH = 0.025;
             SILENCE_HOLD_MS = 300;
             ARM_TIMEOUT_MS = 10000; // if no onset in 10s, bail out
-            _context12.p = 3;
-            _context12.n = 4;
+            _context14.p = 3;
+            _context14.n = 4;
             return navigator.mediaDevices.getUserMedia({
               audio: true
             });
           case 4:
-            stream = _context12.v;
+            stream = _context14.v;
             recordStreamRef.current = stream;
             ctx = bell.current && bell.current.ctx || drumEngine.current && drumEngine.current.ctx;
             if (ctx) {
-              _context12.n = 5;
+              _context14.n = 5;
               break;
             }
             stream.getTracks().forEach(function (t) {
@@ -6558,7 +6712,7 @@ function Tabula() {
             });
             recordStreamRef.current = null;
             showFlash("AUDIO INIT");
-            return _context12.a(2);
+            return _context14.a(2);
           case 5:
             source = ctx.createMediaStreamSource(stream);
             analyser = ctx.createAnalyser();
@@ -6572,39 +6726,39 @@ function Tabula() {
             stopped = false;
             armedStart = performance.now();
             finishWith = /*#__PURE__*/function () {
-              var _ref18 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11() {
-                var blob, ab, audioBuf, _t1;
-                return _regenerator().w(function (_context11) {
-                  while (1) switch (_context11.p = _context11.n) {
+              var _ref22 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee13() {
+                var blob, ab, audioBuf, _t10;
+                return _regenerator().w(function (_context13) {
+                  while (1) switch (_context13.p = _context13.n) {
                     case 0:
                       stopped = true;
-                      _context11.p = 1;
+                      _context13.p = 1;
                       if (!chunks.length) {
-                        _context11.n = 4;
+                        _context13.n = 4;
                         break;
                       }
                       blob = new Blob(chunks, {
                         type: recorder && recorder.mimeType || "audio/webm"
                       });
-                      _context11.n = 2;
+                      _context13.n = 2;
                       return blob.arrayBuffer();
                     case 2:
-                      ab = _context11.v;
-                      _context11.n = 3;
+                      ab = _context13.v;
+                      _context13.n = 3;
                       return ctx.decodeAudioData(ab);
                     case 3:
-                      audioBuf = _context11.v;
+                      audioBuf = _context13.v;
                       setVoiceSamples(function (prev) {
                         return _objectSpread(_objectSpread({}, prev), {}, _defineProperty({}, voiceKey, audioBuf));
                       });
                       showFlash("REC OK " + voiceKey);
                     case 4:
-                      _context11.n = 6;
+                      _context13.n = 6;
                       break;
                     case 5:
-                      _context11.p = 5;
-                      _t1 = _context11.v;
-                      console.error("Sample decode failed:", _t1);
+                      _context13.p = 5;
+                      _t10 = _context13.v;
+                      console.error("Sample decode failed:", _t10);
                       showFlash("DECODE FAIL");
                     case 6:
                       if (recordStreamRef.current) {
@@ -6616,12 +6770,12 @@ function Tabula() {
                       recorderRef.current = null;
                       setRecordingVoice(null);
                     case 7:
-                      return _context11.a(2);
+                      return _context13.a(2);
                   }
-                }, _callee11, null, [[1, 5]]);
+                }, _callee13, null, [[1, 5]]);
               }));
               return function finishWith() {
-                return _ref18.apply(this, arguments);
+                return _ref22.apply(this, arguments);
               };
             }();
             _tick = function tick() {
@@ -6671,21 +6825,21 @@ function Tabula() {
             };
             setRecordingVoice(voiceKey);
             if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(_tick);else setTimeout(_tick, 30);
-            _context12.n = 7;
+            _context14.n = 7;
             break;
           case 6:
-            _context12.p = 6;
-            _t10 = _context12.v;
-            console.error("Mic denied:", _t10);
+            _context14.p = 6;
+            _t11 = _context14.v;
+            console.error("Mic denied:", _t11);
             showFlash("MIC DENIED");
             setRecordingVoice(null);
           case 7:
-            return _context12.a(2);
+            return _context14.a(2);
         }
-      }, _callee12, null, [[3, 6]]);
+      }, _callee14, null, [[3, 6]]);
     }));
-    return function startRecord(_x12) {
-      return _ref17.apply(this, arguments);
+    return function startRecord(_x14) {
+      return _ref21.apply(this, arguments);
     };
   }();
   var stopRecord = function stopRecord() {
@@ -6912,18 +7066,18 @@ function Tabula() {
     if (j < 0 || j >= chain.length) return;
     setChain(function (c) {
       var n = _toConsumableArray(c);
-      var _ref19 = [n[j], n[i]];
-      n[i] = _ref19[0];
-      n[j] = _ref19[1];
+      var _ref23 = [n[j], n[i]];
+      n[i] = _ref23[0];
+      n[j] = _ref23[1];
       return n;
     });
   };
 
   // BPM drag scrubber
-  var _useState169 = useState(false),
-    _useState170 = _slicedToArray(_useState169, 2),
-    bpmDragging = _useState170[0],
-    setBpmDragging = _useState170[1];
+  var _useState173 = useState(false),
+    _useState174 = _slicedToArray(_useState173, 2),
+    bpmDragging = _useState174[0],
+    setBpmDragging = _useState174[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -6952,10 +7106,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState171 = useState(false),
-    _useState172 = _slicedToArray(_useState171, 2),
-    stDragging = _useState172[0],
-    setStDragging = _useState172[1];
+  var _useState175 = useState(false),
+    _useState176 = _slicedToArray(_useState175, 2),
+    stDragging = _useState176[0],
+    setStDragging = _useState176[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -6984,10 +7138,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState173 = useState(false),
-    _useState174 = _slicedToArray(_useState173, 2),
-    swingDragging = _useState174[0],
-    setSwingDragging = _useState174[1];
+  var _useState177 = useState(false),
+    _useState178 = _slicedToArray(_useState177, 2),
+    swingDragging = _useState178[0],
+    setSwingDragging = _useState178[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -7438,12 +7592,12 @@ function Tabula() {
       });
     }, isOnlyPat, true], ["MUT8", function () {
       return act(mutatePat1);
-    }], ["", null, true]].map(function (_ref20) {
-      var _ref21 = _slicedToArray(_ref20, 4),
-        label = _ref21[0],
-        fn = _ref21[1],
-        disabled = _ref21[2],
-        danger = _ref21[3];
+    }], ["", null, true]].map(function (_ref24) {
+      var _ref25 = _slicedToArray(_ref24, 4),
+        label = _ref25[0],
+        fn = _ref25[1],
+        disabled = _ref25[2],
+        danger = _ref25[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -7549,10 +7703,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref22) {
-    var _ref23 = _slicedToArray(_ref22, 2),
-      k = _ref23[0],
-      v = _ref23[1];
+  }, Object.entries(SCALES).map(function (_ref26) {
+    var _ref27 = _slicedToArray(_ref26, 2),
+      k = _ref27[0],
+      v = _ref27[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -7648,13 +7802,13 @@ function Tabula() {
       flexDirection: "column",
       gap: 4
     }
-  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref24) {
+  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref28) {
     var _layerStoreR$current$, _layerStoreR$current$2;
-    var _ref25 = _slicedToArray(_ref24, 4),
-      layer = _ref25[0],
-      label = _ref25[1],
-      accent = _ref25[2],
-      accentRgb = _ref25[3];
+    var _ref29 = _slicedToArray(_ref28, 4),
+      layer = _ref29[0],
+      label = _ref29[1],
+      accent = _ref29[2],
+      accentRgb = _ref29[3];
     var isActive = activeLayer === layer;
     var layerPats = isActive ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || [];
     var layerActiveId = isActive ? activeId : (_layerStoreR$current$2 = layerStoreR.current[layer]) === null || _layerStoreR$current$2 === void 0 ? void 0 : _layerStoreR$current$2.activeId;
@@ -8109,11 +8263,11 @@ function Tabula() {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref26) {
-      var _ref27 = _slicedToArray(_ref26, 3),
-        l = _ref27[0],
-        f = _ref27[1],
-        d = _ref27[2];
+    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref30) {
+      var _ref31 = _slicedToArray(_ref30, 3),
+        l = _ref31[0],
+        f = _ref31[1],
+        d = _ref31[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         style: {
@@ -8143,12 +8297,12 @@ function Tabula() {
       return dupPatId(targetId);
     }, pats.length >= 8, false], ["DEL", function () {
       return delPatId(targetId);
-    }, isOnlyPat, true]].map(function (_ref28) {
-      var _ref29 = _slicedToArray(_ref28, 4),
-        l = _ref29[0],
-        f = _ref29[1],
-        d = _ref29[2],
-        danger = _ref29[3];
+    }, isOnlyPat, true]].map(function (_ref32) {
+      var _ref33 = _slicedToArray(_ref32, 4),
+        l = _ref33[0],
+        f = _ref33[1],
+        d = _ref33[2],
+        danger = _ref33[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -8172,9 +8326,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref30) {
-      var label = _ref30.label,
-        mult = _ref30.mult;
+    }, SPEED_OPTS.map(function (_ref34) {
+      var label = _ref34.label,
+        mult = _ref34.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -8201,11 +8355,11 @@ function Tabula() {
         gridTemplateColumns: "repeat(3,1fr)",
         gap: 2
       }
-    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["─", null, true, false]].map(function (_ref31) {
-      var _ref32 = _slicedToArray(_ref31, 3),
-        l = _ref32[0],
-        f = _ref32[1],
-        d = _ref32[2];
+    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["─", null, true, false]].map(function (_ref35) {
+      var _ref36 = _slicedToArray(_ref35, 3),
+        l = _ref36[0],
+        f = _ref36[1],
+        d = _ref36[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -8228,12 +8382,12 @@ function Tabula() {
         gridTemplateColumns: "repeat(4,1fr)",
         gap: 2
       }
-    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref33) {
-      var _ref34 = _slicedToArray(_ref33, 4),
-        l = _ref34[0],
-        f = _ref34[1],
-        d = _ref34[2],
-        danger = _ref34[3];
+    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref37) {
+      var _ref38 = _slicedToArray(_ref37, 4),
+        l = _ref38[0],
+        f = _ref38[1],
+        d = _ref38[2],
+        danger = _ref38[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -8257,9 +8411,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref35) {
-      var label = _ref35.label,
-        mult = _ref35.mult;
+    }, SPEED_OPTS.map(function (_ref39) {
+      var label = _ref39.label,
+        mult = _ref39.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -8678,10 +8832,10 @@ function Tabula() {
       flexShrink: 0,
       alignSelf: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref36) {
-    var _ref37 = _slicedToArray(_ref36, 2),
-      val = _ref37[0],
-      lbl = _ref37[1];
+  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref40) {
+    var _ref41 = _slicedToArray(_ref40, 2),
+      val = _ref41[0],
+      lbl = _ref41[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -9424,6 +9578,46 @@ function Tabula() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
+        flexShrink: 0,
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 7,
+        letterSpacing: 2,
+        color: "rgba(210,195,175,0.3)",
+        fontWeight: 500,
+        marginBottom: 4
+      }
+    }, "KIT"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 3,
+        flexWrap: "wrap"
+      }
+    }, DRUM_KITS.map(function (kit) {
+      var on = activeKit === kit.id;
+      return /*#__PURE__*/React.createElement("button", {
+        key: kit.id,
+        disabled: kitLoading,
+        onClick: function onClick() {
+          return loadKit(kit.id);
+        },
+        style: {
+          padding: "3px 8px",
+          borderRadius: 4,
+          border: "1px solid " + (on ? "rgba(210,195,175,0.6)" : "rgba(210,195,175,0.15)"),
+          background: on ? "rgba(210,195,175,0.1)" : "transparent",
+          color: on ? "rgba(210,195,175,0.9)" : "rgba(210,195,175,0.4)",
+          fontSize: 8,
+          letterSpacing: 1,
+          fontWeight: on ? 700 : 400,
+          cursor: kitLoading ? "wait" : "pointer",
+          fontFamily: "inherit"
+        }
+      }, kitLoading && on ? "…" : kit.label);
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
         fontSize: 9,
         letterSpacing: 2,
         color: "rgba(210,195,175,0.35)",
@@ -9762,11 +9956,11 @@ function Tabula() {
     }) || drumPats[0];
     var vRhythm = (dPat === null || dPat === void 0 ? void 0 : dPat.vRhythm) || 0;
     var vVelocity = (dPat === null || dPat === void 0 ? void 0 : dPat.vVelocity) || 0;
-    var SliderRow = function SliderRow(_ref39) {
-      var label = _ref39.label,
-        value = _ref39.value,
-        onChange = _ref39.onChange,
-        accent = _ref39.accent;
+    var SliderRow = function SliderRow(_ref43) {
+      var label = _ref43.label,
+        value = _ref43.value,
+        onChange = _ref43.onChange,
+        accent = _ref43.accent;
       return /*#__PURE__*/React.createElement("div", {
         style: {
           marginBottom: 16
@@ -10626,10 +10820,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref40) {
-    var _ref41 = _slicedToArray(_ref40, 2),
-      p = _ref41[0],
-      lbl = _ref41[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref44) {
+    var _ref45 = _slicedToArray(_ref44, 2),
+      p = _ref45[0],
+      lbl = _ref45[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && varyMode ? {
@@ -10769,12 +10963,12 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref42) {
-    var _ref43 = _slicedToArray(_ref42, 4),
-      lyr = _ref43[0],
-      lbl = _ref43[1],
-      c = _ref43[2],
-      cf = _ref43[3];
+  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref46) {
+    var _ref47 = _slicedToArray(_ref46, 4),
+      lyr = _ref47[0],
+      lbl = _ref47[1],
+      c = _ref47[2],
+      cf = _ref47[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       "data-layer-box": lyr,
@@ -11114,10 +11308,10 @@ function Tabula() {
       flexShrink: 0,
       alignSelf: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref44) {
-    var _ref45 = _slicedToArray(_ref44, 2),
-      val = _ref45[0],
-      lbl = _ref45[1];
+  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref48) {
+    var _ref49 = _slicedToArray(_ref48, 2),
+      val = _ref49[0],
+      lbl = _ref49[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -12057,10 +12251,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref47) {
-    var _ref48 = _slicedToArray(_ref47, 2),
-      k = _ref48[0],
-      v = _ref48[1];
+  }, Object.entries(SCALES).map(function (_ref51) {
+    var _ref52 = _slicedToArray(_ref51, 2),
+      k = _ref52[0],
+      v = _ref52[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -12138,12 +12332,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref49) {
-      var _ref50 = _slicedToArray(_ref49, 4),
-        l = _ref50[0],
-        f = _ref50[1],
-        d = _ref50[2],
-        danger = _ref50[3];
+    }, ops.map(function (_ref53) {
+      var _ref54 = _slicedToArray(_ref53, 4),
+        l = _ref54[0],
+        f = _ref54[1],
+        d = _ref54[2],
+        danger = _ref54[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -13362,13 +13556,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref51) {
-    var _ref52 = _slicedToArray(_ref51, 5),
-      label = _ref52[0],
-      val = _ref52[1],
-      setter = _ref52[2],
-      max = _ref52[3],
-      unit = _ref52[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref55) {
+    var _ref56 = _slicedToArray(_ref55, 5),
+      label = _ref56[0],
+      val = _ref56[1],
+      setter = _ref56[2],
+      max = _ref56[3],
+      unit = _ref56[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -13453,13 +13647,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref53) {
-    var _ref54 = _slicedToArray(_ref53, 5),
-      label = _ref54[0],
-      val = _ref54[1],
-      setter = _ref54[2],
-      max = _ref54[3],
-      unit = _ref54[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref57) {
+    var _ref58 = _slicedToArray(_ref57, 5),
+      label = _ref58[0],
+      val = _ref58[1],
+      setter = _ref58[2],
+      max = _ref58[3],
+      unit = _ref58[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -13544,11 +13738,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref55) {
-    var _ref56 = _slicedToArray(_ref55, 3),
-      label = _ref56[0],
-      val = _ref56[1],
-      setter = _ref56[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref59) {
+    var _ref60 = _slicedToArray(_ref59, 3),
+      label = _ref60[0],
+      val = _ref60[1],
+      setter = _ref60[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -13704,12 +13898,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref57) {
-      var _ref58 = _slicedToArray(_ref57, 4),
-        label = _ref58[0],
-        fn = _ref58[1],
-        disabled = _ref58[2],
-        danger = _ref58[3];
+    }, isOnlyPat, true]].map(function (_ref61) {
+      var _ref62 = _slicedToArray(_ref61, 4),
+        label = _ref62[0],
+        fn = _ref62[1],
+        disabled = _ref62[2],
+        danger = _ref62[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -13793,12 +13987,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref59) {
-      var _ref60 = _slicedToArray(_ref59, 4),
-        label = _ref60[0],
-        fn = _ref60[1],
-        disabled = _ref60[2],
-        danger = _ref60[3];
+    }, isOnly, true]].map(function (_ref63) {
+      var _ref64 = _slicedToArray(_ref63, 4),
+        label = _ref64[0],
+        fn = _ref64[1],
+        disabled = _ref64[2],
+        danger = _ref64[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,

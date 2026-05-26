@@ -113,6 +113,42 @@ const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
 // rvSend/dlySend default to 0 — per-channel FX sends are opt-in.
 const DRUM_DEFAULT_LEVEL = 60;
+
+// ─── Curated drum kits ───────────────────────────────────────────────────────
+// Each non-"synth" kit maps every DRUM_VOICES key to a relative URL that will
+// be fetched and decoded when the kit is selected. Add new kits here; paths
+// are relative to the deployed root so samples/kit-name/file.wav will resolve
+// correctly on GitHub Pages. Missing keys fall back to the synth voice.
+//
+// File layout convention:
+//   samples/<kit-id>/<voice-key>.wav   e.g. samples/707/BD.wav
+//
+// To add a kit: copy the template, fill in the id/label/samples map, and put
+// your audio files at the listed paths in the repo.
+const DRUM_KITS = [
+  {
+    id:    "synth",
+    label: "SYNTH",
+    // no samples — engine falls through to the built-in synthesizer
+  },
+  // ── Add your kits below. Template: ─────────────────────────────────────────
+  // {
+  //   id:    "my-kit",
+  //   label: "MY KIT",
+  //   samples: {
+  //     BD: "samples/my-kit/BD.wav",
+  //     SD: "samples/my-kit/SD.wav",
+  //     LT: "samples/my-kit/LT.wav",
+  //     HT: "samples/my-kit/HT.wav",
+  //     CH: "samples/my-kit/CH.wav",
+  //     OH: "samples/my-kit/OH.wav",
+  //     CY: "samples/my-kit/CY.wav",
+  //     CP: "samples/my-kit/CP.wav",
+  //     CL: "samples/my-kit/CL.wav",
+  //     CB: "samples/my-kit/CB.wav",
+  //   },
+  // },
+];
 // Filter modes: "off" disables the filter (passes everything through unity),
 // "lp"/"hp"/"bp" route through the corresponding biquad type. filtCut 0..100
 // maps log-scaled to 20..20000 Hz at runtime. pitch is in semitones, ±24.
@@ -148,7 +184,7 @@ const SESSION_DEFAULTS = Object.freeze({
   bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
-  drumLevel:85,
+  drumLevel:85, activeKit:"synth",
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
@@ -1255,6 +1291,11 @@ export default function Tabula(){
   const [voiceSamples, setVoiceSamples] = useState({});
   const voiceSamplesR = useRef({});
   const [recordingVoice, setRecordingVoice] = useState(null);
+  // Active kit id ("synth" = no samples, use synthesizer; any other id loads
+  // from DRUM_KITS. "user" is the implicit id for individual mic recordings
+  // that don't come from a kit — loading a kit replaces them all.
+  const [activeKit, setActiveKit] = useState("synth");
+  const [kitLoading, setKitLoading] = useState(false);
   const recorderRef = useRef(null);
   const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -1835,7 +1876,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,activeKit,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
@@ -2012,6 +2053,11 @@ export default function Tabula(){
     setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
     setActiveSlot(slot);
     showFlash("LOADED "+slot);
+    // Load the saved kit — must come after setVoiceSamples({}) earlier in
+    // doLoad so the previous kit's samples are cleared before the new fetch.
+    const savedKit=s.activeKit||"synth";
+    if(savedKit!=="synth")loadKit(savedKit).catch(()=>{});
+    else{setActiveKit("synth");setVoiceSamples({});}
   };
   const saveSlot=slot=>{
     if(slotData[slot]){setConfirmAction({type:"save",slot,label:"OVERWRITE "+slot+"?"});return;}
@@ -2086,6 +2132,7 @@ export default function Tabula(){
     recorderRef.current=null;
     setRecordingVoice(null);
     setVoiceSamples({});
+    setActiveKit("synth");
     showFlash("NEW PROJECT");
   };
   const newProject=()=>{
@@ -3307,6 +3354,46 @@ export default function Tabula(){
   }));}
 
   // ── Internal sampler ─────────────────────────────────────────────────
+  // Load a named kit from DRUM_KITS. "synth" clears all samples; any other
+  // id fetches + decodes each voice's audio file. Uses OfflineAudioContext so
+  // kits can be pre-loaded before the user hits play (the live AudioContext
+  // may not exist yet). Individual mic recordings are replaced entirely.
+  const loadKit=async(kitId)=>{
+    const kit=DRUM_KITS.find(k=>k.id===kitId);
+    if(!kit)return;
+    setKitLoading(true);
+    if(!kit.samples){
+      // "synth" kit — drop all samples, engine falls through to synthesizer.
+      setVoiceSamples({});
+      setActiveKit("synth");
+      setKitLoading(false);
+      showFlash("SYNTH ENGINE");
+      return;
+    }
+    const newSamples={};
+    const errors=[];
+    await Promise.all(Object.entries(kit.samples).map(async([voiceKey,url])=>{
+      try{
+        const res=await fetch(url);
+        if(!res.ok)throw new Error(res.statusText);
+        const ab=await res.arrayBuffer();
+        // Prefer the live AudioContext so the buffer is compatible with the
+        // engine; fall back to a temporary OfflineAudioContext for pre-loading.
+        const ctx=bell.current?.ctx||drumEngine.current?.ctx
+          ||(()=>{const o=new OfflineAudioContext(1,1,44100);return o;})();
+        const buf=await ctx.decodeAudioData(ab);
+        newSamples[voiceKey]=buf;
+      }catch(e){
+        errors.push(voiceKey);
+        console.warn("Kit sample load failed:",url,e);
+      }
+    }));
+    setVoiceSamples(newSamples);
+    setActiveKit(kitId);
+    setKitLoading(false);
+    showFlash(errors.length?`${kit.label} (${errors.length} MISSING)`:kit.label);
+  };
+
   // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
   // store it per drum voice. Drum playback paths read voiceSamplesR.current
   // and substitute the sample for the synthesized voice when present.
@@ -4527,6 +4614,22 @@ export default function Tabula(){
               const mix=fillDrumMix(dPat?.mix);
               return(
               <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+                {/* Kit selector — switch between curated sample packs or the synth engine */}
+                <div style={{flexShrink:0,marginBottom:8}}>
+                  <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {DRUM_KITS.map(kit=>{
+                      const on=activeKit===kit.id;
+                      return(
+                        <button key={kit.id} disabled={kitLoading}
+                          onClick={()=>loadKit(kit.id)}
+                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(210,195,175,0.6)":"rgba(210,195,175,0.15)"),background:on?"rgba(210,195,175,0.1)":"transparent",color:on?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                          {kitLoading&&on?"…":kit.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8,flexShrink:0}}>MIXER</div>
                 {/* Channel strips — horizontal row of conventional vertical strips.
                     OH is hidden; CH's strip is labeled "HAT" and writes propagate
