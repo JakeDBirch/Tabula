@@ -1458,26 +1458,39 @@ var Bell = /*#__PURE__*/function () {
       }
       vca.gain.exponentialRampToValueAtTime(0.0001, t + end);
 
-      // Stereo spread of the detune stack — pan o1 left and o2 right by spread/100.
-      // Implementation: explicit ChannelMerger + per-channel Gain nodes (not
-      // StereoPanner). StereoPanner uses constant-power panning (cos/sin law)
-      // which over-attenuates when two oscillators are panned to opposite sides
-      // — each ear only gets half the unison stack so per-channel level drops by
-      // ~6 dB at full spread, which is heard as the spread "thinning" the sound
-      // rather than widening it. The explicit linear-pan approach keeps each
-      // oscillator at unity on its target side and gradually attenuates it on
-      // the other side: at spread=0 both osc fill both channels (no change from
-      // mono); at spread=1 each osc is hard-routed to one side; intermediate
-      // values give a continuous widening.
+      // Stereo spread of the detune stack — pan o1 left and o2 right, AND widen
+      // the detune as spread increases so the L/R signals become more distinct.
+      //
+      // Two things had to be solved together to make this knob actually feel like
+      // "spread" rather than "attenuate":
+      //
+      //   1. Loudness: at spread=0 both oscillators sum on each channel
+      //      (~+3 dB incoherent sum). At full spread each channel only carries
+      //      one oscillator — net -3 dB per channel. Fixed with a power-preserving
+      //      compensation gain on the merger output.
+      //
+      //   2. Audible width: at the default 8-cent detune, hard-panning two near-
+      //      identical signals doesn't produce a dramatic stereo image — both
+      //      ears just hear "almost the same thing, slightly quieter." Fixed by
+      //      scaling the detune amount with spread: 1× at spread=0, 2.5× at
+      //      spread=1. The user dials a base detune; SPREAD then widens AND pans.
+      //
+      // Topology: o1 → gL, gR → merger (ch0+ch1) → comp → vcf. Same for o2.
       var spreadAmt = p && p.spread != null && p.detune > 2 ? Math.max(0, Math.min(100, p.spread)) / 100 : 0;
       var spreadMerger = null;
       if (spreadAmt > 0) {
         spreadMerger = this.ctx.createChannelMerger(2);
-        spreadMerger.connect(vcf);
+        var spreadComp = this.ctx.createGain();
+        // Power-preserving compensation: per-channel power = comp² × (1 + (1-s)²).
+        // Solving for power = 2 (the no-spread value) gives this formula.
+        // At s=0: comp = 1.0 (no boost). At s=1: comp = √2 ≈ 1.414 (+3 dB).
+        spreadComp.gain.value = Math.sqrt(2 / (1 + (1 - spreadAmt) * (1 - spreadAmt)));
+        spreadMerger.connect(spreadComp);
+        spreadComp.connect(vcf);
       }
-      // Linear pan: pan=-1 → gL=1, gR=0; pan=0 → gL=gR=1 (center, both sides at
-      // unity, no attenuation); pan=+1 → gL=0, gR=1. Saturating at 1 keeps the
-      // center signal at full level rather than collapsing it like cosine law.
+      // Linear pan, center-preserved: pan=-1 → L=1, R=0; pan=0 → L=R=1; pan=+1
+      // → L=0, R=1. Saturating at 1 keeps the center full rather than collapsing
+      // it like a constant-power law would.
       var panOsc = function panOsc(osc, panVal) {
         if (!spreadMerger) {
           osc.connect(vcf);
@@ -1514,7 +1527,11 @@ var Bell = /*#__PURE__*/function () {
         } else {
           o2.frequency.value = playFreq;
         }
-        o2.detune.value = p.detune;
+        // Detune widens with spread — 1× at s=0 (matches no-spread sound) up to
+        // 2.5× at s=1. With small base detune (e.g. 8 cents), spread alone gave
+        // a barely-perceptible stereo image; this multiplier makes it actually
+        // sound wide.
+        o2.detune.value = p.detune * (1 + spreadAmt * 1.5);
         panOsc(o2, +spreadAmt);
         o2.start(t);
         o2.stop(t + end + .05);
