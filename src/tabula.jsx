@@ -427,12 +427,19 @@ class Bell{
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
     // L/R image). Per-layer send and optional delay-to-reverb feed both land
     // on rvIn (mono input bus). Signal flow per comb:
-    //   rvIn → preDelay → comb_delay → highShelf → lowShelf → feedback → comb_delay
-    //                                                       ↘ tap → channel merger
-    // Damping uses SHELF filters (no resonance peaks ever — unlike a biquad LP
-    // which colors the tail like a static EQ). Each pass through the feedback
-    // attenuates HF (and optionally LF) by the shelf gain — that's natural
-    // frequency-dependent decay: HF dies faster than LF.
+    //
+    //   rvIn → preDelay → cd ─→ rvMerger (raw output tap)
+    //                       ↓
+    //                       hsh → lsh → cfb → cd  (feedback only — shelf cuts
+    //                                              accumulate over recirculations)
+    //
+    // CRITICAL: the tap is from cd directly, BEFORE the shelves. The shelves
+    // live only in the feedback path. Each circulation applies the shelf cut
+    // one more time — so the 1st reflection is unfiltered, the 2nd has one
+    // shelf-cut applied, the Nth has N cuts. That's true frequency-dependent
+    // decay (HF dies faster than LF, naturally). Tapping post-shelves (which
+    // an earlier version did) just put a static EQ on the wet bus — sounded
+    // like a low-pass coloration, not like a real reverb.
     const rvIn = this.ctx.createGain(); rvIn.gain.value = 1.0;
     const rvPreDelay = this.ctx.createDelay(0.5); rvPreDelay.delayTime.value = 0;
     rvIn.connect(rvPreDelay);
@@ -447,13 +454,19 @@ class Bell{
       const cd = this.ctx.createDelay(1); cd.delayTime.value = delaySec;
       const cfb = this.ctx.createGain(); cfb.gain.value = 0.78;
       const hsh = this.ctx.createBiquadFilter();
-      hsh.type="highshelf"; hsh.frequency.value = 3500; hsh.gain.value = 0; // HF damp (dB cut)
+      // HF damp shelf: corner at 6 kHz so only the brightest air dies faster —
+      // mids and lower-highs decay normally. Earlier 3500Hz was too aggressive.
+      hsh.type="highshelf"; hsh.frequency.value = 6000; hsh.gain.value = 0;
       const lsh = this.ctx.createBiquadFilter();
-      lsh.type="lowshelf";  lsh.frequency.value = 250;  lsh.gain.value = 0; // LF damp (dB cut)
+      // LF damp shelf: corner at 200 Hz — kills sub-rumble buildup without
+      // hollowing out the body of the tail.
+      lsh.type="lowshelf";  lsh.frequency.value = 200;  lsh.gain.value = 0;
       rvPreDelay.connect(cd);
+      // Output tap: raw delay (before shelves). First reflection is clean.
+      cd.connect(rvMerger, 0, channel);
+      // Feedback chain: delay → shelves → gain → back to delay input. Each
+      // recirculation applies the shelf cut once, accumulating over time.
       cd.connect(hsh); hsh.connect(lsh); lsh.connect(cfb); cfb.connect(cd);
-      // Tap is post-shelves so the output reflects the cumulative damping.
-      lsh.connect(rvMerger, 0, channel);
       rvCombs.push({delay:cd, fb:cfb, hsh, lsh});
     };
     [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>mkComb(ct, 0)); // left
@@ -495,18 +508,19 @@ class Bell{
     for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
   }
   // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
-  // damp (0 dB), 100 pct = max damp (~-18 dB). Each pass through the comb
-  // attenuates HF by that much, so highs decay faster than lows — that's
-  // natural reverb damping behaviour (no static EQ-coloring of the wet
-  // signal, no resonance, just freq-dependent decay).
+  // damp (0 dB), 100 pct = max damp (~-12 dB). The cut compounds: each comb
+  // recirculation applies it once more, so the cumulative HF attenuation
+  // over a tail with N reflections is N × shelfGain. -12 dB per pass over
+  // ~5 reflections is enough to make highs visibly die before mids and lows.
+  // Pure shelf — no resonance, no Q peak. Natural freq-dependent decay.
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
-    const gdb=-(Math.max(0,Math.min(100,pct))/100)*18; // 0 → -18 dB
+    const gdb=-(Math.max(0,Math.min(100,pct))/100)*12; // 0 → -12 dB
     for(const c of this.rvCombs)if(c.hsh)c.hsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
   }
-  // LF damping — low-shelf gain (dB cut). Same idea, applied to lows.
-  // 0 pct = no damp, 100 pct = max damp (~-18 dB).
+  // LF damping — low-shelf gain (dB cut). Same compounding behaviour applied
+  // to bass below the corner (200 Hz). 0 pct = no damp, 100 pct = ~-12 dB.
   setRvLfDamp(pct){if(!this.ready||!this.rvCombs)return;
-    const gdb=-(Math.max(0,Math.min(100,pct))/100)*18;
+    const gdb=-(Math.max(0,Math.min(100,pct))/100)*12;
     for(const c of this.rvCombs)if(c.lsh)c.lsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
   }
   // Pre-delay — delay between input and reverb combs (initial reflection time).
