@@ -192,6 +192,29 @@ const DRUM_KITS = [
     },
   },
   {
+    id:    "vp-kit",
+    label: "VP",
+    // Mixed sample types per voice:
+    //   string      → single one-shot
+    //   {rr:[...]}  → round-robin (random pick each hit)
+    //   {vel:[...]} → velocity layers, ordered soft→hard
+    samples: {
+      BD: "samples/vp-kit/BD.wav",
+      SD: {vel:["samples/vp-kit/SDv1.wav","samples/vp-kit/SDv2.wav","samples/vp-kit/SDv3.wav"]},
+      RM: "samples/vp-kit/RM.wav",
+      CP: "samples/vp-kit/CP.wav",
+      HT: "samples/vp-kit/HT.wav",
+      MT: "samples/vp-kit/MT.wav",
+      LT: "samples/vp-kit/LT.wav",
+      CH: {rr:["samples/vp-kit/CH1.wav","samples/vp-kit/CH2.wav","samples/vp-kit/CH3.wav","samples/vp-kit/CH4.wav","samples/vp-kit/CH5.wav","samples/vp-kit/CH6.wav"]},
+      OH: "samples/vp-kit/OH.wav",
+      CY: "samples/vp-kit/CY.wav",
+      CL: "samples/vp-kit/CL.wav",
+      SH: {rr:["samples/vp-kit/SH1.wav","samples/vp-kit/SH2.wav","samples/vp-kit/SH3.wav"]},
+      CB: "samples/vp-kit/CB.aiff",
+    },
+  },
+  {
     // USER kit — no bundled samples (every voice starts on the synth engine),
     // but it's the only kit that exposes the per-voice REC/sampling interface.
     // As the user records a voice, that recording replaces its synth sound.
@@ -1147,15 +1170,25 @@ class DrumEngine{
   // Update the persistent strip for a voice. Uses setTargetAtTime with a tight
   // time constant so live drags fold smoothly into audio without clicks, and
   // pat-switches in song mode crossfade rather than snap.
-  setVoiceMix(voice,mix){
+  // `when` (optional) = the audio time the values should land. Live drags /
+  // pat-switches omit it (apply now, smoothed). The per-step motion path passes
+  // the note's onset time so each scheduled note locks its OWN param values at
+  // its own time — otherwise several look-ahead-scheduled steps all write to the
+  // shared AudioParam at currentTime and only the last sticks (notes then play
+  // the wrong step's value: "see new, hear old").
+  setVoiceMix(voice,mix,when){
     if(!this.ready)return;
     const strip=this.voiceStrips[voice];if(!strip)return;
     const t=this.ctx.currentTime;
     const TAU=0.008;
-    if(mix.level!=null)strip.lvlGain.gain.setTargetAtTime(Math.max(0,Math.min(2,mix.level/100)),t,TAU);
-    if(mix.pan!=null&&strip.panner)strip.panner.pan.setTargetAtTime(Math.max(-1,Math.min(1,mix.pan/100)),t,TAU);
-    if(mix.rvSend!=null)strip.revSend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.rvSend/100)),t,TAU);
-    if(mix.dlySend!=null)strip.dlySend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.dlySend/100)),t,TAU);
+    // setParam: at `when` lock the value exactly (setValueAtTime a hair early so
+    // it's settled by the onset); otherwise smooth from now.
+    const at=when!=null?Math.max(t,when-0.004):null;
+    const setP=(p,v)=>{ if(at!=null){try{p.setValueAtTime(v,at);}catch(e){p.value=v;}} else p.setTargetAtTime(v,t,TAU); };
+    if(mix.level!=null)setP(strip.lvlGain.gain,Math.max(0,Math.min(2,mix.level/100)));
+    if(mix.pan!=null&&strip.panner)setP(strip.panner.pan,Math.max(-1,Math.min(1,mix.pan/100)));
+    if(mix.rvSend!=null)setP(strip.revSend.gain,Math.max(0,Math.min(1,mix.rvSend/100)));
+    if(mix.dlySend!=null)setP(strip.dlySend.gain,Math.max(0,Math.min(1,mix.dlySend/100)));
     if(mix.pitch!=null)strip.pitch=Math.max(-12,Math.min(12,mix.pitch));
     if(mix.env!=null)strip.env=Math.max(0,Math.min(100,mix.env));
     // Saturation — regenerate the shaper curve only when the amount changes.
@@ -1179,7 +1212,7 @@ class DrumEngine{
       const cut=mix.filtCut!=null?mix.filtCut:100;
       // "off" pins the cutoff at the top so the biquad is effectively bypass.
       const targetHz=(strip.filtMode==="off")?20000:filtCutHz(cut);
-      strip.filter.frequency.setTargetAtTime(targetHz,t,TAU);
+      setP(strip.filter.frequency,targetHz);
     }
   }
   setMasterLevel(pct){
@@ -1245,9 +1278,26 @@ class DrumEngine{
     // Pitch ratio applied to every osc frequency in the synth voice paths
     // below. Samples use playbackRate. Range matches the mix range (-24..+24).
     const pr=Math.pow(2,(strip.pitch||0)/12);
-    // User-recorded sample takes precedence over the synthesized voice.
-    if(sample){
-      const src=ctx.createBufferSource();src.buffer=sample;
+    // Resolve the sample: a plain AudioBuffer (single one-shot / user
+    // recording), {rr:[buffers]} (round-robin — random pick, avoiding an
+    // immediate repeat), or {vel:[buffers]} (velocity layers, soft→hard —
+    // pick by this hit's velocity).
+    let buf=sample;
+    if(sample&&!(sample.numberOfChannels!=null)){
+      if(sample.rr&&sample.rr.length){
+        const a=sample.rr;let i=Math.floor(Math.random()*a.length);
+        if(a.length>1&&this._lastRR&&this._lastRR[voice]===i)i=(i+1)%a.length;
+        if(!this._lastRR)this._lastRR={};this._lastRR[voice]=i;
+        buf=a[i];
+      } else if(sample.vel&&sample.vel.length){
+        const n=sample.vel.length;
+        const idx=Math.max(0,Math.min(n-1,Math.floor((vel/128)*n)));
+        buf=sample.vel[idx];
+      } else buf=null;
+    }
+    // User-recorded sample / kit sample takes precedence over the synth voice.
+    if(buf){
+      const src=ctx.createBufferSource();src.buffer=buf;
       const g=ctx.createGain();g.gain.value=v;
       src.playbackRate.value=pr; // pitch ratio applies to samples
       src.connect(g);g.connect(out);
@@ -1256,7 +1306,7 @@ class DrumEngine{
       // shorter length with a brief release fade so it doesn't click; at 0 it's
       // a ~12ms transient. Squared curve gives finer control at the short end.
       const env01=(strip.env!=null?strip.env:100)/100;
-      const sampleDur=(sample.duration||0.5)/pr; // pitch stretches duration
+      const sampleDur=(buf.duration||0.5)/pr; // pitch stretches duration
       let endAt=t+sampleDur;
       if(env01<0.999){
         const MIN_GATE=0.012;
@@ -2713,9 +2763,10 @@ export default function Tabula(){
             if(mv!=null)eff[k]=mv;
           }
           dMix=eff;
-          // Per-step application (bypasses play()'s pat-switch guard) so the
-          // strip tracks the recorded automation hit-to-hit.
-          drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(voiceKey,eff);
+          // Per-step application — scheduled at THIS note's onset (`at`) so each
+          // note locks its own recorded values, instead of all look-ahead steps
+          // stomping the shared param at currentTime.
+          drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(voiceKey,eff,at);
         }
         drumEngine.current.play(voiceKey,at,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
       }
@@ -3831,20 +3882,24 @@ export default function Tabula(){
     }
     const newSamples={};
     const errors=[];
-    await Promise.all(Object.entries(kit.samples).map(async([voiceKey,url])=>{
+    // Prefer the live AudioContext so buffers are engine-compatible; fall back
+    // to an OfflineAudioContext for pre-loading before play.
+    const ctx=bell.current?.ctx||drumEngine.current?.ctx||new OfflineAudioContext(1,1,44100);
+    const decode=async(url)=>{
+      const res=await fetch(url);
+      if(!res.ok)throw new Error(res.statusText);
+      return ctx.decodeAudioData(await res.arrayBuffer());
+    };
+    // A voice spec is a URL string (single one-shot), {rr:[urls]} (round-robin
+    // — random pick per hit), or {vel:[urls]} (velocity layers, soft→hard).
+    await Promise.all(Object.entries(kit.samples).map(async([voiceKey,spec])=>{
       try{
-        const res=await fetch(url);
-        if(!res.ok)throw new Error(res.statusText);
-        const ab=await res.arrayBuffer();
-        // Prefer the live AudioContext so the buffer is compatible with the
-        // engine; fall back to a temporary OfflineAudioContext for pre-loading.
-        const ctx=bell.current?.ctx||drumEngine.current?.ctx
-          ||(()=>{const o=new OfflineAudioContext(1,1,44100);return o;})();
-        const buf=await ctx.decodeAudioData(ab);
-        newSamples[voiceKey]=buf;
+        if(typeof spec==="string"){ newSamples[voiceKey]=await decode(spec); }
+        else if(spec&&spec.rr){ newSamples[voiceKey]={rr:await Promise.all(spec.rr.map(decode))}; }
+        else if(spec&&spec.vel){ newSamples[voiceKey]={vel:await Promise.all(spec.vel.map(decode))}; }
       }catch(e){
         errors.push(voiceKey);
-        console.warn("Kit sample load failed:",url,e);
+        console.warn("Kit sample load failed:",voiceKey,e);
       }
     }));
     setVoiceSamples(newSamples);
