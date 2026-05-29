@@ -159,7 +159,12 @@ const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new
 // Continuous drum-mix params that support motion automation (the slider ones;
 // the FILT mode chip is excluded). pat.motion[param] is a lazily-created
 // ROWS×COLS grid of number|null — null = "use the base mix value at this step".
-const MOTION_PARAMS=["level","pan","rvSend","dlySend","pitch","env","sat","filtCut"];
+// Drum-mix params that MOTION can automate per step. level/pan/rvSend/dlySend/
+// filtCut are AudioParams scheduled at the note onset; pitch/env are read
+// per-hit from the passed mix inside DrumEngine.play. `sat` is intentionally
+// excluded — it's a WaveShaper curve swap on a shared strip node, which can't
+// be scheduled per-step under the look-ahead, so it stays a static control.
+const MOTION_PARAMS=["level","pan","rvSend","dlySend","pitch","env","filtCut"];
 const motionValAt=(pat,param,r,s)=>{
   const m=pat&&pat.motion&&pat.motion[param];
   return (m&&m[r]&&m[r][s]!=null)?m[r][s]:null;
@@ -376,7 +381,7 @@ const lpLbl=v=>{const f=lpHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f)
 const stR=st=>Math.pow(2,st/12);
 const ms=v=>Math.max(0.001,v/1000);
 
-const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return;}catch(e){}try{localStorage.setItem("tnori-"+k,v);}catch(e){}};
+const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
 
 // ── User-sample (de)serialization ────────────────────────────────────────────
@@ -1323,8 +1328,11 @@ class DrumEngine{
     // out feeds the strip's filter (and then lvlGain → panner → master).
     const out=strip.filter;
     // Pitch ratio applied to every osc frequency in the synth voice paths
-    // below. Samples use playbackRate. Range matches the mix range (-24..+24).
-    const pr=Math.pow(2,(strip.pitch||0)/12);
+    // below. Samples use playbackRate. Read per-hit from the passed mix when
+    // present (so MOTION pitch automation is correct per step — the shared
+    // strip.pitch would be stomped by look-ahead steps); else the strip value.
+    const pitchSemi=(mix&&mix.pitch!=null)?mix.pitch:(strip.pitch||0);
+    const pr=Math.pow(2,pitchSemi/12);
     // Resolve the sample: a plain AudioBuffer (single one-shot / user
     // recording), {rr:[buffers]} (round-robin — random pick, avoiding an
     // immediate repeat), or {vel:[buffers]} (velocity layers, soft→hard —
@@ -1352,7 +1360,7 @@ class DrumEngine{
       // plays. 100 = whole sample (no gate). Below that, gate the sample to a
       // shorter length with a brief release fade so it doesn't click; at 0 it's
       // a ~12ms transient. Squared curve gives finer control at the short end.
-      const env01=(strip.env!=null?strip.env:100)/100;
+      const env01=((mix&&mix.env!=null)?mix.env:(strip.env!=null?strip.env:100))/100;
       const sampleDur=(buf.duration||0.5)/pr; // pitch stretches duration
       let endAt=t+sampleDur;
       if(env01<0.999){
@@ -2311,7 +2319,10 @@ export default function Tabula(){
     // with captureSnapshotR / getShareState — the 4-site rule.
     const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
-    setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
+    setSlotData(next);
+    const ok=await storageSet("slots",JSON.stringify(next));
+    if(ok){setActiveSlot(slot);showFlash("SAVED "+slot);}
+    else showFlash("SAVE FAILED — TOO LARGE"); // storage quota (recorded samples can be big)
   };
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   // Saved projects can contain stale chain entries: legacy name strings ("A","B")
@@ -2396,7 +2407,8 @@ export default function Tabula(){
     // slot maps to synth on setPats below; otherwise the user's current
     // activeLayer (e.g. bass) would absorb the legacy synth data.
     setActiveLayer(s.activeLayer||"synth");
-    const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
+    const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
+    const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
     setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
@@ -2633,7 +2645,29 @@ export default function Tabula(){
   const applyShareState=rawState=>{
     if(!rawState)return;
     const s=migrateLegacyBass(rawState);
-    const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
+    // Restore the non-active layers + active layer (mirror doLoad). Without
+    // this, importing a project authored on a different layer dropped the other
+    // layer's patterns and dumped the active-layer pats into the wrong slot.
+    const _freshLead=mkPat(symPat(0));
+    layerStoreR.current={
+      synth:null,
+      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
+    };
+    if(s.layerStore){
+      for(const layer of SYNTH_LAYERS){
+        if(s.layerStore[layer]){
+          const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if(ld.pats)ld.pats=relabelByIndex(migratePats(ld.pats,s.speedMult),symPat);
+          if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
+          layerStoreR.current[layer]=ld;
+        }
+      }
+    }
+    setActiveLayer(s.activeLayer||"synth");
+    // Advance _id past EVERY numeric-id collection (synth + lead pats AND drum
+    // pats), else a later-created pattern can collide with an existing id.
+    const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
+    const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
     if(s.pats)setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     // Apply with fallback to defaults — share imports should reset to a clean
@@ -2841,9 +2875,8 @@ export default function Tabula(){
     // Recorded motion only drives the strip while MOTION mode is ON. With it
     // off the mixer is fully static (base mix) — the recorded automation is
     // retained in the pat but ignored, so output is persistent.
-    const patHasMotion = motionEnabledR.current && !!(pat.motion && MOTION_PARAMS.some(k=>pat.motion[k]));
     // Base mix is GLOBAL/static (drumMixR). Motion (per-pattern) overlays it
-    // only while MOTION is on — see patHasMotion path below.
+    // only while MOTION is on — see the motionEnabledR path below.
     const baseMixArr = drumMixR.current||defaultDrumMix();
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
@@ -2852,10 +2885,13 @@ export default function Tabula(){
         const dVel=(Array.isArray(velRow)?velRow[s]:useVel?.[s])??100;
         let dMix=baseMixArr[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
         const voiceKey=DRUM_VOICES[r].key;
-        if(patHasMotion){
-          // Build the effective mix: base, overlaid with this step's motion
-          // value for each automated param (null → keep base). A param under
-          // an active live drag (perfMix) wins over both.
+        if(motionEnabledR.current){
+          // MOTION mode on: re-assert the effective mix on EVERY hit — base,
+          // overlaid with this step's motion value per automated param (null →
+          // keep base), with an active live drag (perfMix) winning over both.
+          // Doing this even for patterns WITHOUT motion lanes snaps strips back
+          // to base on a pattern/song switch, instead of leaving them stuck at
+          // the previous (motion) pattern's last automated value.
           const eff={...dMix};
           const pm=perfMixR.current&&perfMixR.current[r];
           for(const k of MOTION_PARAMS){
@@ -2865,8 +2901,9 @@ export default function Tabula(){
           }
           dMix=eff;
           // Per-step application — scheduled at THIS note's onset (`at`) so each
-          // note locks its own recorded values, instead of all look-ahead steps
-          // stomping the shared param at currentTime.
+          // note locks its own values, instead of all look-ahead steps stomping
+          // the shared param at currentTime. (pitch/env are read per-hit from
+          // dMix inside play() so they're correct too; sat isn't motion-able.)
           drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(voiceKey,eff,at);
         }
         // Per-cell ratchet: retrigger the voice `rat` evenly-spaced times across
@@ -3316,9 +3353,9 @@ export default function Tabula(){
   });};
 
   const handleGridDown=useCallback(e=>{
+    if(e.button===2)return; // right-click handled by onContextMenu only — no undo snapshot / follow-cancel
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
-    if(e.button===2)return; // right-click handled by onContextMenu only
     e.preventDefault();
     pointerCountR.current++;
     const g=gesture.current;
@@ -5373,8 +5410,8 @@ export default function Tabula(){
                                 const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
                                 pushHistory();
                                 const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
-                                const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
-                                document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
+                                const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                                document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                                 return;
                               }
                               e.stopPropagation();if(inactive)return;
@@ -5406,10 +5443,10 @@ export default function Tabula(){
                                 }
                               };
                               const onUp=()=>{
-                                document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
+                                document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
                                 if(mode===null&&wasOn)setDrumCell(r,c,false); // pure tap on existing note → clear
                               };
-                              document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
+                              document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                             }}>
                             {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                               <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
@@ -6288,8 +6325,8 @@ export default function Tabula(){
                                   const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
                                   pushHistory();
                                   const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
-                                  const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
-                                  document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
+                                  const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                                  document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                                   return;
                                 }
                                 e.preventDefault();e.stopPropagation();if(inactive)return;
@@ -6318,10 +6355,10 @@ export default function Tabula(){
                                   }
                                 };
                                 const onUp=()=>{
-                                  document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
+                                  document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
                                   if(mode===null&&wasOn)setDrumCell(r,step,false);
                                 };
-                                document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
+                                document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                               }}>
                                 {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                                   <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>

@@ -407,7 +407,12 @@ var mkDrumPat = function mkDrumPat(name) {
 // Continuous drum-mix params that support motion automation (the slider ones;
 // the FILT mode chip is excluded). pat.motion[param] is a lazily-created
 // ROWS×COLS grid of number|null — null = "use the base mix value at this step".
-var MOTION_PARAMS = ["level", "pan", "rvSend", "dlySend", "pitch", "env", "sat", "filtCut"];
+// Drum-mix params that MOTION can automate per step. level/pan/rvSend/dlySend/
+// filtCut are AudioParams scheduled at the note onset; pitch/env are read
+// per-hit from the passed mix inside DrumEngine.play. `sat` is intentionally
+// excluded — it's a WaveShaper curve swap on a shared strip node, which can't
+// be scheduled per-step under the look-ahead, so it stays a static control.
+var MOTION_PARAMS = ["level", "pan", "rvSend", "dlySend", "pitch", "env", "filtCut"];
 var motionValAt = function motionValAt(pat, param, r, s) {
   var m = pat && pat.motion && pat.motion[param];
   return m && m[r] && m[r][s] != null ? m[r][s] : null;
@@ -750,7 +755,7 @@ var ms = function ms(v) {
 };
 var storageSet = /*#__PURE__*/function () {
   var _ref = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee(k, v) {
-    var _t;
+    var _t, _t2;
     return _regenerator().w(function (_context) {
       while (1) switch (_context.p = _context.n) {
         case 0:
@@ -758,17 +763,19 @@ var storageSet = /*#__PURE__*/function () {
           _context.n = 1;
           return window.storage.set(k, v);
         case 1:
-          return _context.a(2);
+          return _context.a(2, true);
         case 2:
           _context.p = 2;
           _t = _context.v;
-          try {
-            localStorage.setItem("tnori-" + k, v);
-          } catch (e) {}
-        case 3:
-          return _context.a(2);
+          _context.p = 3;
+          localStorage.setItem("tnori-" + k, v);
+          return _context.a(2, true);
+        case 4:
+          _context.p = 4;
+          _t2 = _context.v;
+          return _context.a(2, false);
       }
-    }, _callee, null, [[0, 2]]);
+    }, _callee, null, [[3, 4], [0, 2]]);
   }));
   return function storageSet(_x, _x2) {
     return _ref.apply(this, arguments);
@@ -776,7 +783,7 @@ var storageSet = /*#__PURE__*/function () {
 }();
 var storageGet = /*#__PURE__*/function () {
   var _ref2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2(k) {
-    var r, v, _t2, _t3;
+    var r, v, _t3, _t4;
     return _regenerator().w(function (_context2) {
       while (1) switch (_context2.p = _context2.n) {
         case 0:
@@ -795,7 +802,7 @@ var storageGet = /*#__PURE__*/function () {
           break;
         case 3:
           _context2.p = 3;
-          _t2 = _context2.v;
+          _t3 = _context2.v;
         case 4:
           _context2.p = 4;
           v = localStorage.getItem("tnori-" + k);
@@ -809,7 +816,7 @@ var storageGet = /*#__PURE__*/function () {
           break;
         case 6:
           _context2.p = 6;
-          _t3 = _context2.v;
+          _t4 = _context2.v;
         case 7:
           return _context2.a(2, null);
       }
@@ -2520,8 +2527,11 @@ var DrumEngine = /*#__PURE__*/function () {
       // out feeds the strip's filter (and then lvlGain → panner → master).
       var out = strip.filter;
       // Pitch ratio applied to every osc frequency in the synth voice paths
-      // below. Samples use playbackRate. Range matches the mix range (-24..+24).
-      var pr = Math.pow(2, (strip.pitch || 0) / 12);
+      // below. Samples use playbackRate. Read per-hit from the passed mix when
+      // present (so MOTION pitch automation is correct per step — the shared
+      // strip.pitch would be stomped by look-ahead steps); else the strip value.
+      var pitchSemi = mix && mix.pitch != null ? mix.pitch : strip.pitch || 0;
+      var pr = Math.pow(2, pitchSemi / 12);
       // Resolve the sample: a plain AudioBuffer (single one-shot / user
       // recording), {rr:[buffers]} (round-robin — random pick, avoiding an
       // immediate repeat), or {vel:[buffers]} (velocity layers, soft→hard —
@@ -2554,7 +2564,7 @@ var DrumEngine = /*#__PURE__*/function () {
         // plays. 100 = whole sample (no gate). Below that, gate the sample to a
         // shorter length with a brief release fade so it doesn't click; at 0 it's
         // a ~12ms transient. Squared curve gives finer control at the short end.
-        var env01 = (strip.env != null ? strip.env : 100) / 100;
+        var env01 = (mix && mix.env != null ? mix.env : strip.env != null ? strip.env : 100) / 100;
         var sampleDur = (buf.duration || 0.5) / pr; // pitch stretches duration
         var endAt = t + sampleDur;
         if (env01 < 0.999) {
@@ -4375,7 +4385,7 @@ function Tabula() {
   });
   var doSave = /*#__PURE__*/function () {
     var _ref1 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee8(slot) {
-      var liveLayerStore, snap, next;
+      var liveLayerStore, snap, next, ok;
       return _regenerator().w(function (_context8) {
         while (1) switch (_context8.n) {
           case 0:
@@ -4455,8 +4465,11 @@ function Tabula() {
             _context8.n = 1;
             return storageSet("slots", JSON.stringify(next));
           case 1:
-            setActiveSlot(slot);
-            showFlash("SAVED " + slot);
+            ok = _context8.v;
+            if (ok) {
+              setActiveSlot(slot);
+              showFlash("SAVED " + slot);
+            } else showFlash("SAVE FAILED — TOO LARGE"); // storage quota (recorded samples can be big)
           case 2:
             return _context8.a(2);
         }
@@ -4582,9 +4595,14 @@ function Tabula() {
     // slot maps to synth on setPats below; otherwise the user's current
     // activeLayer (e.g. bass) would absorb the legacy synth data.
     setActiveLayer(s.activeLayer || "synth");
-    var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(s.pats.map(function (p) {
-      return p.id;
-    }))));
+    var _allIds = [].concat(_toConsumableArray(s.pats || []), _toConsumableArray(s.drumPats || []), _toConsumableArray(Object.values(s.layerStore || {}).flatMap(function (l) {
+      return l && l.pats || [];
+    }))).map(function (p) {
+      return p && p.id;
+    }).filter(function (x) {
+      return typeof x === "number";
+    });
+    var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(_allIds)));
     if (maxId >= _id) _id = maxId + 1;
     var cleanChain = sanitizeChain(s.chain, s.pats);
     setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
@@ -5073,9 +5091,45 @@ function Tabula() {
   var applyShareState = function applyShareState(rawState) {
     if (!rawState) return;
     var s = migrateLegacyBass(rawState);
-    var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray((s.pats || []).map(function (p) {
-      return p.id;
-    }))));
+    // Restore the non-active layers + active layer (mirror doLoad). Without
+    // this, importing a project authored on a different layer dropped the other
+    // layer's patterns and dumped the active-layer pats into the wrong slot.
+    var _freshLead = mkPat(symPat(0));
+    layerStoreR.current = {
+      synth: null,
+      lead: {
+        pats: [_freshLead],
+        activeId: _freshLead.id,
+        phrases: [{
+          id: "LP1",
+          name: symPhr(0),
+          chain: [_freshLead.id]
+        }],
+        activePhraseId: "LP1"
+      }
+    };
+    if (s.layerStore) {
+      for (var _i7 = 0, _SYNTH_LAYERS3 = SYNTH_LAYERS; _i7 < _SYNTH_LAYERS3.length; _i7++) {
+        var layer = _SYNTH_LAYERS3[_i7];
+        if (s.layerStore[layer]) {
+          var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
+          if (ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
+          if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
+          layerStoreR.current[layer] = ld;
+        }
+      }
+    }
+    setActiveLayer(s.activeLayer || "synth");
+    // Advance _id past EVERY numeric-id collection (synth + lead pats AND drum
+    // pats), else a later-created pattern can collide with an existing id.
+    var _allIds = [].concat(_toConsumableArray(s.pats || []), _toConsumableArray(s.drumPats || []), _toConsumableArray(Object.values(s.layerStore || {}).flatMap(function (l) {
+      return l && l.pats || [];
+    }))).map(function (p) {
+      return p && p.id;
+    }).filter(function (x) {
+      return typeof x === "number";
+    });
+    var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(_allIds)));
     if (maxId >= _id) _id = maxId + 1;
     if (s.pats) setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
     if (s.chain) {
@@ -5376,11 +5430,8 @@ function Tabula() {
     // Recorded motion only drives the strip while MOTION mode is ON. With it
     // off the mixer is fully static (base mix) — the recorded automation is
     // retained in the pat but ignored, so output is persistent.
-    var patHasMotion = motionEnabledR.current && !!(pat.motion && MOTION_PARAMS.some(function (k) {
-      return pat.motion[k];
-    }));
     // Base mix is GLOBAL/static (drumMixR). Motion (per-pattern) overlays it
-    // only while MOTION is on — see patHasMotion path below.
+    // only while MOTION is on — see the motionEnabledR path below.
     var baseMixArr = drumMixR.current || defaultDrumMix();
     for (var r = 0; r < DRUM_ROWS; r++) {
       if (useGrid[r] && useGrid[r][s]) {
@@ -5395,10 +5446,13 @@ function Tabula() {
           dlySend: 0
         };
         var voiceKey = DRUM_VOICES[r].key;
-        if (patHasMotion) {
-          // Build the effective mix: base, overlaid with this step's motion
-          // value for each automated param (null → keep base). A param under
-          // an active live drag (perfMix) wins over both.
+        if (motionEnabledR.current) {
+          // MOTION mode on: re-assert the effective mix on EVERY hit — base,
+          // overlaid with this step's motion value per automated param (null →
+          // keep base), with an active live drag (perfMix) winning over both.
+          // Doing this even for patterns WITHOUT motion lanes snaps strips back
+          // to base on a pattern/song switch, instead of leaving them stuck at
+          // the previous (motion) pattern's last automated value.
           var eff = _objectSpread({}, dMix);
           var pm = perfMixR.current && perfMixR.current[r];
           var _iterator0 = _createForOfIteratorHelper(MOTION_PARAMS),
@@ -5420,8 +5474,9 @@ function Tabula() {
           }
           dMix = eff;
           // Per-step application — scheduled at THIS note's onset (`at`) so each
-          // note locks its own recorded values, instead of all look-ahead steps
-          // stomping the shared param at currentTime.
+          // note locks its own values, instead of all look-ahead steps stomping
+          // the shared param at currentTime. (pitch/env are read per-hit from
+          // dMix inside play() so they're correct too; sat isn't motion-able.)
           drumEngine.current.setVoiceMix && drumEngine.current.setVoiceMix(voiceKey, eff, at);
         }
         // Per-cell ratchet: retrigger the voice `rat` evenly-spaced times across
@@ -5519,16 +5574,16 @@ function Tabula() {
     var ranges = null;
     if (isFree) {
       ranges = {};
-      for (var _i7 = 0, _arr2 = ["synth", "lead", "drums"]; _i7 < _arr2.length; _i7++) {
-        var layer = _arr2[_i7];
+      for (var _i8 = 0, _arr2 = ["synth", "lead", "drums"]; _i8 < _arr2.length; _i8++) {
+        var layer = _arr2[_i8];
         var first = -1,
           last = -1;
         var bars = [];
-        for (var _i8 = 0; _i8 < 64; _i8++) {
-          if (sm[layer][_i8] != null) {
-            if (first === -1) first = _i8;
-            last = _i8;
-            bars.push(_i8);
+        for (var _i9 = 0; _i9 < 64; _i9++) {
+          if (sm[layer][_i9] != null) {
+            if (first === -1) first = _i9;
+            last = _i9;
+            bars.push(_i9);
           }
         }
         ranges[layer] = {
@@ -5544,8 +5599,8 @@ function Tabula() {
     // freeR.current[layer] = {step, nextAt, bar} per layer.
     var cursorChanged = false;
     var newCursor = _objectSpread({}, songBarLayer);
-    for (var _i9 = 0, _arr3 = ["synth", "lead", "drums"]; _i9 < _arr3.length; _i9++) {
-      var _layer = _arr3[_i9];
+    for (var _i0 = 0, _arr3 = ["synth", "lead", "drums"]; _i0 < _arr3.length; _i0++) {
+      var _layer = _arr3[_i0];
       var lf = freeR.current[_layer];
       // Free mode: skip silent layers, init bar within range.
       if (isFree) {
@@ -5712,8 +5767,8 @@ function Tabula() {
         var nextBar = void 0;
         if (isRandom) {
           var candidates = [];
-          for (var _i0 = songFirstBar; _i0 <= songLastBar; _i0++) {
-            if (sm.synth[_i0] != null || sm.lead[_i0] != null || sm.drums[_i0] != null) candidates.push(_i0);
+          for (var _i1 = songFirstBar; _i1 <= songLastBar; _i1++) {
+            if (sm.synth[_i1] != null || sm.lead[_i1] != null || sm.drums[_i1] != null) candidates.push(_i1);
           }
           nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
         } else {
@@ -5730,8 +5785,8 @@ function Tabula() {
           drums: nextBar
         });
         // Reset per-layer step index so each layer starts new bar from step 0.
-        for (var _i1 = 0, _arr4 = ["synth", "lead", "drums"]; _i1 < _arr4.length; _i1++) {
-          var l = _arr4[_i1];
+        for (var _i10 = 0, _arr4 = ["synth", "lead", "drums"]; _i10 < _arr4.length; _i10++) {
+          var l = _arr4[_i10];
           freeR.current[l].step = 0;
           // Realign nextAt to bar boundary so layers re-sync after bar advance.
           freeR.current[l].nextAt = nextNoteR.current + absStepDur;
@@ -5747,7 +5802,7 @@ function Tabula() {
 
   var _startStop = /*#__PURE__*/function () {
     var _ref15 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, _m, r, t0, _i10, _arr5, layer, sm, layerFirst, _i11, _arr6, _layer2, f, i, firstBar, _i12, _t4;
+      var dlyT, _m, r, t0, _i11, _arr5, layer, sm, layerFirst, _i12, _arr6, _layer2, f, i, firstBar, _i13, _t5;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -5837,7 +5892,7 @@ function Tabula() {
             break;
           case 8:
             _context9.p = 8;
-            _t4 = _context9.v;
+            _t5 = _context9.v;
           case 9:
             _context9.n = 10;
             return requestWakeLock();
@@ -5870,8 +5925,8 @@ function Tabula() {
             stepR.current = 0;
             t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
             // song mode also sets each layer's bar to its first populated cell.
-            for (_i10 = 0, _arr5 = ["synth", "lead", "drums"]; _i10 < _arr5.length; _i10++) {
-              layer = _arr5[_i10];
+            for (_i11 = 0, _arr5 = ["synth", "lead", "drums"]; _i11 < _arr5.length; _i11++) {
+              layer = _arr5[_i11];
               freeR.current[layer] = {
                 step: 0,
                 nextAt: t0,
@@ -5884,13 +5939,13 @@ function Tabula() {
             }
             sm = songMatrix;
             layerFirst = {};
-            _i11 = 0, _arr6 = ["synth", "lead", "drums"];
+            _i12 = 0, _arr6 = ["synth", "lead", "drums"];
           case 11:
-            if (!(_i11 < _arr6.length)) {
+            if (!(_i12 < _arr6.length)) {
               _context9.n = 16;
               break;
             }
-            _layer2 = _arr6[_i11];
+            _layer2 = _arr6[_i12];
             f = -1;
             i = 0;
           case 12:
@@ -5912,25 +5967,25 @@ function Tabula() {
             layerFirst[_layer2] = f === -1 ? 0 : f;
             freeR.current[_layer2].bar = layerFirst[_layer2];
           case 15:
-            _i11++;
+            _i12++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i12 = 0;
+            _i13 = 0;
           case 17:
-            if (!(_i12 < 64)) {
+            if (!(_i13 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i12] != null || sm.lead[_i12] != null || sm.drums[_i12] != null)) {
+            if (!(sm.synth[_i13] != null || sm.lead[_i13] != null || sm.drums[_i13] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i12;
+            firstBar = _i13;
             return _context9.a(3, 19);
           case 18:
-            _i12++;
+            _i13++;
             _context9.n = 17;
             break;
           case 19:
@@ -5966,7 +6021,7 @@ function Tabula() {
     // Resume AudioContext and silent loop when page becomes visible
     var onVisible = /*#__PURE__*/function () {
       var _ref16 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0() {
-        var _t5, _t6, _t7;
+        var _t6, _t7, _t8;
         return _regenerator().w(function (_context0) {
           while (1) switch (_context0.p = _context0.n) {
             case 0:
@@ -5986,7 +6041,7 @@ function Tabula() {
               break;
             case 3:
               _context0.p = 3;
-              _t5 = _context0.v;
+              _t6 = _context0.v;
             case 4:
               if (!(drumEngine.current.ctx && drumEngine.current.ctx.state === "suspended")) {
                 _context0.n = 8;
@@ -6000,7 +6055,7 @@ function Tabula() {
               break;
             case 7:
               _context0.p = 7;
-              _t6 = _context0.v;
+              _t7 = _context0.v;
             case 8:
               if (!(silentLoopR.current && silentLoopR.current.paused)) {
                 _context0.n = 12;
@@ -6014,7 +6069,7 @@ function Tabula() {
               break;
             case 11:
               _context0.p = 11;
-              _t7 = _context0.v;
+              _t8 = _context0.v;
             case 12:
               // Re-request wake lock if playing
               if (playingR.current) requestWakeLock();
@@ -6030,7 +6085,7 @@ function Tabula() {
     // iOS pageshow fires when returning from bfcache (app switch)
     var onPageShow = /*#__PURE__*/function () {
       var _ref17 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee1(e) {
-        var _t8, _t9;
+        var _t9, _t0;
         return _regenerator().w(function (_context1) {
           while (1) switch (_context1.p = _context1.n) {
             case 0:
@@ -6050,7 +6105,7 @@ function Tabula() {
               break;
             case 3:
               _context1.p = 3;
-              _t8 = _context1.v;
+              _t9 = _context1.v;
             case 4:
               if (!(silentLoopR.current && silentLoopR.current.paused)) {
                 _context1.n = 8;
@@ -6064,7 +6119,7 @@ function Tabula() {
               break;
             case 7:
               _context1.p = 7;
-              _t9 = _context1.v;
+              _t0 = _context1.v;
             case 8:
               return _context1.a(2);
           }
@@ -6089,7 +6144,7 @@ function Tabula() {
   }, [playing]);
   var requestWakeLock = /*#__PURE__*/function () {
     var _ref18 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10() {
-      var _t0;
+      var _t1;
       return _regenerator().w(function (_context10) {
         while (1) switch (_context10.p = _context10.n) {
           case 0:
@@ -6117,7 +6172,7 @@ function Tabula() {
             break;
           case 4:
             _context10.p = 4;
-            _t0 = _context10.v;
+            _t1 = _context10.v;
           case 5:
             return _context10.a(2);
         }
@@ -6295,9 +6350,9 @@ function Tabula() {
     });
   };
   var handleGridDown = useCallback(function (e) {
+    if (e.button === 2) return; // right-click handled by onContextMenu only — no undo snapshot / follow-cancel
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
-    if (e.button === 2) return; // right-click handled by onContextMenu only
     e.preventDefault();
     pointerCountR.current++;
     var g = gesture.current;
@@ -7737,7 +7792,7 @@ function Tabula() {
             ctx = ((_bell$current = bell.current) === null || _bell$current === void 0 ? void 0 : _bell$current.ctx) || ((_drumEngine$current = drumEngine.current) === null || _drumEngine$current === void 0 ? void 0 : _drumEngine$current.ctx) || new OfflineAudioContext(1, 1, 44100);
             decode = /*#__PURE__*/function () {
               var _ref20 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11(url) {
-                var res, _t1;
+                var res, _t10;
                 return _regenerator().w(function (_context11) {
                   while (1) switch (_context11.n) {
                     case 0:
@@ -7751,11 +7806,11 @@ function Tabula() {
                       }
                       throw new Error(res.statusText);
                     case 2:
-                      _t1 = ctx;
+                      _t10 = ctx;
                       _context11.n = 3;
                       return res.arrayBuffer();
                     case 3:
-                      return _context11.a(2, _t1.decodeAudioData.call(_t1, _context11.v));
+                      return _context11.a(2, _t10.decodeAudioData.call(_t10, _context11.v));
                   }
                 }, _callee11);
               }));
@@ -7767,7 +7822,7 @@ function Tabula() {
             _context13.n = 3;
             return Promise.all(Object.entries(kit.samples).map(/*#__PURE__*/function () {
               var _ref22 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(_ref21) {
-                var _ref23, voiceKey, spec, _t10, _t11, _t12;
+                var _ref23, voiceKey, spec, _t11, _t12, _t13;
                 return _regenerator().w(function (_context12) {
                   while (1) switch (_context12.p = _context12.n) {
                     case 0:
@@ -7791,9 +7846,9 @@ function Tabula() {
                       _context12.n = 4;
                       return Promise.all(spec.rr.map(decode));
                     case 4:
-                      _t10 = _context12.v;
+                      _t11 = _context12.v;
                       newSamples[voiceKey] = {
-                        rr: _t10
+                        rr: _t11
                       };
                       _context12.n = 7;
                       break;
@@ -7805,18 +7860,18 @@ function Tabula() {
                       _context12.n = 6;
                       return Promise.all(spec.vel.map(decode));
                     case 6:
-                      _t11 = _context12.v;
+                      _t12 = _context12.v;
                       newSamples[voiceKey] = {
-                        vel: _t11
+                        vel: _t12
                       };
                     case 7:
                       _context12.n = 9;
                       break;
                     case 8:
                       _context12.p = 8;
-                      _t12 = _context12.v;
+                      _t13 = _context12.v;
                       errors.push(voiceKey);
-                      console.warn("Kit sample load failed:", voiceKey, _t12);
+                      console.warn("Kit sample load failed:", voiceKey, _t13);
                     case 9:
                       return _context12.a(2);
                   }
@@ -7864,7 +7919,7 @@ function Tabula() {
             _context15.n = 1;
             return Promise.all(Object.entries(sj).map(/*#__PURE__*/function () {
               var _ref26 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee14(_ref25) {
-                var _ref27, k, b64, _t13;
+                var _ref27, k, b64, _t14;
                 return _regenerator().w(function (_context14) {
                   while (1) switch (_context14.p = _context14.n) {
                     case 0:
@@ -7878,8 +7933,8 @@ function Tabula() {
                       break;
                     case 3:
                       _context14.p = 3;
-                      _t13 = _context14.v;
-                      console.warn("user sample decode failed", k, _t13);
+                      _t14 = _context14.v;
+                      console.warn("user sample decode failed", k, _t14);
                     case 4:
                       return _context14.a(2);
                   }
@@ -7909,7 +7964,7 @@ function Tabula() {
   // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
   var startRecord = /*#__PURE__*/function () {
     var _ref28 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee17(voiceKey) {
-      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t15;
+      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t16;
       return _regenerator().w(function (_context17) {
         while (1) switch (_context17.p = _context17.n) {
           case 0:
@@ -7963,7 +8018,7 @@ function Tabula() {
             armedStart = performance.now();
             finishWith = /*#__PURE__*/function () {
               var _ref29 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee16() {
-                var blob, ab, audioBuf, _t14;
+                var blob, ab, audioBuf, _t15;
                 return _regenerator().w(function (_context16) {
                   while (1) switch (_context16.p = _context16.n) {
                     case 0:
@@ -7998,8 +8053,8 @@ function Tabula() {
                       break;
                     case 5:
                       _context16.p = 5;
-                      _t14 = _context16.v;
-                      console.error("Sample decode failed:", _t14);
+                      _t15 = _context16.v;
+                      console.error("Sample decode failed:", _t15);
                       showFlash("DECODE FAIL");
                     case 6:
                       if (recordStreamRef.current) {
@@ -8070,8 +8125,8 @@ function Tabula() {
             break;
           case 6:
             _context17.p = 6;
-            _t15 = _context17.v;
-            console.error("Mic denied:", _t15);
+            _t16 = _context17.v;
+            console.error("Mic denied:", _t16);
             showFlash("MIC DENIED");
             setRecordingVoice(null);
           case 7:
@@ -10835,9 +10890,11 @@ function Tabula() {
               var _up2 = function up() {
                 document.removeEventListener("pointermove", mv);
                 document.removeEventListener("pointerup", _up2);
+                document.removeEventListener("pointercancel", _up2);
               };
               document.addEventListener("pointermove", mv);
               document.addEventListener("pointerup", _up2);
+              document.addEventListener("pointercancel", _up2);
               return;
             }
             e.stopPropagation();
@@ -10895,10 +10952,12 @@ function Tabula() {
             var _onUp4 = function onUp() {
               document.removeEventListener("pointermove", onMove);
               document.removeEventListener("pointerup", _onUp4);
+              document.removeEventListener("pointercancel", _onUp4);
               if (mode === null && wasOn) setDrumCell(r, c, false); // pure tap on existing note → clear
             };
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", _onUp4);
+            document.addEventListener("pointercancel", _onUp4);
           }
         }, on && rt > 1 && Array.from({
           length: rt - 1
@@ -13467,9 +13526,11 @@ function Tabula() {
               var _up6 = function up() {
                 document.removeEventListener("pointermove", mv);
                 document.removeEventListener("pointerup", _up6);
+                document.removeEventListener("pointercancel", _up6);
               };
               document.addEventListener("pointermove", mv);
               document.addEventListener("pointerup", _up6);
+              document.addEventListener("pointercancel", _up6);
               return;
             }
             e.preventDefault();
@@ -13524,10 +13585,12 @@ function Tabula() {
             var _onUp7 = function onUp() {
               document.removeEventListener("pointermove", onMove);
               document.removeEventListener("pointerup", _onUp7);
+              document.removeEventListener("pointercancel", _onUp7);
               if (mode === null && wasOn) setDrumCell(r, step, false);
             };
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", _onUp7);
+            document.addEventListener("pointercancel", _onUp7);
           }
         }, on && rt > 1 && Array.from({
           length: rt - 1
