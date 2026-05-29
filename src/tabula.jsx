@@ -113,7 +113,25 @@ const DRUM_VOICES=[
   {key:"SH",label:"SH",full:"SHAKER", color:"#8fb0c0"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
-const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
+// Drum velocity is PER-CELL: vel[row][col]. (Was per-column vel[col].) This
+// lets two voices on the same step play at different velocities.
+const mkDrumVel=()=>Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(100));
+// Normalize any saved vel into the per-cell 2D shape. Legacy saves stored a
+// 1D per-column array — broadcast each column value across all rows. A 2D
+// array (current shape) is copied cell-by-cell into a fresh full-size grid.
+const toDrumVel2D=(vel)=>{
+  const out=mkDrumVel();
+  if(!Array.isArray(vel))return out;
+  if(Array.isArray(vel[0])){ // already per-cell
+    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
+      if(vel[r]&&vel[r][c]!=null)out[r][c]=vel[r][c];
+  } else { // legacy per-column → broadcast down each column
+    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
+      if(vel[c]!=null)out[r][c]=vel[c];
+  }
+  return out;
+};
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
 // Default drum voice level — 60% sits well below the "unity" mark so users
 // have plenty of headroom to push voices up rather than only being able to
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
@@ -200,9 +218,14 @@ const MT_ROW_INDEX=3;
 // rows at the end to reach DRUM_ROWS. No-op for current-length pats.
 const migrateDrumPatRows=(pat)=>{
   if(!pat||!Array.isArray(pat.grid))return pat;
-  if(pat.grid.length===DRUM_ROWS)return pat;
+  // vel is always normalized to per-cell 2D, even when the grid is already the
+  // right length (a save can have correct rows but legacy 1D per-column vel).
+  const velNorm=toDrumVel2D(pat.vel);
+  if(pat.grid.length===DRUM_ROWS){
+    return Array.isArray(pat.vel)&&Array.isArray(pat.vel[0])?pat:{...pat,vel:velNorm};
+  }
   const emptyRow=()=>new Array(COLS).fill(false);
-  const defMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100});
+  const defMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100,sat:0});
   const grid=pat.grid.map(r=>[...r]);
   const hasMix=Array.isArray(pat.mix);
   const mix=hasMix?pat.mix.map(m=>({...m})):null;
@@ -214,7 +237,10 @@ const migrateDrumPatRows=(pat)=>{
   // Pad the end (RM/SH and any future appended voices) to current row count.
   while(grid.length<DRUM_ROWS)grid.push(emptyRow());
   if(mix){while(mix.length<DRUM_ROWS)mix.push(defMix());}
-  const out={...pat,grid};
+  // toDrumVel2D already broadcasts/aligns vel to full DRUM_ROWS×COLS, so the
+  // row splice/pad above doesn't need to touch it — column values are the
+  // same across all rows for legacy saves, and 2D saves are already full-size.
+  const out={...pat,grid,vel:velNorm};
   if(mix)out.mix=mix;
   return out;
 };
@@ -230,7 +256,7 @@ const FILT_MODES=["off","lp","hp","bp"];
 const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
-  vel:Array.from({length:COLS},()=>100),
+  vel:mkDrumVel(),
   gridLen:16,
   mix:defaultDrumMix()
 });
@@ -1850,7 +1876,9 @@ export default function Tabula(){
           const had=dp.grid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
           const got=vGrid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
           if(had&&!got)vGrid=dp.grid.map(row=>[...row]);
-          const vVel=(dp.vel||[]).map(vv=>Math.max(1,Math.min(127,Math.round(vv+(Math.random()*2-1)*vVelocity*50))));
+          // Per-cell velocity jitter (vel is 2D now).
+          const baseVel=toDrumVel2D(dp.vel);
+          const vVel=baseVel.map(row=>row.map(vv=>Math.max(1,Math.min(127,Math.round(vv+(Math.random()*2-1)*vVelocity*50)))));
           variedDrumGrids.current.set(dp.id,vGrid);
           variedDrumVels.current.set(dp.id,vVel);
         }
@@ -2558,7 +2586,9 @@ export default function Tabula(){
     const useVel  = dvary ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
-        const dVel=useVel?.[s]??100;
+        // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
+        const velRow=useVel&&useVel[r];
+        const dVel=(Array.isArray(velRow)?velRow[s]:useVel?.[s])??100;
         const dMix=(pat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
         drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key],pat.id);
       }
@@ -2671,7 +2701,8 @@ export default function Tabula(){
             const had=pat.grid.some(row=>row.some((on,ci)=>on&&ci<len));
             const got=vGrid.some(row=>row.some((on,ci)=>on&&ci<len));
             if(had&&!got)vGrid=pat.grid.map(row=>[...row]);
-            const vVel=pat.vel.map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50))));
+            const baseVel=toDrumVel2D(pat.vel);
+            const vVel=baseVel.map(row=>row.map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50)))));
             variedDrumGrids.current.set(pat.id,vGrid);
             variedDrumVels.current.set(pat.id,vVel);
           } else {
@@ -3510,9 +3541,12 @@ export default function Tabula(){
     const grid=p.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
     return Object.assign({},p,{grid});
   }));
-  const setDrumVel=(col,val)=>setDrumPats(ps=>ps.map(p=>{
+  // Per-cell velocity setter (row, col). vel is normalized to 2D first so
+  // legacy 1D saves edited in-session upgrade cleanly.
+  const setDrumVelCell=(row,col,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const vel=p.vel.map((v,i)=>i===col?val:v);
+    const v2=toDrumVel2D(p.vel);
+    const vel=v2.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
     return Object.assign({},p,{vel});
   }));
   const setDrumLen=(len)=>setDrumPats(ps=>ps.map(p=>{
@@ -3521,7 +3555,7 @@ export default function Tabula(){
   }));
   const clearDrums=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
+    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel()});
   }));}
   // Mixer link groups.
   //  • Hi-hats (CH+OH): every mix param is linked — they model one physical
@@ -3553,7 +3587,8 @@ export default function Tabula(){
   }));
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const vel=p.vel.map(()=>Math.round(80+Math.random()*Math.random()*47));
+    // Per-cell velocity now.
+    const vel=mkDrumVel().map(row=>row.map(()=>Math.round(80+Math.random()*Math.random()*47)));
     // Also randomize the rhythm grid. ~22% density per cell gives a sparse-
     // but-populated rhythm — repeat RAND to keep generating variations.
     const grid=p.grid.map(row=>row.map(()=>Math.random()<0.22));
@@ -3706,7 +3741,7 @@ export default function Tabula(){
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
     const d=Object.assign({},mkDrumPat(symPat(drumPats.length)),{
-      grid:src.grid.map(r=>[...r]),vel:[...src.vel],gridLen:src.gridLen,
+      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       vRhythm:src.vRhythm,vVelocity:src.vVelocity
     });
@@ -3741,7 +3776,7 @@ export default function Tabula(){
       if(p.id!==activeDrumId)return p;
       return Object.assign({},p,{
         grid:drumClipboard.grid.map(r=>[...r]),
-        vel:[...drumClipboard.vel],gridLen:drumClipboard.gridLen,
+        vel:toDrumVel2D(drumClipboard.vel),gridLen:drumClipboard.gridLen,
         mix:(drumClipboard.mix||defaultDrumMix()).map(m=>({...m}))
       });
     }));
@@ -4764,45 +4799,45 @@ export default function Tabula(){
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
                   <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
                 </div>
-                {/* Grid — voice labels are transparent overlays inside each row */}
+                {/* Grid — voice labels are transparent overlays inside each row.
+                    Tap a cell to toggle; click-and-drag vertically on a cell to
+                    set its per-cell velocity (drag up = louder). Brightness of a
+                    lit cell reflects its velocity. */}
                 <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
                   {DRUM_VOICES.map((voice,r)=>(
                     <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
                       <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                       {Array.from({length:COLS},(_,c)=>{
                         const on=dPat?.grid[r]?.[c]||false;
+                        const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][c]!=null)?dPat.vel[r][c]:100;
                         const isActive=playing&&c===drumStep;
                         const inactive=c>=dLen;
                         const isQ=c%4===0;
+                        // Velocity → brightness via alpha on the voice color.
+                        const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
+                        const onBg=isActive?"rgba(255,255,255,0.9)":voice.color+aHex;
                         return(
-                          <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?(isActive?"rgba(255,255,255,0.9)":voice.color):isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
-                            onPointerDown={e=>{e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,c,!on);}}}/>
+                          <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
+                            onPointerDown={e=>{
+                              e.stopPropagation();if(inactive)return;
+                              const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
+                              pushHistory();
+                              if(!wasOn)setDrumCell(r,c,true);
+                              const onMove=ev=>{
+                                const dy=startY-ev.clientY;
+                                if(!dragging&&Math.abs(dy)>4)dragging=true;
+                                if(dragging)setDrumVelCell(r,c,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                              };
+                              const onUp=()=>{
+                                document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
+                                if(wasOn&&!dragging)setDrumCell(r,c,false); // pure tap on existing note → clear
+                              };
+                              document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
+                            }}/>
                         );
                       })}
                     </div>
                   ))}
-                </div>
-                {/* Velocity lane */}
-                <div style={{width:dw||"80%",height:28,flexShrink:0,display:"flex",gap:2,alignItems:"flex-end",position:"relative"}}>
-                  <div style={{position:"absolute",right:"100%",bottom:0,height:"100%",width:26,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4,fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1}}>VEL</div>
-                  <div style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
-                    {Array.from({length:COLS},(_,c)=>{
-                      const vel=dPat?.vel?.[c]??100;
-                      const inactive=c>=dLen;
-                      return(
-                        <div key={c} style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end",cursor:inactive?"default":"ns-resize",opacity:inactive?0.2:1}}
-                          onPointerDown={e=>{
-                            if(inactive)return; e.stopPropagation();
-                            const startY=e.clientY,startV=vel;
-                            const onMove=ev=>{if(!ev.buttons)return;setDrumVel(c,Math.max(1,Math.min(127,Math.round(startV+(startY-ev.clientY)*1.5))));};
-                            const onUp=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);};
-                            document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
-                          }}>
-                          <div style={{width:"100%",height:((vel/127)*100)+"%",background:"rgba(210,195,175,0.35)",borderRadius:"1px 1px 0 0",minHeight:1}}/>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
                 {/* Length slider */}
                 <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
@@ -5597,15 +5632,33 @@ export default function Tabula(){
                             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                             {Array.from({length:COLS},(_,step)=>{
                               const on=dPat?.grid[r]?.[step]||false;
+                              const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][step]!=null)?dPat.vel[r][step]:100;
                               const isActive=playing&&step===drumStep;
                               const inactive=step>=dLen;
                               const isQ=step%4===0;
+                              const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
+                              const onBg=isActive?"rgba(255,255,255,0.88)":voice.color+aHex;
                               return(<div key={step} style={{flex:1,aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
-                                background:inactive?"rgba(220,200,180,0.015)":on?(isActive?"rgba(255,255,255,0.88)":voice.color):isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
+                                background:inactive?"rgba(220,200,180,0.015)":on?onBg:isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
                                 border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
                                 boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
                                 boxSizing:"border-box",
-                              }} onPointerDown={e=>{e.preventDefault();e.stopPropagation();if(!inactive){pushHistory();setDrumCell(r,step,!on);}}}/>);
+                              }} onPointerDown={e=>{
+                                e.preventDefault();e.stopPropagation();if(inactive)return;
+                                const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
+                                pushHistory();
+                                if(!wasOn)setDrumCell(r,step,true);
+                                const onMove=ev=>{
+                                  const dy=startY-ev.clientY;
+                                  if(!dragging&&Math.abs(dy)>4)dragging=true;
+                                  if(dragging)setDrumVelCell(r,step,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                };
+                                const onUp=()=>{
+                                  document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
+                                  if(wasOn&&!dragging)setDrumCell(r,step,false);
+                                };
+                                document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
+                              }}/>);
                             })}
                           </div>
                         ))}
