@@ -431,6 +431,13 @@ var DRUM_KITS = [{
     RM: "samples/808-kit/RM.wav",
     SH: "samples/808-kit/SH.wav"
   }
+}, {
+  // USER kit — no bundled samples (every voice starts on the synth engine),
+  // but it's the only kit that exposes the per-voice REC/sampling interface.
+  // As the user records a voice, that recording replaces its synth sound.
+  id: "user",
+  label: "USER",
+  user: true
 }];
 // The kit selected on a fresh load / NEW project. Points at the curated kit
 // so the bundled samples are the out-of-the-box sound.
@@ -7203,11 +7210,13 @@ function Tabula() {
               _context12.n = 2;
               break;
             }
-            // "synth" kit — drop all samples, engine falls through to synthesizer.
+            // Sample-less kit (USER). Drop the previous kit's bundled buffers so
+            // every voice starts on the synth; the user records into them via the
+            // sampling interface, which only this kit exposes.
             setVoiceSamples({});
-            setActiveKit("synth");
+            setActiveKit(kit.id);
             setKitLoading(false);
-            showFlash("SYNTH ENGINE");
+            showFlash(kit.label);
             return _context12.a(2);
           case 2:
             newSamples = {};
@@ -10565,7 +10574,7 @@ function Tabula() {
           textAlign: "center",
           fontWeight: 600
         }
-      }, md.level), /*#__PURE__*/React.createElement("div", {
+      }, md.level), activeKit === "user" && /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
           gap: 2,
@@ -13943,7 +13952,7 @@ function Tabula() {
           textAlign: "center",
           fontWeight: 600
         }
-      }, md.level), /*#__PURE__*/React.createElement("div", {
+      }, md.level), activeKit === "user" && /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
           gap: 2,

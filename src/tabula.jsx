@@ -191,6 +191,14 @@ const DRUM_KITS = [
       SH: "samples/808-kit/SH.wav",
     },
   },
+  {
+    // USER kit — no bundled samples (every voice starts on the synth engine),
+    // but it's the only kit that exposes the per-voice REC/sampling interface.
+    // As the user records a voice, that recording replaces its synth sound.
+    id:    "user",
+    label: "USER",
+    user:  true,
+  },
 ];
 // The kit selected on a fresh load / NEW project. Points at the curated kit
 // so the bundled samples are the out-of-the-box sound.
@@ -3739,11 +3747,13 @@ export default function Tabula(){
     if(!kit)return;
     setKitLoading(true);
     if(!kit.samples){
-      // "synth" kit — drop all samples, engine falls through to synthesizer.
+      // Sample-less kit (USER). Drop the previous kit's bundled buffers so
+      // every voice starts on the synth; the user records into them via the
+      // sampling interface, which only this kit exposes.
       setVoiceSamples({});
-      setActiveKit("synth");
+      setActiveKit(kit.id);
       setKitLoading(false);
-      showFlash("SYNTH ENGINE");
+      showFlash(kit.label);
       return;
     }
     const newSamples={};
@@ -5147,7 +5157,9 @@ export default function Tabula(){
                           <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                         </div>
                         <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
-                        {/* REC / sample */}
+                        {/* REC / sample — only on the USER kit (curated presets
+                            don't expose the sampler). */}
+                        {activeKit==="user"&&(
                         <div style={{display:"flex",gap:2,justifyContent:"center"}}>
                           <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                             onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
@@ -5155,6 +5167,7 @@ export default function Tabula(){
                           </button>
                           {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                         </div>
+                        )}
                       </div>
                     );
                   })}
@@ -6191,6 +6204,7 @@ export default function Tabula(){
                               <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                             </div>
                             <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+                            {activeKit==="user"&&(
                             <div style={{display:"flex",gap:2,justifyContent:"center"}}>
                               <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                                 onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
@@ -6198,6 +6212,7 @@ export default function Tabula(){
                               </button>
                               {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                             </div>
+                            )}
                           </div>);
                         })}
                       </div>
