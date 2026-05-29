@@ -142,7 +142,19 @@ const toDrumVel2D=(vel)=>{
   }
   return out;
 };
-const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1,vo:DRUM_ORDER_V});
+// Per-cell ratchet: rat[row][col] = how many evenly-spaced retriggers fire
+// within that step (1 = a single normal hit). Ctrl/Cmd+click a cell cycles it.
+const mkDrumRat=()=>Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(1));
+// Normalize a saved ratchet grid into the 2D shape. No legacy 1D form exists
+// (the field is new), so anything non-2D just yields all-1s.
+const toDrumRat2D=(rat)=>{
+  const out=mkDrumRat();
+  if(!Array.isArray(rat)||!Array.isArray(rat[0]))return out;
+  for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
+    if(rat[r]&&rat[r][c]!=null)out[r][c]=Math.max(1,Math.min(8,rat[r][c]));
+  return out;
+};
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),rat:mkDrumRat(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1,vo:DRUM_ORDER_V});
 // Continuous drum-mix params that support motion automation (the slider ones;
 // the FILT mode chip is excluded). pat.motion[param] is a lazily-created
 // ROWS×COLS grid of number|null — null = "use the base mix value at this step".
@@ -264,9 +276,10 @@ const fillDrumMix=(mix)=>{
 const _drumDefMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100,sat:0});
 const migrateDrumPatRows=(pat)=>{
   if(!pat||!Array.isArray(pat.grid))return pat;
-  // Already current order + current row count → just ensure vel is 2D.
+  // Already current order + current row count → just ensure vel + rat are 2D.
   if(pat.vo===DRUM_ORDER_V&&pat.grid.length===DRUM_ROWS){
-    return (Array.isArray(pat.vel)&&Array.isArray(pat.vel[0]))?pat:{...pat,vel:toDrumVel2D(pat.vel)};
+    const v=(Array.isArray(pat.vel)&&Array.isArray(pat.vel[0]))?pat.vel:toDrumVel2D(pat.vel);
+    return Object.assign({},pat,{vel:v,rat:toDrumRat2D(pat.rat)});
   }
   // Determine the source order. vo===1 (or any 13-len untagged) is the
   // pre-reorder 13 order; 10/11 lengths are the older layouts.
@@ -290,6 +303,10 @@ const migrateDrumPatRows=(pat)=>{
   } else {
     out.vel=vel2; // broadcast (per-column) — order doesn't matter
   }
+  // rat: new field; only a 2D form exists, remap it by key (else all-1s).
+  out.rat=(Array.isArray(pat.rat)&&Array.isArray(pat.rat[0]))
+    ? remap(pat.rat.map(r=>[...r]),()=>new Array(COLS).fill(1))
+    : mkDrumRat();
   // motion lanes (param → ROWS×COLS) remap by key too.
   if(pat.motion&&typeof pat.motion==="object"){
     const m={};
@@ -322,6 +339,7 @@ const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
   vel:mkDrumVel(),
+  rat:mkDrumRat(),
   gridLen:16,
   mix:defaultDrumMix()
 });
@@ -2731,7 +2749,7 @@ export default function Tabula(){
     }
   };
   // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
-  const playDrumStep=(pat,s,at)=>{
+  const playDrumStep=(pat,s,at,stepDur)=>{
     if(!pat||!pat.grid||!drumEngine.current.ready)return;
     const dvary = !!varyModeR.current.drums;
     const useGrid = dvary ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
@@ -2768,7 +2786,16 @@ export default function Tabula(){
           // stomping the shared param at currentTime.
           drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(voiceKey,eff,at);
         }
-        drumEngine.current.play(voiceKey,at,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
+        // Per-cell ratchet: retrigger the voice `rat` evenly-spaced times across
+        // the step. rat===1 (or no stepDur) is a single normal hit.
+        const ratRow=pat.rat&&pat.rat[r];
+        const rat=(Array.isArray(ratRow)&&ratRow[s]!=null)?ratRow[s]:1;
+        if(rat>1&&stepDur>0){
+          const sub=stepDur/rat;
+          for(let i=0;i<rat;i++)drumEngine.current.play(voiceKey,at+i*sub,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
+        }else{
+          drumEngine.current.play(voiceKey,at,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
+        }
       }
     }
   };
@@ -2904,7 +2931,7 @@ export default function Tabula(){
         // scheduler clock so the layer stays in sync if it gets un-muted
         // mid-bar.
         if(isLayerAudibleR.current(layer)){
-          if(layer==="drums")playDrumStep(pat,s,at);
+          if(layer==="drums")playDrumStep(pat,s,at,layerStepDur);
           else playSynthLayerStep(layer,pat,s,at,layerStepDur);
         }
         // Update visual playhead for whichever layer is active.
@@ -3740,9 +3767,48 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{gridLen:len});
   }));
+  // Ctrl/Cmd+click a drum cell: cycle its ratchet count. An empty cell turns
+  // on at 2 (start ratcheting); a lit cell cycles 1→2→3→4→1 (4 = max, wraps
+  // back to a single hit but stays lit). Ratchet retriggers the voice that
+  // many evenly-spaced times within the step — see playDrumStep.
+  const cycleDrumRat=(row,col)=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    const rat=toDrumRat2D(p.rat);
+    const grid=p.grid.map(r=>[...r]);
+    const cur=rat[row][col]||1;
+    let nx;
+    if(!grid[row][col]){grid[row][col]=true;nx=2;}      // off → on, start at 2
+    else nx=cur>=4?1:cur+1;                              // on → 2,3,4,back to 1
+    rat[row][col]=nx;
+    return Object.assign({},p,{grid,rat});
+  }));
+  // Shift+drag the whole drum pattern around the grid. Recomputes from a frozen
+  // base each move (no accumulation drift). Horizontal rotation wraps within the
+  // active length (gridLen); vertical wraps across all voices. Moves grid, vel
+  // and rat together so a hit keeps its velocity + ratchet as it travels.
+  const shiftDrumActive=(dCols,dRows,base)=>{
+    const L=Math.max(1,base.gridLen||16);
+    const mod=(n,m)=>((n%m)+m)%m;
+    const ng=Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false));
+    const nv=mkDrumVel(),nr=mkDrumRat();
+    for(let r=0;r<DRUM_ROWS;r++){
+      const sr=mod(r-dRows,DRUM_ROWS);
+      for(let c=0;c<COLS;c++){
+        const sc=c<L?mod(c-dCols,L):c;
+        ng[r][c]=!!(base.grid[sr]&&base.grid[sr][sc]);
+        nv[r][c]=(base.vel[sr]&&base.vel[sr][sc]!=null)?base.vel[sr][sc]:100;
+        nr[r][c]=(base.rat[sr]&&base.rat[sr][sc]!=null)?base.rat[sr][sc]:1;
+      }
+    }
+    return {grid:ng,vel:nv,rat:nr};
+  };
+  const applyDrumShift=(dCols,dRows,base)=>{
+    const s=shiftDrumActive(dCols,dRows,base);
+    setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{grid:s.grid,vel:s.vel,rat:s.rat})));
+  };
   const clearDrums=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel()});
+    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),rat:mkDrumRat()});
   }));}
   // Mixer link groups.
   //  • Hi-hats (CH+OH): every mix param is linked — they model one physical
@@ -3837,8 +3903,10 @@ export default function Tabula(){
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[motionEnabled]);
   useEffect(()=>{if(!motionRec)recDragR.current=null;},[motionRec]);
-  // Clear all recorded motion on the active drum pat (for the CLR-motion button).
-  const clearMotion=()=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{motion:undefined})));
+  // Clear recorded motion on EVERY drum pattern (CLR-motion button). Old
+  // projects can carry stale motion on patterns other than the active one,
+  // which keeps the mixer animating; wiping all of them is the cure.
+  const clearMotion=()=>setDrumPats(ps=>ps.map(p=>(p.motion?Object.assign({},p,{motion:undefined}):p)));
   // Display overlay for the mixer sliders in motion mode: a live drag (perfMix)
   // wins, else the currently-playing step's recorded motion, else the base.
   // Drives slider thumb animation while the sequence plays back.
@@ -4013,7 +4081,7 @@ export default function Tabula(){
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
     const d=Object.assign({},mkDrumPat(symPat(drumPats.length)),{
-      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),gridLen:src.gridLen,
+      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),rat:toDrumRat2D(src.rat),gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
       vRhythm:src.vRhythm,vVelocity:src.vVelocity
@@ -4049,7 +4117,7 @@ export default function Tabula(){
       if(p.id!==activeDrumId)return p;
       return Object.assign({},p,{
         grid:drumClipboard.grid.map(r=>[...r]),
-        vel:toDrumVel2D(drumClipboard.vel),gridLen:drumClipboard.gridLen,
+        vel:toDrumVel2D(drumClipboard.vel),rat:toDrumRat2D(drumClipboard.rat),gridLen:drumClipboard.gridLen,
         mix:(drumClipboard.mix||defaultDrumMix()).map(m=>({...m})),
         motion:drumClipboard.motion?JSON.parse(JSON.stringify(drumClipboard.motion)):undefined
       });
@@ -5091,6 +5159,7 @@ export default function Tabula(){
                       {Array.from({length:COLS},(_,c)=>{
                         const on=dPat?.grid[r]?.[c]||false;
                         const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][c]!=null)?dPat.vel[r][c]:100;
+                        const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][c]!=null)?dPat.rat[r][c]:1;
                         const isActive=playing&&c===drumStep;
                         const inactive=c>=dLen;
                         const isQ=c%4===0;
@@ -5098,9 +5167,23 @@ export default function Tabula(){
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":voice.color+aHex;
                         return(
-                          <div key={c} style={{flex:1,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
+                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
                             onPointerDown={e=>{
+                              // Shift+drag → move the whole pattern (grid+vel+rat).
+                              if(e.shiftKey){
+                                e.preventDefault();e.stopPropagation();
+                                const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+                                const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
+                                const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
+                                pushHistory();
+                                const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
+                                const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
+                                document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
+                                return;
+                              }
                               e.stopPropagation();if(inactive)return;
+                              // Ctrl/Cmd+click → cycle this cell's ratchet count.
+                              if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,c);return;}
                               const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
                               pushHistory();
                               if(!wasOn)setDrumCell(r,c,true);
@@ -5114,7 +5197,11 @@ export default function Tabula(){
                                 if(wasOn&&!dragging)setDrumCell(r,c,false); // pure tap on existing note → clear
                               };
                               document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
-                            }}/>
+                            }}>
+                            {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
+                              <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
+                            ))}
+                          </div>
                         );
                       })}
                     </div>
@@ -5949,18 +6036,33 @@ export default function Tabula(){
                             {Array.from({length:COLS},(_,step)=>{
                               const on=dPat?.grid[r]?.[step]||false;
                               const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][step]!=null)?dPat.vel[r][step]:100;
+                              const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][step]!=null)?dPat.rat[r][step]:1;
                               const isActive=playing&&step===drumStep;
                               const inactive=step>=dLen;
                               const isQ=step%4===0;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":voice.color+aHex;
-                              return(<div key={step} style={{flex:1,aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
+                              return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
                                 background:inactive?"rgba(220,200,180,0.015)":on?onBg:isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
                                 border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
                                 boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
                                 boxSizing:"border-box",
                               }} onPointerDown={e=>{
+                                // Shift+drag → move the whole pattern (grid+vel+rat).
+                                if(e.shiftKey){
+                                  e.preventDefault();e.stopPropagation();
+                                  const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+                                  const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
+                                  const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
+                                  pushHistory();
+                                  const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
+                                  const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
+                                  document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
+                                  return;
+                                }
                                 e.preventDefault();e.stopPropagation();if(inactive)return;
+                                // Ctrl/Cmd+click → cycle this cell's ratchet count.
+                                if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,step);return;}
                                 const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
                                 pushHistory();
                                 if(!wasOn)setDrumCell(r,step,true);
@@ -5974,7 +6076,11 @@ export default function Tabula(){
                                   if(wasOn&&!dragging)setDrumCell(r,step,false);
                                 };
                                 document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
-                              }}/>);
+                              }}>
+                                {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
+                                  <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
+                                ))}
+                              </div>);
                             })}
                           </div>
                         ))}

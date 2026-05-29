@@ -367,6 +367,23 @@ var toDrumVel2D = function toDrumVel2D(vel) {
   }
   return out;
 };
+// Per-cell ratchet: rat[row][col] = how many evenly-spaced retriggers fire
+// within that step (1 = a single normal hit). Ctrl/Cmd+click a cell cycles it.
+var mkDrumRat = function mkDrumRat() {
+  return Array.from({
+    length: DRUM_ROWS
+  }, function () {
+    return new Array(COLS).fill(1);
+  });
+};
+// Normalize a saved ratchet grid into the 2D shape. No legacy 1D form exists
+// (the field is new), so anything non-2D just yields all-1s.
+var toDrumRat2D = function toDrumRat2D(rat) {
+  var out = mkDrumRat();
+  if (!Array.isArray(rat) || !Array.isArray(rat[0])) return out;
+  for (var r = 0; r < DRUM_ROWS; r++) for (var c = 0; c < COLS; c++) if (rat[r] && rat[r][c] != null) out[r][c] = Math.max(1, Math.min(8, rat[r][c]));
+  return out;
+};
 var mkDrumPat = function mkDrumPat(name) {
   return {
     id: ++_id,
@@ -377,6 +394,7 @@ var mkDrumPat = function mkDrumPat(name) {
       return new Array(COLS).fill(false);
     }),
     vel: mkDrumVel(),
+    rat: mkDrumRat(),
     gridLen: 16,
     mix: defaultDrumMix(),
     vRhythm: 0,
@@ -536,10 +554,12 @@ var _drumDefMix = function _drumDefMix() {
 };
 var migrateDrumPatRows = function migrateDrumPatRows(pat) {
   if (!pat || !Array.isArray(pat.grid)) return pat;
-  // Already current order + current row count → just ensure vel is 2D.
+  // Already current order + current row count → just ensure vel + rat are 2D.
   if (pat.vo === DRUM_ORDER_V && pat.grid.length === DRUM_ROWS) {
-    return Array.isArray(pat.vel) && Array.isArray(pat.vel[0]) ? pat : _objectSpread(_objectSpread({}, pat), {}, {
-      vel: toDrumVel2D(pat.vel)
+    var v = Array.isArray(pat.vel) && Array.isArray(pat.vel[0]) ? pat.vel : toDrumVel2D(pat.vel);
+    return Object.assign({}, pat, {
+      vel: v,
+      rat: toDrumRat2D(pat.rat)
     });
   }
   // Determine the source order. vo===1 (or any 13-len untagged) is the
@@ -579,6 +599,12 @@ var migrateDrumPatRows = function migrateDrumPatRows(pat) {
   } else {
     out.vel = vel2; // broadcast (per-column) — order doesn't matter
   }
+  // rat: new field; only a 2D form exists, remap it by key (else all-1s).
+  out.rat = Array.isArray(pat.rat) && Array.isArray(pat.rat[0]) ? remap(pat.rat.map(function (r) {
+    return _toConsumableArray(r);
+  }), function () {
+    return new Array(COLS).fill(1);
+  }) : mkDrumRat();
   // motion lanes (param → ROWS×COLS) remap by key too.
   if (pat.motion && _typeof(pat.motion) === "object") {
     var m = {};
@@ -636,6 +662,7 @@ var defaultDrums = function defaultDrums() {
       return new Array(COLS).fill(false);
     }),
     vel: mkDrumVel(),
+    rat: mkDrumRat(),
     gridLen: 16,
     mix: defaultDrumMix()
   };
@@ -5164,7 +5191,7 @@ function Tabula() {
     }
   };
   // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
-  var playDrumStep = function playDrumStep(pat, s, at) {
+  var playDrumStep = function playDrumStep(pat, s, at, stepDur) {
     if (!pat || !pat.grid || !drumEngine.current.ready) return;
     var dvary = !!varyModeR.current.drums;
     var useGrid = dvary ? variedDrumGrids.current.get(pat.id) || pat.grid : pat.grid;
@@ -5221,7 +5248,16 @@ function Tabula() {
           // stomping the shared param at currentTime.
           drumEngine.current.setVoiceMix && drumEngine.current.setVoiceMix(voiceKey, eff, at);
         }
-        drumEngine.current.play(voiceKey, at, dVel, dMix, voiceSamplesR.current[voiceKey], pat.id);
+        // Per-cell ratchet: retrigger the voice `rat` evenly-spaced times across
+        // the step. rat===1 (or no stepDur) is a single normal hit.
+        var ratRow = pat.rat && pat.rat[r];
+        var rat = Array.isArray(ratRow) && ratRow[s] != null ? ratRow[s] : 1;
+        if (rat > 1 && stepDur > 0) {
+          var sub = stepDur / rat;
+          for (var i = 0; i < rat; i++) drumEngine.current.play(voiceKey, at + i * sub, dVel, dMix, voiceSamplesR.current[voiceKey], pat.id);
+        } else {
+          drumEngine.current.play(voiceKey, at, dVel, dMix, voiceSamplesR.current[voiceKey], pat.id);
+        }
       }
     }
   };
@@ -5440,7 +5476,7 @@ function Tabula() {
         // scheduler clock so the layer stays in sync if it gets un-muted
         // mid-bar.
         if (isLayerAudibleR.current(_layer)) {
-          if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
+          if (_layer === "drums") playDrumStep(pat, s, at, layerStepDur);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
         }
         // Update visual playhead for whichever layer is active.
         if (_layer === activeLayerR.current) {
@@ -7121,6 +7157,76 @@ function Tabula() {
       });
     });
   };
+  // Ctrl/Cmd+click a drum cell: cycle its ratchet count. An empty cell turns
+  // on at 2 (start ratcheting); a lit cell cycles 1→2→3→4→1 (4 = max, wraps
+  // back to a single hit but stays lit). Ratchet retriggers the voice that
+  // many evenly-spaced times within the step — see playDrumStep.
+  var cycleDrumRat = function cycleDrumRat(row, col) {
+    return setDrumPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeDrumId) return p;
+        var rat = toDrumRat2D(p.rat);
+        var grid = p.grid.map(function (r) {
+          return _toConsumableArray(r);
+        });
+        var cur = rat[row][col] || 1;
+        var nx;
+        if (!grid[row][col]) {
+          grid[row][col] = true;
+          nx = 2;
+        } // off → on, start at 2
+        else nx = cur >= 4 ? 1 : cur + 1; // on → 2,3,4,back to 1
+        rat[row][col] = nx;
+        return Object.assign({}, p, {
+          grid: grid,
+          rat: rat
+        });
+      });
+    });
+  };
+  // Shift+drag the whole drum pattern around the grid. Recomputes from a frozen
+  // base each move (no accumulation drift). Horizontal rotation wraps within the
+  // active length (gridLen); vertical wraps across all voices. Moves grid, vel
+  // and rat together so a hit keeps its velocity + ratchet as it travels.
+  var shiftDrumActive = function shiftDrumActive(dCols, dRows, base) {
+    var L = Math.max(1, base.gridLen || 16);
+    var mod = function mod(n, m) {
+      return (n % m + m) % m;
+    };
+    var ng = Array.from({
+      length: DRUM_ROWS
+    }, function () {
+      return new Array(COLS).fill(false);
+    });
+    var nv = mkDrumVel(),
+      nr = mkDrumRat();
+    for (var r = 0; r < DRUM_ROWS; r++) {
+      var sr = mod(r - dRows, DRUM_ROWS);
+      for (var c = 0; c < COLS; c++) {
+        var sc = c < L ? mod(c - dCols, L) : c;
+        ng[r][c] = !!(base.grid[sr] && base.grid[sr][sc]);
+        nv[r][c] = base.vel[sr] && base.vel[sr][sc] != null ? base.vel[sr][sc] : 100;
+        nr[r][c] = base.rat[sr] && base.rat[sr][sc] != null ? base.rat[sr][sc] : 1;
+      }
+    }
+    return {
+      grid: ng,
+      vel: nv,
+      rat: nr
+    };
+  };
+  var applyDrumShift = function applyDrumShift(dCols, dRows, base) {
+    var s = shiftDrumActive(dCols, dRows, base);
+    setDrumPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== activeDrumId ? p : Object.assign({}, p, {
+          grid: s.grid,
+          vel: s.vel,
+          rat: s.rat
+        });
+      });
+    });
+  };
   var clearDrums = function clearDrums() {
     pushHistory();
     return setDrumPats(function (ps) {
@@ -7132,7 +7238,8 @@ function Tabula() {
           }, function () {
             return new Array(COLS).fill(false);
           }),
-          vel: mkDrumVel()
+          vel: mkDrumVel(),
+          rat: mkDrumRat()
         });
       });
     });
@@ -7291,13 +7398,15 @@ function Tabula() {
   useEffect(function () {
     if (!motionRec) recDragR.current = null;
   }, [motionRec]);
-  // Clear all recorded motion on the active drum pat (for the CLR-motion button).
+  // Clear recorded motion on EVERY drum pattern (CLR-motion button). Old
+  // projects can carry stale motion on patterns other than the active one,
+  // which keeps the mixer animating; wiping all of them is the cure.
   var clearMotion = function clearMotion() {
     return setDrumPats(function (ps) {
       return ps.map(function (p) {
-        return p.id !== activeDrumId ? p : Object.assign({}, p, {
+        return p.motion ? Object.assign({}, p, {
           motion: undefined
-        });
+        }) : p;
       });
     });
   };
@@ -7710,6 +7819,7 @@ function Tabula() {
         return _toConsumableArray(r);
       }),
       vel: toDrumVel2D(src.vel),
+      rat: toDrumRat2D(src.rat),
       gridLen: src.gridLen,
       mix: (src.mix || defaultDrumMix()).map(function (m) {
         return _objectSpread({}, m);
@@ -7781,6 +7891,7 @@ function Tabula() {
             return _toConsumableArray(r);
           }),
           vel: toDrumVel2D(drumClipboard.vel),
+          rat: toDrumRat2D(drumClipboard.rat),
           gridLen: drumClipboard.gridLen,
           mix: (drumClipboard.mix || defaultDrumMix()).map(function (m) {
             return _objectSpread({}, m);
@@ -10262,6 +10373,7 @@ function Tabula() {
         var _dPat$grid$r;
         var on = (dPat === null || dPat === void 0 || (_dPat$grid$r = dPat.grid[r]) === null || _dPat$grid$r === void 0 ? void 0 : _dPat$grid$r[c]) || false;
         var cv = dPat && dPat.vel && dPat.vel[r] && dPat.vel[r][c] != null ? dPat.vel[r][c] : 100;
+        var rt = dPat && dPat.rat && dPat.rat[r] && dPat.rat[r][c] != null ? dPat.rat[r][c] : 1;
         var isActive = playing && c === drumStep;
         var inactive = c >= dLen;
         var isQ = c % 4 === 0;
@@ -10272,6 +10384,7 @@ function Tabula() {
           key: c,
           style: {
             flex: 1,
+            position: "relative",
             borderRadius: 2,
             cursor: inactive ? "default" : "pointer",
             background: inactive ? "rgba(220,200,180,0.02)" : on ? onBg : isActive ? "rgba(220,200,180,0.15)" : isQ ? "rgba(220,200,180,0.06)" : "rgba(220,200,180,0.03)",
@@ -10280,8 +10393,44 @@ function Tabula() {
             transition: "background .06s"
           },
           onPointerDown: function onPointerDown(e) {
+            // Shift+drag → move the whole pattern (grid+vel+rat).
+            if (e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              var ge = e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+              var cw = ge.width / COLS || 1,
+                ch = ge.height / DRUM_ROWS || 1,
+                sx = e.clientX,
+                sy = e.clientY;
+              var base = {
+                grid: dPat.grid.map(function (rw) {
+                  return _toConsumableArray(rw);
+                }),
+                vel: toDrumVel2D(dPat.vel),
+                rat: toDrumRat2D(dPat.rat),
+                gridLen: dLen
+              };
+              pushHistory();
+              var mv = function mv(ev) {
+                return applyDrumShift(Math.round((ev.clientX - sx) / cw), Math.round((ev.clientY - sy) / ch), base);
+              };
+              var _up2 = function up() {
+                document.removeEventListener("pointermove", mv);
+                document.removeEventListener("pointerup", _up2);
+              };
+              document.addEventListener("pointermove", mv);
+              document.addEventListener("pointerup", _up2);
+              return;
+            }
             e.stopPropagation();
             if (inactive) return;
+            // Ctrl/Cmd+click → cycle this cell's ratchet count.
+            if (e.ctrlKey || e.metaKey) {
+              e.preventDefault();
+              pushHistory();
+              cycleDrumRat(r, c);
+              return;
+            }
             var startY = e.clientY,
               wasOn = on,
               startVel = cv;
@@ -10301,7 +10450,22 @@ function Tabula() {
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", _onUp4);
           }
-        });
+        }, on && rt > 1 && Array.from({
+          length: rt - 1
+        }, function (_, i) {
+          return /*#__PURE__*/React.createElement("div", {
+            key: "r" + i,
+            style: {
+              position: "absolute",
+              top: 1,
+              bottom: 1,
+              width: 1,
+              left: "".concat((i + 1) / rt * 100, "%"),
+              background: "rgba(20,16,12,0.5)",
+              pointerEvents: "none"
+            }
+          });
+        }));
       }));
     })), /*#__PURE__*/React.createElement("div", {
       style: _objectSpread(_objectSpread({}, S.lenSlider), {}, {
@@ -10541,13 +10705,13 @@ function Tabula() {
               onMixDrag(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             update(e);
-            var _up2 = function up() {
+            var _up3 = function up() {
               onMixUp(r, key);
               document.removeEventListener("pointermove", update);
-              document.removeEventListener("pointerup", _up2);
+              document.removeEventListener("pointerup", _up3);
             };
             document.addEventListener("pointermove", update);
-            document.addEventListener("pointerup", _up2);
+            document.addEventListener("pointerup", _up3);
           },
           onDoubleClick: function onDoubleClick() {
             onMixDrag(r, key, 0);
@@ -10786,13 +10950,13 @@ function Tabula() {
             onMixDrag(r, "level", Math.round(pct * 100));
           };
           update(e);
-          var _up3 = function up() {
+          var _up4 = function up() {
             onMixUp(r, "level");
             document.removeEventListener("pointermove", update);
-            document.removeEventListener("pointerup", _up3);
+            document.removeEventListener("pointerup", _up4);
           };
           document.addEventListener("pointermove", update);
-          document.addEventListener("pointerup", _up3);
+          document.addEventListener("pointerup", _up4);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10929,12 +11093,12 @@ function Tabula() {
             onChange(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
           };
           upd(e);
-          var _up4 = function up() {
+          var _up5 = function up() {
             document.removeEventListener("pointermove", upd);
-            document.removeEventListener("pointerup", _up4);
+            document.removeEventListener("pointerup", _up5);
           };
           document.addEventListener("pointermove", upd);
-          document.addEventListener("pointerup", _up4);
+          document.addEventListener("pointerup", _up5);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -12787,6 +12951,7 @@ function Tabula() {
         var _dPat$grid$r2;
         var on = (dPat === null || dPat === void 0 || (_dPat$grid$r2 = dPat.grid[r]) === null || _dPat$grid$r2 === void 0 ? void 0 : _dPat$grid$r2[step]) || false;
         var cv = dPat && dPat.vel && dPat.vel[r] && dPat.vel[r][step] != null ? dPat.vel[r][step] : 100;
+        var rt = dPat && dPat.rat && dPat.rat[r] && dPat.rat[r][step] != null ? dPat.rat[r][step] : 1;
         var isActive = playing && step === drumStep;
         var inactive = step >= dLen;
         var isQ = step % 4 === 0;
@@ -12796,6 +12961,7 @@ function Tabula() {
           key: step,
           style: {
             flex: 1,
+            position: "relative",
             aspectRatio: "1",
             borderRadius: 2,
             cursor: inactive ? "default" : "pointer",
@@ -12805,9 +12971,44 @@ function Tabula() {
             boxSizing: "border-box"
           },
           onPointerDown: function onPointerDown(e) {
+            // Shift+drag → move the whole pattern (grid+vel+rat).
+            if (e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              var ge = e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+              var cw = ge.width / COLS || 1,
+                ch = ge.height / DRUM_ROWS || 1,
+                sx = e.clientX,
+                sy = e.clientY;
+              var base = {
+                grid: dPat.grid.map(function (rw) {
+                  return _toConsumableArray(rw);
+                }),
+                vel: toDrumVel2D(dPat.vel),
+                rat: toDrumRat2D(dPat.rat),
+                gridLen: dLen
+              };
+              pushHistory();
+              var mv = function mv(ev) {
+                return applyDrumShift(Math.round((ev.clientX - sx) / cw), Math.round((ev.clientY - sy) / ch), base);
+              };
+              var _up6 = function up() {
+                document.removeEventListener("pointermove", mv);
+                document.removeEventListener("pointerup", _up6);
+              };
+              document.addEventListener("pointermove", mv);
+              document.addEventListener("pointerup", _up6);
+              return;
+            }
             e.preventDefault();
             e.stopPropagation();
             if (inactive) return;
+            // Ctrl/Cmd+click → cycle this cell's ratchet count.
+            if (e.ctrlKey || e.metaKey) {
+              pushHistory();
+              cycleDrumRat(r, step);
+              return;
+            }
             var startY = e.clientY,
               wasOn = on,
               startVel = cv;
@@ -12827,7 +13028,22 @@ function Tabula() {
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", _onUp7);
           }
-        });
+        }, on && rt > 1 && Array.from({
+          length: rt - 1
+        }, function (_, i) {
+          return /*#__PURE__*/React.createElement("div", {
+            key: "r" + i,
+            style: {
+              position: "absolute",
+              top: 1,
+              bottom: 1,
+              width: 1,
+              left: "".concat((i + 1) / rt * 100, "%"),
+              background: "rgba(20,16,12,0.5)",
+              pointerEvents: "none"
+            }
+          });
+        }));
       }));
     })), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -12848,12 +13064,12 @@ function Tabula() {
           setDrumLen(Math.max(1, Math.round(pct * COLS)));
         };
         update(e);
-        var _up5 = function up() {
+        var _up7 = function up() {
           document.removeEventListener("pointermove", update);
-          document.removeEventListener("pointerup", _up5);
+          document.removeEventListener("pointerup", _up7);
         };
         document.addEventListener("pointermove", update);
-        document.addEventListener("pointerup", _up5);
+        document.addEventListener("pointerup", _up7);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -13969,13 +14185,13 @@ function Tabula() {
               onMixDrag(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             u(e);
-            var _up6 = function up() {
+            var _up8 = function up() {
               onMixUp(r, key);
               document.removeEventListener("pointermove", u);
-              document.removeEventListener("pointerup", _up6);
+              document.removeEventListener("pointerup", _up8);
             };
             document.addEventListener("pointermove", u);
-            document.addEventListener("pointerup", _up6);
+            document.addEventListener("pointerup", _up8);
           },
           onDoubleClick: function onDoubleClick() {
             onMixDrag(r, key, 0);
@@ -14209,13 +14425,13 @@ function Tabula() {
             onMixDrag(r, "level", Math.round(pct * 100));
           };
           u(e);
-          var _up7 = function up() {
+          var _up9 = function up() {
             onMixUp(r, "level");
             document.removeEventListener("pointermove", u);
-            document.removeEventListener("pointerup", _up7);
+            document.removeEventListener("pointerup", _up9);
           };
           document.addEventListener("pointermove", u);
-          document.addEventListener("pointerup", _up7);
+          document.addEventListener("pointerup", _up9);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -14442,12 +14658,12 @@ function Tabula() {
             onChange(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
           };
           update(e);
-          var _up8 = function up() {
+          var _up0 = function up() {
             document.removeEventListener("pointermove", update);
-            document.removeEventListener("pointerup", _up8);
+            document.removeEventListener("pointerup", _up0);
           };
           document.addEventListener("pointermove", update);
-          document.addEventListener("pointerup", _up8);
+          document.addEventListener("pointerup", _up0);
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -14683,12 +14899,12 @@ function Tabula() {
           setter(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * max));
         };
         update(e);
-        var _up9 = function up() {
+        var _up1 = function up() {
           document.removeEventListener("pointermove", update);
-          document.removeEventListener("pointerup", _up9);
+          document.removeEventListener("pointerup", _up1);
         };
         document.addEventListener("pointermove", update);
-        document.addEventListener("pointerup", _up9);
+        document.addEventListener("pointerup", _up1);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -14774,12 +14990,12 @@ function Tabula() {
           setter(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * max));
         };
         update(e);
-        var _up0 = function up() {
+        var _up10 = function up() {
           document.removeEventListener("pointermove", update);
-          document.removeEventListener("pointerup", _up0);
+          document.removeEventListener("pointerup", _up10);
         };
         document.addEventListener("pointermove", update);
-        document.addEventListener("pointerup", _up0);
+        document.addEventListener("pointerup", _up10);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -14863,12 +15079,12 @@ function Tabula() {
           setter(Math.round(Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) * 100));
         };
         update(e);
-        var _up1 = function up() {
+        var _up11 = function up() {
           document.removeEventListener("pointermove", update);
-          document.removeEventListener("pointerup", _up1);
+          document.removeEventListener("pointerup", _up11);
         };
         document.addEventListener("pointermove", update);
-        document.addEventListener("pointerup", _up1);
+        document.addEventListener("pointerup", _up11);
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
