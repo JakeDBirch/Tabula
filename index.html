@@ -265,6 +265,10 @@ var cullPatToMono = function cullPatToMono(grid, durs) {
   };
 };
 // ─── Drum layer ───────────────────────────────────────────────────────────────
+// Lane order top→bottom. Reordered 2026-05: kick, snare, rim, clap, toms
+// (hi→lo), hats, cymbal, clave, shaker, cowbell. Save data is positional, so
+// changing this order requires migrating old saves by voice KEY — see
+// DRUM_ORDER_* + migrateDrumPatRows. Bump DRUM_ORDER_V on any future reorder.
 var DRUM_VOICES = [{
   key: "BD",
   label: "BD",
@@ -276,20 +280,30 @@ var DRUM_VOICES = [{
   full: "SNARE",
   color: "#e09050"
 }, {
-  key: "LT",
-  label: "LT",
-  full: "LO TOM",
-  color: "#c8a840"
+  key: "RM",
+  label: "RM",
+  full: "RIM",
+  color: "#cf8f6a"
+}, {
+  key: "CP",
+  label: "CP",
+  full: "CLAP",
+  color: "#c070c0"
+}, {
+  key: "HT",
+  label: "HT",
+  full: "HI TOM",
+  color: "#a0b840"
 }, {
   key: "MT",
   label: "MT",
   full: "MID TOM",
   color: "#b8b040"
 }, {
-  key: "HT",
-  label: "HT",
-  full: "HI TOM",
-  color: "#a0b840"
+  key: "LT",
+  label: "LT",
+  full: "LO TOM",
+  color: "#c8a840"
 }, {
   key: "CH",
   label: "CH",
@@ -306,32 +320,29 @@ var DRUM_VOICES = [{
   full: "CYMBAL",
   color: "#7888d0"
 }, {
-  key: "CP",
-  label: "CP",
-  full: "CLAP",
-  color: "#c070c0"
-}, {
   key: "CL",
   label: "CL",
   full: "CLAVES",
   color: "#d4956a"
 }, {
-  key: "CB",
-  label: "CB",
-  full: "COWBELL",
-  color: "#9bbfaa"
-}, {
-  key: "RM",
-  label: "RM",
-  full: "RIM",
-  color: "#cf8f6a"
-}, {
   key: "SH",
   label: "SH",
   full: "SHAKER",
   color: "#8fb0c0"
+}, {
+  key: "CB",
+  label: "CB",
+  full: "COWBELL",
+  color: "#9bbfaa"
 }];
 var DRUM_ROWS = DRUM_VOICES.length;
+// Voice-order schema version. Saves tag their pats with `vo`; anything not
+// matching the current version is remapped by key on load.
+var DRUM_ORDER_V = 2;
+// Historical row orders (by voice key) for migrating positional save data.
+var DRUM_ORDER_10 = ["BD", "SD", "LT", "HT", "CH", "OH", "CY", "CP", "CL", "CB"]; // pre-MT, pre-RM/SH
+var DRUM_ORDER_11 = ["BD", "SD", "LT", "MT", "HT", "CH", "OH", "CY", "CP", "CL", "CB"]; // pre-RM/SH
+var DRUM_ORDER_13_OLD = ["BD", "SD", "LT", "MT", "HT", "CH", "OH", "CY", "CP", "CL", "CB", "RM", "SH"]; // v1 (pre-reorder)
 // Drum velocity is PER-CELL: vel[row][col]. (Was per-column vel[col].) This
 // lets two voices on the same step play at different velocities.
 var mkDrumVel = function mkDrumVel() {
@@ -370,7 +381,8 @@ var mkDrumPat = function mkDrumPat(name) {
     mix: defaultDrumMix(),
     vRhythm: 0,
     vVelocity: 0,
-    speedMult: 1
+    speedMult: 1,
+    vo: DRUM_ORDER_V
   };
 };
 // Continuous drum-mix params that support motion automation (the slider ones;
@@ -469,67 +481,83 @@ var fillDrumMix = function fillDrumMix(mix) {
     return Object.assign({}, d, mix[i] || {});
   });
 };
-// Row index where MT (mid tom) was inserted — between LT(2) and HT.
-var MT_ROW_INDEX = 3;
-// Migrate a loaded drum pat to the current voice layout. Two historical
-// layouts predate the current one:
-//   10 rows: [BD,SD,LT,HT,CH,OH,CY,CP,CL,CB]      (pre-MT, pre-RM/SH)
-//   11 rows: [BD,SD,LT,MT,HT,CH,OH,CY,CP,CL,CB]   (post-MT, pre-RM/SH)
-// Current is 13 rows (…CB,RM,SH). For the 10-row layout, MT was inserted at
-// index 3 so everything from HT down shifted — splice an empty MT row there
-// first. RM + SH were appended at the end, so any short pat just pads empty
-// rows at the end to reach DRUM_ROWS. No-op for current-length pats.
+// Migrate a loaded drum pat to the current voice layout + row count. Save data
+// is positional, so we remap by voice KEY: figure out which historical order
+// the save used (by its `vo` tag, else by row count), then rebuild each
+// per-row array in the current DRUM_VOICES order. Voices absent from the
+// source order get defaults. Idempotent for current-version pats.
+var _drumDefMix = function _drumDefMix() {
+  return {
+    level: DRUM_DEFAULT_LEVEL,
+    pan: 0,
+    rvSend: 0,
+    dlySend: 0,
+    pitch: 0,
+    filt: "off",
+    filtCut: 100,
+    env: 100,
+    sat: 0
+  };
+};
 var migrateDrumPatRows = function migrateDrumPatRows(pat) {
   if (!pat || !Array.isArray(pat.grid)) return pat;
-  // vel is always normalized to per-cell 2D, even when the grid is already the
-  // right length (a save can have correct rows but legacy 1D per-column vel).
-  var velNorm = toDrumVel2D(pat.vel);
-  if (pat.grid.length === DRUM_ROWS) {
+  // Already current order + current row count → just ensure vel is 2D.
+  if (pat.vo === DRUM_ORDER_V && pat.grid.length === DRUM_ROWS) {
     return Array.isArray(pat.vel) && Array.isArray(pat.vel[0]) ? pat : _objectSpread(_objectSpread({}, pat), {}, {
-      vel: velNorm
+      vel: toDrumVel2D(pat.vel)
     });
   }
-  var emptyRow = function emptyRow() {
+  // Determine the source order. vo===1 (or any 13-len untagged) is the
+  // pre-reorder 13 order; 10/11 lengths are the older layouts.
+  var len = pat.grid.length;
+  var fromKeys = len <= 10 ? DRUM_ORDER_10 : len === 11 ? DRUM_ORDER_11 : DRUM_ORDER_13_OLD;
+  // Remap a per-row array (indexed by fromKeys) into the new DRUM_VOICES order.
+  var remap = function remap(arr, fill) {
+    return DRUM_VOICES.map(function (v) {
+      var fi = fromKeys.indexOf(v.key);
+      return fi >= 0 && arr && arr[fi] !== undefined ? arr[fi] : fill();
+    });
+  };
+  var grid = remap(pat.grid.map(function (r) {
+    return Array.isArray(r) ? _toConsumableArray(r) : new Array(COLS).fill(false);
+  }), function () {
     return new Array(COLS).fill(false);
-  };
-  var defMix = function defMix() {
-    return {
-      level: DRUM_DEFAULT_LEVEL,
-      pan: 0,
-      rvSend: 0,
-      dlySend: 0,
-      pitch: 0,
-      filt: "off",
-      filtCut: 100,
-      env: 100,
-      sat: 0
-    };
-  };
-  var grid = pat.grid.map(function (r) {
-    return _toConsumableArray(r);
   });
-  var hasMix = Array.isArray(pat.mix);
-  var mix = hasMix ? pat.mix.map(function (m) {
-    return _objectSpread({}, m);
-  }) : null;
-  // 10-row layout predates MT — splice it in at index 3 to realign.
-  if (grid.length === 10) {
-    grid.splice(MT_ROW_INDEX, 0, emptyRow());
-    if (mix && mix.length === 10) mix.splice(MT_ROW_INDEX, 0, defMix());
-  }
-  // Pad the end (RM/SH and any future appended voices) to current row count.
-  while (grid.length < DRUM_ROWS) grid.push(emptyRow());
-  if (mix) {
-    while (mix.length < DRUM_ROWS) mix.push(defMix());
-  }
-  // toDrumVel2D already broadcasts/aligns vel to full DRUM_ROWS×COLS, so the
-  // row splice/pad above doesn't need to touch it — column values are the
-  // same across all rows for legacy saves, and 2D saves are already full-size.
   var out = _objectSpread(_objectSpread({}, pat), {}, {
     grid: grid,
-    vel: velNorm
+    vo: DRUM_ORDER_V
   });
-  if (mix) out.mix = mix;
+  if (Array.isArray(pat.mix)) out.mix = remap(pat.mix.map(function (m) {
+    return _objectSpread({}, m);
+  }), _drumDefMix);
+  // vel: normalize to 2D in the SOURCE order first, then remap rows by key.
+  var vel2 = toDrumVel2D(pat.vel); // full DRUM_ROWS in *current* order if 2D, else broadcast
+  // toDrumVel2D assumes current row count; for legacy 1D it broadcasts columns
+  // (row-order-independent), so remap is a no-op there. For an old 2D vel we
+  // remap by key from fromKeys.
+  if (Array.isArray(pat.vel) && Array.isArray(pat.vel[0])) {
+    out.vel = remap(pat.vel.map(function (r) {
+      return _toConsumableArray(r);
+    }), function () {
+      return new Array(COLS).fill(100);
+    });
+  } else {
+    out.vel = vel2; // broadcast (per-column) — order doesn't matter
+  }
+  // motion lanes (param → ROWS×COLS) remap by key too.
+  if (pat.motion && _typeof(pat.motion) === "object") {
+    var m = {};
+    for (var _i = 0, _Object$keys = Object.keys(pat.motion); _i < _Object$keys.length; _i++) {
+      var k = _Object$keys[_i];
+      var lane = pat.motion[k];
+      if (Array.isArray(lane)) m[k] = remap(lane.map(function (r) {
+        return Array.isArray(r) ? _toConsumableArray(r) : new Array(COLS).fill(null);
+      }), function () {
+        return new Array(COLS).fill(null);
+      });
+    }
+    out.motion = m;
+  }
   return out;
 };
 // Normalize a saved varyMode into the per-layer object shape. Legacy saves
@@ -2060,7 +2088,7 @@ var DrumEngine = /*#__PURE__*/function () {
     key: "init",
     value: function () {
       var _init2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(masterNode, revNode, dlyNode) {
-        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, filter, shaper, sendTap;
+        var AudioContext, _i2, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, filter, shaper, sendTap;
         return _regenerator().w(function (_context5) {
           while (1) switch (_context5.n) {
             case 0:
@@ -2083,8 +2111,8 @@ var DrumEngine = /*#__PURE__*/function () {
               // Build a persistent strip per voice. Voice keys are read off DRUM_VOICES
               // which is in module scope. lvlGain starts at the mixer default (0.6) so
               // hits sound right even before any setVoiceMix call comes in.
-              for (_i = 0, _DRUM_VOICES = DRUM_VOICES; _i < _DRUM_VOICES.length; _i++) {
-                v = _DRUM_VOICES[_i];
+              for (_i2 = 0, _DRUM_VOICES = DRUM_VOICES; _i2 < _DRUM_VOICES.length; _i2++) {
+                v = _DRUM_VOICES[_i2];
                 lvlGain = this.ctx.createGain();
                 lvlGain.gain.value = DRUM_DEFAULT_LEVEL / 100;
                 panner = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
@@ -3903,8 +3931,8 @@ function Tabula() {
     };
     if (s.layerStore) {
       // Restore non-active layers to the store
-      for (var _i2 = 0, _SYNTH_LAYERS = SYNTH_LAYERS; _i2 < _SYNTH_LAYERS.length; _i2++) {
-        var layer = _SYNTH_LAYERS[_i2];
+      for (var _i3 = 0, _SYNTH_LAYERS = SYNTH_LAYERS; _i3 < _SYNTH_LAYERS.length; _i3++) {
+        var layer = _SYNTH_LAYERS[_i3];
         if (s.layerStore[layer] && layer !== (s.activeLayer || activeLayer)) {
           layerStoreR.current[layer] = JSON.parse(JSON.stringify(s.layerStore[layer]));
         }
@@ -4220,8 +4248,8 @@ function Tabula() {
       }
     };
     if (s.layerStore) {
-      for (var _i3 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i3 < _SYNTH_LAYERS2.length; _i3++) {
-        var layer = _SYNTH_LAYERS2[_i3];
+      for (var _i4 = 0, _SYNTH_LAYERS2 = SYNTH_LAYERS; _i4 < _SYNTH_LAYERS2.length; _i4++) {
+        var layer = _SYNTH_LAYERS2[_i4];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
           if (ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
@@ -4546,8 +4574,8 @@ function Tabula() {
     if (variedDrumGrids && variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
     if (variedDrumVels && variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
     if (freeR && freeR.current) {
-      for (var _i4 = 0, _arr = ["synth", "lead", "drums"]; _i4 < _arr.length; _i4++) {
-        var l = _arr[_i4];
+      for (var _i5 = 0, _arr = ["synth", "lead", "drums"]; _i5 < _arr.length; _i5++) {
+        var l = _arr[_i5];
         if (freeR.current[l]) freeR.current[l] = {
           step: 0,
           nextAt: 0,
@@ -5123,14 +5151,14 @@ function Tabula() {
     var ranges = null;
     if (isFree) {
       ranges = {};
-      for (var _i5 = 0, _arr2 = ["synth", "lead", "drums"]; _i5 < _arr2.length; _i5++) {
-        var layer = _arr2[_i5];
+      for (var _i6 = 0, _arr2 = ["synth", "lead", "drums"]; _i6 < _arr2.length; _i6++) {
+        var layer = _arr2[_i6];
         var first = -1,
           last = -1;
-        for (var _i6 = 0; _i6 < 64; _i6++) {
-          if (sm[layer][_i6] != null) {
-            if (first === -1) first = _i6;
-            last = _i6;
+        for (var _i7 = 0; _i7 < 64; _i7++) {
+          if (sm[layer][_i7] != null) {
+            if (first === -1) first = _i7;
+            last = _i7;
           }
         }
         ranges[layer] = {
@@ -5145,8 +5173,8 @@ function Tabula() {
     // freeR.current[layer] = {step, nextAt, bar} per layer.
     var cursorChanged = false;
     var newCursor = _objectSpread({}, songBarLayer);
-    for (var _i7 = 0, _arr3 = ["synth", "lead", "drums"]; _i7 < _arr3.length; _i7++) {
-      var _layer = _arr3[_i7];
+    for (var _i8 = 0, _arr3 = ["synth", "lead", "drums"]; _i8 < _arr3.length; _i8++) {
+      var _layer = _arr3[_i8];
       var lf = freeR.current[_layer];
       // Free mode: skip silent layers, init bar within range.
       if (isFree) {
@@ -5300,8 +5328,8 @@ function Tabula() {
         var nextBar = void 0;
         if (isRandom) {
           var candidates = [];
-          for (var _i8 = songFirstBar; _i8 <= songLastBar; _i8++) {
-            if (sm.synth[_i8] != null || sm.lead[_i8] != null || sm.drums[_i8] != null) candidates.push(_i8);
+          for (var _i9 = songFirstBar; _i9 <= songLastBar; _i9++) {
+            if (sm.synth[_i9] != null || sm.lead[_i9] != null || sm.drums[_i9] != null) candidates.push(_i9);
           }
           nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
         } else {
@@ -5318,8 +5346,8 @@ function Tabula() {
           drums: nextBar
         });
         // Reset per-layer step index so each layer starts new bar from step 0.
-        for (var _i9 = 0, _arr4 = ["synth", "lead", "drums"]; _i9 < _arr4.length; _i9++) {
-          var l = _arr4[_i9];
+        for (var _i0 = 0, _arr4 = ["synth", "lead", "drums"]; _i0 < _arr4.length; _i0++) {
+          var l = _arr4[_i0];
           freeR.current[l].step = 0;
           // Realign nextAt to bar boundary so layers re-sync after bar advance.
           freeR.current[l].nextAt = nextNoteR.current + absStepDur;
@@ -5335,7 +5363,7 @@ function Tabula() {
 
   var _startStop = /*#__PURE__*/function () {
     var _ref14 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, t0, _i0, _arr5, layer, sm, layerFirst, _i1, _arr6, _layer2, f, i, firstBar, _i10, _t4;
+      var dlyT, t0, _i1, _arr5, layer, sm, layerFirst, _i10, _arr6, _layer2, f, i, firstBar, _i11, _t4;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -5453,8 +5481,8 @@ function Tabula() {
             stepR.current = 0;
             t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
             // song mode also sets each layer's bar to its first populated cell.
-            for (_i0 = 0, _arr5 = ["synth", "lead", "drums"]; _i0 < _arr5.length; _i0++) {
-              layer = _arr5[_i0];
+            for (_i1 = 0, _arr5 = ["synth", "lead", "drums"]; _i1 < _arr5.length; _i1++) {
+              layer = _arr5[_i1];
               freeR.current[layer] = {
                 step: 0,
                 nextAt: t0,
@@ -5467,13 +5495,13 @@ function Tabula() {
             }
             sm = songMatrix;
             layerFirst = {};
-            _i1 = 0, _arr6 = ["synth", "lead", "drums"];
+            _i10 = 0, _arr6 = ["synth", "lead", "drums"];
           case 11:
-            if (!(_i1 < _arr6.length)) {
+            if (!(_i10 < _arr6.length)) {
               _context9.n = 16;
               break;
             }
-            _layer2 = _arr6[_i1];
+            _layer2 = _arr6[_i10];
             f = -1;
             i = 0;
           case 12:
@@ -5495,25 +5523,25 @@ function Tabula() {
             layerFirst[_layer2] = f === -1 ? 0 : f;
             freeR.current[_layer2].bar = layerFirst[_layer2];
           case 15:
-            _i1++;
+            _i10++;
             _context9.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i10 = 0;
+            _i11 = 0;
           case 17:
-            if (!(_i10 < 64)) {
+            if (!(_i11 < 64)) {
               _context9.n = 19;
               break;
             }
-            if (!(sm.synth[_i10] != null || sm.lead[_i10] != null || sm.drums[_i10] != null)) {
+            if (!(sm.synth[_i11] != null || sm.lead[_i11] != null || sm.drums[_i11] != null)) {
               _context9.n = 18;
               break;
             }
-            firstBar = _i10;
+            firstBar = _i11;
             return _context9.a(3, 19);
           case 18:
-            _i10++;
+            _i11++;
             _context9.n = 17;
             break;
           case 19:

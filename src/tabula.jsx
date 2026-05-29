@@ -97,22 +97,33 @@ const cullPatToMono=(grid,durs)=>{
   return{grid:g,durs:d};
 };
 // ─── Drum layer ───────────────────────────────────────────────────────────────
+// Lane order top→bottom. Reordered 2026-05: kick, snare, rim, clap, toms
+// (hi→lo), hats, cymbal, clave, shaker, cowbell. Save data is positional, so
+// changing this order requires migrating old saves by voice KEY — see
+// DRUM_ORDER_* + migrateDrumPatRows. Bump DRUM_ORDER_V on any future reorder.
 const DRUM_VOICES=[
   {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
   {key:"SD",label:"SD",full:"SNARE",  color:"#e09050"},
-  {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
-  {key:"MT",label:"MT",full:"MID TOM",color:"#b8b040"},
+  {key:"RM",label:"RM",full:"RIM",    color:"#cf8f6a"},
+  {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
   {key:"HT",label:"HT",full:"HI TOM", color:"#a0b840"},
+  {key:"MT",label:"MT",full:"MID TOM",color:"#b8b040"},
+  {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
   {key:"CH",label:"CH",full:"CL HAT", color:"#60b878"},
   {key:"OH",label:"OH",full:"OP HAT", color:"#50a8c0"},
   {key:"CY",label:"CY",full:"CYMBAL", color:"#7888d0"},
-  {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
   {key:"CL",label:"CL",full:"CLAVES", color:"#d4956a"},
-  {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
-  {key:"RM",label:"RM",full:"RIM",    color:"#cf8f6a"},
   {key:"SH",label:"SH",full:"SHAKER", color:"#8fb0c0"},
+  {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
+// Voice-order schema version. Saves tag their pats with `vo`; anything not
+// matching the current version is remapped by key on load.
+const DRUM_ORDER_V=2;
+// Historical row orders (by voice key) for migrating positional save data.
+const DRUM_ORDER_10=["BD","SD","LT","HT","CH","OH","CY","CP","CL","CB"];               // pre-MT, pre-RM/SH
+const DRUM_ORDER_11=["BD","SD","LT","MT","HT","CH","OH","CY","CP","CL","CB"];           // pre-RM/SH
+const DRUM_ORDER_13_OLD=["BD","SD","LT","MT","HT","CH","OH","CY","CP","CL","CB","RM","SH"]; // v1 (pre-reorder)
 // Drum velocity is PER-CELL: vel[row][col]. (Was per-column vel[col].) This
 // lets two voices on the same step play at different velocities.
 const mkDrumVel=()=>Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(100));
@@ -131,7 +142,7 @@ const toDrumVel2D=(vel)=>{
   }
   return out;
 };
-const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1,vo:DRUM_ORDER_V});
 // Continuous drum-mix params that support motion automation (the slider ones;
 // the FILT mode chip is excluded). pat.motion[param] is a lazily-created
 // ROWS×COLS grid of number|null — null = "use the base mix value at this step".
@@ -214,42 +225,49 @@ const fillDrumMix=(mix)=>{
   if(!Array.isArray(mix))return out;
   return out.map((d,i)=>Object.assign({},d,mix[i]||{}));
 };
-// Row index where MT (mid tom) was inserted — between LT(2) and HT.
-const MT_ROW_INDEX=3;
-// Migrate a loaded drum pat to the current voice layout. Two historical
-// layouts predate the current one:
-//   10 rows: [BD,SD,LT,HT,CH,OH,CY,CP,CL,CB]      (pre-MT, pre-RM/SH)
-//   11 rows: [BD,SD,LT,MT,HT,CH,OH,CY,CP,CL,CB]   (post-MT, pre-RM/SH)
-// Current is 13 rows (…CB,RM,SH). For the 10-row layout, MT was inserted at
-// index 3 so everything from HT down shifted — splice an empty MT row there
-// first. RM + SH were appended at the end, so any short pat just pads empty
-// rows at the end to reach DRUM_ROWS. No-op for current-length pats.
+// Migrate a loaded drum pat to the current voice layout + row count. Save data
+// is positional, so we remap by voice KEY: figure out which historical order
+// the save used (by its `vo` tag, else by row count), then rebuild each
+// per-row array in the current DRUM_VOICES order. Voices absent from the
+// source order get defaults. Idempotent for current-version pats.
+const _drumDefMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100,sat:0});
 const migrateDrumPatRows=(pat)=>{
   if(!pat||!Array.isArray(pat.grid))return pat;
-  // vel is always normalized to per-cell 2D, even when the grid is already the
-  // right length (a save can have correct rows but legacy 1D per-column vel).
-  const velNorm=toDrumVel2D(pat.vel);
-  if(pat.grid.length===DRUM_ROWS){
-    return Array.isArray(pat.vel)&&Array.isArray(pat.vel[0])?pat:{...pat,vel:velNorm};
+  // Already current order + current row count → just ensure vel is 2D.
+  if(pat.vo===DRUM_ORDER_V&&pat.grid.length===DRUM_ROWS){
+    return (Array.isArray(pat.vel)&&Array.isArray(pat.vel[0]))?pat:{...pat,vel:toDrumVel2D(pat.vel)};
   }
-  const emptyRow=()=>new Array(COLS).fill(false);
-  const defMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100,sat:0});
-  const grid=pat.grid.map(r=>[...r]);
-  const hasMix=Array.isArray(pat.mix);
-  const mix=hasMix?pat.mix.map(m=>({...m})):null;
-  // 10-row layout predates MT — splice it in at index 3 to realign.
-  if(grid.length===10){
-    grid.splice(MT_ROW_INDEX,0,emptyRow());
-    if(mix&&mix.length===10)mix.splice(MT_ROW_INDEX,0,defMix());
+  // Determine the source order. vo===1 (or any 13-len untagged) is the
+  // pre-reorder 13 order; 10/11 lengths are the older layouts.
+  const len=pat.grid.length;
+  const fromKeys = len<=10?DRUM_ORDER_10 : len===11?DRUM_ORDER_11 : DRUM_ORDER_13_OLD;
+  // Remap a per-row array (indexed by fromKeys) into the new DRUM_VOICES order.
+  const remap=(arr,fill)=>DRUM_VOICES.map(v=>{
+    const fi=fromKeys.indexOf(v.key);
+    return (fi>=0&&arr&&arr[fi]!==undefined)?arr[fi]:fill();
+  });
+  const grid=remap(pat.grid.map(r=>Array.isArray(r)?[...r]:new Array(COLS).fill(false)),()=>new Array(COLS).fill(false));
+  const out={...pat,grid,vo:DRUM_ORDER_V};
+  if(Array.isArray(pat.mix))out.mix=remap(pat.mix.map(m=>({...m})),_drumDefMix);
+  // vel: normalize to 2D in the SOURCE order first, then remap rows by key.
+  const vel2=toDrumVel2D(pat.vel); // full DRUM_ROWS in *current* order if 2D, else broadcast
+  // toDrumVel2D assumes current row count; for legacy 1D it broadcasts columns
+  // (row-order-independent), so remap is a no-op there. For an old 2D vel we
+  // remap by key from fromKeys.
+  if(Array.isArray(pat.vel)&&Array.isArray(pat.vel[0])){
+    out.vel=remap(pat.vel.map(r=>[...r]),()=>new Array(COLS).fill(100));
+  } else {
+    out.vel=vel2; // broadcast (per-column) — order doesn't matter
   }
-  // Pad the end (RM/SH and any future appended voices) to current row count.
-  while(grid.length<DRUM_ROWS)grid.push(emptyRow());
-  if(mix){while(mix.length<DRUM_ROWS)mix.push(defMix());}
-  // toDrumVel2D already broadcasts/aligns vel to full DRUM_ROWS×COLS, so the
-  // row splice/pad above doesn't need to touch it — column values are the
-  // same across all rows for legacy saves, and 2D saves are already full-size.
-  const out={...pat,grid,vel:velNorm};
-  if(mix)out.mix=mix;
+  // motion lanes (param → ROWS×COLS) remap by key too.
+  if(pat.motion&&typeof pat.motion==="object"){
+    const m={};
+    for(const k of Object.keys(pat.motion)){
+      const lane=pat.motion[k];
+      if(Array.isArray(lane))m[k]=remap(lane.map(r=>Array.isArray(r)?[...r]:new Array(COLS).fill(null)),()=>new Array(COLS).fill(null));
+    }
+    out.motion=m;
+  }
   return out;
 };
 // Normalize a saved varyMode into the per-layer object shape. Legacy saves
