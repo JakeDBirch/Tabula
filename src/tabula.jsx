@@ -1484,6 +1484,30 @@ export default function Tabula(){
   const drumStepR=useRef(-1);
   const [drumStep,setDrumStep]=useState(-1);
   useEffect(()=>{drumStepR.current=drumStep;},[drumStep]);
+  // Drive the drum-mixer hit flashes off the playhead. On each new drum step,
+  // any voice that sounds in the active pat pulses its channel, scaled by the
+  // cell's velocity. (Reads the vary grid/vel when drum vary is on.)
+  useEffect(()=>{
+    if(!playing||drumStep<0)return;
+    const dPat=drumPats.find(p=>p.id===activeDrumId);
+    if(!dPat)return;
+    const dv=varyMode.drums;
+    const grid=dv?(variedDrumGrids.current.get(dPat.id)||dPat.grid):dPat.grid;
+    const vel=dv?(variedDrumVels.current.get(dPat.id)||dPat.vel):dPat.vel;
+    setDrumFlash(prev=>{
+      let next=prev,changed=false;
+      for(let r=0;r<DRUM_ROWS;r++){
+        if(grid[r]&&grid[r][drumStep]){
+          const vr=vel&&vel[r];
+          const v=(Array.isArray(vr)?vr[drumStep]:vel?.[drumStep])??100;
+          if(!changed){next={...prev};changed=true;}
+          next[r]={vel:v,n:((prev[r]&&prev[r].n)||0)+1};
+        }
+      }
+      return changed?next:prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[drumStep,playing]);
 
   // ── Motion mixer (drum mix automation) ───────────────────────────────────
   // motionEnabled: performance mode — the drum mixer is driven by the
@@ -1502,6 +1526,10 @@ export default function Tabula(){
   // The currently-held record drag: {row,param,val} or null. The drumStep
   // effect below writes it onto each step as playback advances.
   const recDragR=useRef(null);
+  // Per-voice hit flash for the drum mixer: {[row]:{vel,n}}. n is a nonce that
+  // bumps each hit so the flash overlay remounts and replays its fade. Driven
+  // off the drum playhead (drumStep) so a channel pulses when its voice sounds.
+  const [drumFlash,setDrumFlash]=useState({});
 
   // Track window width to drive responsive left column layout
   // Use ResizeObserver on the layout container — works inside iframes too
@@ -2661,7 +2689,10 @@ export default function Tabula(){
     // Does this pat carry any recorded motion? If so we apply the per-step
     // effective mix to each hitting voice's strip (sequence playback of the
     // automation); otherwise the per-pat-switch guard in play() handles it.
-    const patHasMotion = !!(pat.motion && MOTION_PARAMS.some(k=>pat.motion[k]));
+    // Recorded motion only drives the strip while MOTION mode is ON. With it
+    // off the mixer is fully static (base mix) — the recorded automation is
+    // retained in the pat but ignored, so output is persistent.
+    const patHasMotion = motionEnabledR.current && !!(pat.motion && MOTION_PARAMS.some(k=>pat.motion[k]));
     const baseMixArr = pat.mix||defaultDrumMix();
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
@@ -3741,7 +3772,19 @@ export default function Tabula(){
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[drumStep,motionRec,playing]);
   // Leaving motion mode (or disarming record) drops any transient drag state.
-  useEffect(()=>{if(!motionEnabled){setPerfMix({});recDragR.current=null;}},[motionEnabled]);
+  useEffect(()=>{
+    if(!motionEnabled){
+      setPerfMix({});recDragR.current=null;
+      // Snap every strip back to the active pat's static base mix — otherwise
+      // a strip could be stuck at the last per-step automated value.
+      if(drumEngine.current.ready){
+        const dPat=drumPats.find(p=>p.id===activeDrumId);
+        const mixArr=fillDrumMix(dPat&&dPat.mix);
+        for(let r=0;r<DRUM_ROWS;r++)drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,mixArr[r]);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[motionEnabled]);
   useEffect(()=>{if(!motionRec)recDragR.current=null;},[motionRec]);
   // Clear all recorded motion on the active drum pat (for the CLR-motion button).
   const clearMotion=()=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{motion:undefined})));
@@ -5121,7 +5164,12 @@ export default function Tabula(){
                     const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
                     const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                     return(
-                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box"}}>
+                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
+                        {/* Hit flash — fades up from the bottom, height + peak
+                            opacity scale with the velocity of the sounding note. */}
+                        {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.10+0.32*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                          <div key={fv.n} style={{position:"absolute",left:0,right:0,bottom:0,height:`${30+(fv.vel/127)*70}%`,background:"linear-gradient(to top,"+voice.color+a+",transparent)",pointerEvents:"none",borderRadius:4,animation:"dflash 280ms ease-out forwards"}}/>
+                        );})()}
                         {/* Voice name */}
                         <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
                         {/* PITCH (semitones, bipolar) */}
@@ -6197,7 +6245,10 @@ export default function Tabula(){
                           const filtMode=m.filt||"off";
                           const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
                           const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box"}}>
+                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
+                            {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.10+0.32*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                              <div key={fv.n} style={{position:"absolute",left:0,right:0,bottom:0,height:`${30+(fv.vel/127)*70}%`,background:"linear-gradient(to top,"+voice.color+a+",transparent)",pointerEvents:"none",borderRadius:4,animation:"dflash 280ms ease-out forwards"}}/>
+                            );})()}
                             <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
@@ -6453,6 +6504,7 @@ const CSS=`
   }
   .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}
   @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}
+  @keyframes dflash{from{opacity:1}to{opacity:0}}
   select option{background:#111;color:#fff;}
   .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .left-col select{min-width:0;}
