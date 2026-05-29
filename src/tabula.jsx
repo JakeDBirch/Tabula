@@ -163,8 +163,21 @@ const DEFAULT_KIT = "808-kit";
 // at 0. Only affects sample voices, not the synthesizer.
 const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({
   level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,
-  pitch:0,filt:"off",filtCut:100,env:100,
+  pitch:0,filt:"off",filtCut:100,env:100,sat:0,
 }));
+// Waveshaper curve for per-voice saturation. amt 0..1. At 0 the curve is the
+// identity (clean bypass); as amt rises it becomes a soft-clip that's identity
+// at the origin and compresses toward ±1, adding harmonics. (1+k) numerator
+// keeps loud transients present rather than just squashing them.
+const makeSatCurve=(amt)=>{
+  const n=1024,c=new Float32Array(n);
+  const k=Math.max(0,Math.min(1,amt))**2*16; // 0..16 drive, eased
+  for(let i=0;i<n;i++){
+    const x=(i/(n-1))*2-1;
+    c[i]=k>0.0001 ? ((1+k)*x)/(1+k*Math.abs(x)) : x;
+  }
+  return c;
+};
 // Backfill any missing fields on loaded drum mix arrays — older saves only had
 // {level,pan}, so we need to pad new fields with their defaults.
 const fillDrumMix=(mix)=>{
@@ -1010,7 +1023,13 @@ class DrumEngine{
       filter.type="lowpass";
       filter.frequency.value=20000;
       filter.Q.value=0.7;
-      filter.connect(lvlGain);
+      // Per-voice saturation waveshaper between filter and level. Identity
+      // curve at sat=0 (clean bypass); setVoiceMix swaps the curve on change.
+      const shaper=this.ctx.createWaveShaper();
+      shaper.curve=makeSatCurve(0);
+      shaper.oversample="2x";
+      filter.connect(shaper);
+      shaper.connect(lvlGain);
       if(panner){
         panner.pan.value=0;
         lvlGain.connect(panner);
@@ -1026,7 +1045,7 @@ class DrumEngine{
       // pitch is in semitones; cached on the strip so play() can read it
       // without traversing React state. Filter type is stored separately so
       // setVoiceMix only re-assigns when it actually changes.
-      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,pitch:0,filtMode:"off",env:100};
+      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,shaper,pitch:0,filtMode:"off",env:100,sat:0};
     }
     this.ready=true;
   }
@@ -1044,6 +1063,13 @@ class DrumEngine{
     if(mix.dlySend!=null)strip.dlySend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.dlySend/100)),t,TAU);
     if(mix.pitch!=null)strip.pitch=Math.max(-24,Math.min(24,mix.pitch));
     if(mix.env!=null)strip.env=Math.max(0,Math.min(100,mix.env));
+    // Saturation — regenerate the shaper curve only when the amount changes.
+    // A curve swap is click-free here because the curves agree near the origin
+    // and drum hits are short transients.
+    if(mix.sat!=null&&strip.shaper){
+      const s2=Math.max(0,Math.min(100,mix.sat));
+      if(s2!==strip.sat){strip.sat=s2;strip.shaper.curve=makeSatCurve(s2/100);}
+    }
     // Filter — store mode on the strip and switch the biquad type only when
     // the mode actually changes. Cut is smoothed; mode change is immediate
     // but inaudible since the new type's frequency response starts fresh.
@@ -3461,24 +3487,32 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100)});
   }));}
-  // CH (closed hat) + OH (open hat) are fully linked on the mixer — they
-  // model the same physical hi-hat. The mixer UI hides OH and shows a
-  // single HAT strip that writes to CH; this propagates everything
-  // (pan/level/sends/pitch/filter) to OH so playback stays consistent.
-  // Sample slots stay independent so each can hold its own recording.
-  const _CH_ROW=DRUM_VOICES.findIndex(v=>v.key==="CH");
-  const _OH_ROW=DRUM_VOICES.findIndex(v=>v.key==="OH");
-  const _HAT_LINKED_KEYS=new Set(["pan","level","rvSend","dlySend","pitch","filt","filtCut"]);
+  // Mixer link groups.
+  //  • Hi-hats (CH+OH): every mix param is linked — they model one physical
+  //    hi-hat. Both strips are shown so each can hold its own sample, but
+  //    moving any slider on one moves it on the other. Sample slots stay
+  //    independent.
+  //  • Toms (LT+MT+HT): only LEVEL is linked (balance the kit as a group);
+  //    pan and everything else stay per-tom so they can spread across the
+  //    field and be tuned individually.
+  const _rowOf=k=>DRUM_VOICES.findIndex(v=>v.key===k);
+  const _HAT_ROWS=[_rowOf("CH"),_rowOf("OH")];
+  const _TOM_ROWS=[_rowOf("LT"),_rowOf("MT"),_rowOf("HT")];
+  const _HAT_KEYS=new Set(["pan","level","rvSend","dlySend","pitch","filt","filtCut","env","sat"]);
+  const _TOM_KEYS=new Set(["level"]);
+  // Which rows a given (row,key) edit should write to (always includes row).
+  const _linkedRows=(row,key)=>{
+    if(_HAT_ROWS.includes(row)&&_HAT_KEYS.has(key))return _HAT_ROWS;
+    if(_TOM_ROWS.includes(row)&&_TOM_KEYS.has(key))return _TOM_ROWS;
+    return [row];
+  };
   const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const linksHat=_HAT_LINKED_KEYS.has(key)&&(row===_CH_ROW||row===_OH_ROW);
-    const linkedRow=linksHat?(row===_CH_ROW?_OH_ROW:_CH_ROW):-1;
-    // fillDrumMix normalizes any partial saves so old voice rows without
-    // rvSend/dlySend pick up the default before getting the new value applied.
-    const mix=fillDrumMix(p.mix).map((m,i)=>{
-      if(i===row||i===linkedRow)return Object.assign({},m,{[key]:val});
-      return m;
-    });
+    const targets=_linkedRows(row,key);
+    // fillDrumMix normalizes any partial saves so old voice rows without the
+    // newer fields pick up defaults before the value is applied.
+    const mix=fillDrumMix(p.mix).map((m,i)=>
+      targets.includes(i)?Object.assign({},m,{[key]:val}):m);
     return Object.assign({},p,{mix});
   }));
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
@@ -4769,14 +4803,13 @@ export default function Tabula(){
                 </div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8,flexShrink:0}}>MIXER</div>
                 {/* Channel strips — horizontal row of conventional vertical strips.
-                    OH is hidden; CH's strip is labeled "HAT" and writes propagate
-                    to OH via the CH/OH link in setDrumMix. Layout per strip:
-                    name → PITCH → FILT (mode + cut) → PAN → REV → DLY → fader → REC/CLR. */}
+                    CH + OH are separate strips (each holds its own sample) but their
+                    params are linked via setDrumMix. Toms link on level only. Layout
+                    per strip: name → PITCH → FILT → SAT → ENV → PAN → REV → DLY →
+                    fader → REC/CLR. */}
                 <div style={{flex:1,display:"flex",gap:4,overflowX:"auto",overflowY:"hidden",alignItems:"stretch",paddingBottom:4}}>
                   {DRUM_VOICES.map((voice,r)=>{
-                    if(voice.key==="OH")return null; // collapsed into HAT (CH) strip
-                    const isHat=voice.key==="CH";
-                    const stripLabel=isHat?"HAT":(voice.full||voice.label);
+                    const stripLabel=voice.full||voice.label;
                     const m=mix[r];
                     const stripBg="rgba(30,28,24,0.55)";
                     const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
@@ -4838,6 +4871,12 @@ export default function Tabula(){
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
                           {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
                           <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
+                        </div>
+                        {/* SAT — per-voice saturation/drive */}
+                        <div style={cell}>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
+                          {miniSlider("sat",m.sat||0,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.sat||0}</div>
                         </div>
                         {/* PAN */}
                         <div style={cell}>
@@ -5820,9 +5859,7 @@ export default function Tabula(){
                       // vertical level fader → REC) but at a narrower width.
                       return(<div style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
                         {DRUM_VOICES.map((voice,r)=>{
-                          if(voice.key==="OH")return null; // collapsed into HAT (CH) strip
-                          const isHat=voice.key==="CH";
-                          const stripLabel=isHat?"HAT":(voice.full||voice.label);
+                          const stripLabel=voice.full||voice.label;
                           const m=mix[r];
                           const isRec=recordingVoice===voice.key;
                           const hasSample=!!voiceSamples[voice.key];
@@ -5864,6 +5901,11 @@ export default function Tabula(){
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
                               {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
                               <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
+                            </div>
+                            <div style={cell}>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
+                              {miniSlider("sat",m.sat||0,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.sat||0}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>

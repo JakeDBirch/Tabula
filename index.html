@@ -410,9 +410,24 @@ var defaultDrumMix = function defaultDrumMix() {
       pitch: 0,
       filt: "off",
       filtCut: 100,
-      env: 100
+      env: 100,
+      sat: 0
     };
   });
+};
+// Waveshaper curve for per-voice saturation. amt 0..1. At 0 the curve is the
+// identity (clean bypass); as amt rises it becomes a soft-clip that's identity
+// at the origin and compresses toward ±1, adding harmonics. (1+k) numerator
+// keeps loud transients present rather than just squashing them.
+var makeSatCurve = function makeSatCurve(amt) {
+  var n = 1024,
+    c = new Float32Array(n);
+  var k = Math.pow(Math.max(0, Math.min(1, amt)), 2) * 16; // 0..16 drive, eased
+  for (var i = 0; i < n; i++) {
+    var x = i / (n - 1) * 2 - 1;
+    c[i] = k > 0.0001 ? (1 + k) * x / (1 + k * Math.abs(x)) : x;
+  }
+  return c;
 };
 // Backfill any missing fields on loaded drum mix arrays — older saves only had
 // {level,pan}, so we need to pad new fields with their defaults.
@@ -1967,7 +1982,7 @@ var DrumEngine = /*#__PURE__*/function () {
     key: "init",
     value: function () {
       var _init2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(masterNode, revNode, dlyNode) {
-        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, filter, sendTap;
+        var AudioContext, _i, _DRUM_VOICES, v, lvlGain, panner, revSend, dlySend, filter, shaper, sendTap;
         return _regenerator().w(function (_context5) {
           while (1) switch (_context5.n) {
             case 0:
@@ -2007,7 +2022,13 @@ var DrumEngine = /*#__PURE__*/function () {
                 filter.type = "lowpass";
                 filter.frequency.value = 20000;
                 filter.Q.value = 0.7;
-                filter.connect(lvlGain);
+                // Per-voice saturation waveshaper between filter and level. Identity
+                // curve at sat=0 (clean bypass); setVoiceMix swaps the curve on change.
+                shaper = this.ctx.createWaveShaper();
+                shaper.curve = makeSatCurve(0);
+                shaper.oversample = "2x";
+                filter.connect(shaper);
+                shaper.connect(lvlGain);
                 if (panner) {
                   panner.pan.value = 0;
                   lvlGain.connect(panner);
@@ -2035,9 +2056,11 @@ var DrumEngine = /*#__PURE__*/function () {
                   revSend: revSend,
                   dlySend: dlySend,
                   filter: filter,
+                  shaper: shaper,
                   pitch: 0,
                   filtMode: "off",
-                  env: 100
+                  env: 100,
+                  sat: 0
                 };
               }
               this.ready = true;
@@ -2067,6 +2090,16 @@ var DrumEngine = /*#__PURE__*/function () {
       if (mix.dlySend != null) strip.dlySend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.dlySend / 100)), t, TAU);
       if (mix.pitch != null) strip.pitch = Math.max(-24, Math.min(24, mix.pitch));
       if (mix.env != null) strip.env = Math.max(0, Math.min(100, mix.env));
+      // Saturation — regenerate the shaper curve only when the amount changes.
+      // A curve swap is click-free here because the curves agree near the origin
+      // and drum hits are short transients.
+      if (mix.sat != null && strip.shaper) {
+        var s2 = Math.max(0, Math.min(100, mix.sat));
+        if (s2 !== strip.sat) {
+          strip.sat = s2;
+          strip.shaper.curve = makeSatCurve(s2 / 100);
+        }
+      }
       // Filter — store mode on the strip and switch the biquad type only when
       // the mode actually changes. Cut is smoothed; mode change is immediate
       // but inaudible since the new type's frequency response starts fresh.
@@ -6705,29 +6738,38 @@ function Tabula() {
       });
     });
   };
-  // CH (closed hat) + OH (open hat) are fully linked on the mixer — they
-  // model the same physical hi-hat. The mixer UI hides OH and shows a
-  // single HAT strip that writes to CH; this propagates everything
-  // (pan/level/sends/pitch/filter) to OH so playback stays consistent.
-  // Sample slots stay independent so each can hold its own recording.
-  var _CH_ROW = DRUM_VOICES.findIndex(function (v) {
-    return v.key === "CH";
-  });
-  var _OH_ROW = DRUM_VOICES.findIndex(function (v) {
-    return v.key === "OH";
-  });
-  var _HAT_LINKED_KEYS = new Set(["pan", "level", "rvSend", "dlySend", "pitch", "filt", "filtCut"]);
+  // Mixer link groups.
+  //  • Hi-hats (CH+OH): every mix param is linked — they model one physical
+  //    hi-hat. Both strips are shown so each can hold its own sample, but
+  //    moving any slider on one moves it on the other. Sample slots stay
+  //    independent.
+  //  • Toms (LT+MT+HT): only LEVEL is linked (balance the kit as a group);
+  //    pan and everything else stay per-tom so they can spread across the
+  //    field and be tuned individually.
+  var _rowOf = function _rowOf(k) {
+    return DRUM_VOICES.findIndex(function (v) {
+      return v.key === k;
+    });
+  };
+  var _HAT_ROWS = [_rowOf("CH"), _rowOf("OH")];
+  var _TOM_ROWS = [_rowOf("LT"), _rowOf("MT"), _rowOf("HT")];
+  var _HAT_KEYS = new Set(["pan", "level", "rvSend", "dlySend", "pitch", "filt", "filtCut", "env", "sat"]);
+  var _TOM_KEYS = new Set(["level"]);
+  // Which rows a given (row,key) edit should write to (always includes row).
+  var _linkedRows = function _linkedRows(row, key) {
+    if (_HAT_ROWS.includes(row) && _HAT_KEYS.has(key)) return _HAT_ROWS;
+    if (_TOM_ROWS.includes(row) && _TOM_KEYS.has(key)) return _TOM_ROWS;
+    return [row];
+  };
   var setDrumMix = function setDrumMix(row, key, val) {
     return setDrumPats(function (ps) {
       return ps.map(function (p) {
         if (p.id !== activeDrumId) return p;
-        var linksHat = _HAT_LINKED_KEYS.has(key) && (row === _CH_ROW || row === _OH_ROW);
-        var linkedRow = linksHat ? row === _CH_ROW ? _OH_ROW : _CH_ROW : -1;
-        // fillDrumMix normalizes any partial saves so old voice rows without
-        // rvSend/dlySend pick up the default before getting the new value applied.
+        var targets = _linkedRows(row, key);
+        // fillDrumMix normalizes any partial saves so old voice rows without the
+        // newer fields pick up defaults before the value is applied.
         var mix = fillDrumMix(p.mix).map(function (m, i) {
-          if (i === row || i === linkedRow) return Object.assign({}, m, _defineProperty({}, key, val));
-          return m;
+          return targets.includes(i) ? Object.assign({}, m, _defineProperty({}, key, val)) : m;
         });
         return Object.assign({}, p, {
           mix: mix
@@ -9829,9 +9871,7 @@ function Tabula() {
         paddingBottom: 4
       }
     }, DRUM_VOICES.map(function (voice, r) {
-      if (voice.key === "OH") return null; // collapsed into HAT (CH) strip
-      var isHat = voice.key === "CH";
-      var stripLabel = isHat ? "HAT" : voice.full || voice.label;
+      var stripLabel = voice.full || voice.label;
       var m = mix[r];
       var stripBg = "rgba(30,28,24,0.55)";
       var cell = {
@@ -10013,6 +10053,20 @@ function Tabula() {
           color: "rgba(210,195,175,0.55)"
         }
       }, m.env != null ? m.env : 100)), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          letterSpacing: 1,
+          color: "rgba(210,195,175,0.4)",
+          alignSelf: "flex-start"
+        }
+      }, "SAT"), miniSlider("sat", m.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          color: "rgba(210,195,175,0.55)"
+        }
+      }, m.sat || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13121,9 +13175,7 @@ function Tabula() {
         WebkitOverflowScrolling: "touch"
       }
     }, DRUM_VOICES.map(function (voice, r) {
-      if (voice.key === "OH") return null; // collapsed into HAT (CH) strip
-      var isHat = voice.key === "CH";
-      var stripLabel = isHat ? "HAT" : voice.full || voice.label;
+      var stripLabel = voice.full || voice.label;
       var m = mix[r];
       var isRec = recordingVoice === voice.key;
       var hasSample = !!voiceSamples[voice.key];
@@ -13300,6 +13352,20 @@ function Tabula() {
           color: "rgba(210,195,175,0.55)"
         }
       }, m.env != null ? m.env : 100)), /*#__PURE__*/React.createElement("div", {
+        style: cell
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          letterSpacing: 1,
+          color: "rgba(210,195,175,0.4)",
+          alignSelf: "flex-start"
+        }
+      }, "SAT"), miniSlider("sat", m.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 6,
+          color: "rgba(210,195,175,0.55)"
+        }
+      }, m.sat || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
