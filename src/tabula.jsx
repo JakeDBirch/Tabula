@@ -138,8 +138,10 @@ const DRUM_KITS = [
       CP: "samples/808-kit/CP.wav",
       CL: "samples/808-kit/CL.wav",
       CB: "samples/808-kit/CB.wav",
-      // LT: "samples/808-kit/LT.wav",
-      // HT: "samples/808-kit/HT.wav",
+      LT: "samples/808-kit/LT.wav",
+      HT: "samples/808-kit/HT.wav",
+      // NOTE: MT.wav (mid tom) is committed but unmapped — Tabula only has
+      // LT (lo) + HT (hi) tom voices, no mid tom.
       // CH: "samples/808-kit/CH.wav",
       // OH: "samples/808-kit/OH.wav",
       // CY: "samples/808-kit/CY.wav",
