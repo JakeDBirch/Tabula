@@ -356,23 +356,20 @@ var DRUM_KITS = [{
   id: "808-kit",
   label: "808",
   // Only the voices with files listed here load samples; every other voice
-  // falls through to the built-in synth. Add keys as more samples land.
+  // falls through to the built-in synth per-voice. Add keys as more samples
+  // land.
   samples: {
     BD: "samples/808-kit/BD.wav",
-    SD: "samples/808-kit/SD.wav"
+    SD: "samples/808-kit/SD.wav",
+    CP: "samples/808-kit/CP.wav",
+    CL: "samples/808-kit/CL.wav",
+    CB: "samples/808-kit/CB.wav"
     // LT: "samples/808-kit/LT.wav",
     // HT: "samples/808-kit/HT.wav",
     // CH: "samples/808-kit/CH.wav",
     // OH: "samples/808-kit/OH.wav",
     // CY: "samples/808-kit/CY.wav",
-    // CP: "samples/808-kit/CP.wav",
-    // CL: "samples/808-kit/CL.wav",
-    // CB: "samples/808-kit/CB.wav",
   }
-}, {
-  id: "synth",
-  label: "SYNTH"
-  // no samples — engine falls through to the built-in synthesizer
 }];
 // The kit selected on a fresh load / NEW project. Points at the curated kit
 // so the bundled samples are the out-of-the-box sound.
