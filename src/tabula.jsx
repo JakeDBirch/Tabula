@@ -212,7 +212,7 @@ const DRUM_KITS = [
     //   {rr:[...]}  → round-robin (random pick each hit)
     //   {vel:[...]} → velocity layers, ordered soft→hard
     samples: {
-      BD: "samples/vp-kit/BD.wav",
+      BD: {vel:["samples/vp-kit/BDv1.wav","samples/vp-kit/BDv2.wav"]},
       SD: {vel:["samples/vp-kit/SDv1.wav","samples/vp-kit/SDv2.wav","samples/vp-kit/SDv3.wav"]},
       RM: "samples/vp-kit/RM.wav",
       CP: "samples/vp-kit/CP.wav",
@@ -378,6 +378,30 @@ const ms=v=>Math.max(0.001,v/1000);
 
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return;}catch(e){}try{localStorage.setItem("tnori-"+k,v);}catch(e){}};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
+
+// ── User-sample (de)serialization ────────────────────────────────────────────
+// Recorded drum samples are AudioBuffers (binary). To save/export them with a
+// project they're encoded to 16-bit PCM WAV → base64. Short one-shots, so the
+// size is acceptable in a file/slot save (excluded from the URL share).
+const audioBufToWav=(buf)=>{
+  const nCh=buf.numberOfChannels||1, len=buf.length, sr=buf.sampleRate||44100;
+  const blockAlign=nCh*2, dataLen=len*blockAlign;
+  const ab=new ArrayBuffer(44+dataLen), dv=new DataView(ab); let o=0;
+  const ws=s=>{for(let i=0;i<s.length;i++)dv.setUint8(o++,s.charCodeAt(i));};
+  const w16=v=>{dv.setUint16(o,v,true);o+=2;}; const w32=v=>{dv.setUint32(o,v,true);o+=4;};
+  ws("RIFF");w32(36+dataLen);ws("WAVE");ws("fmt ");w32(16);w16(1);w16(nCh);w32(sr);w32(sr*blockAlign);w16(blockAlign);w16(16);ws("data");w32(dataLen);
+  const chans=[]; for(let c=0;c<nCh;c++)chans.push(buf.getChannelData(c));
+  for(let i=0;i<len;i++)for(let c=0;c<nCh;c++){const s=Math.max(-1,Math.min(1,chans[c][i]));dv.setInt16(o,s<0?s*0x8000:s*0x7FFF,true);o+=2;}
+  return ab;
+};
+const abToBase64=(ab)=>{let bin="";const b=new Uint8Array(ab),CH=0x8000;for(let i=0;i<b.length;i+=CH)bin+=String.fromCharCode.apply(null,b.subarray(i,i+CH));return btoa(bin);};
+const base64ToAb=(b64)=>{const bin=atob(b64),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return b.buffer;};
+// Encode a {voiceKey:AudioBuffer} map to {voiceKey:base64wav}. Skips non-buffers.
+const serializeSamples=(map)=>{
+  const out={}; if(!map)return out;
+  for(const k of Object.keys(map)){const b=map[k];if(b&&b.numberOfChannels!=null){try{out[k]=abToBase64(audioBufToWav(b));}catch(e){}}}
+  return out;
+};
 
 const genVariation=(grid,vp={})=>{
   const g=grid.map(r=>[...r]);
@@ -1630,6 +1654,10 @@ export default function Tabula(){
   const [playing,   setPlaying]   = useState(false);
   const [step,      setStep]      = useState(-1);
   const [playId,    setPlayId]    = useState(null);
+  // Playing pattern id of whichever layer is ACTIVE (synth/lead/drums) — drives
+  // FOLLOW for every layer (playId above stays synth-only for pill highlights).
+  const [actPlayId, setActPlayId] = useState(null);
+  const actPlayIdR = useRef(null);
   const [loopMode,  setLoopMode]  = useState(false);
   const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
@@ -1659,6 +1687,13 @@ export default function Tabula(){
   // not persisted to save slots (would bloat them with binary audio data).
   const [voiceSamples, setVoiceSamples] = useState({});
   const voiceSamplesR = useRef({});
+  // The USER kit's recorded buffers, kept SEPARATE from voiceSamples so they
+  // survive switching to a bundled kit and back (voiceSamples gets overwritten
+  // by the bundled buffers; userSamples does not). Restored into voiceSamples
+  // whenever the USER kit is selected. Persisted with the project (#user-samples).
+  const [userSamples, setUserSamples] = useState({});
+  const userSamplesR = useRef({});
+  useEffect(()=>{userSamplesR.current=userSamples;},[userSamples]);
   const [recordingVoice, setRecordingVoice] = useState(null);
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
@@ -2020,7 +2055,14 @@ export default function Tabula(){
   // playId comes from (synth chain or song-mode synth pat). On bass/lead,
   // setting activeId to a synth pat id leaves activePat undefined and
   // freezes the playhead animation.
-  useEffect(()=>{if(followSeq&&playing&&playId&&activeLayer==="synth")setActiveId(playId);},[playId,followSeq,playing,activeLayer]);
+  // FOLLOW: keep the active pattern locked to whatever is playing, for the
+  // active layer — synth, lead OR drums. Guard membership so a layer-switch
+  // transient (actPlayId still from the old layer) can't set a bad id.
+  useEffect(()=>{
+    if(!followSeq||!playing||actPlayId==null)return;
+    if(activeLayer==="drums"){if(drumPats.some(p=>p.id===actPlayId))setActiveDrumId(actPlayId);}
+    else if(pats.some(p=>p.id===actPlayId))setActiveId(actPlayId);
+  },[actPlayId,followSeq,playing,activeLayer]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{
@@ -2267,7 +2309,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,activeKit,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
@@ -2458,6 +2500,7 @@ export default function Tabula(){
     // valid kit, so resolve any unknown id to DEFAULT_KIT.
     const savedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
     loadKit(savedKit).catch(()=>{});
+    restoreUserSamples(s);
   };
   const saveSlot=slot=>{
     if(slotData[slot]){setConfirmAction({type:"save",slot,label:"OVERWRITE "+slot+"?"});return;}
@@ -2570,12 +2613,16 @@ export default function Tabula(){
   },[editOuter]);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
-  const getShareState=()=>({
+  // includeSamples: encode recorded USER samples (base64 WAV) into the state.
+  // ON for file export / slot save; OFF for the URL share link (samples would
+  // blow past practical URL length).
+  const getShareState=(includeSamples=true)=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
-    trackMute,trackSolo,
+    trackMute,trackSolo,activeKit,
+    ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
@@ -2668,13 +2715,14 @@ export default function Tabula(){
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
     const sharedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
     loadKit(sharedKit).catch(()=>{});
+    restoreUserSamples(s);
   };
 
   const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};
   const decodeState=str=>{try{return JSON.parse(decodeURIComponent(escape(atob(str))));}catch(e){return null;}};
 
   const copyShareLink=()=>{
-    const url=window.location.origin+window.location.pathname+'#'+encodeState(getShareState());
+    const url=window.location.origin+window.location.pathname+'#'+encodeState(getShareState(false)); // no samples in URL
     navigator.clipboard.writeText(url).then(()=>{setShareFlash("LINK COPIED");setTimeout(()=>setShareFlash(""),2000);});
   };
 
@@ -2972,6 +3020,9 @@ export default function Tabula(){
         // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
           if(layer==="drums")setDrumStep(s);else setStep(s);
+          // Track the active layer's currently-playing pattern for FOLLOW (only
+          // push state when it actually changes, so this isn't a per-step churn).
+          if(actPlayIdR.current!==pat.id){actPlayIdR.current=pat.id;setActPlayId(pat.id);}
         }
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if(layer==="synth")setPlayId(pat.id);
@@ -3233,7 +3284,20 @@ export default function Tabula(){
     };
   },[]);
 
-  const mutatePat=fn=>setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:fn(p.grid)})));
+  // Keep only the topmost active cell per column — enforces monophony on the
+  // MONO (lead) layer so grid mutations (MUT8/RAND/variation) can't stack
+  // notes into a chord.
+  const cullMonoGrid=(grid)=>{
+    const g=grid.map(r=>[...r]);
+    for(let c=0;c<COLS;c++){let found=false;for(let r=0;r<ROWS;r++){if(g[r][c]){if(found)g[r][c]=false;else found=true;}}}
+    return g;
+  };
+  const mutatePat=fn=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    let grid=fn(p.grid);
+    if(activeLayer==="lead")grid=cullMonoGrid(grid); // MONO never goes polyphonic
+    return Object.assign({},p,{grid});
+  }));
 
   // Collapse a grid to at most one note per column (keep a random one)
   const collapseToMono=g=>{
@@ -3991,10 +4055,10 @@ export default function Tabula(){
     if(!kit)return;
     setKitLoading(true);
     if(!kit.samples){
-      // Sample-less kit (USER). Drop the previous kit's bundled buffers so
-      // every voice starts on the synth; the user records into them via the
-      // sampling interface, which only this kit exposes.
-      setVoiceSamples({});
+      // Sample-less kit (USER). Restore the user's OWN recorded buffers (kept in
+      // userSamples across kit switches); voices without a recording fall back
+      // to the synth. The sampling interface (only on this kit) records more.
+      setVoiceSamples({...userSamplesR.current});
       setActiveKit(kit.id);
       setKitLoading(false);
       showFlash(kit.label);
@@ -4026,6 +4090,27 @@ export default function Tabula(){
     setActiveKit(kitId);
     setKitLoading(false);
     showFlash(errors.length?`${kit.label} (${errors.length} MISSING)`:kit.label);
+  };
+  // Decode a project's saved user samples (base64 WAV) back into AudioBuffers
+  // and restore the persistent userSamples map. If the project's kit is USER,
+  // also push them live so they sound immediately. Called by every load path.
+  const restoreUserSamples=(s)=>{
+    const sj=s&&s.userSamples;
+    const kitId=(s&&DRUM_KITS.find(k=>k.id===s.activeKit))?s.activeKit:DEFAULT_KIT;
+    if(!sj||typeof sj!=="object"||!Object.keys(sj).length){
+      setUserSamples({});userSamplesR.current={};
+      if(kitId==="user")setVoiceSamples({}); // clear any prior project's USER samples
+      return;
+    }
+    const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx)||new OfflineAudioContext(1,1,44100);
+    (async()=>{
+      const decoded={};
+      await Promise.all(Object.entries(sj).map(async([k,b64])=>{
+        try{decoded[k]=await ctx.decodeAudioData(base64ToAb(b64));}catch(e){console.warn("user sample decode failed",k,e);}
+      }));
+      setUserSamples(decoded);userSamplesR.current=decoded;
+      if(kitId==="user")setVoiceSamples(decoded); // USER kit → play them now
+    })();
   };
 
   // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
@@ -4065,7 +4150,10 @@ export default function Tabula(){
             const blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)||"audio/webm"});
             const ab=await blob.arrayBuffer();
             const audioBuf=await ctx.decodeAudioData(ab);
+            // Store in BOTH the live map and the persistent user-kit map so the
+            // recording survives kit switches and is saved with the project.
             setVoiceSamples(prev=>({...prev,[voiceKey]:audioBuf}));
+            setUserSamples(prev=>({...prev,[voiceKey]:audioBuf}));
             showFlash("REC OK "+voiceKey);
           }
         }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
@@ -4128,6 +4216,7 @@ export default function Tabula(){
   };
   const clearVoiceSample=(voiceKey)=>{
     setVoiceSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
+    setUserSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
   };
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
@@ -5250,13 +5339,7 @@ export default function Tabula(){
               const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
               return(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
-                {/* Drum header: active pattern name + RAND/CLR */}
-                <div style={{width:dw||"80%",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                  <span style={{fontSize:9,letterSpacing:2,color:"#c4727a",fontWeight:700,opacity:0.7}}>{drumPats.find(p=>p.id===activeDrumId)?.name||"A"}</span>
-                  <div style={{flex:1}}/>
-                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",marginRight:4}} onClick={randDrumVel}>RAND</button>
-                  <button style={{padding:"3px 10px",border:"1px solid rgba(200,185,165,0.15)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={clearDrums}>CLR</button>
-                </div>
+                {/* (RAND/CLR live in the action row — no duplicate header here.) */}
                 {/* Grid — voice labels are transparent overlays inside each row.
                     Tap a cell to toggle; click-and-drag vertically on a cell to
                     set its per-cell velocity (drag up = louder). Brightness of a
