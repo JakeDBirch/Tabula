@@ -646,7 +646,8 @@ var SESSION_DEFAULTS = Object.freeze({
   },
   songMode: false,
   songView: false,
-  songSyncMode: "sync"
+  songSyncMode: "sync",
+  songRandom: false
 });
 var vcfHz = function vcfHz(v) {
   return Math.round(20 * Math.pow(1000, v / 100));
@@ -3393,38 +3394,52 @@ function Tabula() {
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
   // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
   // paths migrate via _normalizeSongSyncMode below.
+  // Base advance mode — "sync" or "free" (mutually exclusive). RANDOM is a
+  // separate additive flag (songRandom) that layers on top of either:
+  //   sync   + random → all layers play the SAME randomly-chosen column each bar
+  //   free   + random → each layer independently jumps to a random populated bar
   var _useState167 = useState("sync"),
     _useState168 = _slicedToArray(_useState167, 2),
     songSyncMode = _useState168[0],
     setSongSyncMode = _useState168[1];
-  var _useState169 = useState({
+  var _useState169 = useState(false),
+    _useState170 = _slicedToArray(_useState169, 2),
+    songRandom = _useState170[0],
+    setSongRandom = _useState170[1];
+  var songRandomR = useRef(false);
+  var _useState171 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState170 = _slicedToArray(_useState169, 2),
-    songMatrix = _useState170[0],
-    setSongMatrix = _useState170[1];
-  var _useState171 = useState(-1),
     _useState172 = _slicedToArray(_useState171, 2),
-    songBar = _useState172[0],
-    setSongBar = _useState172[1]; // sync mode current bar; -1 when stopped
+    songMatrix = _useState172[0],
+    setSongMatrix = _useState172[1];
+  var _useState173 = useState(-1),
+    _useState174 = _slicedToArray(_useState173, 2),
+    songBar = _useState174[0],
+    setSongBar = _useState174[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState173 = useState({
+  var _useState175 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState174 = _slicedToArray(_useState173, 2),
-    songBarLayer = _useState174[0],
-    setSongBarLayer = _useState174[1];
+    _useState176 = _slicedToArray(_useState175, 2),
+    songBarLayer = _useState176[0],
+    setSongBarLayer = _useState176[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
-  // Legacy saves stored songSyncMode as boolean (true=sync, false=free). Coerce
-  // to the current string form so old projects load correctly.
+  // Legacy saves stored songSyncMode as boolean (true=sync, false=free), and
+  // later as "sync"/"free"/"random". RANDOM is now a separate flag, so the base
+  // coerces "random" → "sync" (its old behaviour was random over the shared
+  // column). _songRandomFromSave derives the additive flag.
   var _normalizeSongSyncMode = function _normalizeSongSyncMode(v) {
-    return typeof v === "boolean" ? v ? "sync" : "free" : v || "sync";
+    return typeof v === "boolean" ? v ? "sync" : "free" : v === "random" ? "sync" : v || "sync";
+  };
+  var _songRandomFromSave = function _songRandomFromSave(s) {
+    return s.songRandom != null ? !!s.songRandom : s.songSyncMode === "random";
   };
   var songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
@@ -3455,6 +3470,9 @@ function Tabula() {
   useEffect(function () {
     songSyncR.current = songSyncMode;
   }, [songSyncMode]);
+  useEffect(function () {
+    songRandomR.current = songRandom;
+  }, [songRandom]);
   useEffect(function () {
     songMatrixR.current = songMatrix;
   }, [songMatrix]);
@@ -3875,6 +3893,7 @@ function Tabula() {
       songMode: songMode,
       songView: songView,
       songSyncMode: songSyncMode,
+      songRandom: songRandom,
       activeId: activeId,
       activeDrumId: activeDrumId,
       activeSynthPhraseId: activeSynthPhraseId,
@@ -3961,6 +3980,7 @@ function Tabula() {
     if (s.songMode != null) setSongMode(s.songMode);
     if (s.songView != null) setSongView(s.songView);
     if (s.songSyncMode != null) setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
+    setSongRandom(_songRandomFromSave(s));
     setActiveId(s.activeId);
     setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);
@@ -4136,7 +4156,8 @@ function Tabula() {
               songMatrix: songMatrix,
               songMode: songMode,
               songView: songView,
-              songSyncMode: songSyncMode
+              songSyncMode: songSyncMode,
+              songRandom: songRandom
             };
             next = Object.assign({}, slotData, _defineProperty({}, slot, snap));
             setSlotData(next);
@@ -4409,6 +4430,7 @@ function Tabula() {
     setSongMode(s.songMode != null ? s.songMode : SESSION_DEFAULTS.songMode);
     setSongView(s.songView != null ? s.songView : s.songMode ? true : SESSION_DEFAULTS.songView);
     setSongSyncMode(s.songSyncMode != null ? _normalizeSongSyncMode(s.songSyncMode) : SESSION_DEFAULTS.songSyncMode);
+    setSongRandom(_songRandomFromSave(s));
     setActiveSlot(slot);
     showFlash("LOADED " + slot);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
@@ -4521,6 +4543,7 @@ function Tabula() {
     setSongMode(false);
     setSongView(false);
     setSongSyncMode("sync");
+    setSongRandom(false);
     setSongMatrix({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
@@ -4654,14 +4677,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState175 = useState(null),
-    _useState176 = _slicedToArray(_useState175, 2),
-    gridPx = _useState176[0],
-    setGridPx = _useState176[1];
   var _useState177 = useState(null),
     _useState178 = _slicedToArray(_useState177, 2),
-    editOuter = _useState178[0],
-    setEditOuter = _useState178[1];
+    gridPx = _useState178[0],
+    setGridPx = _useState178[1];
+  var _useState179 = useState(null),
+    _useState180 = _slicedToArray(_useState179, 2),
+    editOuter = _useState180[0],
+    setEditOuter = _useState180[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4731,6 +4754,7 @@ function Tabula() {
       songMode: songMode,
       songView: songView,
       songSyncMode: songSyncMode,
+      songRandom: songRandom,
       layerStore: layerStoreR.current,
       activeLayer: activeLayer
     };
@@ -4864,6 +4888,7 @@ function Tabula() {
     setSongMode(s.songMode != null ? s.songMode : SESSION_DEFAULTS.songMode);
     setSongView(s.songView != null ? s.songView : s.songMode ? true : SESSION_DEFAULTS.songView);
     setSongSyncMode(s.songSyncMode != null ? _normalizeSongSyncMode(s.songSyncMode) : SESSION_DEFAULTS.songSyncMode);
+    setSongRandom(_songRandomFromSave(s));
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
     var sharedKit = DRUM_KITS.find(function (k) {
       return k.id === s.activeKit;
@@ -5089,7 +5114,8 @@ function Tabula() {
     var inLoop = loopR.current;
     var inSong = songModeR.current && !inLoop;
     var isFree = inSong && songSyncR.current === "free";
-    var isRandom = inSong && songSyncR.current === "random";
+    // RANDOM is additive — it modifies whichever base (sync or free) is active.
+    var isRandom = inSong && songRandomR.current;
 
     // ── Layer pat resolution. Same data, different mode-dependent source.
     var sm = inSong ? songMatrixR.current : null;
@@ -5154,7 +5180,8 @@ function Tabula() {
       });
     };
 
-    // Free mode per-layer populated ranges.
+    // Free mode per-layer populated ranges (+ the explicit list of populated
+    // bars, used when RANDOM is additive over free).
     var ranges = null;
     if (isFree) {
       ranges = {};
@@ -5162,16 +5189,19 @@ function Tabula() {
         var layer = _arr2[_i6];
         var first = -1,
           last = -1;
+        var bars = [];
         for (var _i7 = 0; _i7 < 64; _i7++) {
           if (sm[layer][_i7] != null) {
             if (first === -1) first = _i7;
             last = _i7;
+            bars.push(_i7);
           }
         }
         ranges[layer] = {
           first: first,
           last: last,
-          empty: first === -1
+          empty: first === -1,
+          bars: bars
         };
       }
     }
@@ -5300,11 +5330,18 @@ function Tabula() {
         var ns = (s + 1) % len;
         lf.step = ns;
         lf.nextAt += layerStepDur;
-        // Free mode: per-layer bar advances on layer-step wrap.
+        // Free mode: per-layer bar advances on layer-step wrap. With RANDOM
+        // additive, jump to a random populated bar for this layer instead of
+        // stepping linearly — "any cell, no inter-relation between layers".
         if (isFree && ns === 0) {
           var _r5 = ranges[_layer];
-          var nb = lf.bar + 1;
-          if (nb > _r5.last) nb = _r5.empty ? 0 : _r5.first;
+          var nb;
+          if (isRandom && _r5.bars && _r5.bars.length) {
+            nb = _r5.bars[Math.floor(Math.random() * _r5.bars.length)];
+          } else {
+            nb = lf.bar + 1;
+            if (nb > _r5.last) nb = _r5.empty ? 0 : _r5.first;
+          }
           lf.bar = nb;
           if (newCursor[_layer] !== lf.bar) {
             newCursor[_layer] = lf.bar;
@@ -7698,10 +7735,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState179 = useState(false),
-    _useState180 = _slicedToArray(_useState179, 2),
-    bpmDragging = _useState180[0],
-    setBpmDragging = _useState180[1];
+  var _useState181 = useState(false),
+    _useState182 = _slicedToArray(_useState181, 2),
+    bpmDragging = _useState182[0],
+    setBpmDragging = _useState182[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -7730,10 +7767,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState181 = useState(false),
-    _useState182 = _slicedToArray(_useState181, 2),
-    stDragging = _useState182[0],
-    setStDragging = _useState182[1];
+  var _useState183 = useState(false),
+    _useState184 = _slicedToArray(_useState183, 2),
+    stDragging = _useState184[0],
+    setStDragging = _useState184[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -7762,10 +7799,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState183 = useState(false),
-    _useState184 = _slicedToArray(_useState183, 2),
-    swingDragging = _useState184[0],
-    setSwingDragging = _useState184[1];
+  var _useState185 = useState(false),
+    _useState186 = _slicedToArray(_useState185, 2),
+    swingDragging = _useState186[0],
+    setSwingDragging = _useState186[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -9459,9 +9496,10 @@ function Tabula() {
       display: "flex",
       gap: 4,
       flexShrink: 0,
-      alignSelf: "center"
+      alignSelf: "center",
+      alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref41) {
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref41) {
     var _ref42 = _slicedToArray(_ref41, 2),
       val = _ref42[0],
       lbl = _ref42[1];
@@ -9485,7 +9523,33 @@ function Tabula() {
         lineHeight: 1
       }
     }, lbl);
-  })), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 1,
+      height: 16,
+      background: "rgba(220,200,180,0.15)",
+      margin: "0 2px"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setSongRandom(function (v) {
+        return !v;
+      });
+    },
+    style: {
+      padding: "4px 14px",
+      fontSize: 9,
+      letterSpacing: 2,
+      fontWeight: 600,
+      border: "1px solid " + (songRandom ? "#c9a96e" : "rgba(220,200,180,0.12)"),
+      background: songRandom ? "rgba(201,169,110,0.12)" : "transparent",
+      color: songRandom ? "#c9a96e" : "rgba(220,200,180,0.4)",
+      borderRadius: 4,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      lineHeight: 1
+    }
+  }, "RAND")), /*#__PURE__*/React.createElement("div", {
     style: {
       width: "min(100%,calc(100dvh - 175px))",
       aspectRatio: "1",
@@ -11973,9 +12037,10 @@ function Tabula() {
       display: "flex",
       gap: 4,
       flexShrink: 0,
-      alignSelf: "center"
+      alignSelf: "center",
+      alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"], ["random", "RAND"]].map(function (_ref49) {
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref49) {
     var _ref50 = _slicedToArray(_ref49, 2),
       val = _ref50[0],
       lbl = _ref50[1];
@@ -11999,7 +12064,33 @@ function Tabula() {
         lineHeight: 1
       }
     }, lbl);
-  })), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 1,
+      height: 16,
+      background: "rgba(220,200,180,0.15)",
+      margin: "0 2px"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setSongRandom(function (v) {
+        return !v;
+      });
+    },
+    style: {
+      padding: "4px 14px",
+      fontSize: 9,
+      letterSpacing: 2,
+      fontWeight: 600,
+      border: "1px solid " + (songRandom ? "#c9a96e" : "rgba(220,200,180,0.12)"),
+      background: songRandom ? "rgba(201,169,110,0.12)" : "transparent",
+      color: songRandom ? "#c9a96e" : "rgba(220,200,180,0.4)",
+      borderRadius: 4,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      lineHeight: 1
+    }
+  }, "RAND")), /*#__PURE__*/React.createElement("div", {
     style: {
       width: "min(100%,calc(100dvh - 175px))",
       aspectRatio: "1",

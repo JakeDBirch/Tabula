@@ -312,7 +312,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
   loopMode:false, varyMode:{synth:false,lead:false,drums:false},
-  songMode:false, songView:false, songSyncMode:"sync",
+  songMode:false, songView:false, songSyncMode:"sync", songRandom:false,
 });
 
 
@@ -1772,7 +1772,13 @@ export default function Tabula(){
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
   // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
   // paths migrate via _normalizeSongSyncMode below.
+  // Base advance mode — "sync" or "free" (mutually exclusive). RANDOM is a
+  // separate additive flag (songRandom) that layers on top of either:
+  //   sync   + random → all layers play the SAME randomly-chosen column each bar
+  //   free   + random → each layer independently jumps to a random populated bar
   const [songSyncMode, setSongSyncMode] = useState("sync");
+  const [songRandom,   setSongRandom]   = useState(false);
+  const songRandomR    = useRef(false);
   const [songMatrix,   setSongMatrix]   = useState({
     synth: Array(64).fill(null),
     lead:  Array(64).fill(null),
@@ -1784,9 +1790,12 @@ export default function Tabula(){
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
   const songSyncR   = useRef("sync");
-  // Legacy saves stored songSyncMode as boolean (true=sync, false=free). Coerce
-  // to the current string form so old projects load correctly.
-  const _normalizeSongSyncMode=(v)=>typeof v==="boolean"?(v?"sync":"free"):(v||"sync");
+  // Legacy saves stored songSyncMode as boolean (true=sync, false=free), and
+  // later as "sync"/"free"/"random". RANDOM is now a separate flag, so the base
+  // coerces "random" → "sync" (its old behaviour was random over the shared
+  // column). _songRandomFromSave derives the additive flag.
+  const _normalizeSongSyncMode=(v)=>typeof v==="boolean"?(v?"sync":"free"):(v==="random"?"sync":(v||"sync"));
+  const _songRandomFromSave=(s)=>s.songRandom!=null?!!s.songRandom:(s.songSyncMode==="random");
   const songMatrixR = useRef(songMatrix);
   // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
   // so layers can drift apart by gridLen. In sync mode these are unused.
@@ -1798,6 +1807,7 @@ export default function Tabula(){
   useEffect(()=>{songBarR.current=songBar;},[songBar]);
   useEffect(()=>{songModeR.current=songMode;},[songMode]);
   useEffect(()=>{songSyncR.current=songSyncMode;},[songSyncMode]);
+  useEffect(()=>{songRandomR.current=songRandom;},[songRandom]);
   useEffect(()=>{songMatrixR.current=songMatrix;},[songMatrix]);
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
@@ -2017,7 +2027,7 @@ export default function Tabula(){
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
     songMatrix:JSON.parse(JSON.stringify(songMatrix)),
-    songMode,songView,songSyncMode,
+    songMode,songView,songSyncMode,songRandom,
     activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
@@ -2055,6 +2065,7 @@ export default function Tabula(){
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);
     if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
+    setSongRandom(_songRandomFromSave(s));
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     // Undo/redo snapshots — fall back to defaults for any field a previous
@@ -2134,7 +2145,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,activeKit,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode};
+    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,activeKit,trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);await storageSet("slots",JSON.stringify(next));setActiveSlot(slot);showFlash("SAVED "+slot);
   };
@@ -2309,6 +2320,7 @@ export default function Tabula(){
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
     setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
+    setSongRandom(_songRandomFromSave(s));
     setActiveSlot(slot);
     showFlash("LOADED "+slot);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
@@ -2357,7 +2369,7 @@ export default function Tabula(){
     setLoopMode(false);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
-    setSongMode(false);setSongView(false);setSongSyncMode("sync");
+    setSongMode(false);setSongView(false);setSongSyncMode("sync");setSongRandom(false);
     setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),drums:Array(64).fill(null)});
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
@@ -2438,7 +2450,7 @@ export default function Tabula(){
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,varyMode,drumPats,activeDrumId,drumChain,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songView,songSyncMode,layerStore:layerStoreR.current,activeLayer
+    songMatrix,songMode,songView,songSyncMode,songRandom,layerStore:layerStoreR.current,activeLayer
   });
 
   const applyShareState=rawState=>{
@@ -2517,6 +2529,7 @@ export default function Tabula(){
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
     setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
+    setSongRandom(_songRandomFromSave(s));
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
     const sharedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
     loadKit(sharedKit).catch(()=>{});
@@ -2682,7 +2695,8 @@ export default function Tabula(){
     const inLoop=loopR.current;
     const inSong=songModeR.current&&!inLoop;
     const isFree=inSong&&songSyncR.current==="free";
-    const isRandom=inSong&&songSyncR.current==="random";
+    // RANDOM is additive — it modifies whichever base (sync or free) is active.
+    const isRandom=inSong&&songRandomR.current;
 
     // ── Layer pat resolution. Same data, different mode-dependent source.
     const sm=inSong?songMatrixR.current:null;
@@ -2721,14 +2735,15 @@ export default function Tabula(){
       return data.pats.find(x=>x.id===data.activeId);
     };
 
-    // Free mode per-layer populated ranges.
+    // Free mode per-layer populated ranges (+ the explicit list of populated
+    // bars, used when RANDOM is additive over free).
     let ranges=null;
     if(isFree){
       ranges={};
       for(const layer of ["synth","lead","drums"]){
-        let first=-1,last=-1;
-        for(let i=0;i<64;i++){if(sm[layer][i]!=null){if(first===-1)first=i;last=i;}}
-        ranges[layer]={first,last,empty:first===-1};
+        let first=-1,last=-1;const bars=[];
+        for(let i=0;i<64;i++){if(sm[layer][i]!=null){if(first===-1)first=i;last=i;bars.push(i);}}
+        ranges[layer]={first,last,empty:first===-1,bars};
       }
     }
 
@@ -2812,11 +2827,18 @@ export default function Tabula(){
         const ns=(s+1)%len;
         lf.step=ns;
         lf.nextAt+=layerStepDur;
-        // Free mode: per-layer bar advances on layer-step wrap.
+        // Free mode: per-layer bar advances on layer-step wrap. With RANDOM
+        // additive, jump to a random populated bar for this layer instead of
+        // stepping linearly — "any cell, no inter-relation between layers".
         if(isFree&&ns===0){
           const r=ranges[layer];
-          let nb=lf.bar+1;
-          if(nb>r.last)nb=r.empty?0:r.first;
+          let nb;
+          if(isRandom&&r.bars&&r.bars.length){
+            nb=r.bars[Math.floor(Math.random()*r.bars.length)];
+          } else {
+            nb=lf.bar+1;
+            if(nb>r.last)nb=r.empty?0:r.first;
+          }
           lf.bar=nb;
           if(newCursor[layer]!==lf.bar){newCursor[layer]=lf.bar;cursorChanged=true;}
         }
@@ -4721,9 +4743,11 @@ export default function Tabula(){
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                {/* SYNC | FREE toggle — controls per-layer cursor independence */}
-                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
-                  {[["sync","SYNC"],["free","FREE"],["random","RAND"]].map(([val,lbl])=>{
+                {/* SYNC|FREE (exclusive base) + RAND (additive). RAND over SYNC
+                    cycles a random shared column each bar; RAND over FREE jumps
+                    each layer to a random populated bar independently. */}
+                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center",alignItems:"center"}}>
+                  {[["sync","SYNC"],["free","FREE"]].map(([val,lbl])=>{
                     const sel=songSyncMode===val;
                     return(
                       <button key={lbl} onClick={()=>setSongSyncMode(val)}
@@ -4732,6 +4756,11 @@ export default function Tabula(){
                       </button>
                     );
                   })}
+                  <div style={{width:1,height:16,background:"rgba(220,200,180,0.15)",margin:"0 2px"}}/>
+                  <button onClick={()=>setSongRandom(v=>!v)}
+                    style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(songRandom?"#c9a96e":"rgba(220,200,180,0.12)"),background:songRandom?"rgba(201,169,110,0.12)":"transparent",color:songRandom?"#c9a96e":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
+                    RAND
+                  </button>
                 </div>
                 <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
@@ -5616,9 +5645,11 @@ export default function Tabula(){
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                {/* SYNC | FREE toggle — controls per-layer cursor independence */}
-                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center"}}>
-                  {[["sync","SYNC"],["free","FREE"],["random","RAND"]].map(([val,lbl])=>{
+                {/* SYNC|FREE (exclusive base) + RAND (additive). RAND over SYNC
+                    cycles a random shared column each bar; RAND over FREE jumps
+                    each layer to a random populated bar independently. */}
+                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center",alignItems:"center"}}>
+                  {[["sync","SYNC"],["free","FREE"]].map(([val,lbl])=>{
                     const sel=songSyncMode===val;
                     return(
                       <button key={lbl} onClick={()=>setSongSyncMode(val)}
@@ -5627,6 +5658,11 @@ export default function Tabula(){
                       </button>
                     );
                   })}
+                  <div style={{width:1,height:16,background:"rgba(220,200,180,0.15)",margin:"0 2px"}}/>
+                  <button onClick={()=>setSongRandom(v=>!v)}
+                    style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(songRandom?"#c9a96e":"rgba(220,200,180,0.12)"),background:songRandom?"rgba(201,169,110,0.12)":"transparent",color:songRandom?"#c9a96e":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
+                    RAND
+                  </button>
                 </div>
                 <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
