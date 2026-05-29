@@ -373,6 +373,14 @@ var mkDrumPat = function mkDrumPat(name) {
     speedMult: 1
   };
 };
+// Continuous drum-mix params that support motion automation (the slider ones;
+// the FILT mode chip is excluded). pat.motion[param] is a lazily-created
+// ROWS×COLS grid of number|null — null = "use the base mix value at this step".
+var MOTION_PARAMS = ["level", "pan", "rvSend", "dlySend", "pitch", "env", "sat", "filtCut"];
+var motionValAt = function motionValAt(pat, param, r, s) {
+  var m = pat && pat.motion && pat.motion[param];
+  return m && m[r] && m[r][s] != null ? m[r][s] : null;
+};
 // Default drum voice level — 60% sits well below the "unity" mark so users
 // have plenty of headroom to push voices up rather than only being able to
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
@@ -2713,14 +2721,50 @@ function Tabula() {
     _useState12 = _slicedToArray(_useState11, 2),
     drumStep = _useState12[0],
     setDrumStep = _useState12[1];
+  useEffect(function () {
+    drumStepR.current = drumStep;
+  }, [drumStep]);
+
+  // ── Motion mixer (drum mix automation) ───────────────────────────────────
+  // motionEnabled: performance mode — the drum mixer is driven by the
+  //   sequence (base mix + any recorded per-step automation). Dragging a
+  //   slider live-overrides the audio without persisting.
+  // motionRec: while on (and playing), holding a slider WRITES its value onto
+  //   the step(s) that play during the hold — per-step automation.
+  var _useState13 = useState(false),
+    _useState14 = _slicedToArray(_useState13, 2),
+    motionEnabled = _useState14[0],
+    setMotionEnabled = _useState14[1];
+  var _useState15 = useState(false),
+    _useState16 = _slicedToArray(_useState15, 2),
+    motionRec = _useState16[0],
+    setMotionRec = _useState16[1];
+  var motionEnabledR = useRef(false);
+  useEffect(function () {
+    motionEnabledR.current = motionEnabled;
+  }, [motionEnabled]);
+  var motionRecR = useRef(false);
+  useEffect(function () {
+    motionRecR.current = motionRec;
+  }, [motionRec]);
+  // Transient performance overrides during an active slider drag (motion mode).
+  // Shape {[row]:{[param]:val}}. Drives the slider position + live audio; not
+  // persisted. Cleared on release.
+  var _useState17 = useState({}),
+    _useState18 = _slicedToArray(_useState17, 2),
+    perfMix = _useState18[0],
+    setPerfMix = _useState18[1];
+  // The currently-held record drag: {row,param,val} or null. The drumStep
+  // effect below writes it onto each step as playback advances.
+  var recDragR = useRef(null);
 
   // Track window width to drive responsive left column layout
   // Use ResizeObserver on the layout container — works inside iframes too
   var layoutRef = useRef(null);
-  var _useState13 = useState(1200),
-    _useState14 = _slicedToArray(_useState13, 2),
-    winW = _useState14[0],
-    setWinW = _useState14[1];
+  var _useState19 = useState(1200),
+    _useState20 = _slicedToArray(_useState19, 2),
+    winW = _useState20[0],
+    setWinW = _useState20[1];
   useEffect(function () {
     if (!layoutRef.current) return;
     var ro = new ResizeObserver(function (entries) {
@@ -2731,160 +2775,160 @@ function Tabula() {
       return ro.disconnect();
     };
   }, []);
-  var _useState15 = useState("major"),
-    _useState16 = _slicedToArray(_useState15, 2),
-    scale = _useState16[0],
-    setScale = _useState16[1];
-  var _useState17 = useState(false),
-    _useState18 = _slicedToArray(_useState17, 2),
-    playing = _useState18[0],
-    setPlaying = _useState18[1];
-  var _useState19 = useState(-1),
-    _useState20 = _slicedToArray(_useState19, 2),
-    step = _useState20[0],
-    setStep = _useState20[1];
-  var _useState21 = useState(null),
+  var _useState21 = useState("major"),
     _useState22 = _slicedToArray(_useState21, 2),
-    playId = _useState22[0],
-    setPlayId = _useState22[1];
+    scale = _useState22[0],
+    setScale = _useState22[1];
   var _useState23 = useState(false),
     _useState24 = _slicedToArray(_useState23, 2),
-    loopMode = _useState24[0],
-    setLoopMode = _useState24[1];
-  var _useState25 = useState(false),
+    playing = _useState24[0],
+    setPlaying = _useState24[1];
+  var _useState25 = useState(-1),
     _useState26 = _slicedToArray(_useState25, 2),
-    followSeq = _useState26[0],
-    setFollowSeq = _useState26[1];
-  var _useState27 = useState(0),
+    step = _useState26[0],
+    setStep = _useState26[1];
+  var _useState27 = useState(null),
     _useState28 = _slicedToArray(_useState27, 2),
-    transpose = _useState28[0],
-    setTranspose = _useState28[1];
-  var _useState29 = useState(null),
+    playId = _useState28[0],
+    setPlayId = _useState28[1];
+  var _useState29 = useState(false),
     _useState30 = _slicedToArray(_useState29, 2),
-    clipboard = _useState30[0],
-    setClipboard = _useState30[1];
-  var _useState31 = useState({
+    loopMode = _useState30[0],
+    setLoopMode = _useState30[1];
+  var _useState31 = useState(false),
+    _useState32 = _slicedToArray(_useState31, 2),
+    followSeq = _useState32[0],
+    setFollowSeq = _useState32[1];
+  var _useState33 = useState(0),
+    _useState34 = _slicedToArray(_useState33, 2),
+    transpose = _useState34[0],
+    setTranspose = _useState34[1];
+  var _useState35 = useState(null),
+    _useState36 = _slicedToArray(_useState35, 2),
+    clipboard = _useState36[0],
+    setClipboard = _useState36[1];
+  var _useState37 = useState({
       S1: null,
       S2: null,
       S3: null,
       S4: null
     }),
-    _useState32 = _slicedToArray(_useState31, 2),
-    slotData = _useState32[0],
-    setSlotData = _useState32[1];
+    _useState38 = _slicedToArray(_useState37, 2),
+    slotData = _useState38[0],
+    setSlotData = _useState38[1];
   // Most recently loaded/saved slot — shown highlighted so the user can see
   // which slot's project is currently in memory and avoid overwriting the
   // wrong one. Resets to null on page reload (not persisted).
-  var _useState33 = useState(null),
-    _useState34 = _slicedToArray(_useState33, 2),
-    activeSlot = _useState34[0],
-    setActiveSlot = _useState34[1];
-  var _useState35 = useState(""),
-    _useState36 = _slicedToArray(_useState35, 2),
-    flash = _useState36[0],
-    setFlash = _useState36[1];
-  var _useState37 = useState(null),
-    _useState38 = _slicedToArray(_useState37, 2),
-    confirmAction = _useState38[0],
-    setConfirmAction = _useState38[1];
   var _useState39 = useState(null),
     _useState40 = _slicedToArray(_useState39, 2),
-    activeSheet = _useState40[0],
-    setActiveSheet = _useState40[1]; // "tempo"|"pattern"|"sound"|"project"|"vary"
-  var _useState41 = useState(null),
+    activeSlot = _useState40[0],
+    setActiveSlot = _useState40[1];
+  var _useState41 = useState(""),
     _useState42 = _slicedToArray(_useState41, 2),
-    seqDrag = _useState42[0],
-    setSeqDrag = _useState42[1]; // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+    flash = _useState42[0],
+    setFlash = _useState42[1];
   var _useState43 = useState(null),
     _useState44 = _slicedToArray(_useState43, 2),
-    sheetDrag = _useState44[0],
-    setSheetDrag = _useState44[1]; // mobile sequence drawer drag: {type, id, name, color, x, y}
+    confirmAction = _useState44[0],
+    setConfirmAction = _useState44[1];
+  var _useState45 = useState(null),
+    _useState46 = _slicedToArray(_useState45, 2),
+    activeSheet = _useState46[0],
+    setActiveSheet = _useState46[1]; // "tempo"|"pattern"|"sound"|"project"|"vary"
+  var _useState47 = useState(null),
+    _useState48 = _slicedToArray(_useState47, 2),
+    seqDrag = _useState48[0],
+    setSeqDrag = _useState48[1]; // {type:"source"|"chain", patId, chainIdx, x, y, overTrack, insertIdx}
+  var _useState49 = useState(null),
+    _useState50 = _slicedToArray(_useState49, 2),
+    sheetDrag = _useState50[0],
+    setSheetDrag = _useState50[1]; // mobile sequence drawer drag: {type, id, name, color, x, y}
   var seqDragR = useRef(null);
   var seqTrackRef = useRef(null);
-  var _useState45 = useState(""),
-    _useState46 = _slicedToArray(_useState45, 2),
-    shareFlash = _useState46[0],
-    setShareFlash = _useState46[1];
+  var _useState51 = useState(""),
+    _useState52 = _slicedToArray(_useState51, 2),
+    shareFlash = _useState52[0],
+    setShareFlash = _useState52[1];
   var importRef = useRef(null);
-  var _useState47 = useState(false),
-    _useState48 = _slicedToArray(_useState47, 2),
-    shifting = _useState48[0],
-    setShifting = _useState48[1];
+  var _useState53 = useState(false),
+    _useState54 = _slicedToArray(_useState53, 2),
+    shifting = _useState54[0],
+    setShifting = _useState54[1];
   // VARY is per-layer now — each layer toggles independently. Normalizer
   // upgrades legacy boolean saves (apply to all layers) to the object shape.
-  var _useState49 = useState({
+  var _useState55 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
-    _useState50 = _slicedToArray(_useState49, 2),
-    varyMode = _useState50[0],
-    setVaryMode = _useState50[1];
-  var _useState51 = useState(false),
-    _useState52 = _slicedToArray(_useState51, 2),
-    recMode = _useState52[0],
-    setRecMode = _useState52[1];
+    _useState56 = _slicedToArray(_useState55, 2),
+    varyMode = _useState56[0],
+    setVaryMode = _useState56[1];
+  var _useState57 = useState(false),
+    _useState58 = _slicedToArray(_useState57, 2),
+    recMode = _useState58[0],
+    setRecMode = _useState58[1];
   // Internal sampler — per-drum-voice user-recorded AudioBuffer. Stored in
   // state so the UI can show "loaded" indicators; mirrored to voiceSamplesR
   // for the scheduler to read without stale-closure issues. Session-only —
   // not persisted to save slots (would bloat them with binary audio data).
-  var _useState53 = useState({}),
-    _useState54 = _slicedToArray(_useState53, 2),
-    voiceSamples = _useState54[0],
-    setVoiceSamples = _useState54[1];
+  var _useState59 = useState({}),
+    _useState60 = _slicedToArray(_useState59, 2),
+    voiceSamples = _useState60[0],
+    setVoiceSamples = _useState60[1];
   var voiceSamplesR = useRef({});
-  var _useState55 = useState(null),
-    _useState56 = _slicedToArray(_useState55, 2),
-    recordingVoice = _useState56[0],
-    setRecordingVoice = _useState56[1];
+  var _useState61 = useState(null),
+    _useState62 = _slicedToArray(_useState61, 2),
+    recordingVoice = _useState62[0],
+    setRecordingVoice = _useState62[1];
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
   // that don't come from a kit — loading a kit replaces them all.
-  var _useState57 = useState(DEFAULT_KIT),
-    _useState58 = _slicedToArray(_useState57, 2),
-    activeKit = _useState58[0],
-    setActiveKit = _useState58[1];
-  var _useState59 = useState(false),
-    _useState60 = _slicedToArray(_useState59, 2),
-    kitLoading = _useState60[0],
-    setKitLoading = _useState60[1];
-  var recorderRef = useRef(null);
-  var recordStreamRef = useRef(null);
-  var _useState61 = useState(0),
-    _useState62 = _slicedToArray(_useState61, 2),
-    swing = _useState62[0],
-    setSwing = _useState62[1]; // 0–100, 0=straight, 100=full triplet swing
-  var swingR = useRef(0);
-  var gridLenR = useRef(16);
-  var _useState63 = useState(1),
+  var _useState63 = useState(DEFAULT_KIT),
     _useState64 = _slicedToArray(_useState63, 2),
-    speedMult = _useState64[0],
-    setSpeedMult = _useState64[1];
-  var speedMultR = useRef(1);
+    activeKit = _useState64[0],
+    setActiveKit = _useState64[1];
   var _useState65 = useState(false),
     _useState66 = _slicedToArray(_useState65, 2),
-    showMenu = _useState66[0],
-    setShowMenu = _useState66[1];
-  var _useState67 = useState(false),
+    kitLoading = _useState66[0],
+    setKitLoading = _useState66[1];
+  var recorderRef = useRef(null);
+  var recordStreamRef = useRef(null);
+  var _useState67 = useState(0),
     _useState68 = _slicedToArray(_useState67, 2),
-    topTrayOpen = _useState68[0],
-    setTopTrayOpen = _useState68[1];
-  var _useState69 = useState(false),
+    swing = _useState68[0],
+    setSwing = _useState68[1]; // 0–100, 0=straight, 100=full triplet swing
+  var swingR = useRef(0);
+  var gridLenR = useRef(16);
+  var _useState69 = useState(1),
     _useState70 = _slicedToArray(_useState69, 2),
-    bottomTrayOpen = _useState70[0],
-    setBottomTrayOpen = _useState70[1];
-  var _useState71 = useState(null),
+    speedMult = _useState70[0],
+    setSpeedMult = _useState70[1];
+  var speedMultR = useRef(1);
+  var _useState71 = useState(false),
     _useState72 = _slicedToArray(_useState71, 2),
-    patMenu = _useState72[0],
-    setPatMenu = _useState72[1]; // {id, x, y}
-  var _useState73 = useState(null),
+    showMenu = _useState72[0],
+    setShowMenu = _useState72[1];
+  var _useState73 = useState(false),
     _useState74 = _slicedToArray(_useState73, 2),
-    drumMenu = _useState74[0],
-    setDrumMenu = _useState74[1]; // {id, x, y}
-  var _useState75 = useState(null),
+    topTrayOpen = _useState74[0],
+    setTopTrayOpen = _useState74[1];
+  var _useState75 = useState(false),
     _useState76 = _slicedToArray(_useState75, 2),
-    paramPopup = _useState76[0],
-    setParamPopup = _useState76[1]; // {col,x,y,activeArm,values}
+    bottomTrayOpen = _useState76[0],
+    setBottomTrayOpen = _useState76[1];
+  var _useState77 = useState(null),
+    _useState78 = _slicedToArray(_useState77, 2),
+    patMenu = _useState78[0],
+    setPatMenu = _useState78[1]; // {id, x, y}
+  var _useState79 = useState(null),
+    _useState80 = _slicedToArray(_useState79, 2),
+    drumMenu = _useState80[0],
+    setDrumMenu = _useState80[1]; // {id, x, y}
+  var _useState81 = useState(null),
+    _useState82 = _slicedToArray(_useState81, 2),
+    paramPopup = _useState82[0],
+    setParamPopup = _useState82[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var varyLongPressR = useRef(null);
@@ -2893,69 +2937,69 @@ function Tabula() {
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState77 = useState(null),
-    _useState78 = _slicedToArray(_useState77, 2),
-    chainDrag = _useState78[0],
-    setChainDrag = _useState78[1]; // {type,id,fromIdx,x,y}
+  var _useState83 = useState(null),
+    _useState84 = _slicedToArray(_useState83, 2),
+    chainDrag = _useState84[0],
+    setChainDrag = _useState84[1]; // {type,id,fromIdx,x,y}
   var chainStripRef = useRef(null);
   var chainDragR = useRef(null); // mirror of chainDrag for handlers
-  var _useState79 = useState(null),
-    _useState80 = _slicedToArray(_useState79, 2),
-    patternDrag = _useState80[0],
-    setPatternDrag = _useState80[1]; // {patId, name, accent, x, y, overDrop}
-  // Vary params
-  var _useState81 = useState(13),
-    _useState82 = _slicedToArray(_useState81, 2),
-    vDropRate = _useState82[0],
-    setVDropRate = _useState82[1];
-  var _useState83 = useState(17),
-    _useState84 = _slicedToArray(_useState83, 2),
-    vShiftRate = _useState84[0],
-    setVShiftRate = _useState84[1];
-  var _useState85 = useState(1),
+  var _useState85 = useState(null),
     _useState86 = _slicedToArray(_useState85, 2),
-    vShiftRange = _useState86[0],
-    setVShiftRange = _useState86[1];
-  var _useState87 = useState(0),
+    patternDrag = _useState86[0],
+    setPatternDrag = _useState86[1]; // {patId, name, accent, x, y, overDrop}
+  // Vary params
+  var _useState87 = useState(13),
     _useState88 = _slicedToArray(_useState87, 2),
-    vPitchRate = _useState88[0],
-    setVPitchRate = _useState88[1];
-  var _useState89 = useState(1),
+    vDropRate = _useState88[0],
+    setVDropRate = _useState88[1];
+  var _useState89 = useState(17),
     _useState90 = _slicedToArray(_useState89, 2),
-    vPitchRange = _useState90[0],
-    setVPitchRange = _useState90[1];
-  var _useState91 = useState(0),
+    vShiftRate = _useState90[0],
+    setVShiftRate = _useState90[1];
+  var _useState91 = useState(1),
     _useState92 = _slicedToArray(_useState91, 2),
-    vGhostRate = _useState92[0],
-    setVGhostRate = _useState92[1];
+    vShiftRange = _useState92[0],
+    setVShiftRange = _useState92[1];
   var _useState93 = useState(0),
     _useState94 = _slicedToArray(_useState93, 2),
-    vVelJitter = _useState94[0],
-    setVVelJitter = _useState94[1];
-  var _useState95 = useState(0),
+    vPitchRate = _useState94[0],
+    setVPitchRate = _useState94[1];
+  var _useState95 = useState(1),
     _useState96 = _slicedToArray(_useState95, 2),
-    vFltJitter = _useState96[0],
-    setVFltJitter = _useState96[1];
+    vPitchRange = _useState96[0],
+    setVPitchRange = _useState96[1];
   var _useState97 = useState(0),
     _useState98 = _slicedToArray(_useState97, 2),
-    vDlyJitter = _useState98[0],
-    setVDlyJitter = _useState98[1];
+    vGhostRate = _useState98[0],
+    setVGhostRate = _useState98[1];
   var _useState99 = useState(0),
     _useState100 = _slicedToArray(_useState99, 2),
-    vRhyJitter = _useState100[0],
-    setVRhyJitter = _useState100[1];
+    vVelJitter = _useState100[0],
+    setVVelJitter = _useState100[1];
   var _useState101 = useState(0),
     _useState102 = _slicedToArray(_useState101, 2),
-    vOctJitter = _useState102[0],
-    setVOctJitter = _useState102[1];
+    vFltJitter = _useState102[0],
+    setVFltJitter = _useState102[1];
   var _useState103 = useState(0),
     _useState104 = _slicedToArray(_useState103, 2),
-    vGlideJitter = _useState104[0],
-    setVGlideJitter = _useState104[1];
+    vDlyJitter = _useState104[0],
+    setVDlyJitter = _useState104[1];
   var _useState105 = useState(0),
     _useState106 = _slicedToArray(_useState105, 2),
-    vDurJitter = _useState106[0],
-    setVDurJitter = _useState106[1];
+    vRhyJitter = _useState106[0],
+    setVRhyJitter = _useState106[1];
+  var _useState107 = useState(0),
+    _useState108 = _slicedToArray(_useState107, 2),
+    vOctJitter = _useState108[0],
+    setVOctJitter = _useState108[1];
+  var _useState109 = useState(0),
+    _useState110 = _slicedToArray(_useState109, 2),
+    vGlideJitter = _useState110[0],
+    setVGlideJitter = _useState110[1];
+  var _useState111 = useState(0),
+    _useState112 = _slicedToArray(_useState111, 2),
+    vDurJitter = _useState112[0],
+    setVDurJitter = _useState112[1];
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -3021,13 +3065,13 @@ function Tabula() {
       })
     };
   };
-  var _useState107 = useState({
+  var _useState113 = useState({
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
-    _useState108 = _slicedToArray(_useState107, 2),
-    layerParams = _useState108[0],
-    setLayerParams = _useState108[1];
+    _useState114 = _slicedToArray(_useState113, 2),
+    layerParams = _useState114[0],
+    setLayerParams = _useState114[1];
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
@@ -3087,70 +3131,70 @@ function Tabula() {
     setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
-  var _useState109 = useState(3),
-    _useState110 = _slicedToArray(_useState109, 2),
-    dlyIdx = _useState110[0],
-    setDlyIdx = _useState110[1];
-  var _useState111 = useState(45),
-    _useState112 = _slicedToArray(_useState111, 2),
-    dlyFbPct = _useState112[0],
-    setDlyFbPct = _useState112[1];
-  var _useState113 = useState(8),
-    _useState114 = _slicedToArray(_useState113, 2),
-    dlyHpVal = _useState114[0],
-    setDlyHpVal = _useState114[1];
-  var _useState115 = useState(78),
+  var _useState115 = useState(3),
     _useState116 = _slicedToArray(_useState115, 2),
-    dlyLpVal = _useState116[0],
-    setDlyLpVal = _useState116[1];
+    dlyIdx = _useState116[0],
+    setDlyIdx = _useState116[1];
+  var _useState117 = useState(45),
+    _useState118 = _slicedToArray(_useState117, 2),
+    dlyFbPct = _useState118[0],
+    setDlyFbPct = _useState118[1];
+  var _useState119 = useState(8),
+    _useState120 = _slicedToArray(_useState119, 2),
+    dlyHpVal = _useState120[0],
+    setDlyHpVal = _useState120[1];
+  var _useState121 = useState(78),
+    _useState122 = _slicedToArray(_useState121, 2),
+    dlyLpVal = _useState122[0],
+    setDlyLpVal = _useState122[1];
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  var _useState117 = useState(50),
-    _useState118 = _slicedToArray(_useState117, 2),
-    rvSize = _useState118[0],
-    setRvSize = _useState118[1]; // comb feedback (0..100)
-  var _useState119 = useState(40),
-    _useState120 = _slicedToArray(_useState119, 2),
-    rvDamp = _useState120[0],
-    setRvDamp = _useState120[1]; // HF damp shelf cut (0=none, 100=full)
-  var _useState121 = useState(0),
-    _useState122 = _slicedToArray(_useState121, 2),
-    rvLfDamp = _useState122[0],
-    setRvLfDamp = _useState122[1]; // LF damp shelf cut (0=none, 100=full)
-  var _useState123 = useState(0),
+  var _useState123 = useState(50),
     _useState124 = _slicedToArray(_useState123, 2),
-    rvPreDelay = _useState124[0],
-    setRvPreDelay = _useState124[1]; // pre-delay (ms, 0..500)
-  var _useState125 = useState(0),
+    rvSize = _useState124[0],
+    setRvSize = _useState124[1]; // comb feedback (0..100)
+  var _useState125 = useState(40),
     _useState126 = _slicedToArray(_useState125, 2),
-    dlyToRev = _useState126[0],
-    setDlyToRev = _useState126[1]; // delay output → reverb input send
+    rvDamp = _useState126[0],
+    setRvDamp = _useState126[1]; // HF damp shelf cut (0=none, 100=full)
+  var _useState127 = useState(0),
+    _useState128 = _slicedToArray(_useState127, 2),
+    rvLfDamp = _useState128[0],
+    setRvLfDamp = _useState128[1]; // LF damp shelf cut (0=none, 100=full)
+  var _useState129 = useState(0),
+    _useState130 = _slicedToArray(_useState129, 2),
+    rvPreDelay = _useState130[0],
+    setRvPreDelay = _useState130[1]; // pre-delay (ms, 0..500)
+  var _useState131 = useState(0),
+    _useState132 = _slicedToArray(_useState131, 2),
+    dlyToRev = _useState132[0],
+    setDlyToRev = _useState132[1]; // delay output → reverb input send
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState127 = useState(85),
-    _useState128 = _slicedToArray(_useState127, 2),
-    drumLevel = _useState128[0],
-    setDrumLevel = _useState128[1];
+  var _useState133 = useState(85),
+    _useState134 = _slicedToArray(_useState133, 2),
+    drumLevel = _useState134[0],
+    setDrumLevel = _useState134[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
-  var _useState129 = useState({
+  var _useState135 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
-    _useState130 = _slicedToArray(_useState129, 2),
-    trackMute = _useState130[0],
-    setTrackMute = _useState130[1];
-  var _useState131 = useState({
+    _useState136 = _slicedToArray(_useState135, 2),
+    trackMute = _useState136[0],
+    setTrackMute = _useState136[1];
+  var _useState137 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
-    _useState132 = _slicedToArray(_useState131, 2),
-    trackSolo = _useState132[0],
-    setTrackSolo = _useState132[1];
+    _useState138 = _slicedToArray(_useState137, 2),
+    trackSolo = _useState138[0],
+    setTrackSolo = _useState138[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -3178,64 +3222,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState133 = useState([initDrum]),
-    _useState134 = _slicedToArray(_useState133, 2),
-    drumPats = _useState134[0],
-    setDrumPats = _useState134[1];
-  var _useState135 = useState(initDrum.id),
-    _useState136 = _slicedToArray(_useState135, 2),
-    activeDrumId = _useState136[0],
-    setActiveDrumId = _useState136[1];
-  var _useState137 = useState([initDrum.id]),
-    _useState138 = _slicedToArray(_useState137, 2),
-    drumChain = _useState138[0],
-    setDrumChain = _useState138[1];
-  var _useState139 = useState(null),
+  var _useState139 = useState([initDrum]),
     _useState140 = _slicedToArray(_useState139, 2),
-    drumClipboard = _useState140[0],
-    setDrumClipboard = _useState140[1];
+    drumPats = _useState140[0],
+    setDrumPats = _useState140[1];
+  var _useState141 = useState(initDrum.id),
+    _useState142 = _slicedToArray(_useState141, 2),
+    activeDrumId = _useState142[0],
+    setActiveDrumId = _useState142[1];
+  var _useState143 = useState([initDrum.id]),
+    _useState144 = _slicedToArray(_useState143, 2),
+    drumChain = _useState144[0],
+    setDrumChain = _useState144[1];
+  var _useState145 = useState(null),
+    _useState146 = _slicedToArray(_useState145, 2),
+    drumClipboard = _useState146[0],
+    setDrumClipboard = _useState146[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState141 = useState([{
+  var _useState147 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState142 = _slicedToArray(_useState141, 2),
-    synthPhrases = _useState142[0],
-    setSynthPhrases = _useState142[1];
-  var _useState143 = useState([{
+    _useState148 = _slicedToArray(_useState147, 2),
+    synthPhrases = _useState148[0],
+    setSynthPhrases = _useState148[1];
+  var _useState149 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState144 = _slicedToArray(_useState143, 2),
-    drumPhrases = _useState144[0],
-    setDrumPhrases = _useState144[1];
-  var _useState145 = useState([{
+    _useState150 = _slicedToArray(_useState149, 2),
+    drumPhrases = _useState150[0],
+    setDrumPhrases = _useState150[1];
+  var _useState151 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
-    _useState146 = _slicedToArray(_useState145, 2),
-    sections = _useState146[0],
-    setSections = _useState146[1];
-  var _useState147 = useState("SP1"),
-    _useState148 = _slicedToArray(_useState147, 2),
-    activeSynthPhraseId = _useState148[0],
-    setActiveSynthPhraseId = _useState148[1];
-  var _useState149 = useState("DP1"),
-    _useState150 = _slicedToArray(_useState149, 2),
-    activeDrumPhraseId = _useState150[0],
-    setActiveDrumPhraseId = _useState150[1];
-  var _useState151 = useState("SC1"),
     _useState152 = _slicedToArray(_useState151, 2),
-    activeSectionId = _useState152[0],
-    setActiveSectionId = _useState152[1];
-  var _useState153 = useState("patterns"),
+    sections = _useState152[0],
+    setSections = _useState152[1];
+  var _useState153 = useState("SP1"),
     _useState154 = _slicedToArray(_useState153, 2),
-    seqTab = _useState154[0],
-    setSeqTab = _useState154[1]; // "patterns"|"phrases"|"sections"
+    activeSynthPhraseId = _useState154[0],
+    setActiveSynthPhraseId = _useState154[1];
+  var _useState155 = useState("DP1"),
+    _useState156 = _slicedToArray(_useState155, 2),
+    activeDrumPhraseId = _useState156[0],
+    setActiveDrumPhraseId = _useState156[1];
+  var _useState157 = useState("SC1"),
+    _useState158 = _slicedToArray(_useState157, 2),
+    activeSectionId = _useState158[0],
+    setActiveSectionId = _useState158[1];
+  var _useState159 = useState("patterns"),
+    _useState160 = _slicedToArray(_useState159, 2),
+    seqTab = _useState160[0],
+    setSeqTab = _useState160[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -3288,57 +3332,57 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState155 = useState("sequence"),
-    _useState156 = _slicedToArray(_useState155, 2),
-    seqPage = _useState156[0],
-    setSeqPage = _useState156[1]; // "sequence"|"step"
+  var _useState161 = useState("sequence"),
+    _useState162 = _slicedToArray(_useState161, 2),
+    seqPage = _useState162[0],
+    setSeqPage = _useState162[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState157 = useState(false),
-    _useState158 = _slicedToArray(_useState157, 2),
-    songMode = _useState158[0],
-    setSongMode = _useState158[1];
+  var _useState163 = useState(false),
+    _useState164 = _slicedToArray(_useState163, 2),
+    songMode = _useState164[0],
+    setSongMode = _useState164[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState159 = useState(false),
-    _useState160 = _slicedToArray(_useState159, 2),
-    songView = _useState160[0],
-    setSongView = _useState160[1];
+  var _useState165 = useState(false),
+    _useState166 = _slicedToArray(_useState165, 2),
+    songView = _useState166[0],
+    setSongView = _useState166[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
   // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
   // paths migrate via _normalizeSongSyncMode below.
-  var _useState161 = useState("sync"),
-    _useState162 = _slicedToArray(_useState161, 2),
-    songSyncMode = _useState162[0],
-    setSongSyncMode = _useState162[1];
-  var _useState163 = useState({
+  var _useState167 = useState("sync"),
+    _useState168 = _slicedToArray(_useState167, 2),
+    songSyncMode = _useState168[0],
+    setSongSyncMode = _useState168[1];
+  var _useState169 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState164 = _slicedToArray(_useState163, 2),
-    songMatrix = _useState164[0],
-    setSongMatrix = _useState164[1];
-  var _useState165 = useState(-1),
-    _useState166 = _slicedToArray(_useState165, 2),
-    songBar = _useState166[0],
-    setSongBar = _useState166[1]; // sync mode current bar; -1 when stopped
+    _useState170 = _slicedToArray(_useState169, 2),
+    songMatrix = _useState170[0],
+    setSongMatrix = _useState170[1];
+  var _useState171 = useState(-1),
+    _useState172 = _slicedToArray(_useState171, 2),
+    songBar = _useState172[0],
+    setSongBar = _useState172[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState167 = useState({
+  var _useState173 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState168 = _slicedToArray(_useState167, 2),
-    songBarLayer = _useState168[0],
-    setSongBarLayer = _useState168[1];
+    _useState174 = _slicedToArray(_useState173, 2),
+    songBarLayer = _useState174[0],
+    setSongBarLayer = _useState174[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -4575,14 +4619,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState169 = useState(null),
-    _useState170 = _slicedToArray(_useState169, 2),
-    gridPx = _useState170[0],
-    setGridPx = _useState170[1];
-  var _useState171 = useState(null),
-    _useState172 = _slicedToArray(_useState171, 2),
-    editOuter = _useState172[0],
-    setEditOuter = _useState172[1];
+  var _useState175 = useState(null),
+    _useState176 = _slicedToArray(_useState175, 2),
+    gridPx = _useState176[0],
+    setGridPx = _useState176[1];
+  var _useState177 = useState(null),
+    _useState178 = _slicedToArray(_useState177, 2),
+    editOuter = _useState178[0],
+    setEditOuter = _useState178[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4947,19 +4991,55 @@ function Tabula() {
     var dvary = !!varyModeR.current.drums;
     var useGrid = dvary ? variedDrumGrids.current.get(pat.id) || pat.grid : pat.grid;
     var useVel = dvary ? variedDrumVels.current.get(pat.id) || pat.vel : pat.vel;
+    // Does this pat carry any recorded motion? If so we apply the per-step
+    // effective mix to each hitting voice's strip (sequence playback of the
+    // automation); otherwise the per-pat-switch guard in play() handles it.
+    var patHasMotion = !!(pat.motion && MOTION_PARAMS.some(function (k) {
+      return pat.motion[k];
+    }));
+    var baseMixArr = pat.mix || defaultDrumMix();
     for (var r = 0; r < DRUM_ROWS; r++) {
       if (useGrid[r] && useGrid[r][s]) {
         var _ref13;
         // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
         var velRow = useVel && useVel[r];
         var dVel = (_ref13 = Array.isArray(velRow) ? velRow[s] : useVel === null || useVel === void 0 ? void 0 : useVel[s]) !== null && _ref13 !== void 0 ? _ref13 : 100;
-        var dMix = (pat.mix || defaultDrumMix())[r] || {
+        var dMix = baseMixArr[r] || {
           level: DRUM_DEFAULT_LEVEL,
           pan: 0,
           rvSend: 0,
           dlySend: 0
         };
-        drumEngine.current.play(DRUM_VOICES[r].key, at, dVel, dMix, voiceSamplesR.current[DRUM_VOICES[r].key], pat.id);
+        var voiceKey = DRUM_VOICES[r].key;
+        if (patHasMotion) {
+          // Build the effective mix: base, overlaid with this step's motion
+          // value for each automated param (null → keep base). A param under
+          // an active live drag (perfMix) wins over both.
+          var eff = _objectSpread({}, dMix);
+          var pm = perfMixR.current && perfMixR.current[r];
+          var _iterator0 = _createForOfIteratorHelper(MOTION_PARAMS),
+            _step0;
+          try {
+            for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
+              var k = _step0.value;
+              if (pm && pm[k] != null) {
+                eff[k] = pm[k];
+                continue;
+              }
+              var mv = motionValAt(pat, k, r, s);
+              if (mv != null) eff[k] = mv;
+            }
+          } catch (err) {
+            _iterator0.e(err);
+          } finally {
+            _iterator0.f();
+          }
+          dMix = eff;
+          // Per-step application (bypasses play()'s pat-switch guard) so the
+          // strip tracks the recorded automation hit-to-hit.
+          drumEngine.current.setVoiceMix && drumEngine.current.setVoiceMix(voiceKey, eff);
+        }
+        drumEngine.current.play(voiceKey, at, dVel, dMix, voiceSamplesR.current[voiceKey], pat.id);
       }
     }
   };
@@ -5661,11 +5741,11 @@ function Tabula() {
     // Use a per-touch-identifier map so multi-touch is handled correctly.
     var scrollableStarts = new Map(); // identifier → boolean
     var onTouchStart = function onTouchStart(e) {
-      var _iterator0 = _createForOfIteratorHelper(e.changedTouches),
-        _step0;
+      var _iterator1 = _createForOfIteratorHelper(e.changedTouches),
+        _step1;
       try {
-        for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
-          var t = _step0.value;
+        for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
+          var t = _step1.value;
           var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
           while (el && el !== document.body) {
@@ -5679,42 +5759,42 @@ function Tabula() {
           scrollableStarts.set(t.identifier, scrollable);
         }
       } catch (err) {
-        _iterator0.e(err);
-      } finally {
-        _iterator0.f();
-      }
-    };
-    var onTouchEnd = function onTouchEnd(e) {
-      var _iterator1 = _createForOfIteratorHelper(e.changedTouches),
-        _step1;
-      try {
-        for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
-          var t = _step1.value;
-          scrollableStarts["delete"](t.identifier);
-        }
-      } catch (err) {
         _iterator1.e(err);
       } finally {
         _iterator1.f();
       }
     };
-    var noOverscroll = function noOverscroll(e) {
-      // Block if ALL active touches started on non-scrollable elements
-      var anyScrollable = false;
-      var _iterator10 = _createForOfIteratorHelper(e.touches),
+    var onTouchEnd = function onTouchEnd(e) {
+      var _iterator10 = _createForOfIteratorHelper(e.changedTouches),
         _step10;
       try {
         for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
           var t = _step10.value;
+          scrollableStarts["delete"](t.identifier);
+        }
+      } catch (err) {
+        _iterator10.e(err);
+      } finally {
+        _iterator10.f();
+      }
+    };
+    var noOverscroll = function noOverscroll(e) {
+      // Block if ALL active touches started on non-scrollable elements
+      var anyScrollable = false;
+      var _iterator11 = _createForOfIteratorHelper(e.touches),
+        _step11;
+      try {
+        for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
+          var t = _step11.value;
           if (scrollableStarts.get(t.identifier)) {
             anyScrollable = true;
             break;
           }
         }
       } catch (err) {
-        _iterator10.e(err);
+        _iterator11.e(err);
       } finally {
-        _iterator10.f();
+        _iterator11.f();
       }
       if (!anyScrollable && e.cancelable) e.preventDefault();
     };
@@ -6902,6 +6982,148 @@ function Tabula() {
       });
     });
   };
+  // ── Motion mixer write/route ──────────────────────────────────────────────
+  // Write a motion automation value onto a step (and linked voices). Lazily
+  // allocates the per-param ROWS×COLS lane. Persisted in the drum pat.
+  var writeMotion = function writeMotion(row, key, step, val) {
+    return setDrumPats(function (ps) {
+      return ps.map(function (p) {
+        if (p.id !== activeDrumId) return p;
+        var targets = _linkedRows(row, key);
+        var motion = _objectSpread({}, p.motion || {});
+        var lane = motion[key] ? motion[key].map(function (r) {
+          return r ? _toConsumableArray(r) : new Array(COLS).fill(null);
+        }) : Array.from({
+          length: DRUM_ROWS
+        }, function () {
+          return new Array(COLS).fill(null);
+        });
+        targets.forEach(function (rr) {
+          if (lane[rr]) lane[rr][step] = val;
+        });
+        motion[key] = lane;
+        return Object.assign({}, p, {
+          motion: motion
+        });
+      });
+    });
+  };
+  // Slider drag in the drum mixer. In motion mode the drag is a live override
+  // (audible, transient, shown via perfMix) and — if record-armed during
+  // playback — writes onto the current step. Outside motion mode it edits the
+  // persistent base mix (the normal mixer behavior).
+  var onMixDrag = function onMixDrag(row, key, val) {
+    if (!motionEnabledR.current) {
+      setDrumMix(row, key, val);
+      return;
+    }
+    var linked = _linkedRows(row, key);
+    linked.forEach(function (rr) {
+      return drumEngine.current.setVoiceMix && drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key, _defineProperty({}, key, val));
+    });
+    setPerfMix(function (pm) {
+      var n = _objectSpread({}, pm);
+      linked.forEach(function (rr) {
+        n[rr] = _objectSpread(_objectSpread({}, n[rr] || {}), {}, _defineProperty({}, key, val));
+      });
+      return n;
+    });
+    if (motionRecR.current && playingR.current) {
+      recDragR.current = {
+        row: row,
+        key: key,
+        val: val
+      };
+      if (drumStepR.current >= 0) writeMotion(row, key, drumStepR.current, val);
+    }
+  };
+  var onMixUp = function onMixUp(row, key) {
+    if (!motionEnabledR.current) return;
+    recDragR.current = null;
+    var linked = _linkedRows(row, key);
+    setPerfMix(function (pm) {
+      var n = _objectSpread({}, pm);
+      linked.forEach(function (rr) {
+        if (n[rr]) {
+          var c = _objectSpread({}, n[rr]);
+          delete c[key];
+          Object.keys(c).length ? n[rr] = c : delete n[rr];
+        }
+      });
+      return n;
+    });
+    // Revert the engine strip to the sequence base for these voices; any
+    // motion-automated params re-apply per-step on the next hit anyway.
+    var pat = drumPatsR.current.find(function (p) {
+      return p.id === activeDrumIdR.current;
+    });
+    var mixArr = fillDrumMix(pat && pat.mix);
+    linked.forEach(function (rr) {
+      return drumEngine.current.setVoiceMix && drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key, mixArr[rr]);
+    });
+  };
+  // perfMix → ref so the scheduler (playDrumStep) can let a live drag win over
+  // recorded motion without re-binding every render.
+  var perfMixR = useRef({});
+  useEffect(function () {
+    perfMixR.current = perfMix;
+  }, [perfMix]);
+  // Record drag: as the playhead advances, paint the held value onto each new
+  // step. The drag start writes the first step (in onMixDrag); this catches
+  // every subsequent step during the hold.
+  useEffect(function () {
+    if (!motionRec || !playing) return;
+    var rd = recDragR.current;
+    if (rd && drumStep >= 0) writeMotion(rd.row, rd.key, drumStep, rd.val);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drumStep, motionRec, playing]);
+  // Leaving motion mode (or disarming record) drops any transient drag state.
+  useEffect(function () {
+    if (!motionEnabled) {
+      setPerfMix({});
+      recDragR.current = null;
+    }
+  }, [motionEnabled]);
+  useEffect(function () {
+    if (!motionRec) recDragR.current = null;
+  }, [motionRec]);
+  // Clear all recorded motion on the active drum pat (for the CLR-motion button).
+  var clearMotion = function clearMotion() {
+    return setDrumPats(function (ps) {
+      return ps.map(function (p) {
+        return p.id !== activeDrumId ? p : Object.assign({}, p, {
+          motion: undefined
+        });
+      });
+    });
+  };
+  // Display overlay for the mixer sliders in motion mode: a live drag (perfMix)
+  // wins, else the currently-playing step's recorded motion, else the base.
+  // Drives slider thumb animation while the sequence plays back.
+  var effDispMix = function effDispMix(dp, r, base) {
+    if (!motionEnabled) return base;
+    var o = _objectSpread({}, base);
+    var _iterator12 = _createForOfIteratorHelper(MOTION_PARAMS),
+      _step12;
+    try {
+      for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
+        var k = _step12.value;
+        if (perfMix[r] && perfMix[r][k] != null) {
+          o[k] = perfMix[r][k];
+          continue;
+        }
+        if (playing) {
+          var mv = motionValAt(dp, k, r, drumStep);
+          if (mv != null) o[k] = mv;
+        }
+      }
+    } catch (err) {
+      _iterator12.e(err);
+    } finally {
+      _iterator12.f();
+    }
+    return o;
+  };
   var randDrumVel = function randDrumVel() {
     pushHistory();
     return setDrumPats(function (ps) {
@@ -7242,6 +7464,7 @@ function Tabula() {
       mix: (src.mix || defaultDrumMix()).map(function (m) {
         return _objectSpread({}, m);
       }),
+      motion: src.motion ? JSON.parse(JSON.stringify(src.motion)) : undefined,
       vRhythm: src.vRhythm,
       vVelocity: src.vVelocity
     });
@@ -7311,7 +7534,8 @@ function Tabula() {
           gridLen: drumClipboard.gridLen,
           mix: (drumClipboard.mix || defaultDrumMix()).map(function (m) {
             return _objectSpread({}, m);
-          })
+          }),
+          motion: drumClipboard.motion ? JSON.parse(JSON.stringify(drumClipboard.motion)) : undefined
         });
       });
     });
@@ -7437,10 +7661,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState173 = useState(false),
-    _useState174 = _slicedToArray(_useState173, 2),
-    bpmDragging = _useState174[0],
-    setBpmDragging = _useState174[1];
+  var _useState179 = useState(false),
+    _useState180 = _slicedToArray(_useState179, 2),
+    bpmDragging = _useState180[0],
+    setBpmDragging = _useState180[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -7469,10 +7693,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState175 = useState(false),
-    _useState176 = _slicedToArray(_useState175, 2),
-    stDragging = _useState176[0],
-    setStDragging = _useState176[1];
+  var _useState181 = useState(false),
+    _useState182 = _slicedToArray(_useState181, 2),
+    stDragging = _useState182[0],
+    setStDragging = _useState182[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -7501,10 +7725,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState177 = useState(false),
-    _useState178 = _slicedToArray(_useState177, 2),
-    swingDragging = _useState178[0],
-    setSwingDragging = _useState178[1];
+  var _useState183 = useState(false),
+    _useState184 = _slicedToArray(_useState183, 2),
+    swingDragging = _useState184[0],
+    setSwingDragging = _useState184[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -9931,14 +10155,74 @@ function Tabula() {
       }, kitLoading && on ? "…" : kit.label);
     }))), /*#__PURE__*/React.createElement("div", {
       style: {
+        flexShrink: 0,
+        marginBottom: 8,
+        display: "flex",
+        alignItems: "center",
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
         fontSize: 9,
         letterSpacing: 2,
         color: "rgba(210,195,175,0.35)",
-        fontWeight: 500,
-        marginBottom: 8,
-        flexShrink: 0
+        fontWeight: 500
       }
     }, "MIXER"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: function onClick() {
+        return setMotionEnabled(function (v) {
+          return !v;
+        });
+      },
+      style: {
+        padding: "3px 9px",
+        borderRadius: 4,
+        fontSize: 8,
+        letterSpacing: 1,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid " + (motionEnabled ? "#c4727a" : "rgba(200,185,165,0.2)"),
+        background: motionEnabled ? "rgba(196,114,122,0.16)" : "transparent",
+        color: motionEnabled ? "#e0909a" : "rgba(210,195,175,0.45)"
+      }
+    }, "MOTION"), motionEnabled && /*#__PURE__*/React.createElement("button", {
+      onClick: function onClick() {
+        return setMotionRec(function (v) {
+          return !v;
+        });
+      },
+      style: {
+        padding: "3px 9px",
+        borderRadius: 4,
+        fontSize: 8,
+        letterSpacing: 1,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid " + (motionRec ? "#e07060" : "rgba(200,185,165,0.2)"),
+        background: motionRec ? "rgba(224,112,96,0.2)" : "transparent",
+        color: motionRec ? "#ff8a78" : "rgba(210,195,175,0.45)"
+      }
+    }, motionRec ? "● REC" : "REC"), motionEnabled && /*#__PURE__*/React.createElement("button", {
+      onClick: clearMotion,
+      style: {
+        padding: "3px 9px",
+        borderRadius: 4,
+        fontSize: 8,
+        letterSpacing: 1,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid rgba(200,185,165,0.2)",
+        background: "transparent",
+        color: "rgba(210,195,175,0.45)"
+      }
+    }, "CLR")), /*#__PURE__*/React.createElement("div", {
       style: {
         flex: 1,
         display: "flex",
@@ -9951,6 +10235,7 @@ function Tabula() {
     }, DRUM_VOICES.map(function (voice, r) {
       var stripLabel = voice.full || voice.label;
       var m = mix[r];
+      var md = effDispMix(dPat, r, m); // motion-aware display values
       var stripBg = "rgba(30,28,24,0.55)";
       var cell = {
         display: "flex",
@@ -9958,7 +10243,8 @@ function Tabula() {
         alignItems: "center",
         gap: 2
       };
-      // Horizontal mini-slider builder (pan + sends share this shape).
+      // Horizontal mini-slider builder. Drag routes through onMixDrag
+      // (base edit, or motion override/record), onMixUp on release.
       var miniSlider = function miniSlider(key, val, minVal, maxVal, bipolar) {
         return /*#__PURE__*/React.createElement("div", {
           style: {
@@ -9974,11 +10260,12 @@ function Tabula() {
             var rect = e.currentTarget.getBoundingClientRect();
             var update = function update(ev) {
               var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-              var v = bipolar ? Math.round(pct * (maxVal - minVal) + minVal) : Math.round(pct * (maxVal - minVal) + minVal);
-              setDrumMix(r, key, Math.max(minVal, Math.min(maxVal, v)));
+              var v = Math.round(pct * (maxVal - minVal) + minVal);
+              onMixDrag(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             update(e);
             var _up2 = function up() {
+              onMixUp(r, key);
               document.removeEventListener("pointermove", update);
               document.removeEventListener("pointerup", _up2);
             };
@@ -9986,7 +10273,8 @@ function Tabula() {
             document.addEventListener("pointerup", _up2);
           },
           onDoubleClick: function onDoubleClick() {
-            return setDrumMix(r, key, bipolar ? 0 : 0);
+            onMixDrag(r, key, 0);
+            onMixUp(r, key);
           }
         }, bipolar && /*#__PURE__*/React.createElement("div", {
           style: {
@@ -10078,12 +10366,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PITCH"), miniSlider("pitch", m.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, (m.pitch || 0) > 0 ? "+" + m.pitch : m.pitch || 0)), /*#__PURE__*/React.createElement("div", {
+      }, (md.pitch || 0) > 0 ? "+" + md.pitch : md.pitch || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10116,7 +10404,7 @@ function Tabula() {
           flex: 1,
           opacity: filtMode === "off" ? 0.35 : 1
         }
-      }, miniSlider("filtCut", m.filtCut != null ? m.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
+      }, miniSlider("filtCut", md.filtCut != null ? md.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10125,12 +10413,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "ENV"), miniSlider("env", m.env != null ? m.env : 100, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "ENV"), miniSlider("env", md.env != null ? md.env : 100, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.env != null ? m.env : 100)), /*#__PURE__*/React.createElement("div", {
+      }, md.env != null ? md.env : 100)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10139,12 +10427,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "SAT"), miniSlider("sat", m.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "SAT"), miniSlider("sat", md.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.sat || 0)), /*#__PURE__*/React.createElement("div", {
+      }, md.sat || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10153,12 +10441,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PAN"), miniSlider("pan", m.pan, -100, 100, true), /*#__PURE__*/React.createElement("div", {
+      }, "PAN"), miniSlider("pan", md.pan, -100, 100, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.pan > 0 ? "+" + m.pan : m.pan)), /*#__PURE__*/React.createElement("div", {
+      }, md.pan > 0 ? "+" + md.pan : md.pan)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10167,12 +10455,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "REV"), miniSlider("rvSend", m.rvSend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "REV"), miniSlider("rvSend", md.rvSend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.rvSend)), /*#__PURE__*/React.createElement("div", {
+      }, md.rvSend)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -10181,12 +10469,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "DLY"), miniSlider("dlySend", m.dlySend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "DLY"), miniSlider("dlySend", md.dlySend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.dlySend)), /*#__PURE__*/React.createElement("div", {
+      }, md.dlySend)), /*#__PURE__*/React.createElement("div", {
         style: {
           flex: 1,
           minHeight: 60,
@@ -10201,10 +10489,11 @@ function Tabula() {
           var rect = e.currentTarget.getBoundingClientRect();
           var update = function update(ev) {
             var pct = Math.max(0, Math.min(1, 1 - (ev.clientY - rect.top) / rect.height));
-            setDrumMix(r, "level", Math.round(pct * 100));
+            onMixDrag(r, "level", Math.round(pct * 100));
           };
           update(e);
           var _up3 = function up() {
+            onMixUp(r, "level");
             document.removeEventListener("pointermove", update);
             document.removeEventListener("pointerup", _up3);
           };
@@ -10217,7 +10506,7 @@ function Tabula() {
           left: 0,
           right: 0,
           bottom: 0,
-          height: "".concat(m.level, "%"),
+          height: "".concat(md.level, "%"),
           background: "linear-gradient(to top," + voice.color + "cc," + voice.color + "66)",
           borderRadius: 3
         }
@@ -10227,7 +10516,7 @@ function Tabula() {
           left: -4,
           right: -4,
           height: 6,
-          top: "calc(".concat(100 - m.level, "% - 3px)"),
+          top: "calc(".concat(100 - md.level, "% - 3px)"),
           background: "rgba(255,255,255,0.92)",
           borderRadius: 2,
           boxShadow: "0 0 4px " + voice.color + "88"
@@ -10248,7 +10537,7 @@ function Tabula() {
           textAlign: "center",
           fontWeight: 600
         }
-      }, m.level), /*#__PURE__*/React.createElement("div", {
+      }, md.level), /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
           gap: 2,
@@ -13262,7 +13551,64 @@ function Tabula() {
     // Mobile mixer: horizontally-scrolling row of compact channel strips.
     // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
     // vertical level fader → REC) but at a narrower width.
-    return /*#__PURE__*/React.createElement("div", {
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        marginBottom: 6
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: function onClick() {
+        return setMotionEnabled(function (v) {
+          return !v;
+        });
+      },
+      style: {
+        padding: "4px 10px",
+        borderRadius: 5,
+        fontSize: 9,
+        letterSpacing: 1,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid " + (motionEnabled ? "#c4727a" : "rgba(200,185,165,0.2)"),
+        background: motionEnabled ? "rgba(196,114,122,0.16)" : "transparent",
+        color: motionEnabled ? "#e0909a" : "rgba(210,195,175,0.45)"
+      }
+    }, "MOTION"), motionEnabled && /*#__PURE__*/React.createElement("button", {
+      onClick: function onClick() {
+        return setMotionRec(function (v) {
+          return !v;
+        });
+      },
+      style: {
+        padding: "4px 10px",
+        borderRadius: 5,
+        fontSize: 9,
+        letterSpacing: 1,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid " + (motionRec ? "#e07060" : "rgba(200,185,165,0.2)"),
+        background: motionRec ? "rgba(224,112,96,0.2)" : "transparent",
+        color: motionRec ? "#ff8a78" : "rgba(210,195,175,0.45)"
+      }
+    }, motionRec ? "● REC" : "REC"), motionEnabled && /*#__PURE__*/React.createElement("button", {
+      onClick: clearMotion,
+      style: {
+        padding: "4px 10px",
+        borderRadius: 5,
+        fontSize: 9,
+        letterSpacing: 1,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        border: "1px solid rgba(200,185,165,0.2)",
+        background: "transparent",
+        color: "rgba(210,195,175,0.45)"
+      }
+    }, "CLR")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 3,
@@ -13275,6 +13621,7 @@ function Tabula() {
     }, DRUM_VOICES.map(function (voice, r) {
       var stripLabel = voice.full || voice.label;
       var m = mix[r];
+      var md = effDispMix(dPat, r, m); // motion-aware display values
       var isRec = recordingVoice === voice.key;
       var hasSample = !!voiceSamples[voice.key];
       var cell = {
@@ -13298,10 +13645,11 @@ function Tabula() {
             var u = function u(ev) {
               var pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
               var v = Math.round(pct * (maxVal - minVal) + minVal);
-              setDrumMix(r, key, Math.max(minVal, Math.min(maxVal, v)));
+              onMixDrag(r, key, Math.max(minVal, Math.min(maxVal, v)));
             };
             u(e);
             var _up6 = function up() {
+              onMixUp(r, key);
               document.removeEventListener("pointermove", u);
               document.removeEventListener("pointerup", _up6);
             };
@@ -13309,7 +13657,8 @@ function Tabula() {
             document.addEventListener("pointerup", _up6);
           },
           onDoubleClick: function onDoubleClick() {
-            return setDrumMix(r, key, 0);
+            onMixDrag(r, key, 0);
+            onMixUp(r, key);
           }
         }, bipolar && /*#__PURE__*/React.createElement("div", {
           style: {
@@ -13397,12 +13746,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PITCH"), miniSlider("pitch", m.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, (m.pitch || 0) > 0 ? "+" + m.pitch : m.pitch || 0)), /*#__PURE__*/React.createElement("div", {
+      }, (md.pitch || 0) > 0 ? "+" + md.pitch : md.pitch || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13435,7 +13784,7 @@ function Tabula() {
           flex: 1,
           opacity: filtMode === "off" ? 0.35 : 1
         }
-      }, miniSlider("filtCut", m.filtCut != null ? m.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
+      }, miniSlider("filtCut", md.filtCut != null ? md.filtCut : 100, 0, 100, false)))), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13444,12 +13793,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "ENV"), miniSlider("env", m.env != null ? m.env : 100, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "ENV"), miniSlider("env", md.env != null ? md.env : 100, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.env != null ? m.env : 100)), /*#__PURE__*/React.createElement("div", {
+      }, md.env != null ? md.env : 100)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13458,12 +13807,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "SAT"), miniSlider("sat", m.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "SAT"), miniSlider("sat", md.sat || 0, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.sat || 0)), /*#__PURE__*/React.createElement("div", {
+      }, md.sat || 0)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13472,12 +13821,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PAN"), miniSlider("pan", m.pan, -100, 100, true), /*#__PURE__*/React.createElement("div", {
+      }, "PAN"), miniSlider("pan", md.pan, -100, 100, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.pan > 0 ? "+" + m.pan : m.pan)), /*#__PURE__*/React.createElement("div", {
+      }, md.pan > 0 ? "+" + md.pan : md.pan)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13486,12 +13835,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "REV"), miniSlider("rvSend", m.rvSend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "REV"), miniSlider("rvSend", md.rvSend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.rvSend)), /*#__PURE__*/React.createElement("div", {
+      }, md.rvSend)), /*#__PURE__*/React.createElement("div", {
         style: cell
       }, /*#__PURE__*/React.createElement("div", {
         style: {
@@ -13500,12 +13849,12 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "DLY"), miniSlider("dlySend", m.dlySend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
+      }, "DLY"), miniSlider("dlySend", md.dlySend, 0, 100, false), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
         }
-      }, m.dlySend)), /*#__PURE__*/React.createElement("div", {
+      }, md.dlySend)), /*#__PURE__*/React.createElement("div", {
         style: {
           flex: 1,
           minHeight: 50,
@@ -13519,10 +13868,11 @@ function Tabula() {
           var rect = e.currentTarget.getBoundingClientRect();
           var u = function u(ev) {
             var pct = Math.max(0, Math.min(1, 1 - (ev.clientY - rect.top) / rect.height));
-            setDrumMix(r, "level", Math.round(pct * 100));
+            onMixDrag(r, "level", Math.round(pct * 100));
           };
           u(e);
           var _up7 = function up() {
+            onMixUp(r, "level");
             document.removeEventListener("pointermove", u);
             document.removeEventListener("pointerup", _up7);
           };
@@ -13535,7 +13885,7 @@ function Tabula() {
           left: 0,
           right: 0,
           bottom: 0,
-          height: "".concat(m.level, "%"),
+          height: "".concat(md.level, "%"),
           background: "linear-gradient(to top," + voice.color + "cc," + voice.color + "66)",
           borderRadius: 3
         }
@@ -13545,7 +13895,7 @@ function Tabula() {
           left: -3,
           right: -3,
           height: 5,
-          top: "calc(".concat(100 - m.level, "% - 3px)"),
+          top: "calc(".concat(100 - md.level, "% - 3px)"),
           background: "rgba(255,255,255,0.92)",
           borderRadius: 2
         }
@@ -13565,7 +13915,7 @@ function Tabula() {
           textAlign: "center",
           fontWeight: 600
         }
-      }, m.level), /*#__PURE__*/React.createElement("div", {
+      }, md.level), /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
           gap: 2,
@@ -13605,7 +13955,7 @@ function Tabula() {
           return clearVoiceSample(voice.key);
         }
       }, "\u2715")));
-    }));
+    })));
   }()), activeSheet === "project" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,

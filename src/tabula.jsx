@@ -132,6 +132,14 @@ const toDrumVel2D=(vel)=>{
   return out;
 };
 const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
+// Continuous drum-mix params that support motion automation (the slider ones;
+// the FILT mode chip is excluded). pat.motion[param] is a lazily-created
+// ROWS×COLS grid of number|null — null = "use the base mix value at this step".
+const MOTION_PARAMS=["level","pan","rvSend","dlySend","pitch","env","sat","filtCut"];
+const motionValAt=(pat,param,r,s)=>{
+  const m=pat&&pat.motion&&pat.motion[param];
+  return (m&&m[r]&&m[r][s]!=null)?m[r][s]:null;
+};
 // Default drum voice level — 60% sits well below the "unity" mark so users
 // have plenty of headroom to push voices up rather than only being able to
 // pull them down. Earlier 75% still felt too hot in stacks of voices.
@@ -1441,6 +1449,25 @@ export default function Tabula(){
   // Drum step editing state
   const drumStepR=useRef(-1);
   const [drumStep,setDrumStep]=useState(-1);
+  useEffect(()=>{drumStepR.current=drumStep;},[drumStep]);
+
+  // ── Motion mixer (drum mix automation) ───────────────────────────────────
+  // motionEnabled: performance mode — the drum mixer is driven by the
+  //   sequence (base mix + any recorded per-step automation). Dragging a
+  //   slider live-overrides the audio without persisting.
+  // motionRec: while on (and playing), holding a slider WRITES its value onto
+  //   the step(s) that play during the hold — per-step automation.
+  const [motionEnabled,setMotionEnabled]=useState(false);
+  const [motionRec,setMotionRec]=useState(false);
+  const motionEnabledR=useRef(false); useEffect(()=>{motionEnabledR.current=motionEnabled;},[motionEnabled]);
+  const motionRecR=useRef(false); useEffect(()=>{motionRecR.current=motionRec;},[motionRec]);
+  // Transient performance overrides during an active slider drag (motion mode).
+  // Shape {[row]:{[param]:val}}. Drives the slider position + live audio; not
+  // persisted. Cleared on release.
+  const [perfMix,setPerfMix]=useState({});
+  // The currently-held record drag: {row,param,val} or null. The drumStep
+  // effect below writes it onto each step as playback advances.
+  const recDragR=useRef(null);
 
   // Track window width to drive responsive left column layout
   // Use ResizeObserver on the layout container — works inside iframes too
@@ -2584,13 +2611,35 @@ export default function Tabula(){
     const dvary = !!varyModeR.current.drums;
     const useGrid = dvary ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
     const useVel  = dvary ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
+    // Does this pat carry any recorded motion? If so we apply the per-step
+    // effective mix to each hitting voice's strip (sequence playback of the
+    // automation); otherwise the per-pat-switch guard in play() handles it.
+    const patHasMotion = !!(pat.motion && MOTION_PARAMS.some(k=>pat.motion[k]));
+    const baseMixArr = pat.mix||defaultDrumMix();
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
         const velRow=useVel&&useVel[r];
         const dVel=(Array.isArray(velRow)?velRow[s]:useVel?.[s])??100;
-        const dMix=(pat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key],pat.id);
+        let dMix=baseMixArr[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
+        const voiceKey=DRUM_VOICES[r].key;
+        if(patHasMotion){
+          // Build the effective mix: base, overlaid with this step's motion
+          // value for each automated param (null → keep base). A param under
+          // an active live drag (perfMix) wins over both.
+          const eff={...dMix};
+          const pm=perfMixR.current&&perfMixR.current[r];
+          for(const k of MOTION_PARAMS){
+            if(pm&&pm[k]!=null){eff[k]=pm[k];continue;}
+            const mv=motionValAt(pat,k,r,s);
+            if(mv!=null)eff[k]=mv;
+          }
+          dMix=eff;
+          // Per-step application (bypasses play()'s pat-switch guard) so the
+          // strip tracks the recorded automation hit-to-hit.
+          drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(voiceKey,eff);
+        }
+        drumEngine.current.play(voiceKey,at,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
       }
     }
   };
@@ -3585,6 +3634,73 @@ export default function Tabula(){
       targets.includes(i)?Object.assign({},m,{[key]:val}):m);
     return Object.assign({},p,{mix});
   }));
+  // ── Motion mixer write/route ──────────────────────────────────────────────
+  // Write a motion automation value onto a step (and linked voices). Lazily
+  // allocates the per-param ROWS×COLS lane. Persisted in the drum pat.
+  const writeMotion=(row,key,step,val)=>setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    const targets=_linkedRows(row,key);
+    const motion={...(p.motion||{})};
+    const lane=motion[key]?motion[key].map(r=>r?[...r]:new Array(COLS).fill(null))
+                          :Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(null));
+    targets.forEach(rr=>{if(lane[rr])lane[rr][step]=val;});
+    motion[key]=lane;
+    return Object.assign({},p,{motion});
+  }));
+  // Slider drag in the drum mixer. In motion mode the drag is a live override
+  // (audible, transient, shown via perfMix) and — if record-armed during
+  // playback — writes onto the current step. Outside motion mode it edits the
+  // persistent base mix (the normal mixer behavior).
+  const onMixDrag=(row,key,val)=>{
+    if(!motionEnabledR.current){setDrumMix(row,key,val);return;}
+    const linked=_linkedRows(row,key);
+    linked.forEach(rr=>drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key,{[key]:val}));
+    setPerfMix(pm=>{const n={...pm};linked.forEach(rr=>{n[rr]={...(n[rr]||{}),[key]:val};});return n;});
+    if(motionRecR.current&&playingR.current){
+      recDragR.current={row,key,val};
+      if(drumStepR.current>=0)writeMotion(row,key,drumStepR.current,val);
+    }
+  };
+  const onMixUp=(row,key)=>{
+    if(!motionEnabledR.current)return;
+    recDragR.current=null;
+    const linked=_linkedRows(row,key);
+    setPerfMix(pm=>{const n={...pm};linked.forEach(rr=>{if(n[rr]){const c={...n[rr]};delete c[key];Object.keys(c).length?n[rr]=c:delete n[rr];}});return n;});
+    // Revert the engine strip to the sequence base for these voices; any
+    // motion-automated params re-apply per-step on the next hit anyway.
+    const pat=drumPatsR.current.find(p=>p.id===activeDrumIdR.current);
+    const mixArr=fillDrumMix(pat&&pat.mix);
+    linked.forEach(rr=>drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key,mixArr[rr]));
+  };
+  // perfMix → ref so the scheduler (playDrumStep) can let a live drag win over
+  // recorded motion without re-binding every render.
+  const perfMixR=useRef({}); useEffect(()=>{perfMixR.current=perfMix;},[perfMix]);
+  // Record drag: as the playhead advances, paint the held value onto each new
+  // step. The drag start writes the first step (in onMixDrag); this catches
+  // every subsequent step during the hold.
+  useEffect(()=>{
+    if(!motionRec||!playing)return;
+    const rd=recDragR.current;
+    if(rd&&drumStep>=0)writeMotion(rd.row,rd.key,drumStep,rd.val);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[drumStep,motionRec,playing]);
+  // Leaving motion mode (or disarming record) drops any transient drag state.
+  useEffect(()=>{if(!motionEnabled){setPerfMix({});recDragR.current=null;}},[motionEnabled]);
+  useEffect(()=>{if(!motionRec)recDragR.current=null;},[motionRec]);
+  // Clear all recorded motion on the active drum pat (for the CLR-motion button).
+  const clearMotion=()=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{motion:undefined})));
+  // Display overlay for the mixer sliders in motion mode: a live drag (perfMix)
+  // wins, else the currently-playing step's recorded motion, else the base.
+  // Drives slider thumb animation while the sequence plays back.
+  const effDispMix=(dp,r,base)=>{
+    if(!motionEnabled)return base;
+    const o={...base};
+    for(const k of MOTION_PARAMS){
+      if(perfMix[r]&&perfMix[r][k]!=null){o[k]=perfMix[r][k];continue;}
+      if(playing){const mv=motionValAt(dp,k,r,drumStep);if(mv!=null)o[k]=mv;}
+    }
+    return o;
+  };
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     // Per-cell velocity now.
@@ -3743,6 +3859,7 @@ export default function Tabula(){
     const d=Object.assign({},mkDrumPat(symPat(drumPats.length)),{
       grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
+      motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
       vRhythm:src.vRhythm,vVelocity:src.vVelocity
     });
     setDrumPats(ps=>[...ps,d]);setActiveDrumId(d.id);
@@ -3777,7 +3894,8 @@ export default function Tabula(){
       return Object.assign({},p,{
         grid:drumClipboard.grid.map(r=>[...r]),
         vel:toDrumVel2D(drumClipboard.vel),gridLen:drumClipboard.gridLen,
-        mix:(drumClipboard.mix||defaultDrumMix()).map(m=>({...m}))
+        mix:(drumClipboard.mix||defaultDrumMix()).map(m=>({...m})),
+        motion:drumClipboard.motion?JSON.parse(JSON.stringify(drumClipboard.motion)):undefined
       });
     }));
   };
@@ -4877,7 +4995,23 @@ export default function Tabula(){
                     })}
                   </div>
                 </div>
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8,flexShrink:0}}>MIXER</div>
+                <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIXER</div>
+                  <div style={{flex:1}}/>
+                  {/* MOTION mode + record arm. In MOTION mode dragging a slider
+                      is a live override; with REC armed during playback the hold
+                      writes per-step automation. */}
+                  <button onClick={()=>setMotionEnabled(v=>!v)}
+                    style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(200,185,165,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(210,195,175,0.45)"}}>MOTION</button>
+                  {motionEnabled&&(
+                    <button onClick={()=>setMotionRec(v=>!v)}
+                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(200,185,165,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(210,195,175,0.45)"}}>{motionRec?"● REC":"REC"}</button>
+                  )}
+                  {motionEnabled&&(
+                    <button onClick={clearMotion}
+                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.45)"}}>CLR</button>
+                  )}
+                </div>
                 {/* Channel strips — horizontal row of conventional vertical strips.
                     CH + OH are separate strips (each holds its own sample) but their
                     params are linked via setDrumMix. Toms link on level only. Layout
@@ -4887,9 +5021,11 @@ export default function Tabula(){
                   {DRUM_VOICES.map((voice,r)=>{
                     const stripLabel=voice.full||voice.label;
                     const m=mix[r];
+                    const md=effDispMix(dPat,r,m); // motion-aware display values
                     const stripBg="rgba(30,28,24,0.55)";
                     const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
-                    // Horizontal mini-slider builder (pan + sends share this shape).
+                    // Horizontal mini-slider builder. Drag routes through onMixDrag
+                    // (base edit, or motion override/record), onMixUp on release.
                     const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
                       <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
                         onPointerDown={e=>{
@@ -4897,14 +5033,14 @@ export default function Tabula(){
                           const rect=e.currentTarget.getBoundingClientRect();
                           const update=ev=>{
                             const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));
-                            const v=bipolar?Math.round(pct*(maxVal-minVal)+minVal):Math.round(pct*(maxVal-minVal)+minVal);
-                            setDrumMix(r,key,Math.max(minVal,Math.min(maxVal,v)));
+                            const v=Math.round(pct*(maxVal-minVal)+minVal);
+                            onMixDrag(r,key,Math.max(minVal,Math.min(maxVal,v)));
                           };
                           update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                         }}
-                        onDoubleClick={()=>setDrumMix(r,key,bipolar?0:0)}>
+                        onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                         {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                         {bipolar
                           ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:voice.color+"99",borderRadius:3}}/>
@@ -4926,8 +5062,8 @@ export default function Tabula(){
                         {/* PITCH (semitones, bipolar) */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                          {miniSlider("pitch",m.pitch||0,-24,24,true)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(m.pitch||0)>0?"+"+m.pitch:(m.pitch||0)}</div>
+                          {miniSlider("pitch",md.pitch||0,-24,24,true)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                         </div>
                         {/* FILTER — mode chip + cutoff slider */}
                         <div style={cell}>
@@ -4938,39 +5074,39 @@ export default function Tabula(){
                                 background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
                                 color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
                             <div style={{flex:1,opacity:filtMode==="off"?0.35:1}}>
-                              {miniSlider("filtCut",m.filtCut!=null?m.filtCut:100,0,100,false)}
+                              {miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}
                             </div>
                           </div>
                         </div>
                         {/* ENV — sample playback length (full right = whole sample) */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                          {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
+                          {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.env!=null?md.env:100}</div>
                         </div>
                         {/* SAT — per-voice saturation/drive */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                          {miniSlider("sat",m.sat||0,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.sat||0}</div>
+                          {miniSlider("sat",md.sat||0,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.sat||0}</div>
                         </div>
                         {/* PAN */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                          {miniSlider("pan",m.pan,-100,100,true)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.pan>0?"+"+m.pan:m.pan}</div>
+                          {miniSlider("pan",md.pan,-100,100,true)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
                         </div>
                         {/* REV send */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
-                          {miniSlider("rvSend",m.rvSend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.rvSend}</div>
+                          {miniSlider("rvSend",md.rvSend,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.rvSend}</div>
                         </div>
                         {/* DLY send */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                          {miniSlider("dlySend",m.dlySend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.dlySend}</div>
+                          {miniSlider("dlySend",md.dlySend,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
                         </div>
                         {/* Vertical level fader */}
                         <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0"}}
@@ -4979,20 +5115,20 @@ export default function Tabula(){
                             const rect=e.currentTarget.getBoundingClientRect();
                             const update=ev=>{
                               const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));
-                              setDrumMix(r,"level",Math.round(pct*100));
+                              onMixDrag(r,"level",Math.round(pct*100));
                             };
                             update(e);
-                            const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                            const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                             document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                           }}>
                           {/* Fill from bottom up */}
-                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${m.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
                           {/* Thumb */}
-                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-m.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
+                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
                           {/* Center notch */}
                           <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                         </div>
-                        <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{m.level}</div>
+                        <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
                         {/* REC / sample */}
                         <div style={{display:"flex",gap:2,justifyContent:"center"}}>
                           <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
@@ -5951,17 +6087,31 @@ export default function Tabula(){
                       // Mobile mixer: horizontally-scrolling row of compact channel strips.
                       // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
                       // vertical level fader → REC) but at a narrower width.
-                      return(<div style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
+                      return(<div>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                        <button onClick={()=>setMotionEnabled(v=>!v)}
+                          style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(200,185,165,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(210,195,175,0.45)"}}>MOTION</button>
+                        {motionEnabled&&(
+                          <button onClick={()=>setMotionRec(v=>!v)}
+                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(200,185,165,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(210,195,175,0.45)"}}>{motionRec?"● REC":"REC"}</button>
+                        )}
+                        {motionEnabled&&(
+                          <button onClick={clearMotion}
+                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.45)"}}>CLR</button>
+                        )}
+                      </div>
+                      <div style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
                         {DRUM_VOICES.map((voice,r)=>{
                           const stripLabel=voice.full||voice.label;
                           const m=mix[r];
+                          const md=effDispMix(dPat,r,m); // motion-aware display values
                           const isRec=recordingVoice===voice.key;
                           const hasSample=!!voiceSamples[voice.key];
                           const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
                             <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));const v=Math.round(pct*(maxVal-minVal)+minVal);setDrumMix(r,key,Math.max(minVal,Math.min(maxVal,v)));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
-                              onDoubleClick={()=>setDrumMix(r,key,0)}>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));const v=Math.round(pct*(maxVal-minVal)+minVal);onMixDrag(r,key,Math.max(minVal,Math.min(maxVal,v)));};u(e);const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
+                              onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                               {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                               {bipolar
                                 ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:voice.color+"99",borderRadius:3}}/>
@@ -5976,8 +6126,8 @@ export default function Tabula(){
                             <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                              {miniSlider("pitch",m.pitch||0,-24,24,true)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(m.pitch||0)>0?"+"+m.pitch:(m.pitch||0)}</div>
+                              {miniSlider("pitch",md.pitch||0,-24,24,true)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                             </div>
                             <div style={cell}>
                               <div style={{display:"flex",width:"100%",alignItems:"center",gap:2}}>
@@ -5987,42 +6137,42 @@ export default function Tabula(){
                                     background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
                                     color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
                                 <div style={{flex:1,opacity:filtMode==="off"?0.35:1}}>
-                                  {miniSlider("filtCut",m.filtCut!=null?m.filtCut:100,0,100,false)}
+                                  {miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}
                                 </div>
                               </div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                              {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
+                              {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.env!=null?md.env:100}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                              {miniSlider("sat",m.sat||0,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.sat||0}</div>
+                              {miniSlider("sat",md.sat||0,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.sat||0}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                              {miniSlider("pan",m.pan,-100,100,true)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.pan>0?"+"+m.pan:m.pan}</div>
+                              {miniSlider("pan",md.pan,-100,100,true)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
-                              {miniSlider("rvSend",m.rvSend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.rvSend}</div>
+                              {miniSlider("rvSend",md.rvSend,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.rvSend}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                              {miniSlider("dlySend",m.dlySend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.dlySend}</div>
+                              {miniSlider("dlySend",md.dlySend,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
                             </div>
                             <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));setDrumMix(r,"level",Math.round(pct*100));};u(e);const up=()=>{document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${m.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
-                              <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-m.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));onMixDrag(r,"level",Math.round(pct*100));};u(e);const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
+                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
                               <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                             </div>
-                            <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{m.level}</div>
+                            <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
                             <div style={{display:"flex",gap:2,justifyContent:"center"}}>
                               <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                                 onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
@@ -6032,6 +6182,7 @@ export default function Tabula(){
                             </div>
                           </div>);
                         })}
+                      </div>
                       </div>);
                     })()}
                   </div>
