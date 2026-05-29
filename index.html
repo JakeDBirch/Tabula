@@ -5243,7 +5243,9 @@ function Tabula() {
       if (monoOne) break;
     }
   };
-  // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
+  // Plays one step of a drum pat. Voices per row, using the GLOBAL mix
+  // (drumMixR) as base + per-pattern MOTION overlay when MOTION is on, and
+  // per-cell velocity + ratchet.
   var playDrumStep = function playDrumStep(pat, s, at, stepDur) {
     if (!pat || !pat.grid || !drumEngine.current.ready) return;
     var dvary = !!varyModeR.current.drums;
@@ -10241,6 +10243,10 @@ function Tabula() {
     var fromBot = ROWS - 1 - r;
     var isOct = fromBot % SCALE_SPAN === 0;
     var isFifth = !isOct && fromBot % SCALE_SPAN === 4;
+    // VARY visual feedback (synth/lead): the live varied grid for the
+    // active pattern while vary is on + playing. Drives the gold/dim
+    // overlay below; re-renders each step via `step`.
+    var vSGrid = varyMode[activeLayer] && playing && activePat ? variedGrids.current.get(activePat.id) : null;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       style: Object.assign({}, S.gridRow, {
@@ -10397,7 +10403,42 @@ function Tabula() {
         _loop3();
       }
       return rects;
-    }());
+    }(), vSGrid && Array.from({
+      length: COLS
+    }, function (_, c) {
+      if (c >= gridLen) return null;
+      var baseOn = activePat ? activePat.grid[r][c] : false;
+      var vOn = !!(vSGrid[r] && vSGrid[r][c]);
+      if (vOn === baseOn) return null;
+      var L = "calc(".concat(c / COLS, "*(100% + 2px))");
+      var W = "calc(".concat(1 / COLS, "*(100% + 2px) - 2px)");
+      return vOn ? /*#__PURE__*/React.createElement("div", {
+        key: "va" + c,
+        style: {
+          position: "absolute",
+          left: L,
+          width: W,
+          top: 1,
+          bottom: 1,
+          borderRadius: 2,
+          border: "1.5px solid " + C_VARY,
+          boxShadow: "0 0 5px " + C_VARY + "aa",
+          pointerEvents: "none"
+        }
+      }) : /*#__PURE__*/React.createElement("div", {
+        key: "vd" + c,
+        style: {
+          position: "absolute",
+          left: L,
+          width: W,
+          top: 1,
+          bottom: 1,
+          borderRadius: 2,
+          background: "rgba(20,16,12,0.5)",
+          pointerEvents: "none"
+        }
+      });
+    }));
   })), /*#__PURE__*/React.createElement("div", {
     style: S.stepBar
   }, Array.from({
@@ -10472,6 +10513,11 @@ function Tabula() {
     var dLen = (_dPat$gridLen = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen !== void 0 ? _dPat$gridLen : 16;
     var dw = gridPx || null;
     var dh = dw ? Math.floor(dw * DRUM_ROWS / COLS) : null;
+    // VARY visual feedback: while vary.drums is on AND playing, read the
+    // live varied grid so the editor animates the variation (gold ring on
+    // added hits, dim on dropped). Re-renders each step via drumStep.
+    var dVaryShow = varyMode.drums && playing;
+    var vGridD = dVaryShow ? variedDrumGrids.current.get(dPat.id) : null;
     return /*#__PURE__*/React.createElement("div", {
       style: {
         width: "100%",
@@ -10578,6 +10624,11 @@ function Tabula() {
         var isActive = playing && c === drumStep;
         var inactive = c >= dLen;
         var isQ = c % 4 === 0;
+        // VARY overlay: gold ring where the live variation ADDED a
+        // hit, dim where it DROPPED one. Base grid stays editable.
+        var varOn = vGridD ? !!(vGridD[r] && vGridD[r][c]) : on;
+        var vAdd = vGridD && varOn && !on && c < dLen,
+          vDrop = vGridD && !varOn && on;
         // Velocity → brightness via alpha on the voice color.
         var aHex = Math.round((0.30 + 0.70 * (cv / 127)) * 255).toString(16).padStart(2, "0");
         var onBg = isActive ? "rgba(255,255,255,0.9)" : voice.color + aHex;
@@ -10698,6 +10749,23 @@ function Tabula() {
               pointerEvents: "none"
             }
           });
+        }), vAdd && /*#__PURE__*/React.createElement("div", {
+          style: {
+            position: "absolute",
+            inset: 1,
+            borderRadius: 2,
+            border: "1.5px solid " + C_VARY,
+            boxShadow: "0 0 5px " + C_VARY + "aa",
+            pointerEvents: "none"
+          }
+        }), vDrop && /*#__PURE__*/React.createElement("div", {
+          style: {
+            position: "absolute",
+            inset: 0,
+            borderRadius: 2,
+            background: "rgba(20,16,12,0.5)",
+            pointerEvents: "none"
+          }
         }));
       }));
     })), /*#__PURE__*/React.createElement("div", {
@@ -12851,6 +12919,7 @@ function Tabula() {
     var fromBot = ROWS - 1 - r;
     var isOct = fromBot % SCALE_SPAN === 0;
     var isFifth = !isOct && fromBot % SCALE_SPAN === 4;
+    var vSGrid = varyMode[activeLayer] && playing && activePat ? variedGrids.current.get(activePat.id) : null;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       style: Object.assign({}, S.gridRow, {
@@ -13008,7 +13077,42 @@ function Tabula() {
         _loop4();
       }
       return rects;
-    }());
+    }(), vSGrid && Array.from({
+      length: COLS
+    }, function (_, c) {
+      if (c >= gridLen) return null;
+      var baseOn = activePat ? activePat.grid[r][c] : false;
+      var vOn = !!(vSGrid[r] && vSGrid[r][c]);
+      if (vOn === baseOn) return null;
+      var L = "calc(".concat(c / COLS, "*(100% + 2px))");
+      var W = "calc(".concat(1 / COLS, "*(100% + 2px) - 2px)");
+      return vOn ? /*#__PURE__*/React.createElement("div", {
+        key: "va" + c,
+        style: {
+          position: "absolute",
+          left: L,
+          width: W,
+          top: 1,
+          bottom: 1,
+          borderRadius: 2,
+          border: "1.5px solid " + C_VARY,
+          boxShadow: "0 0 5px " + C_VARY + "aa",
+          pointerEvents: "none"
+        }
+      }) : /*#__PURE__*/React.createElement("div", {
+        key: "vd" + c,
+        style: {
+          position: "absolute",
+          left: L,
+          width: W,
+          top: 1,
+          bottom: 1,
+          borderRadius: 2,
+          background: "rgba(20,16,12,0.5)",
+          pointerEvents: "none"
+        }
+      });
+    }));
   })), /*#__PURE__*/React.createElement("div", {
     style: S.stepBar
   }, Array.from({
@@ -13091,6 +13195,8 @@ function Tabula() {
       return p.id === activeDrumId;
     }) || drumPats[0];
     var dLen = (_dPat$gridLen2 = dPat === null || dPat === void 0 ? void 0 : dPat.gridLen) !== null && _dPat$gridLen2 !== void 0 ? _dPat$gridLen2 : 16;
+    var dVaryShow = varyMode.drums && playing;
+    var vGridD = dVaryShow ? variedDrumGrids.current.get(dPat.id) : null;
     var GAP = 2;
     // Drum grid is now oriented to match the synth grid: voices
     // run vertically as rows, steps horizontally as columns. Time
@@ -13152,6 +13258,9 @@ function Tabula() {
         var isActive = playing && step === drumStep;
         var inactive = step >= dLen;
         var isQ = step % 4 === 0;
+        var varOn = vGridD ? !!(vGridD[r] && vGridD[r][step]) : on;
+        var vAdd = vGridD && varOn && !on && step < dLen,
+          vDrop = vGridD && !varOn && on;
         var aHex = Math.round((0.30 + 0.70 * (cv / 127)) * 255).toString(16).padStart(2, "0");
         var onBg = isActive ? "rgba(255,255,255,0.88)" : voice.color + aHex;
         return /*#__PURE__*/React.createElement("div", {
@@ -13269,6 +13378,23 @@ function Tabula() {
               pointerEvents: "none"
             }
           });
+        }), vAdd && /*#__PURE__*/React.createElement("div", {
+          style: {
+            position: "absolute",
+            inset: 1,
+            borderRadius: 2,
+            border: "1.5px solid " + C_VARY,
+            boxShadow: "0 0 5px " + C_VARY + "aa",
+            pointerEvents: "none"
+          }
+        }), vDrop && /*#__PURE__*/React.createElement("div", {
+          style: {
+            position: "absolute",
+            inset: 0,
+            borderRadius: 2,
+            background: "rgba(20,16,12,0.5)",
+            pointerEvents: "none"
+          }
         }));
       }));
     })), /*#__PURE__*/React.createElement("div", {

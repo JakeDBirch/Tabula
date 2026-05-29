@@ -5153,6 +5153,10 @@ export default function Tabula(){
                   const fromBot=ROWS-1-r;
                   const isOct=fromBot%SCALE_SPAN===0;
                   const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
+                  // VARY visual feedback (synth/lead): the live varied grid for the
+                  // active pattern while vary is on + playing. Drives the gold/dim
+                  // overlay below; re-renders each step via `step`.
+                  const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
@@ -5198,6 +5202,17 @@ export default function Tabula(){
                       }
                       return rects;
                     })()}
+                    {vSGrid&&Array.from({length:COLS},(_,c)=>{
+                      if(c>=gridLen)return null;
+                      const baseOn=activePat?activePat.grid[r][c]:false;
+                      const vOn=!!(vSGrid[r]&&vSGrid[r][c]);
+                      if(vOn===baseOn)return null;
+                      const L=`calc(${c/COLS}*(100% + 2px))`;
+                      const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
+                      return vOn
+                        ? <div key={"va"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>
+                        : <div key={"vd"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>;
+                    })}
                   </div>
                 );})}
               </div>
@@ -5228,6 +5243,11 @@ export default function Tabula(){
               const dLen=(dPat?.gridLen)??16;
               const dw=gridPx||null;
               const dh=dw?Math.floor(dw*DRUM_ROWS/COLS):null;
+              // VARY visual feedback: while vary.drums is on AND playing, read the
+              // live varied grid so the editor animates the variation (gold ring on
+              // added hits, dim on dropped). Re-renders each step via drumStep.
+              const dVaryShow=varyMode.drums&&playing;
+              const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
               return(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
                 {/* Drum header: active pattern name + RAND/CLR */}
@@ -5252,6 +5272,10 @@ export default function Tabula(){
                         const isActive=playing&&c===drumStep;
                         const inactive=c>=dLen;
                         const isQ=c%4===0;
+                        // VARY overlay: gold ring where the live variation ADDED a
+                        // hit, dim where it DROPPED one. Base grid stays editable.
+                        const varOn=vGridD?!!(vGridD[r]&&vGridD[r][c]):on;
+                        const vAdd=vGridD&&varOn&&!on&&c<dLen, vDrop=vGridD&&!varOn&&on;
                         // Velocity → brightness via alpha on the voice color.
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":voice.color+aHex;
@@ -5307,6 +5331,8 @@ export default function Tabula(){
                             {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                               <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
                             ))}
+                            {vAdd&&<div style={{position:"absolute",inset:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>}
+                            {vDrop&&<div style={{position:"absolute",inset:0,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>}
                           </div>
                         );
                       })}
@@ -6099,6 +6125,7 @@ export default function Tabula(){
                     onContextMenu={handleGridContextMenu}>
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
+                      const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                       return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
@@ -6108,6 +6135,16 @@ export default function Tabula(){
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
                         {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {vSGrid&&Array.from({length:COLS},(_,c)=>{
+                          if(c>=gridLen)return null;
+                          const baseOn=activePat?activePat.grid[r][c]:false;
+                          const vOn=!!(vSGrid[r]&&vSGrid[r][c]);
+                          if(vOn===baseOn)return null;
+                          const L=`calc(${c/COLS}*(100% + 2px))`;const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
+                          return vOn
+                            ? <div key={"va"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>
+                            : <div key={"vd"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>;
+                        })}
                       </div>);
                     })}
                   </div>
@@ -6128,6 +6165,8 @@ export default function Tabula(){
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
+                  const dVaryShow=varyMode.drums&&playing;
+                  const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
                   const GAP=2;
                   // Drum grid is now oriented to match the synth grid: voices
                   // run vertically as rows, steps horizontally as columns. Time
@@ -6148,6 +6187,8 @@ export default function Tabula(){
                               const isActive=playing&&step===drumStep;
                               const inactive=step>=dLen;
                               const isQ=step%4===0;
+                              const varOn=vGridD?!!(vGridD[r]&&vGridD[r][step]):on;
+                              const vAdd=vGridD&&varOn&&!on&&step<dLen, vDrop=vGridD&&!varOn&&on;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":voice.color+aHex;
                               return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
@@ -6202,6 +6243,8 @@ export default function Tabula(){
                                 {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                                   <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
                                 ))}
+                                {vAdd&&<div style={{position:"absolute",inset:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>}
+                                {vDrop&&<div style={{position:"absolute",inset:0,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>}
                               </div>);
                             })}
                           </div>
