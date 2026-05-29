@@ -357,7 +357,7 @@ const SESSION_DEFAULTS = Object.freeze({
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
   satAmt:0,
-  drumLevel:85, activeKit:DEFAULT_KIT,
+  drumLevel:85, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
@@ -1291,19 +1291,10 @@ class DrumEngine{
     const v=Math.max(0.001,vel/127);
     // Closed-hat chokes any currently-sounding open hat.
     if(voice==="CH")this.chokeOH(t);
-    // Apply this pat's mix to the voice strip ONLY on a pattern switch — not
-    // on every hit. The scheduler captures the mix up to 100ms ahead (lookahead
-    // window), so calling setVoiceMix per-hit re-applies stale drag values and
-    // fights the live React-effect updates — the user heard their slider drag
-    // play back as a sequence of discrete jumps across the next few hits.
-    // Live drags + pattern edits flow through the React effect (active pat);
-    // this path only catches song-mode bar changes where the playing pat
-    // differs from the active one. lastMixPat is per-voice.
-    if(!this.lastMixPat)this.lastMixPat={};
-    if(patId!==this.lastMixPat[voice]){
-      this.setVoiceMix(voice,mix);
-      this.lastMixPat[voice]=patId;
-    }
+    // The drum mix is GLOBAL/static now — the React effect pushes it to the
+    // strips whenever it changes, and MOTION automation (when on) is scheduled
+    // per-step in playDrumStep. So play() no longer applies any base mix here;
+    // the strip is already configured. (mix/patId args kept for compatibility.)
     const strip=this.voiceStrips[voice];if(!strip)return;
     // out feeds the strip's filter (and then lvlGain → panner → master).
     const out=strip.filter;
@@ -1571,9 +1562,12 @@ export default function Tabula(){
   // cell's velocity. (Reads the vary grid/vel when drum vary is on.)
   useEffect(()=>{
     if(!playing||drumStep<0)return;
-    const dPat=drumPats.find(p=>p.id===activeDrumId);
+    // Read the CURRENT pattern via refs (not a render-stale closure) so a note
+    // deleted between steps doesn't keep flashing its channel — the orphan
+    // "ghost hit" the mixer used to show after edits.
+    const dPat=drumPatsR.current.find(p=>p.id===activeDrumIdR.current);
     if(!dPat)return;
-    const dv=varyMode.drums;
+    const dv=varyModeR.current.drums;
     const grid=dv?(variedDrumGrids.current.get(dPat.id)||dPat.grid):dPat.grid;
     const vel=dv?(variedDrumVels.current.get(dPat.id)||dPat.vel):dPat.vel;
     setDrumFlash(prev=>{
@@ -1590,6 +1584,8 @@ export default function Tabula(){
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[drumStep,playing]);
+  // Clear all channel flashes when playback stops so none linger lit.
+  useEffect(()=>{if(!playing)setDrumFlash({});},[playing]);
 
   // ── Motion mixer (drum mix automation) ───────────────────────────────────
   // motionEnabled: performance mode — the drum mixer is driven by the
@@ -1612,6 +1608,13 @@ export default function Tabula(){
   // bumps each hit so the flash overlay remounts and replays its fade. Driven
   // off the drum playhead (drumStep) so a channel pulses when its voice sounds.
   const [drumFlash,setDrumFlash]=useState({});
+  // ── Global drum mixer ─────────────────────────────────────────────────────
+  // A SINGLE static mix shared by every drum pattern. The mixer is NOT
+  // per-pattern — switching patterns never changes it (it's a console, not a
+  // pattern property). Per-pattern MOTION automation (pat.motion) only overlays
+  // this base while MOTION mode is on; with MOTION off the mix is fully static.
+  const [drumMix,setDrumMixArr]=useState(defaultDrumMix());
+  const drumMixR=useRef(drumMix); useEffect(()=>{drumMixR.current=drumMix;},[drumMix]);
 
   // Track window width to drive responsive left column layout
   // Use ResizeObserver on the layout container — works inside iframes too
@@ -2097,19 +2100,16 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
   useEffect(()=>{bell.current.setSaturation&&bell.current.setSaturation(satAmt);},[satAmt]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
-  // Push the active drum pat's mix to the engine whenever it changes. Per-hit
-  // mix application (inside DrumEngine.play) handles song-mode pat switches;
-  // this effect handles live mixer slider drags so even silent voices respond
-  // immediately and so users hear the slider's final value when they release
-  // (no more "movement got recorded into the upcoming hits" feel).
+  // Push the GLOBAL mix to the engine whenever it changes. The mix is static
+  // and shared across patterns, so this is the single source of truth for the
+  // strips. (MOTION automation, when on, overlays per-step in playDrumStep.)
   useEffect(()=>{
     if(!drumEngine.current.ready)return;
-    const dPat=drumPats.find(p=>p.id===activeDrumId);
-    const mix=fillDrumMix(dPat?.mix);
+    const mix=fillDrumMix(drumMix);
     for(let r=0;r<DRUM_ROWS;r++){
       drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,mix[r]);
     }
-  },[drumPats,activeDrumId]);
+  },[drumMix]);
 
   useEffect(()=>{
     (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
@@ -2154,6 +2154,7 @@ export default function Tabula(){
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
+    drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     varyMode,loopMode,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
@@ -2180,6 +2181,7 @@ export default function Tabula(){
     // See doLoad note: legacy shares lack activeLayer; their `s.pats` is synth.
     {const t=s.activeLayer||"synth";if(t!==activeLayer)setActiveLayer(t);}
     setPats(migratePats(s.pats,s.speedMult));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
+    setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):defaultDrumMix()); // global mix (snapshots always carry it)
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
     if(s.songMode!=null)setSongMode(s.songMode);
@@ -2402,7 +2404,14 @@ export default function Tabula(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
-    if(s.drumPats)setDrumPats(relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat));
+    if(s.drumPats){
+      const _dp=relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat);
+      setDrumPats(_dp);
+      // Global mix: use the saved global drumMix; for legacy projects (which
+      // stored mix per-pattern) seed it from the first pattern's migrated mix
+      // so the old console state isn't lost.
+      setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):fillDrumMix(_dp[0]&&_dp[0].mix));
+    }
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats),symPhr));
@@ -2496,7 +2505,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setSatAmt(0);setDrumLevel(85);
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setSatAmt(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -2565,6 +2574,7 @@ export default function Tabula(){
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
+    drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
@@ -2612,7 +2622,12 @@ export default function Tabula(){
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    if(s.drumPats)setDrumPats(relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat));
+    if(s.drumPats){
+      const _dp=relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat);
+      setDrumPats(_dp);
+      // Global mix: saved global drumMix, else seed from legacy per-pattern mix.
+      setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):fillDrumMix(_dp[0]&&_dp[0].mix));
+    }
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats||[]),symPhr));
@@ -2764,7 +2779,9 @@ export default function Tabula(){
       if(monoOne)break;
     }
   };
-  // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
+  // Plays one step of a drum pat. Voices per row, using the GLOBAL mix
+  // (drumMixR) as base + per-pattern MOTION overlay when MOTION is on, and
+  // per-cell velocity + ratchet.
   const playDrumStep=(pat,s,at,stepDur)=>{
     if(!pat||!pat.grid||!drumEngine.current.ready)return;
     const dvary = !!varyModeR.current.drums;
@@ -2777,7 +2794,9 @@ export default function Tabula(){
     // off the mixer is fully static (base mix) — the recorded automation is
     // retained in the pat but ignored, so output is persistent.
     const patHasMotion = motionEnabledR.current && !!(pat.motion && MOTION_PARAMS.some(k=>pat.motion[k]));
-    const baseMixArr = pat.mix||defaultDrumMix();
+    // Base mix is GLOBAL/static (drumMixR). Motion (per-pattern) overlays it
+    // only while MOTION is on — see patHasMotion path below.
+    const baseMixArr = drumMixR.current||defaultDrumMix();
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
@@ -3053,6 +3072,9 @@ export default function Tabula(){
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
     bell.current.setSaturation&&bell.current.setSaturation(satAmt);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
+    // Push the global drum mix to the strips on play-start (effects fire before
+    // the engine is ready on a cold start).
+    {const _m=fillDrumMix(drumMix);for(let r=0;r<DRUM_ROWS;r++)drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,_m[r]);}
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
     if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
     if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
@@ -3846,15 +3868,12 @@ export default function Tabula(){
     if(_TOM_ROWS.includes(row)&&_TOM_KEYS.has(key))return _TOM_ROWS;
     return [row];
   };
-  const setDrumMix=(row,key,val)=>setDrumPats(ps=>ps.map(p=>{
-    if(p.id!==activeDrumId)return p;
+  // Edit the GLOBAL mix (not per-pattern). Link groups (hats, tom levels)
+  // still apply. fillDrumMix normalizes any partial state before the write.
+  const setDrumMix=(row,key,val)=>setDrumMixArr(prev=>{
     const targets=_linkedRows(row,key);
-    // fillDrumMix normalizes any partial saves so old voice rows without the
-    // newer fields pick up defaults before the value is applied.
-    const mix=fillDrumMix(p.mix).map((m,i)=>
-      targets.includes(i)?Object.assign({},m,{[key]:val}):m);
-    return Object.assign({},p,{mix});
-  }));
+    return fillDrumMix(prev).map((m,i)=>targets.includes(i)?Object.assign({},m,{[key]:val}):m);
+  });
   // ── Motion mixer write/route ──────────────────────────────────────────────
   // Write a motion automation value onto a step (and linked voices). Lazily
   // allocates the per-param ROWS×COLS lane. Persisted in the drum pat.
@@ -3887,10 +3906,9 @@ export default function Tabula(){
     recDragR.current=null;
     const linked=_linkedRows(row,key);
     setPerfMix(pm=>{const n={...pm};linked.forEach(rr=>{if(n[rr]){const c={...n[rr]};delete c[key];Object.keys(c).length?n[rr]=c:delete n[rr];}});return n;});
-    // Revert the engine strip to the sequence base for these voices; any
+    // Revert the engine strip to the global static base for these voices; any
     // motion-automated params re-apply per-step on the next hit anyway.
-    const pat=drumPatsR.current.find(p=>p.id===activeDrumIdR.current);
-    const mixArr=fillDrumMix(pat&&pat.mix);
+    const mixArr=fillDrumMix(drumMixR.current);
     linked.forEach(rr=>drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key,mixArr[rr]));
   };
   // perfMix → ref so the scheduler (playDrumStep) can let a live drag win over
@@ -3909,11 +3927,10 @@ export default function Tabula(){
   useEffect(()=>{
     if(!motionEnabled){
       setPerfMix({});recDragR.current=null;
-      // Snap every strip back to the active pat's static base mix — otherwise
-      // a strip could be stuck at the last per-step automated value.
+      // Snap every strip back to the global static base mix — otherwise a
+      // strip could be stuck at the last per-step automated value.
       if(drumEngine.current.ready){
-        const dPat=drumPats.find(p=>p.id===activeDrumId);
-        const mixArr=fillDrumMix(dPat&&dPat.mix);
+        const mixArr=fillDrumMix(drumMixR.current);
         for(let r=0;r<DRUM_ROWS;r++)drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,mixArr[r]);
       }
     }
@@ -3944,6 +3961,24 @@ export default function Tabula(){
     // but-populated rhythm — repeat RAND to keep generating variations.
     const grid=p.grid.map(row=>row.map(()=>Math.random()<0.22));
     return Object.assign({},p,{vel,grid});
+  }));}
+  // MUT8 for drums — nudge the active pattern: drop some existing hits, sprinkle
+  // a few new ones, all within the active length. Anti-silence guard keeps the
+  // original if the mutation happened to clear every in-window hit. Repeat for
+  // progressive variations (like the synth MUT8).
+  const mutateDrumPat1=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
+    if(p.id!==activeDrumId)return p;
+    const len=Math.max(1,Math.min(COLS,p.gridLen||16));
+    let grid=p.grid.map(row=>row.map((on,ci)=>{
+      if(ci>=len)return on;
+      if(on&&Math.random()<0.30)return false;
+      if(!on&&Math.random()<0.10)return true;
+      return on;
+    }));
+    const had=p.grid.some(row=>row.some((on,ci)=>on&&ci<len));
+    const got=grid.some(row=>row.some((on,ci)=>on&&ci<len));
+    if(had&&!got)grid=p.grid.map(row=>[...row]);
+    return Object.assign({},p,{grid});
   }));}
 
   // ── Internal sampler ─────────────────────────────────────────────────
@@ -4717,9 +4752,13 @@ export default function Tabula(){
               {/* DRUMS layer box */}
               <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
                 onClick={()=>{
-                  if(songView){setSongView(false);setPage("sound");return;}
-                  if(activeLayer==="drums"){setPage("sound");}
-                  else{switchLayer("drums");}
+                  // Stepping into DRUMS lands on the grid editor (the main drum
+                  // workspace). The mixer / kit live on the SOUND tab; global FX
+                  // on the FX tab. (POLY/MONO keep layer→sound since "sound" is
+                  // their per-layer instrument; drums "sound" is the shared kit.)
+                  if(songView)setSongView(false);
+                  if(activeLayer!=="drums")switchLayer("drums");
+                  setPage("edit");
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
@@ -4836,7 +4875,7 @@ export default function Tabula(){
                 return(
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
-                      {[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["─",null,true,false]].map(([l,f,d])=>(
+                      {[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["MUT8",mutateDrumPat1,false,false]].map(([l,f,d])=>(
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.04":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.15)":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
@@ -5234,17 +5273,34 @@ export default function Tabula(){
                               e.stopPropagation();if(inactive)return;
                               // Ctrl/Cmd+click → cycle this cell's ratchet count.
                               if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,c);return;}
-                              const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
+                              e.preventDefault();
+                              // Gesture: horizontal drag = paint/erase a run of notes
+                              // (like POLY/MONO); vertical drag = per-cell velocity;
+                              // pure tap = toggle. paintVal is decided by the start
+                              // cell (empty → paint on, lit → erase).
+                              const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+                              const cw=ge.width/COLS||1,chh=ge.height/DRUM_ROWS||1;
+                              const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
+                              let mode=null;const painted=new Set();
+                              const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
                               pushHistory();
-                              if(!wasOn)setDrumCell(r,c,true);
+                              if(!wasOn){setDrumCell(r,c,true);painted.add(r+":"+c);}
                               const onMove=ev=>{
-                                const dy=startY-ev.clientY;
-                                if(!dragging&&Math.abs(dy)>4)dragging=true;
-                                if(dragging)setDrumVelCell(r,c,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                const dx=ev.clientX-startX,dy=startY-ev.clientY;
+                                if(mode===null){
+                                  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,c);}
+                                  else if(Math.abs(dy)>5){mode="vel";}
+                                }
+                                if(mode==="vel")setDrumVelCell(r,c,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                else if(mode==="paint"){
+                                  const cc=Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
+                                  const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
+                                  paint(rr,cc);
+                                }
                               };
                               const onUp=()=>{
                                 document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
-                                if(wasOn&&!dragging)setDrumCell(r,c,false); // pure tap on existing note → clear
+                                if(mode===null&&wasOn)setDrumCell(r,c,false); // pure tap on existing note → clear
                               };
                               document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
                             }}>
@@ -5276,7 +5332,7 @@ export default function Tabula(){
             )}
             {activeLayer==="drums"&&page==="sound"&&(()=>{
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const mix=fillDrumMix(dPat?.mix);
+              const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
               return(
               <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
                 {/* Kit selector — switch between curated sample packs or the synth engine */}
@@ -6115,17 +6171,31 @@ export default function Tabula(){
                                 e.preventDefault();e.stopPropagation();if(inactive)return;
                                 // Ctrl/Cmd+click → cycle this cell's ratchet count.
                                 if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,step);return;}
-                                const startY=e.clientY,wasOn=on,startVel=cv;let dragging=false;
+                                // Horizontal drag = paint/erase a run; vertical drag
+                                // = per-cell velocity; tap = toggle.
+                                const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+                                const cw=ge.width/COLS||1,chh=ge.height/DRUM_ROWS||1;
+                                const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
+                                let mode=null;const painted=new Set();
+                                const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
                                 pushHistory();
-                                if(!wasOn)setDrumCell(r,step,true);
+                                if(!wasOn){setDrumCell(r,step,true);painted.add(r+":"+step);}
                                 const onMove=ev=>{
-                                  const dy=startY-ev.clientY;
-                                  if(!dragging&&Math.abs(dy)>4)dragging=true;
-                                  if(dragging)setDrumVelCell(r,step,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                  const dx=ev.clientX-startX,dy=startY-ev.clientY;
+                                  if(mode===null){
+                                    if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,step);}
+                                    else if(Math.abs(dy)>5){mode="vel";}
+                                  }
+                                  if(mode==="vel")setDrumVelCell(r,step,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                  else if(mode==="paint"){
+                                    const cc=Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
+                                    const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
+                                    paint(rr,cc);
+                                  }
                                 };
                                 const onUp=()=>{
                                   document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);
-                                  if(wasOn&&!dragging)setDrumCell(r,step,false);
+                                  if(mode===null&&wasOn)setDrumCell(r,step,false);
                                 };
                                 document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);
                               }}>
@@ -6263,7 +6333,7 @@ export default function Tabula(){
                       const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
                       const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(108,154,214,":"rgba(196,114,122,";
                       const ops=isDrum
-                        ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",null,true,false]]
+                        ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
                         :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
                       return(
                         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:12}}>
@@ -6419,7 +6489,7 @@ export default function Tabula(){
                     )}
                     {activeLayer==="drums"&&(()=>{
                       const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=fillDrumMix(dPat?.mix);
+                      const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
                       // Mobile mixer: horizontally-scrolling row of compact channel strips.
                       // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
                       // vertical level fader → REC) but at a narrower width.
