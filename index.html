@@ -4036,11 +4036,12 @@ function Tabula() {
     showFlash("LOADED " + slot);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
     // doLoad so the previous kit's samples are cleared before the new fetch.
-    var savedKit = s.activeKit || "synth";
-    if (savedKit !== "synth") loadKit(savedKit)["catch"](function () {});else {
-      setActiveKit("synth");
-      setVoiceSamples({});
-    }
+    // Legacy saves carry activeKit:"synth" (or nothing) which is no longer a
+    // valid kit, so resolve any unknown id to DEFAULT_KIT.
+    var savedKit = DRUM_KITS.find(function (k) {
+      return k.id === s.activeKit;
+    }) ? s.activeKit : DEFAULT_KIT;
+    loadKit(savedKit)["catch"](function () {});
   };
   var saveSlot = function saveSlot(slot) {
     if (slotData[slot]) {
@@ -4481,6 +4482,11 @@ function Tabula() {
     setSongMode(s.songMode != null ? s.songMode : SESSION_DEFAULTS.songMode);
     setSongView(s.songView != null ? s.songView : s.songMode ? true : SESSION_DEFAULTS.songView);
     setSongSyncMode(s.songSyncMode != null ? _normalizeSongSyncMode(s.songSyncMode) : SESSION_DEFAULTS.songSyncMode);
+    // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
+    var sharedKit = DRUM_KITS.find(function (k) {
+      return k.id === s.activeKit;
+    }) ? s.activeKit : DEFAULT_KIT;
+    loadKit(sharedKit)["catch"](function () {});
   };
   var encodeState = function encodeState(s) {
     try {
