@@ -353,28 +353,30 @@ var DRUM_DEFAULT_LEVEL = 60;
 // To add a kit: copy the template, fill in the id/label/samples map, and put
 // your audio files at the listed paths in the repo.
 var DRUM_KITS = [{
+  id: "808-kit",
+  label: "808",
+  // Only the voices with files listed here load samples; every other voice
+  // falls through to the built-in synth. Add keys as more samples land.
+  samples: {
+    BD: "samples/808-kit/BD.wav",
+    SD: "samples/808-kit/SD.wav"
+    // LT: "samples/808-kit/LT.wav",
+    // HT: "samples/808-kit/HT.wav",
+    // CH: "samples/808-kit/CH.wav",
+    // OH: "samples/808-kit/OH.wav",
+    // CY: "samples/808-kit/CY.wav",
+    // CP: "samples/808-kit/CP.wav",
+    // CL: "samples/808-kit/CL.wav",
+    // CB: "samples/808-kit/CB.wav",
+  }
+}, {
   id: "synth",
   label: "SYNTH"
   // no samples — engine falls through to the built-in synthesizer
-}
-// ── Add your kits below. Template: ─────────────────────────────────────────
-// {
-//   id:    "my-kit",
-//   label: "MY KIT",
-//   samples: {
-//     BD: "samples/my-kit/BD.wav",
-//     SD: "samples/my-kit/SD.wav",
-//     LT: "samples/my-kit/LT.wav",
-//     HT: "samples/my-kit/HT.wav",
-//     CH: "samples/my-kit/CH.wav",
-//     OH: "samples/my-kit/OH.wav",
-//     CY: "samples/my-kit/CY.wav",
-//     CP: "samples/my-kit/CP.wav",
-//     CL: "samples/my-kit/CL.wav",
-//     CB: "samples/my-kit/CB.wav",
-//   },
-// },
-];
+}];
+// The kit selected on a fresh load / NEW project. Points at the curated kit
+// so the bundled samples are the out-of-the-box sound.
+var DEFAULT_KIT = "808-kit";
 // Filter modes: "off" disables the filter (passes everything through unity),
 // "lp"/"hp"/"bp" route through the corresponding biquad type. filtCut 0..100
 // maps log-scaled to 20..20000 Hz at runtime. pitch is in semitones, ±24.
@@ -447,7 +449,7 @@ var SESSION_DEFAULTS = Object.freeze({
   rvPreDelay: 0,
   dlyToRev: 0,
   drumLevel: 85,
-  activeKit: "synth",
+  activeKit: DEFAULT_KIT,
   vDropRate: 13,
   vShiftRate: 17,
   vShiftRange: 1,
@@ -2566,7 +2568,7 @@ function Tabula() {
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
   // that don't come from a kit — loading a kit replaces them all.
-  var _useState57 = useState("synth"),
+  var _useState57 = useState(DEFAULT_KIT),
     _useState58 = _slicedToArray(_useState57, 2),
     activeKit = _useState58[0],
     setActiveKit = _useState58[1];
@@ -3451,6 +3453,14 @@ function Tabula() {
       }, _callee7);
     }))();
   }, []);
+
+  // Pre-load the default kit's samples on first mount so the bundled sound is
+  // ready before the user presses play. loadKit falls back to an
+  // OfflineAudioContext when the live audio context isn't up yet.
+  useEffect(function () {
+    if (DEFAULT_KIT !== "synth") loadKit(DEFAULT_KIT)["catch"](function () {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   var showFlash = function showFlash(msg) {
     setFlash(msg);
     clearTimeout(flashTmr.current);
@@ -4219,7 +4229,10 @@ function Tabula() {
     recorderRef.current = null;
     setRecordingVoice(null);
     setVoiceSamples({});
-    setActiveKit("synth");
+    // Reload the default kit's samples rather than dropping to bare synth.
+    if (DEFAULT_KIT !== "synth") loadKit(DEFAULT_KIT)["catch"](function () {});else {
+      setActiveKit("synth");
+    }
     showFlash("NEW PROJECT");
   };
   var newProject = function newProject() {
