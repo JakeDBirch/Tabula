@@ -23,11 +23,6 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 function _classCallCheck(a, n) { if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function"); }
 function _defineProperties(e, r) { for (var t = 0; t < r.length; t++) { var o = r[t]; o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, _toPropertyKey(o.key), o); } }
 function _createClass(e, r, t) { return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", { writable: !1 }), e; }
-function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
-function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
-function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
-function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
-function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
 function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n4 = 0, F = function F() {}; return { s: F, n: function n() { return _n4 >= r.length ? { done: !0 } : { done: !1, value: r[_n4++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
@@ -37,6 +32,11 @@ function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present,
 function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
+function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
+function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
+function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
+function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
+function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
 function _toConsumableArray(r) { return _arrayWithoutHoles(r) || _iterableToArray(r) || _unsupportedIterableToArray(r) || _nonIterableSpread(); }
 function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
@@ -278,6 +278,11 @@ var DRUM_VOICES = [{
   full: "LO TOM",
   color: "#c8a840"
 }, {
+  key: "MT",
+  label: "MT",
+  full: "MID TOM",
+  color: "#b8b040"
+}, {
   key: "HT",
   label: "HT",
   full: "HI TOM",
@@ -365,11 +370,10 @@ var DRUM_KITS = [{
     CL: "samples/808-kit/CL.wav",
     CB: "samples/808-kit/CB.wav",
     LT: "samples/808-kit/LT.wav",
-    HT: "samples/808-kit/HT.wav"
-    // NOTE: MT.wav (mid tom) is committed but unmapped — Tabula only has
-    // LT (lo) + HT (hi) tom voices, no mid tom.
-    // CH: "samples/808-kit/CH.wav",
-    // OH: "samples/808-kit/OH.wav",
+    MT: "samples/808-kit/MT.wav",
+    HT: "samples/808-kit/HT.wav",
+    CH: "samples/808-kit/CH.wav",
+    OH: "samples/808-kit/OH.wav"
     // CY: "samples/808-kit/CY.wav",
   }
 }];
@@ -402,6 +406,39 @@ var fillDrumMix = function fillDrumMix(mix) {
   return out.map(function (d, i) {
     return Object.assign({}, d, mix[i] || {});
   });
+};
+// Row index where MT (mid tom) was inserted — between LT(2) and HT.
+var MT_ROW_INDEX = 3;
+// Migrate a loaded drum pat from the pre-MT 10-voice layout to the current
+// 11-voice layout. MT was inserted at index 3, so a 10-row grid has every
+// voice from HT onward shifted up by one — splice an empty MT row (and a
+// default MT mix entry) at index 3 to realign. No-op for current-length pats.
+var migrateDrumPatRows = function migrateDrumPatRows(pat) {
+  if (!pat || !Array.isArray(pat.grid)) return pat;
+  if (pat.grid.length !== DRUM_ROWS - 1) return pat; // only the 10→11 case
+  var grid = pat.grid.map(function (r) {
+    return _toConsumableArray(r);
+  });
+  grid.splice(MT_ROW_INDEX, 0, new Array(COLS).fill(false));
+  var out = _objectSpread(_objectSpread({}, pat), {}, {
+    grid: grid
+  });
+  if (Array.isArray(pat.mix) && pat.mix.length === DRUM_ROWS - 1) {
+    var mix = pat.mix.map(function (m) {
+      return _objectSpread({}, m);
+    });
+    mix.splice(MT_ROW_INDEX, 0, {
+      level: DRUM_DEFAULT_LEVEL,
+      pan: 0,
+      rvSend: 0,
+      dlySend: 0,
+      pitch: 0,
+      filt: "off",
+      filtCut: 100
+    });
+    out.mix = mix;
+  }
+  return out;
 };
 var FILT_MODES = ["off", "lp", "hp", "bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
@@ -1473,17 +1510,27 @@ var Bell = /*#__PURE__*/function () {
       // staying inaudible against the new note's attack.
       if (p && p.monoSingle && this.monoActiveVoice) {
         var prev = this.monoActiveVoice;
+        var ct = Math.max(t, this.ctx.currentTime);
         try {
-          prev.vca.gain.cancelScheduledValues(t);
-          prev.vca.gain.setTargetAtTime(0.0001, t, 0.005);
+          var g = prev.vca.gain;
+          // cancelAndHoldAtTime locks the curve's value at ct so the fade starts
+          // from exactly where the note is — no jump. Fall back to plain cancel
+          // on older engines. Then a short LINEAR ramp to true zero: linear can
+          // reach 0 (exponential can't), so the oscillators stop on silence and
+          // there's no residual-amplitude click. setTargetAtTime (the old way)
+          // only approached zero asymptotically, leaving ~0.25% at stop time.
+          if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(ct);else g.cancelScheduledValues(ct);
+          g.linearRampToValueAtTime(0, ct + 0.006);
         } catch (e) {}
+        // Stop the oscs just after the fade completes — by ct+0.008 the gain is
+        // already 0, so stopping is silent.
         var _iterator5 = _createForOfIteratorHelper(prev.oscs || []),
           _step5;
         try {
           for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
             var osc = _step5.value;
             try {
-              osc.stop(t + 0.03);
+              osc.stop(ct + 0.008);
             } catch (e) {}
           }
         } catch (err) {
@@ -2207,8 +2254,13 @@ var DrumEngine = /*#__PURE__*/function () {
         sbp.connect(sg);
         sg.connect(out);
         snare.start(t);
-      } else if (voice === "LT" || voice === "HT") {
-        var freq = (voice === "LT" ? 72 : 130) * pr;
+      } else if (voice === "LT" || voice === "MT" || voice === "HT") {
+        // Three toms — base pitch + decay scale lo→hi. MT sits between LT and HT.
+        var base = voice === "LT" ? 72 : voice === "MT" ? 98 : 130;
+        var dec = voice === "LT" ? 0.12 : voice === "MT" ? 0.10 : 0.08;
+        var stp = voice === "LT" ? 0.5 : voice === "MT" ? 0.42 : 0.35;
+        var rel = voice === "LT" ? 0.22 : voice === "MT" ? 0.18 : 0.14;
+        var freq = base * pr;
         var _osc2 = ctx.createOscillator();
         var _g2 = ctx.createGain();
         var _lp2 = ctx.createBiquadFilter();
@@ -2216,13 +2268,13 @@ var DrumEngine = /*#__PURE__*/function () {
         _lp2.frequency.value = freq * 4;
         _lp2.Q.value = 1;
         _osc2.frequency.setValueAtTime(freq * 2.8, t);
-        _osc2.frequency.exponentialRampToValueAtTime(freq, t + (voice === "LT" ? 0.12 : 0.08));
-        this._env(_g2.gain, t, 0.8 * v, 0.001, voice === "LT" ? 0.12 : 0.08, 0.001, voice === "LT" ? 0.22 : 0.14);
+        _osc2.frequency.exponentialRampToValueAtTime(freq, t + dec);
+        this._env(_g2.gain, t, 0.8 * v, 0.001, dec, 0.001, rel);
         _osc2.connect(_lp2);
         _lp2.connect(_g2);
         _g2.connect(out);
         _osc2.start(t);
-        _osc2.stop(t + (voice === "LT" ? 0.5 : 0.35));
+        _osc2.stop(t + stp);
         // Tom crack
         var tc = this._noise(ctx, 0.012);
         var tcg = ctx.createGain();
@@ -3979,8 +4031,9 @@ function Tabula() {
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
     if (s.drumPats) setDrumPats(s.drumPats.map(function (p) {
-      return Object.assign({}, p, {
-        mix: fillDrumMix(p.mix)
+      var mp = migrateDrumPatRows(p);
+      return Object.assign({}, mp, {
+        mix: fillDrumMix(mp.mix)
       });
     }));
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
@@ -4430,8 +4483,9 @@ function Tabula() {
       drums: false
     });
     if (s.drumPats) setDrumPats(s.drumPats.map(function (p) {
-      return Object.assign({}, p, {
-        mix: fillDrumMix(p.mix)
+      var mp = migrateDrumPatRows(p);
+      return Object.assign({}, mp, {
+        mix: fillDrumMix(mp.mix)
       });
     }));
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
@@ -4843,9 +4897,21 @@ function Tabula() {
         if (isLayerAudibleR.current(_layer)) {
           if (_layer === "drums") playDrumStep(pat, s, at);else playSynthLayerStep(_layer, pat, s, at, layerStepDur);
         }
-        // Update visual playhead for whichever layer is active.
+        // Update visual playhead for the active layer — ALIGNED TO AUDIO TIME.
+        // The lookahead scheduler queues notes up to 100ms ahead; setting the
+        // playhead synchronously here runs it ahead of the sound by that margin
+        // (and inconsistently, since a note can land anywhere in the 0..100ms
+        // window). That reads as "the audio is late." Defer the highlight to
+        // `at` so it lands with the note. Guarded by playingR so timers that
+        // outlive a stop are no-ops.
         if (_layer === activeLayerR.current) {
-          if (_layer === "drums") setDrumStep(s);else setStep(s);
+          var stp = s,
+            lyr = _layer;
+          var delayMs = Math.max(0, (at - ctx.currentTime) * 1000);
+          setTimeout(function () {
+            if (!playingR.current) return;
+            if (lyr === "drums") setDrumStep(stp);else setStep(stp);
+          }, delayMs);
         }
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if (_layer === "synth") setPlayId(pat.id);

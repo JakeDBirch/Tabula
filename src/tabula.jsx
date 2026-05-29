@@ -98,6 +98,7 @@ const DRUM_VOICES=[
   {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
   {key:"SD",label:"SD",full:"SNARE",  color:"#e09050"},
   {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
+  {key:"MT",label:"MT",full:"MID TOM",color:"#b8b040"},
   {key:"HT",label:"HT",full:"HI TOM", color:"#a0b840"},
   {key:"CH",label:"CH",full:"CL HAT", color:"#60b878"},
   {key:"OH",label:"OH",full:"OP HAT", color:"#50a8c0"},
@@ -139,11 +140,10 @@ const DRUM_KITS = [
       CL: "samples/808-kit/CL.wav",
       CB: "samples/808-kit/CB.wav",
       LT: "samples/808-kit/LT.wav",
+      MT: "samples/808-kit/MT.wav",
       HT: "samples/808-kit/HT.wav",
-      // NOTE: MT.wav (mid tom) is committed but unmapped — Tabula only has
-      // LT (lo) + HT (hi) tom voices, no mid tom.
-      // CH: "samples/808-kit/CH.wav",
-      // OH: "samples/808-kit/OH.wav",
+      CH: "samples/808-kit/CH.wav",
+      OH: "samples/808-kit/OH.wav",
       // CY: "samples/808-kit/CY.wav",
     },
   },
@@ -164,6 +164,25 @@ const fillDrumMix=(mix)=>{
   const out=defaultDrumMix();
   if(!Array.isArray(mix))return out;
   return out.map((d,i)=>Object.assign({},d,mix[i]||{}));
+};
+// Row index where MT (mid tom) was inserted — between LT(2) and HT.
+const MT_ROW_INDEX=3;
+// Migrate a loaded drum pat from the pre-MT 10-voice layout to the current
+// 11-voice layout. MT was inserted at index 3, so a 10-row grid has every
+// voice from HT onward shifted up by one — splice an empty MT row (and a
+// default MT mix entry) at index 3 to realign. No-op for current-length pats.
+const migrateDrumPatRows=(pat)=>{
+  if(!pat||!Array.isArray(pat.grid))return pat;
+  if(pat.grid.length!==DRUM_ROWS-1)return pat; // only the 10→11 case
+  const grid=pat.grid.map(r=>[...r]);
+  grid.splice(MT_ROW_INDEX,0,new Array(COLS).fill(false));
+  const out={...pat,grid};
+  if(Array.isArray(pat.mix)&&pat.mix.length===DRUM_ROWS-1){
+    const mix=pat.mix.map(m=>({...m}));
+    mix.splice(MT_ROW_INDEX,0,{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100});
+    out.mix=mix;
+  }
+  return out;
 };
 const FILT_MODES=["off","lp","hp","bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
@@ -628,12 +647,23 @@ class Bell{
     // staying inaudible against the new note's attack.
     if(p&&p.monoSingle&&this.monoActiveVoice){
       const prev=this.monoActiveVoice;
+      const ct=Math.max(t,this.ctx.currentTime);
       try{
-        prev.vca.gain.cancelScheduledValues(t);
-        prev.vca.gain.setTargetAtTime(0.0001,t,0.005);
+        const g=prev.vca.gain;
+        // cancelAndHoldAtTime locks the curve's value at ct so the fade starts
+        // from exactly where the note is — no jump. Fall back to plain cancel
+        // on older engines. Then a short LINEAR ramp to true zero: linear can
+        // reach 0 (exponential can't), so the oscillators stop on silence and
+        // there's no residual-amplitude click. setTargetAtTime (the old way)
+        // only approached zero asymptotically, leaving ~0.25% at stop time.
+        if(g.cancelAndHoldAtTime)g.cancelAndHoldAtTime(ct);
+        else g.cancelScheduledValues(ct);
+        g.linearRampToValueAtTime(0,ct+0.006);
       }catch(e){}
+      // Stop the oscs just after the fade completes — by ct+0.008 the gain is
+      // already 0, so stopping is silent.
       for(const osc of (prev.oscs||[])){
-        try{osc.stop(t+0.03);}catch(e){}
+        try{osc.stop(ct+0.008);}catch(e){}
       }
       this.monoActiveVoice=null;
     }
@@ -1120,15 +1150,20 @@ class DrumEngine{
       snare.connect(shp);shp.connect(sbp);sbp.connect(sg);sg.connect(out);snare.start(t);
     }
 
-    else if(voice==="LT"||voice==="HT"){
-      const freq=(voice==="LT"?72:130)*pr;
+    else if(voice==="LT"||voice==="MT"||voice==="HT"){
+      // Three toms — base pitch + decay scale lo→hi. MT sits between LT and HT.
+      const base = voice==="LT"?72 : voice==="MT"?98 : 130;
+      const dec  = voice==="LT"?0.12 : voice==="MT"?0.10 : 0.08;
+      const stp  = voice==="LT"?0.5 : voice==="MT"?0.42 : 0.35;
+      const rel  = voice==="LT"?0.22 : voice==="MT"?0.18 : 0.14;
+      const freq=base*pr;
       const osc=ctx.createOscillator();const g=ctx.createGain();
       const lp=ctx.createBiquadFilter();lp.type="lowpass";lp.frequency.value=freq*4;lp.Q.value=1;
       osc.frequency.setValueAtTime(freq*2.8,t);
-      osc.frequency.exponentialRampToValueAtTime(freq,t+(voice==="LT"?0.12:0.08));
-      this._env(g.gain,t,0.8*v,0.001,voice==="LT"?0.12:0.08,0.001,voice==="LT"?0.22:0.14);
+      osc.frequency.exponentialRampToValueAtTime(freq,t+dec);
+      this._env(g.gain,t,0.8*v,0.001,dec,0.001,rel);
       osc.connect(lp);lp.connect(g);g.connect(out);
-      osc.start(t);osc.stop(t+(voice==="LT"?0.5:0.35));
+      osc.start(t);osc.stop(t+stp);
       // Tom crack
       const tc=this._noise(ctx,0.012);const tcg=ctx.createGain();
       const tcbp=ctx.createBiquadFilter();tcbp.type="bandpass";tcbp.frequency.value=freq*6;tcbp.Q.value=1;
@@ -2023,7 +2058,7 @@ export default function Tabula(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
-    if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
+    if(s.drumPats)setDrumPats(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats));
@@ -2232,7 +2267,7 @@ export default function Tabula(){
     setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    if(s.drumPats)setDrumPats(s.drumPats.map(p=>Object.assign({},p,{mix:fillDrumMix(p.mix)})));
+    if(s.drumPats)setDrumPats(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats||[]));
@@ -2513,9 +2548,20 @@ export default function Tabula(){
           if(layer==="drums")playDrumStep(pat,s,at);
           else playSynthLayerStep(layer,pat,s,at,layerStepDur);
         }
-        // Update visual playhead for whichever layer is active.
+        // Update visual playhead for the active layer — ALIGNED TO AUDIO TIME.
+        // The lookahead scheduler queues notes up to 100ms ahead; setting the
+        // playhead synchronously here runs it ahead of the sound by that margin
+        // (and inconsistently, since a note can land anywhere in the 0..100ms
+        // window). That reads as "the audio is late." Defer the highlight to
+        // `at` so it lands with the note. Guarded by playingR so timers that
+        // outlive a stop are no-ops.
         if(layer===activeLayerR.current){
-          if(layer==="drums")setDrumStep(s);else setStep(s);
+          const stp=s, lyr=layer;
+          const delayMs=Math.max(0,(at-ctx.currentTime)*1000);
+          setTimeout(()=>{
+            if(!playingR.current)return;
+            if(lyr==="drums")setDrumStep(stp);else setStep(stp);
+          },delayMs);
         }
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if(layer==="synth")setPlayId(pat.id);
