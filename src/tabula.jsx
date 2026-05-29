@@ -5165,10 +5165,12 @@ export default function Tabula(){
                     const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                     return(
                       <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                        {/* Hit flash — fades up from the bottom, height + peak
-                            opacity scale with the velocity of the sounding note. */}
-                        {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.10+0.32*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                          <div key={fv.n} style={{position:"absolute",left:0,right:0,bottom:0,height:`${30+(fv.vel/127)*70}%`,background:"linear-gradient(to top,"+voice.color+a+",transparent)",pointerEvents:"none",borderRadius:4,animation:"dflash 280ms ease-out forwards"}}/>
+                        {/* Hit flash — a uniform full-strip glow that pulses on
+                            each hit, peak opacity scaling with velocity, then
+                            fades. (Intensity, not height — a bottom-anchored
+                            gradient read like the level fader moving.) */}
+                        {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                          <div key={fv.n} style={{position:"absolute",inset:0,background:voice.color+a,boxShadow:"inset 0 0 8px "+voice.color+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
                         );})()}
                         {/* Voice name */}
                         <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
@@ -6246,8 +6248,8 @@ export default function Tabula(){
                           const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
                           const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                           return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                            {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.10+0.32*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                              <div key={fv.n} style={{position:"absolute",left:0,right:0,bottom:0,height:`${30+(fv.vel/127)*70}%`,background:"linear-gradient(to top,"+voice.color+a+",transparent)",pointerEvents:"none",borderRadius:4,animation:"dflash 280ms ease-out forwards"}}/>
+                            {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                              <div key={fv.n} style={{position:"absolute",inset:0,background:voice.color+a,boxShadow:"inset 0 0 8px "+voice.color+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
                             );})()}
                             <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
