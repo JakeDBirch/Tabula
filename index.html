@@ -1579,7 +1579,7 @@ var Bell = /*#__PURE__*/function () {
     value: function () {
       var _init = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(dlyT, fbv, sendPct, dlyHpV, dlyLpV) {
         var _this = this;
-        var m, sat, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
+        var m, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
         return _regenerator().w(function (_context3) {
           while (1) switch (_context3.n) {
             case 0:
@@ -1589,17 +1589,8 @@ var Bell = /*#__PURE__*/function () {
             case 1:
               m = this.ctx.createGain();
               m.gain.value = 0.55;
+              m.connect(this.ctx.destination);
               this.master = m;
-              // Global master saturation. Everything sums into `m` — synth, mono, the
-              // reverb/delay returns, and the drum bus (DrumEngine connects its master
-              // into this node) — so a waveshaper between `m` and the destination is a
-              // true master FX. Identity curve at amt=0 = clean bypass.
-              sat = this.ctx.createWaveShaper();
-              sat.curve = makeSatCurve(0);
-              sat.oversample = "2x";
-              m.connect(sat);
-              sat.connect(this.ctx.destination);
-              this.satShaper = sat;
 
               // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
               // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -1809,15 +1800,6 @@ var Bell = /*#__PURE__*/function () {
     value: function setDlyToRev(pct) {
       if (!this.ready || !this.dlyToRev) return;
       this.dlyToRev.gain.setTargetAtTime(Math.max(0, Math.min(100, pct)) / 100, this.ctx.currentTime, 0.02);
-    }
-    // Global master saturation amount (0..100). Swaps the master waveshaper
-    // curve; 0 = identity (clean). Shares makeSatCurve with the per-voice drum
-    // saturation so the character is consistent across the app.
-  }, {
-    key: "setSaturation",
-    value: function setSaturation(pct) {
-      if (!this.ready || !this.satShaper) return;
-      this.satShaper.curve = makeSatCurve(Math.max(0, Math.min(100, pct)) / 100);
     }
     // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
     // Each entry schedules a smooth filter cutoff transition at that time using
@@ -2516,8 +2498,12 @@ var DrumEngine = /*#__PURE__*/function () {
       if (!this.ready) return;
       var ctx = this.ctx;
       var v = Math.max(0.001, vel / 127);
-      // Closed-hat chokes any currently-sounding open hat.
-      if (voice === "CH") this.chokeOH(t);
+      // Hi-hat choke group: a closed hat OR a new open hat cuts any currently-
+      // sounding open hat — so only ONE open hat ever rings (a real hi-hat is one
+      // object). Single-slot activeOH then can't miss an overlapping earlier OH,
+      // which was the cause of the choke firing only intermittently with long
+      // open-hat samples (e.g. the VP kit).
+      if (voice === "CH" || voice === "OH") this.chokeOH(t);
       // The drum mix is GLOBAL/static now — the React effect pushes it to the
       // strips whenever it changes, and MOTION automation (when on) is scheduled
       // per-step in playDrumStep. So play() no longer applies any base mix here;
@@ -4104,9 +4090,6 @@ function Tabula() {
   useEffect(function () {
     bell.current.setDlyToRev(dlyToRev);
   }, [dlyToRev]);
-  useEffect(function () {
-    bell.current.setSaturation && bell.current.setSaturation(satAmt);
-  }, [satAmt]);
   useEffect(function () {
     drumEngine.current.setMasterLevel && drumEngine.current.setMasterLevel(drumLevel);
   }, [drumLevel]);
@@ -5872,7 +5855,6 @@ function Tabula() {
             bell.current.setRvLfDamp && bell.current.setRvLfDamp(rvLfDamp);
             bell.current.setRvPreDelay && bell.current.setRvPreDelay(rvPreDelay);
             bell.current.setDlyToRev && bell.current.setDlyToRev(dlyToRev);
-            bell.current.setSaturation && bell.current.setSaturation(satAmt);
             drumEngine.current.setMasterLevel && drumEngine.current.setMasterLevel(drumLevel);
             // Push the global drum mix to the strips on play-start (effects fire before
             // the engine is ready on a cold start).
@@ -8760,24 +8742,6 @@ function Tabula() {
     onChange: setRvLfDamp,
     display: rvLfDamp + "%",
     accent: C_REV
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
-    title: "SATURATION",
-    accent: C_SAT
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "4px 12px 10px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "DRIVE",
-    value: satAmt,
-    min: 0,
-    max: 100,
-    onChange: setSatAmt,
-    display: satAmt + "%",
-    accent: C_SAT
   }))));
   return /*#__PURE__*/React.createElement("div", {
     style: S.root,
@@ -13834,7 +13798,7 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "fx" ? C_SAT + "99" : satAmt > 0 ? C_SAT + "55" : "rgba(200,185,165,0.1)"),
+      border: "1px solid " + (activeSheet === "fx" ? C_SAT + "99" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
       background: activeSheet === "fx" ? C_SAT + "1a" : "transparent",
       cursor: "pointer",
@@ -13851,7 +13815,7 @@ function Tabula() {
     style: {
       fontSize: 12,
       lineHeight: 1.1,
-      color: activeSheet === "fx" || satAmt > 0 ? C_SAT : "rgba(210,195,175,0.5)"
+      color: activeSheet === "fx" ? C_SAT : "rgba(210,195,175,0.5)"
     }
   }, "\u224B"), /*#__PURE__*/React.createElement("span", {
     style: {

@@ -714,13 +714,7 @@ class Bell{
   async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();
     await this.ctx.resume();
-    const m=this.ctx.createGain();m.gain.value=0.55;this.master=m;
-    // Global master saturation. Everything sums into `m` — synth, mono, the
-    // reverb/delay returns, and the drum bus (DrumEngine connects its master
-    // into this node) — so a waveshaper between `m` and the destination is a
-    // true master FX. Identity curve at amt=0 = clean bypass.
-    const sat=this.ctx.createWaveShaper();sat.curve=makeSatCurve(0);sat.oversample="2x";
-    m.connect(sat);sat.connect(this.ctx.destination);this.satShaper=sat;
+    const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
 
     // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -834,12 +828,6 @@ class Bell{
   }
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
-  }
-  // Global master saturation amount (0..100). Swaps the master waveshaper
-  // curve; 0 = identity (clean). Shares makeSatCurve with the per-voice drum
-  // saturation so the character is consistent across the app.
-  setSaturation(pct){if(!this.ready||!this.satShaper)return;
-    this.satShaper.curve=makeSatCurve(Math.max(0,Math.min(100,pct))/100);
   }
   // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
   // Each entry schedules a smooth filter cutoff transition at that time using
@@ -1318,8 +1306,12 @@ class DrumEngine{
     if(!this.ready)return;
     const ctx=this.ctx;
     const v=Math.max(0.001,vel/127);
-    // Closed-hat chokes any currently-sounding open hat.
-    if(voice==="CH")this.chokeOH(t);
+    // Hi-hat choke group: a closed hat OR a new open hat cuts any currently-
+    // sounding open hat — so only ONE open hat ever rings (a real hi-hat is one
+    // object). Single-slot activeOH then can't miss an overlapping earlier OH,
+    // which was the cause of the choke firing only intermittently with long
+    // open-hat samples (e.g. the VP kit).
+    if(voice==="CH"||voice==="OH")this.chokeOH(t);
     // The drum mix is GLOBAL/static now — the React effect pushes it to the
     // strips whenever it changes, and MOTION automation (when on) is scheduled
     // per-step in playDrumStep. So play() no longer applies any base mix here;
@@ -2148,7 +2140,6 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);},[rvLfDamp]);
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
-  useEffect(()=>{bell.current.setSaturation&&bell.current.setSaturation(satAmt);},[satAmt]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
   // and shared across patterns, so this is the single source of truth for the
@@ -3158,7 +3149,6 @@ export default function Tabula(){
     bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
-    bell.current.setSaturation&&bell.current.setSaturation(satAmt);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     // Push the global drum mix to the strips on play-start (effects fire before
     // the engine is ready on a cold start).
@@ -4551,13 +4541,6 @@ export default function Tabula(){
         {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
         <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"} accent={C_REV}/>
         <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}    accent={C_REV}/>
-      </div>
-    </SynthSection>
-    <SynthSection title="SATURATION" accent={C_SAT}>
-      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        {/* Master-bus drive — affects the whole mix (synth, mono, drums + FX
-            returns all sum through the master). 0 = clean. */}
-        <KnobSlider label="DRIVE" value={satAmt} min={0} max={100} onChange={setSatAmt} display={satAmt+"%"} accent={C_SAT}/>
       </div>
     </SynthSection>
   </>);
@@ -6428,10 +6411,10 @@ export default function Tabula(){
                 <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
               </button>
-              {/* FX chip — global reverb/delay/saturation design */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":satAmt>0?C_SAT+"55":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              {/* FX chip — global reverb/delay design */}
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"||satAmt>0?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
+                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
               </button>
               {/* VARY chip */}
