@@ -106,6 +106,8 @@ const DRUM_VOICES=[
   {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
   {key:"CL",label:"CL",full:"CLAVES", color:"#d4956a"},
   {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
+  {key:"RM",label:"RM",full:"RIM",    color:"#cf8f6a"},
+  {key:"SH",label:"SH",full:"SHAKER", color:"#8fb0c0"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
 const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:Array.from({length:COLS},()=>100),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1});
@@ -145,6 +147,8 @@ const DRUM_KITS = [
       CH: "samples/808-kit/CH.wav",
       OH: "samples/808-kit/OH.wav",
       CY: "samples/808-kit/CY.wav",
+      RM: "samples/808-kit/RM.wav",
+      SH: "samples/808-kit/SH.wav",
     },
   },
 ];
@@ -154,9 +158,12 @@ const DEFAULT_KIT = "808-kit";
 // Filter modes: "off" disables the filter (passes everything through unity),
 // "lp"/"hp"/"bp" route through the corresponding biquad type. filtCut 0..100
 // maps log-scaled to 20..20000 Hz at runtime. pitch is in semitones, ±24.
+// env: 0..100 sample playback length. 100 = whole sample plays; lower values
+// gate the sample shorter with a short release fade, down to a ~12ms transient
+// at 0. Only affects sample voices, not the synthesizer.
 const defaultDrumMix=()=>Array.from({length:DRUM_ROWS},()=>({
   level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,
-  pitch:0,filt:"off",filtCut:100,
+  pitch:0,filt:"off",filtCut:100,env:100,
 }));
 // Backfill any missing fields on loaded drum mix arrays — older saves only had
 // {level,pan}, so we need to pad new fields with their defaults.
@@ -167,21 +174,32 @@ const fillDrumMix=(mix)=>{
 };
 // Row index where MT (mid tom) was inserted — between LT(2) and HT.
 const MT_ROW_INDEX=3;
-// Migrate a loaded drum pat from the pre-MT 10-voice layout to the current
-// 11-voice layout. MT was inserted at index 3, so a 10-row grid has every
-// voice from HT onward shifted up by one — splice an empty MT row (and a
-// default MT mix entry) at index 3 to realign. No-op for current-length pats.
+// Migrate a loaded drum pat to the current voice layout. Two historical
+// layouts predate the current one:
+//   10 rows: [BD,SD,LT,HT,CH,OH,CY,CP,CL,CB]      (pre-MT, pre-RM/SH)
+//   11 rows: [BD,SD,LT,MT,HT,CH,OH,CY,CP,CL,CB]   (post-MT, pre-RM/SH)
+// Current is 13 rows (…CB,RM,SH). For the 10-row layout, MT was inserted at
+// index 3 so everything from HT down shifted — splice an empty MT row there
+// first. RM + SH were appended at the end, so any short pat just pads empty
+// rows at the end to reach DRUM_ROWS. No-op for current-length pats.
 const migrateDrumPatRows=(pat)=>{
   if(!pat||!Array.isArray(pat.grid))return pat;
-  if(pat.grid.length!==DRUM_ROWS-1)return pat; // only the 10→11 case
+  if(pat.grid.length===DRUM_ROWS)return pat;
+  const emptyRow=()=>new Array(COLS).fill(false);
+  const defMix=()=>({level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100,env:100});
   const grid=pat.grid.map(r=>[...r]);
-  grid.splice(MT_ROW_INDEX,0,new Array(COLS).fill(false));
-  const out={...pat,grid};
-  if(Array.isArray(pat.mix)&&pat.mix.length===DRUM_ROWS-1){
-    const mix=pat.mix.map(m=>({...m}));
-    mix.splice(MT_ROW_INDEX,0,{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0,pitch:0,filt:"off",filtCut:100});
-    out.mix=mix;
+  const hasMix=Array.isArray(pat.mix);
+  const mix=hasMix?pat.mix.map(m=>({...m})):null;
+  // 10-row layout predates MT — splice it in at index 3 to realign.
+  if(grid.length===10){
+    grid.splice(MT_ROW_INDEX,0,emptyRow());
+    if(mix&&mix.length===10)mix.splice(MT_ROW_INDEX,0,defMix());
   }
+  // Pad the end (RM/SH and any future appended voices) to current row count.
+  while(grid.length<DRUM_ROWS)grid.push(emptyRow());
+  if(mix){while(mix.length<DRUM_ROWS)mix.push(defMix());}
+  const out={...pat,grid};
+  if(mix)out.mix=mix;
   return out;
 };
 const FILT_MODES=["off","lp","hp","bp"];
@@ -658,12 +676,15 @@ class Bell{
         // only approached zero asymptotically, leaving ~0.25% at stop time.
         if(g.cancelAndHoldAtTime)g.cancelAndHoldAtTime(ct);
         else g.cancelScheduledValues(ct);
-        g.linearRampToValueAtTime(0,ct+0.006);
+        // 9ms linear fade to true zero — long enough that the fast amplitude
+        // change isn't itself an audible transient, short enough to still feel
+        // monophonic.
+        g.linearRampToValueAtTime(0,ct+0.009);
       }catch(e){}
-      // Stop the oscs just after the fade completes — by ct+0.008 the gain is
-      // already 0, so stopping is silent.
+      // Stop the oscs just after the fade completes — gain is already 0 by
+      // ct+0.009, so stopping is silent.
       for(const osc of (prev.oscs||[])){
-        try{osc.stop(ct+0.008);}catch(e){}
+        try{osc.stop(ct+0.012);}catch(e){}
       }
       this.monoActiveVoice=null;
     }
@@ -1005,7 +1026,7 @@ class DrumEngine{
       // pitch is in semitones; cached on the strip so play() can read it
       // without traversing React state. Filter type is stored separately so
       // setVoiceMix only re-assigns when it actually changes.
-      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,pitch:0,filtMode:"off"};
+      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,pitch:0,filtMode:"off",env:100};
     }
     this.ready=true;
   }
@@ -1022,6 +1043,7 @@ class DrumEngine{
     if(mix.rvSend!=null)strip.revSend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.rvSend/100)),t,TAU);
     if(mix.dlySend!=null)strip.dlySend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.dlySend/100)),t,TAU);
     if(mix.pitch!=null)strip.pitch=Math.max(-24,Math.min(24,mix.pitch));
+    if(mix.env!=null)strip.env=Math.max(0,Math.min(100,mix.env));
     // Filter — store mode on the strip and switch the biquad type only when
     // the mode actually changes. Cut is smoothed; mode change is immediate
     // but inaudible since the new type's frequency response starts fresh.
@@ -1077,17 +1099,25 @@ class DrumEngine{
     const s=ctx.createBufferSource();s.buffer=b;return s;
   }
 
-  play(voice,t,vel,mix={},sample=null){
+  play(voice,t,vel,mix={},sample=null,patId=null){
     if(!this.ready)return;
     const ctx=this.ctx;
     const v=Math.max(0.001,vel/127);
     // Closed-hat chokes any currently-sounding open hat.
     if(voice==="CH")this.chokeOH(t);
-    // Apply this pat's mix to the voice strip. setTargetAtTime smooths between
-    // the previous and new values so song-mode pat switches and live slider
-    // drags both crossfade rather than snap. All hits go through the persistent
-    // strip; nothing about the mix is baked into the per-hit nodes.
-    this.setVoiceMix(voice,mix);
+    // Apply this pat's mix to the voice strip ONLY on a pattern switch — not
+    // on every hit. The scheduler captures the mix up to 100ms ahead (lookahead
+    // window), so calling setVoiceMix per-hit re-applies stale drag values and
+    // fights the live React-effect updates — the user heard their slider drag
+    // play back as a sequence of discrete jumps across the next few hits.
+    // Live drags + pattern edits flow through the React effect (active pat);
+    // this path only catches song-mode bar changes where the playing pat
+    // differs from the active one. lastMixPat is per-voice.
+    if(!this.lastMixPat)this.lastMixPat={};
+    if(patId!==this.lastMixPat[voice]){
+      this.setVoiceMix(voice,mix);
+      this.lastMixPat[voice]=patId;
+    }
     const strip=this.voiceStrips[voice];if(!strip)return;
     // out feeds the strip's filter (and then lvlGain → panner → master).
     const out=strip.filter;
@@ -1100,9 +1130,29 @@ class DrumEngine{
       const g=ctx.createGain();g.gain.value=v;
       src.playbackRate.value=pr; // pitch ratio applies to samples
       src.connect(g);g.connect(out);
+      // Sample envelope — strip.env (0..100) controls how much of the sample
+      // plays. 100 = whole sample (no gate). Below that, gate the sample to a
+      // shorter length with a brief release fade so it doesn't click; at 0 it's
+      // a ~12ms transient. Squared curve gives finer control at the short end.
+      const env01=(strip.env!=null?strip.env:100)/100;
+      const sampleDur=(sample.duration||0.5)/pr; // pitch stretches duration
+      let endAt=t+sampleDur;
+      if(env01<0.999){
+        const MIN_GATE=0.012;
+        const gateDur=Math.max(MIN_GATE,MIN_GATE+(sampleDur-MIN_GATE)*env01*env01);
+        const rel=Math.min(0.05,Math.max(0.004,gateDur*0.35));
+        const relStart=Math.max(t+0.0005,t+gateDur-rel);
+        try{
+          g.gain.setValueAtTime(v,t);
+          g.gain.setValueAtTime(v,relStart);
+          g.gain.linearRampToValueAtTime(0.0001,t+gateDur);
+        }catch(e){}
+        endAt=t+gateDur+0.01;
+      }
       try{src.start(t);}catch(e){src.start();}
-      // Track sample-based OH for choke too — duration approximated from buffer.
-      if(voice==="OH")this.activeOH={g,endT:t+((sample.duration||0.5)/pr)};
+      try{src.stop(endAt);}catch(e){}
+      // Track sample-based OH for choke too — gate-aware end time.
+      if(voice==="OH")this.activeOH={g,endT:endAt};
       return;
     }
 
@@ -1255,6 +1305,33 @@ class DrumEngine{
       const pg=ctx.createGain();
       this._env(pg.gain,t,0.6*v,0.001,0.004,0.001,0.003);
       ping.connect(pg);pg.connect(out);ping.start(t);ping.stop(t+0.01);
+    }
+
+    else if(voice==="RM"){
+      // Rimshot — sharp, short. A high triangle ping + tight bandpassed noise
+      // click for the "wood + shell" snap.
+      const osc=ctx.createOscillator();osc.type="triangle";
+      osc.frequency.setValueAtTime(1700*pr,t);
+      osc.frequency.exponentialRampToValueAtTime(400*pr,t+0.01);
+      const og=ctx.createGain();
+      this._env(og.gain,t,0.7*v,0.0005,0.012,0.001,0.01);
+      osc.connect(og);og.connect(out);osc.start(t);osc.stop(t+0.04);
+      const n=this._noise(ctx,0.02);
+      const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=2600*pr;bp.Q.value=2.5;
+      const ng=ctx.createGain();
+      this._env(ng.gain,t,0.6*v,0.0005,0.008,0.001,0.006);
+      n.connect(bp);bp.connect(ng);ng.connect(out);n.start(t);
+    }
+
+    else if(voice==="SH"){
+      // Shaker — short burst of high-passed noise with a soft attack so it
+      // sounds like beads rather than a click.
+      const n=this._noise(ctx,0.14);
+      const hp=ctx.createBiquadFilter();hp.type="highpass";hp.frequency.value=5000;
+      const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=9000;bp.Q.value=0.6;
+      const g=ctx.createGain();
+      this._env(g.gain,t,0.4*v,0.005,0.04,0.001,0.05);
+      n.connect(hp);hp.connect(bp);bp.connect(g);g.connect(out);n.start(t);
     }
   }
 }
@@ -2360,6 +2437,13 @@ export default function Tabula(){
     const rhy = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
     const ratch = rhy;
     const subDur = stepDur / ratch;
+    // True mono at the source: a monoSingle layer plays at most ONE note per
+    // column. Without this, a column with 2+ active rows (VARY pitch-shift,
+    // MUT8, legacy edits) calls bell.play() per row and each instantly chokes
+    // the previous one at the SAME timestamp — a note is born and killed within
+    // the choke fade = an onset click, and it isn't truly mono. Topmost row
+    // (lowest index = highest pitch) wins, matching the cross-layer cull rule.
+    const monoOne = !!(layerLP && layerLP.monoSingle);
     for(let r=0;r<ROWS;r++){
       if(!useGrid[r][s])continue;
       const dur = (pat.durs&&pat.durs[r]&&pat.durs[r][s])?Math.max(1,pat.durs[r][s]):1;
@@ -2406,6 +2490,8 @@ export default function Tabula(){
       } else {
         bell.current.play(f,at,sp,noteDur,layerLP.dlySend,prevF,glideTime,layerLP,mods);
       }
+      // Mono layer: stop after the first sounded note this column.
+      if(monoOne)break;
     }
   };
   // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
@@ -2417,7 +2503,7 @@ export default function Tabula(){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
         const dMix=(pat.mix||defaultDrumMix())[r]||{level:DRUM_DEFAULT_LEVEL,pan:0,rvSend:0,dlySend:0};
-        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key]);
+        drumEngine.current.play(DRUM_VOICES[r].key,at,dVel,dMix,voiceSamplesR.current[DRUM_VOICES[r].key],pat.id);
       }
     }
   };
@@ -2548,20 +2634,9 @@ export default function Tabula(){
           if(layer==="drums")playDrumStep(pat,s,at);
           else playSynthLayerStep(layer,pat,s,at,layerStepDur);
         }
-        // Update visual playhead for the active layer — ALIGNED TO AUDIO TIME.
-        // The lookahead scheduler queues notes up to 100ms ahead; setting the
-        // playhead synchronously here runs it ahead of the sound by that margin
-        // (and inconsistently, since a note can land anywhere in the 0..100ms
-        // window). That reads as "the audio is late." Defer the highlight to
-        // `at` so it lands with the note. Guarded by playingR so timers that
-        // outlive a stop are no-ops.
+        // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
-          const stp=s, lyr=layer;
-          const delayMs=Math.max(0,(at-ctx.currentTime)*1000);
-          setTimeout(()=>{
-            if(!playingR.current)return;
-            if(lyr==="drums")setDrumStep(stp);else setStep(stp);
-          },delayMs);
+          if(layer==="drums")setDrumStep(s);else setStep(s);
         }
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if(layer==="synth")setPlayId(pat.id);
@@ -4758,6 +4833,12 @@ export default function Tabula(){
                             </div>
                           </div>
                         </div>
+                        {/* ENV — sample playback length (full right = whole sample) */}
+                        <div style={cell}>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
+                          {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
+                        </div>
                         {/* PAN */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
@@ -5778,6 +5859,11 @@ export default function Tabula(){
                                   {miniSlider("filtCut",m.filtCut!=null?m.filtCut:100,0,100,false)}
                                 </div>
                               </div>
+                            </div>
+                            <div style={cell}>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
+                              {miniSlider("env",m.env!=null?m.env:100,0,100,false)}
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{m.env!=null?m.env:100}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
