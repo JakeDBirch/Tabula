@@ -144,7 +144,7 @@ const DRUM_KITS = [
       HT: "samples/808-kit/HT.wav",
       CH: "samples/808-kit/CH.wav",
       OH: "samples/808-kit/OH.wav",
-      // CY: "samples/808-kit/CY.wav",
+      CY: "samples/808-kit/CY.wav",
     },
   },
 ];
