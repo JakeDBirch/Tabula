@@ -2214,7 +2214,7 @@ var DrumEngine = /*#__PURE__*/function () {
       if (mix.pan != null && strip.panner) strip.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, mix.pan / 100)), t, TAU);
       if (mix.rvSend != null) strip.revSend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.rvSend / 100)), t, TAU);
       if (mix.dlySend != null) strip.dlySend.gain.setTargetAtTime(Math.max(0, Math.min(1, mix.dlySend / 100)), t, TAU);
-      if (mix.pitch != null) strip.pitch = Math.max(-24, Math.min(24, mix.pitch));
+      if (mix.pitch != null) strip.pitch = Math.max(-12, Math.min(12, mix.pitch));
       if (mix.env != null) strip.env = Math.max(0, Math.min(100, mix.env));
       // Saturation — regenerate the shaper curve only when the amount changes.
       // A curve swap is click-free here because the curves agree near the origin
@@ -10552,7 +10552,7 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -12, 12, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"
@@ -13978,7 +13978,7 @@ function Tabula() {
           color: "rgba(210,195,175,0.4)",
           alignSelf: "flex-start"
         }
-      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -24, 24, true), /*#__PURE__*/React.createElement("div", {
+      }, "PITCH"), miniSlider("pitch", md.pitch || 0, -12, 12, true), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 6,
           color: "rgba(210,195,175,0.55)"

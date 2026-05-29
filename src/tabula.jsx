@@ -1156,7 +1156,7 @@ class DrumEngine{
     if(mix.pan!=null&&strip.panner)strip.panner.pan.setTargetAtTime(Math.max(-1,Math.min(1,mix.pan/100)),t,TAU);
     if(mix.rvSend!=null)strip.revSend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.rvSend/100)),t,TAU);
     if(mix.dlySend!=null)strip.dlySend.gain.setTargetAtTime(Math.max(0,Math.min(1,mix.dlySend/100)),t,TAU);
-    if(mix.pitch!=null)strip.pitch=Math.max(-24,Math.min(24,mix.pitch));
+    if(mix.pitch!=null)strip.pitch=Math.max(-12,Math.min(12,mix.pitch));
     if(mix.env!=null)strip.env=Math.max(0,Math.min(100,mix.env));
     // Saturation — regenerate the shaper curve only when the amount changes.
     // A curve swap is click-free here because the curves agree near the origin
@@ -5175,7 +5175,7 @@ export default function Tabula(){
                         {/* PITCH (semitones, bipolar) */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                          {miniSlider("pitch",md.pitch||0,-24,24,true)}
+                          {miniSlider("pitch",md.pitch||0,-12,12,true)}
                           <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                         </div>
                         {/* FILTER — mode chip + cutoff slider */}
@@ -6252,7 +6252,7 @@ export default function Tabula(){
                             <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                              {miniSlider("pitch",md.pitch||0,-24,24,true)}
+                              {miniSlider("pitch",md.pitch||0,-12,12,true)}
                               <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                             </div>
                             <div style={cell}>
