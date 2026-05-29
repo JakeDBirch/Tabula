@@ -61,6 +61,9 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
+// VARY page accent — a single neutral gold used across all VARY sections so
+// the page doesn't borrow (and visually conflict with) the layer colors.
+const C_VARY="#c9a96e";
 
 const rowHue=r=>Math.round(195-(r/(ROWS-1))*135);
 const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
@@ -215,6 +218,13 @@ const migrateDrumPatRows=(pat)=>{
   if(mix)out.mix=mix;
   return out;
 };
+// Normalize a saved varyMode into the per-layer object shape. Legacy saves
+// stored a single boolean (global VARY) — upgrade it by applying to all
+// layers. Missing → all off.
+const normVary=(v)=>{
+  if(v&&typeof v==="object")return {synth:!!v.synth,lead:!!v.lead,drums:!!v.drums};
+  const b=!!v; return {synth:b,lead:b,drums:b};
+};
 const FILT_MODES=["off","lp","hp","bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
@@ -241,7 +251,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
-  loopMode:false, varyMode:false,
+  loopMode:false, varyMode:{synth:false,lead:false,drums:false},
   songMode:false, songView:false, songSyncMode:"sync",
 });
 
@@ -324,6 +334,23 @@ const genVariation=(grid,vp={})=>{
     }
   }
   return g;
+};
+
+// Generate a variation that is guaranteed not to silence a pattern that had
+// audible notes. genVariation can shift/drop notes such that nothing lands
+// within the active gridLen (the playable window) — when that happens we
+// fall back to the original grid for this cycle rather than play silence.
+// This is the fix for the "VARY on kills sound" bug.
+const safeVaryGrid=(grid,vp,gridLen)=>{
+  const len=Math.max(1,Math.min(COLS,gridLen||COLS));
+  const hasInWindow=(g)=>{
+    for(let r=0;r<ROWS;r++)for(let c=0;c<len;c++)if(g[r]&&g[r][c])return true;
+    return false;
+  };
+  const origHas=hasInWindow(grid);
+  const varied=genVariation(grid,vp);
+  if(origHas&&!hasInWindow(varied))return grid.map(r=>[...r]);
+  return varied;
 };
 
 // Jitter a step's params by vary settings
@@ -1422,7 +1449,9 @@ export default function Tabula(){
   const [shareFlash,setShareFlash]= useState("");
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
-  const [varyMode,  setVaryMode]  = useState(false);
+  // VARY is per-layer now — each layer toggles independently. Normalizer
+  // upgrades legacy boolean saves (apply to all layers) to the object shape.
+  const [varyMode,  setVaryMode]  = useState({synth:false,lead:false,drums:false});
   const [recMode,   setRecMode]   = useState(false);
   // Internal sampler — per-drum-voice user-recorded AudioBuffer. Stored in
   // state so the UI can show "loaded" indicators; mirrored to voiceSamplesR
@@ -1706,7 +1735,7 @@ export default function Tabula(){
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
-  const transpR=useRef(0),varyModeR=useRef(false),recModeR=useRef(false),recSourceIdR=useRef(null);
+  const transpR=useRef(0),varyModeR=useRef({synth:false,lead:false,drums:false}),recModeR=useRef(false),recSourceIdR=useRef(null);
   const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0,glideJitter:0,durJitter:0});
   const variedGrids=useRef(new Map());
   // (prevFreqByRowR and cposR were used by the legacy unified scheduler;
@@ -1785,51 +1814,51 @@ export default function Tabula(){
   useEffect(()=>{transpR.current=transpose;},[transpose]);
   useEffect(()=>{
     varyModeR.current=varyMode;
-    // Wipe all cached variations on every toggle. Then, if we're enabling,
-    // *synchronously regenerate for every pat in every layer* so the next
-    // scheduler tick already has a populated cache — without this step, the
-    // scheduler runs between cache-clear and the next per-layer step 0, and
-    // can hit useGrid = pat.grid (cache miss fallback) for a few steps; if
-    // a half-played note's params then jitter into silent ranges the user
-    // hears playback "break."
+    // Per-layer VARY. Wipe all cached variations on every toggle, then
+    // synchronously regenerate only the layers that are ON so the next
+    // scheduler tick already has a populated cache (avoids the cache-miss
+    // window that read as a playback break). safeVaryGrid guarantees a
+    // variation never silences a pat that had audible notes — the fix for
+    // "VARY on kills sound."
     if(variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
     if(variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
     if(variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
-    if(!varyMode)return;
     try{
       const vp=varyParamsR.current;
-      // Synth-type pats: live (active layer) + both stored layers. Wrapping in
-      // a Set by id de-dupes if a pat is somehow listed in both places.
-      const seen=new Set();
-      const synthPats=[
-        ...(patsR.current||[]),
-        ...((layerStoreR.current?.synth?.pats)||[]),
-        ...((layerStoreR.current?.lead?.pats)||[]),
-      ];
-      for(const p of synthPats){
-        if(!p||!p.grid||seen.has(p.id))continue;
-        seen.add(p.id);
-        variedGrids.current.set(p.id,genVariation(p.grid,vp));
-      }
-      // Drum pats: per-pat vRhythm + vVelocity, same shape used at step 0.
-      for(const dp of (drumPatsR.current||[])){
-        if(!dp||!dp.grid)continue;
-        const vRhythm=(dp.vRhythm||0)/100;
-        const vVelocity=(dp.vVelocity||0)/100;
-        const vGrid=dp.grid.map(row=>row.map(on=>{
-          if(on&&Math.random()<vRhythm*0.45)return false;
-          if(!on&&Math.random()<vRhythm*0.18)return true;
-          return on;
-        }));
-        const vVel=(dp.vel||[]).map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50))));
-        variedDrumGrids.current.set(dp.id,vGrid);
-        variedDrumVels.current.set(dp.id,vVel);
+      const regenSynth=(pats)=>{
+        for(const p of (pats||[])){
+          if(!p||!p.grid)continue;
+          variedGrids.current.set(p.id,safeVaryGrid(p.grid,vp,p.gridLen));
+        }
+      };
+      if(varyMode.synth)regenSynth(activeLayer==="synth"?patsR.current:(layerStoreR.current?.synth?.pats));
+      if(varyMode.lead) regenSynth(activeLayer==="lead" ?patsR.current:(layerStoreR.current?.lead?.pats));
+      if(varyMode.drums){
+        for(const dp of (drumPatsR.current||[])){
+          if(!dp||!dp.grid)continue;
+          const vRhythm=(dp.vRhythm||0)/100;
+          const vVelocity=(dp.vVelocity||0)/100;
+          const len=Math.max(1,Math.min(COLS,dp.gridLen||COLS));
+          let vGrid=dp.grid.map(row=>row.map(on=>{
+            if(on&&Math.random()<vRhythm*0.45)return false;
+            if(!on&&Math.random()<vRhythm*0.18)return true;
+            return on;
+          }));
+          // Same anti-silence guard as synth — if the variation cleared every
+          // hit inside the playable window but the original had hits, keep the
+          // original this cycle.
+          const had=dp.grid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
+          const got=vGrid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
+          if(had&&!got)vGrid=dp.grid.map(row=>[...row]);
+          const vVel=(dp.vel||[]).map(vv=>Math.max(1,Math.min(127,Math.round(vv+(Math.random()*2-1)*vVelocity*50))));
+          variedDrumGrids.current.set(dp.id,vGrid);
+          variedDrumVels.current.set(dp.id,vVel);
+        }
       }
     }catch(e){
-      // Defensive — if something goes sideways during regen we keep playing
-      // the original pats rather than dropping the audio loop.
       console.warn("VARY: cache regen failed",e);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[varyMode]);
   useEffect(()=>{
     recModeR.current=recMode;
@@ -1966,7 +1995,7 @@ export default function Tabula(){
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
   };
   // Stable function references — read live state via the refs above
@@ -2156,7 +2185,7 @@ export default function Tabula(){
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
-    setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
@@ -2244,7 +2273,7 @@ export default function Tabula(){
       lead:{pats:[_newLeadPat],activeId:_newLeadPat.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_newLeadPat.id]}],activePhraseId:"LP1"}
     };
     setActiveLayer("synth");
-    setLoopMode(false);setVaryMode(false);
+    setLoopMode(false);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);setSongSyncMode("sync");
@@ -2367,7 +2396,7 @@ export default function Tabula(){
       setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
-    setVaryMode(s.varyMode!=null?s.varyMode:SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     if(s.drumPats)setDrumPats(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}));
@@ -2457,9 +2486,10 @@ export default function Tabula(){
     const layerLP = layerParamsR.current[layer];
     const freqs = SCALES[scaleR.current].freqs;
     const ratio = stR(transpR.current);
-    const useGrid = varyModeR.current ? (variedGrids.current.get(pat.id)||pat.grid) : pat.grid;
+    const vary = !!varyModeR.current[layer];
+    const useGrid = vary ? (variedGrids.current.get(pat.id)||pat.grid) : pat.grid;
     const rawSp = (pat.params&&pat.params[s])?pat.params[s]:null;
-    const sp = varyModeR.current&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
+    const sp = vary&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
     const rhy = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
     const ratch = rhy;
     const subDur = stepDur / ratch;
@@ -2506,7 +2536,7 @@ export default function Tabula(){
           const subC=(s+i)%plen;
           const subRaw=pat.params[subC];
           if(!subRaw)continue;
-          const subSp=varyModeR.current?jitterStepParam(subRaw,varyParamsR.current):subRaw;
+          const subSp=vary?jitterStepParam(subRaw,varyParamsR.current):subRaw;
           mods.push({at:at+i*stepDur,sp:subSp});
         }
         if(mods.length===0)mods=null;
@@ -2523,8 +2553,9 @@ export default function Tabula(){
   // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
   const playDrumStep=(pat,s,at)=>{
     if(!pat||!pat.grid||!drumEngine.current.ready)return;
-    const useGrid = varyModeR.current ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
-    const useVel  = varyModeR.current ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
+    const dvary = !!varyModeR.current.drums;
+    const useGrid = dvary ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
+    const useVel  = dvary ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         const dVel=useVel?.[s]??100;
@@ -2625,21 +2656,26 @@ export default function Tabula(){
         const s=lf.step%len;
         const at=lf.nextAt;
         // Variation grid generation at this layer's step 0 (pat-keyed, cached).
-        if(s===0&&varyModeR.current){
+        if(s===0&&varyModeR.current[layer]){
           if(layer==="drums"){
             const vRhythm=(pat.vRhythm||0)/100;
             const vVelocity=(pat.vVelocity||0)/100;
-            const vGrid=pat.grid.map(row=>row.map((on,ci)=>{
+            let vGrid=pat.grid.map(row=>row.map((on,ci)=>{
               if(ci>=len)return false;
               if(on&&Math.random()<vRhythm*0.45)return false;
               if(!on&&Math.random()<vRhythm*0.18)return true;
               return on;
             }));
+            // Anti-silence guard (matches the toggle regen): if the variation
+            // cleared every hit inside the playable window, keep the original.
+            const had=pat.grid.some(row=>row.some((on,ci)=>on&&ci<len));
+            const got=vGrid.some(row=>row.some((on,ci)=>on&&ci<len));
+            if(had&&!got)vGrid=pat.grid.map(row=>[...row]);
             const vVel=pat.vel.map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50))));
             variedDrumGrids.current.set(pat.id,vGrid);
             variedDrumVels.current.set(pat.id,vVel);
           } else {
-            variedGrids.current.set(pat.id,genVariation(pat.grid,varyParamsR.current));
+            variedGrids.current.set(pat.id,safeVaryGrid(pat.grid,varyParamsR.current,len));
             // Self-record (synth-only) — vary the source pat and append.
             if(layer==="synth"&&recModeR.current&&patsR.current.length<8){
               const vp=varyParamsR.current;
@@ -3932,6 +3968,11 @@ export default function Tabula(){
     if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{speedMult:mult})));
     else setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{speedMult:mult})));
   };
+  // VARY is per-layer; these drive the global indicators (tab tint, mobile
+  // chip). anyVary = at least one layer on; activeVary = the layer the user
+  // is currently looking at.
+  const anyVary = varyMode.synth||varyMode.lead||varyMode.drums;
+  const activeVary = !!varyMode[activeLayer];
 
   return(
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
@@ -4960,11 +5001,11 @@ export default function Tabula(){
               return(
               <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"16px 20px",boxSizing:"border-box"}}>
                 <div style={{maxWidth:420}}>
-                  {/* VARY enable toggle — the on/off switch lives at the top of the page now. */}
-                  <button onClick={()=>setVaryMode(v=>!v)}
-                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode?"rgba(201,169,110,0.14)":"transparent",color:varyMode?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode?"0 0 6px #c9a96e":"none"}}/>
-                    VARY {varyMode?"ON":"OFF"}
+                  {/* VARY enable toggle — per layer; this page is DRUMS. */}
+                  <button onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}
+                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode.drums?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode.drums?"rgba(201,169,110,0.14)":"transparent",color:varyMode.drums?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode.drums?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode.drums?"0 0 6px #c9a96e":"none"}}/>
+                    DRUMS VARY {varyMode.drums?"ON":"OFF"}
                   </button>
                   <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
                   <div style={{padding:"14px 16px",background:"rgba(220,200,180,0.04)",borderRadius:8,border:"1px solid rgba(220,200,180,0.08)",marginBottom:8}}>
@@ -5030,36 +5071,36 @@ export default function Tabula(){
             {/* VARY page — was "SET", now includes an in-page enable toggle. */}
             {activeLayer!=="drums"&&page==="vary"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                {/* Enable / disable — at the top so it's the first thing you reach. */}
-                <button onClick={()=>setVaryMode(v=>!v)}
-                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode?"rgba(201,169,110,0.14)":"transparent",color:varyMode?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode?"0 0 6px #c9a96e":"none"}}/>
-                  VARY {varyMode?"ON":"OFF"}
+                {/* Enable / disable — per layer; this page is POLY or MONO. */}
+                <button onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}
+                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode[activeLayer]?C_VARY:"rgba(200,185,165,0.18)"),background:varyMode[activeLayer]?"rgba(201,169,110,0.14)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode[activeLayer]?C_VARY:"rgba(210,195,175,0.25)",boxShadow:varyMode[activeLayer]?"0 0 6px "+C_VARY:"none"}}/>
+                  {activeLayer==="lead"?"MONO":"POLY"} VARY {varyMode[activeLayer]?"ON":"OFF"}
                 </button>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
-                    <SynthSection title="RHYTHM VARY / MUT8" accent="#c4727a">
+                    <SynthSection title="RHYTHM VARY / MUT8" accent={C_VARY}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent="#c4727a"/>
-                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent="#c4727a"/>
-                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent="#c4727a"/>
+                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent={C_VARY}/>
+                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent={C_VARY}/>
+                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent={C_VARY}/>
                       </div>
                     </SynthSection>
-                    <SynthSection title="MELODY VARY / MUT8" accent="#6c9ad6">
+                    <SynthSection title="MELODY VARY / MUT8" accent={C_VARY}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent="#6c9ad6"/>
-                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent="#6c9ad6"/>
-                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent="#6c9ad6"/>
+                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent={C_VARY}/>
+                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent={C_VARY}/>
+                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent={C_VARY}/>
                       </div>
                     </SynthSection>
-                    <SynthSection title="STEP VARY / MUT8" accent="#9fb4c7">
+                    <SynthSection title="STEP VARY / MUT8" accent={C_VARY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="VEL"   value={vVelJitter}   min={0} max={100} onChange={setVVelJitter}   display={vVelJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="FLT"   value={vFltJitter}   min={0} max={100} onChange={setVFltJitter}   display={vFltJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="DLY"   value={vDlyJitter}   min={0} max={100} onChange={setVDlyJitter}   display={vDlyJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="RHY"   value={vRhyJitter}   min={0} max={100} onChange={setVRhyJitter}   display={vRhyJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="OCT"   value={vOctJitter}   min={0} max={100} onChange={setVOctJitter}   display={vOctJitter+"%"}   accent="#9fb4c7"/>
-                        <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent="#9fb4c7"/>
-                        <KnobSlider label="DUR"   value={vDurJitter}   min={0} max={100} onChange={setVDurJitter}   display={vDurJitter+"%"}   accent="#9fb4c7"/>
+                        <KnobSlider label="VEL"   value={vVelJitter}   min={0} max={100} onChange={setVVelJitter}   display={vVelJitter+"%"}   accent={C_VARY}/>
+                        <KnobSlider label="FLT"   value={vFltJitter}   min={0} max={100} onChange={setVFltJitter}   display={vFltJitter+"%"}   accent={C_VARY}/>
+                        <KnobSlider label="DLY"   value={vDlyJitter}   min={0} max={100} onChange={setVDlyJitter}   display={vDlyJitter+"%"}   accent={C_VARY}/>
+                        <KnobSlider label="RHY"   value={vRhyJitter}   min={0} max={100} onChange={setVRhyJitter}   display={vRhyJitter+"%"}   accent={C_VARY}/>
+                        <KnobSlider label="OCT"   value={vOctJitter}   min={0} max={100} onChange={setVOctJitter}   display={vOctJitter+"%"}   accent={C_VARY}/>
+                        <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent={C_VARY}/>
+                        <KnobSlider label="DUR"   value={vDurJitter}   min={0} max={100} onChange={setVDurJitter}   display={vDurJitter+"%"}   accent={C_VARY}/>
                       </div>
                     </SynthSection>
                 </div>
@@ -5166,7 +5207,7 @@ export default function Tabula(){
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
             {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&varyMode?{color:"#c9a96e",borderColor:"#c9a96e"}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
+              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
           {/* Transport — always visible, centered. VARY toggle removed; it lives
@@ -5628,10 +5669,10 @@ export default function Tabula(){
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
               </button>
               {/* VARY chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||varyMode?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||varyMode?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||anyVary?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
-                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||varyMode?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||varyMode?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
+                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||anyVary?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
+                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
               </button>
               {/* PROJECT chip */}
               <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
@@ -6024,9 +6065,9 @@ export default function Tabula(){
                     {activeLayer!=="drums"&&(
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode?"rgba(201,169,110,0.12)":"transparent",color:varyMode?"#c9a96e":"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>!v)}>{varyMode?"VARY ON":"VARY OFF"}</button>
+                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode[activeLayer]?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode[activeLayer]?"rgba(201,169,110,0.12)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}>{(activeLayer==="lead"?"MONO":"POLY")+" VARY "+(varyMode[activeLayer]?"ON":"OFF")}</button>
                         </div>
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"#c4727a",fontWeight:600,marginBottom:8}}>RHYTHM</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8}}>RHYTHM</div>
                         {[["DROP",vDropRate,setVDropRate,60],["SHIFT",vShiftRate,setVShiftRate,60],["RANGE",vShiftRange,setVShiftRange,8,"st"]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
@@ -6035,12 +6076,12 @@ export default function Tabula(){
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(196,114,122,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
                         ))}
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"#6c9ad6",fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
                         {[["PITCH",vPitchRate,setVPitchRate,60],["RANGE",vPitchRange,setVPitchRange,12,"st"],["GHOST",vGhostRate,setVGhostRate,60]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
@@ -6049,12 +6090,12 @@ export default function Tabula(){
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(108,154,214,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
                         ))}
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"#9fb4c7",fontWeight:600,marginBottom:8,marginTop:14}}>STEP</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8,marginTop:14}}>STEP</div>
                         {[["VEL",vVelJitter,setVVelJitter],["FLT",vFltJitter,setVFltJitter],["DLY",vDlyJitter,setVDlyJitter],["RHY",vRhyJitter,setVRhyJitter],["OCT",vOctJitter,setVOctJitter],["GLIDE",vGlideJitter,setVGlideJitter],["DUR",vDurJitter,setVDurJitter]].map(([label,val,setter])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
@@ -6063,7 +6104,7 @@ export default function Tabula(){
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(159,180,199,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>

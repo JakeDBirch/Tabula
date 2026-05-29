@@ -19,7 +19,6 @@ const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
 "use strict";
 
-function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 function _classCallCheck(a, n) { if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function"); }
 function _defineProperties(e, r) { for (var t = 0; t < r.length; t++) { var o = r[t]; o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, _toPropertyKey(o.key), o); } }
 function _createClass(e, r, t) { return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", { writable: !1 }), e; }
@@ -32,6 +31,7 @@ function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present,
 function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
+function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -178,6 +178,9 @@ var C_OSC = "#7ecfb3",
   C_FILT = "#c97b8a",
   C_DLY = "#8bbf9f",
   C_REV = "#a8b8d0";
+// VARY page accent — a single neutral gold used across all VARY sections so
+// the page doesn't borrow (and visually conflict with) the layer colors.
+var C_VARY = "#c9a96e";
 var rowHue = function rowHue(r) {
   return Math.round(195 - r / (ROWS - 1) * 135);
 };
@@ -489,6 +492,22 @@ var migrateDrumPatRows = function migrateDrumPatRows(pat) {
   if (mix) out.mix = mix;
   return out;
 };
+// Normalize a saved varyMode into the per-layer object shape. Legacy saves
+// stored a single boolean (global VARY) — upgrade it by applying to all
+// layers. Missing → all off.
+var normVary = function normVary(v) {
+  if (v && _typeof(v) === "object") return {
+    synth: !!v.synth,
+    lead: !!v.lead,
+    drums: !!v.drums
+  };
+  var b = !!v;
+  return {
+    synth: b,
+    lead: b,
+    drums: b
+  };
+};
 var FILT_MODES = ["off", "lp", "hp", "bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 var filtCutHz = function filtCutHz(v) {
@@ -549,7 +568,11 @@ var SESSION_DEFAULTS = Object.freeze({
   vGlideJitter: 0,
   vDurJitter: 0,
   loopMode: false,
-  varyMode: false,
+  varyMode: {
+    synth: false,
+    lead: false,
+    drums: false
+  },
   songMode: false,
   songView: false,
   songSyncMode: "sync"
@@ -749,6 +772,25 @@ var genVariation = function genVariation(grid) {
     }
   }
   return g;
+};
+
+// Generate a variation that is guaranteed not to silence a pattern that had
+// audible notes. genVariation can shift/drop notes such that nothing lands
+// within the active gridLen (the playable window) — when that happens we
+// fall back to the original grid for this cycle rather than play silence.
+// This is the fix for the "VARY on kills sound" bug.
+var safeVaryGrid = function safeVaryGrid(grid, vp, gridLen) {
+  var len = Math.max(1, Math.min(COLS, gridLen || COLS));
+  var hasInWindow = function hasInWindow(g) {
+    for (var r = 0; r < ROWS; r++) for (var c = 0; c < len; c++) if (g[r] && g[r][c]) return true;
+    return false;
+  };
+  var origHas = hasInWindow(grid);
+  var varied = genVariation(grid, vp);
+  if (origHas && !hasInWindow(varied)) return grid.map(function (r) {
+    return _toConsumableArray(r);
+  });
+  return varied;
 };
 
 // Jitter a step's params by vary settings
@@ -2740,7 +2782,13 @@ function Tabula() {
     _useState48 = _slicedToArray(_useState47, 2),
     shifting = _useState48[0],
     setShifting = _useState48[1];
-  var _useState49 = useState(false),
+  // VARY is per-layer now — each layer toggles independently. Normalizer
+  // upgrades legacy boolean saves (apply to all layers) to the object shape.
+  var _useState49 = useState({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
     _useState50 = _slicedToArray(_useState49, 2),
     varyMode = _useState50[0],
     setVaryMode = _useState50[1];
@@ -3330,7 +3378,11 @@ function Tabula() {
   var loopR = useRef(false),
     activeIdR = useRef(activeId);
   var transpR = useRef(0),
-    varyModeR = useRef(false),
+    varyModeR = useRef({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
     recModeR = useRef(false),
     recSourceIdR = useRef(null);
   var varyParamsR = useRef({
@@ -3482,73 +3534,87 @@ function Tabula() {
   }, [transpose]);
   useEffect(function () {
     varyModeR.current = varyMode;
-    // Wipe all cached variations on every toggle. Then, if we're enabling,
-    // *synchronously regenerate for every pat in every layer* so the next
-    // scheduler tick already has a populated cache — without this step, the
-    // scheduler runs between cache-clear and the next per-layer step 0, and
-    // can hit useGrid = pat.grid (cache miss fallback) for a few steps; if
-    // a half-played note's params then jitter into silent ranges the user
-    // hears playback "break."
+    // Per-layer VARY. Wipe all cached variations on every toggle, then
+    // synchronously regenerate only the layers that are ON so the next
+    // scheduler tick already has a populated cache (avoids the cache-miss
+    // window that read as a playback break). safeVaryGrid guarantees a
+    // variation never silences a pat that had audible notes — the fix for
+    // "VARY on kills sound."
     if (variedGrids.current && variedGrids.current.clear) variedGrids.current.clear();
     if (variedDrumGrids.current && variedDrumGrids.current.clear) variedDrumGrids.current.clear();
     if (variedDrumVels.current && variedDrumVels.current.clear) variedDrumVels.current.clear();
-    if (!varyMode) return;
     try {
       var _layerStoreR$current, _layerStoreR$current2;
       var vp = varyParamsR.current;
-      // Synth-type pats: live (active layer) + both stored layers. Wrapping in
-      // a Set by id de-dupes if a pat is somehow listed in both places.
-      var seen = new Set();
-      var synthPats = [].concat(_toConsumableArray(patsR.current || []), _toConsumableArray(((_layerStoreR$current = layerStoreR.current) === null || _layerStoreR$current === void 0 || (_layerStoreR$current = _layerStoreR$current.synth) === null || _layerStoreR$current === void 0 ? void 0 : _layerStoreR$current.pats) || []), _toConsumableArray(((_layerStoreR$current2 = layerStoreR.current) === null || _layerStoreR$current2 === void 0 || (_layerStoreR$current2 = _layerStoreR$current2.lead) === null || _layerStoreR$current2 === void 0 ? void 0 : _layerStoreR$current2.pats) || []));
-      var _iterator8 = _createForOfIteratorHelper(synthPats),
-        _step8;
-      try {
-        for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
-          var p = _step8.value;
-          if (!p || !p.grid || seen.has(p.id)) continue;
-          seen.add(p.id);
-          variedGrids.current.set(p.id, genVariation(p.grid, vp));
+      var regenSynth = function regenSynth(pats) {
+        var _iterator8 = _createForOfIteratorHelper(pats || []),
+          _step8;
+        try {
+          for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
+            var p = _step8.value;
+            if (!p || !p.grid) continue;
+            variedGrids.current.set(p.id, safeVaryGrid(p.grid, vp, p.gridLen));
+          }
+        } catch (err) {
+          _iterator8.e(err);
+        } finally {
+          _iterator8.f();
         }
-        // Drum pats: per-pat vRhythm + vVelocity, same shape used at step 0.
-      } catch (err) {
-        _iterator8.e(err);
-      } finally {
-        _iterator8.f();
-      }
-      var _iterator9 = _createForOfIteratorHelper(drumPatsR.current || []),
-        _step9;
-      try {
-        var _loop = function _loop() {
-          var dp = _step9.value;
-          if (!dp || !dp.grid) return 1; // continue
-          var vRhythm = (dp.vRhythm || 0) / 100;
-          var vVelocity = (dp.vVelocity || 0) / 100;
-          var vGrid = dp.grid.map(function (row) {
-            return row.map(function (on) {
-              if (on && Math.random() < vRhythm * 0.45) return false;
-              if (!on && Math.random() < vRhythm * 0.18) return true;
-              return on;
+      };
+      if (varyMode.synth) regenSynth(activeLayer === "synth" ? patsR.current : (_layerStoreR$current = layerStoreR.current) === null || _layerStoreR$current === void 0 || (_layerStoreR$current = _layerStoreR$current.synth) === null || _layerStoreR$current === void 0 ? void 0 : _layerStoreR$current.pats);
+      if (varyMode.lead) regenSynth(activeLayer === "lead" ? patsR.current : (_layerStoreR$current2 = layerStoreR.current) === null || _layerStoreR$current2 === void 0 || (_layerStoreR$current2 = _layerStoreR$current2.lead) === null || _layerStoreR$current2 === void 0 ? void 0 : _layerStoreR$current2.pats);
+      if (varyMode.drums) {
+        var _iterator9 = _createForOfIteratorHelper(drumPatsR.current || []),
+          _step9;
+        try {
+          var _loop = function _loop() {
+            var dp = _step9.value;
+            if (!dp || !dp.grid) return 1; // continue
+            var vRhythm = (dp.vRhythm || 0) / 100;
+            var vVelocity = (dp.vVelocity || 0) / 100;
+            var len = Math.max(1, Math.min(COLS, dp.gridLen || COLS));
+            var vGrid = dp.grid.map(function (row) {
+              return row.map(function (on) {
+                if (on && Math.random() < vRhythm * 0.45) return false;
+                if (!on && Math.random() < vRhythm * 0.18) return true;
+                return on;
+              });
             });
-          });
-          var vVel = (dp.vel || []).map(function (v) {
-            return Math.max(1, Math.min(127, Math.round(v + (Math.random() * 2 - 1) * vVelocity * 50)));
-          });
-          variedDrumGrids.current.set(dp.id, vGrid);
-          variedDrumVels.current.set(dp.id, vVel);
-        };
-        for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
-          if (_loop()) continue;
+            // Same anti-silence guard as synth — if the variation cleared every
+            // hit inside the playable window but the original had hits, keep the
+            // original this cycle.
+            var had = dp.grid.some(function (row, ri) {
+              return row.some(function (on, ci) {
+                return on && ci < len;
+              });
+            });
+            var got = vGrid.some(function (row, ri) {
+              return row.some(function (on, ci) {
+                return on && ci < len;
+              });
+            });
+            if (had && !got) vGrid = dp.grid.map(function (row) {
+              return _toConsumableArray(row);
+            });
+            var vVel = (dp.vel || []).map(function (vv) {
+              return Math.max(1, Math.min(127, Math.round(vv + (Math.random() * 2 - 1) * vVelocity * 50)));
+            });
+            variedDrumGrids.current.set(dp.id, vGrid);
+            variedDrumVels.current.set(dp.id, vVel);
+          };
+          for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+            if (_loop()) continue;
+          }
+        } catch (err) {
+          _iterator9.e(err);
+        } finally {
+          _iterator9.f();
         }
-      } catch (err) {
-        _iterator9.e(err);
-      } finally {
-        _iterator9.f();
       }
     } catch (e) {
-      // Defensive — if something goes sideways during regen we keep playing
-      // the original pats rather than dropping the audio loop.
       console.warn("VARY: cache regen failed", e);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [varyMode]);
   useEffect(function () {
     recModeR.current = recMode;
@@ -3825,7 +3891,7 @@ function Tabula() {
       lead: false,
       drums: false
     });
-    setVaryMode(s.varyMode != null ? s.varyMode : SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setLoopMode(s.loopMode != null ? s.loopMode : SESSION_DEFAULTS.loopMode);
   };
   // Stable function references — read live state via the refs above
@@ -4154,7 +4220,7 @@ function Tabula() {
       fn(s[k] != null ? s[k] : SESSION_DEFAULTS[k]);
     });
     setLoopMode(s.loopMode != null ? s.loopMode : SESSION_DEFAULTS.loopMode);
-    setVaryMode(s.varyMode != null ? s.varyMode : SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute && _typeof(s.trackMute) === "object" ? _objectSpread(_objectSpread({}, {
       synth: false,
       lead: false,
@@ -4326,7 +4392,11 @@ function Tabula() {
     };
     setActiveLayer("synth");
     setLoopMode(false);
-    setVaryMode(false);
+    setVaryMode({
+      synth: false,
+      lead: false,
+      drums: false
+    });
     setTrackMute({
       synth: false,
       lead: false,
@@ -4608,7 +4678,7 @@ function Tabula() {
       });
     }
     setLoopMode(s.loopMode != null ? s.loopMode : SESSION_DEFAULTS.loopMode);
-    setVaryMode(s.varyMode != null ? s.varyMode : SESSION_DEFAULTS.varyMode);
+    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute && _typeof(s.trackMute) === "object" ? _objectSpread(_objectSpread({}, {
       synth: false,
       lead: false,
@@ -4773,9 +4843,10 @@ function Tabula() {
     var layerLP = layerParamsR.current[layer];
     var freqs = SCALES[scaleR.current].freqs;
     var ratio = stR(transpR.current);
-    var useGrid = varyModeR.current ? variedGrids.current.get(pat.id) || pat.grid : pat.grid;
+    var vary = !!varyModeR.current[layer];
+    var useGrid = vary ? variedGrids.current.get(pat.id) || pat.grid : pat.grid;
     var rawSp = pat.params && pat.params[s] ? pat.params[s] : null;
-    var sp = varyModeR.current && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
+    var sp = vary && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
     var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
     var ratch = rhy;
     var subDur = stepDur / ratch;
@@ -4821,7 +4892,7 @@ function Tabula() {
           var subC = (s + i) % plen;
           var subRaw = pat.params[subC];
           if (!subRaw) continue;
-          var subSp = varyModeR.current ? jitterStepParam(subRaw, varyParamsR.current) : subRaw;
+          var subSp = vary ? jitterStepParam(subRaw, varyParamsR.current) : subRaw;
           mods.push({
             at: at + i * stepDur,
             sp: subSp
@@ -4841,8 +4912,9 @@ function Tabula() {
   // Plays one step of a drum pat. Voices per row, with per-voice mix (pat.mix) and vel.
   var playDrumStep = function playDrumStep(pat, s, at) {
     if (!pat || !pat.grid || !drumEngine.current.ready) return;
-    var useGrid = varyModeR.current ? variedDrumGrids.current.get(pat.id) || pat.grid : pat.grid;
-    var useVel = varyModeR.current ? variedDrumVels.current.get(pat.id) || pat.vel : pat.vel;
+    var dvary = !!varyModeR.current.drums;
+    var useGrid = dvary ? variedDrumGrids.current.get(pat.id) || pat.grid : pat.grid;
+    var useVel = dvary ? variedDrumVels.current.get(pat.id) || pat.vel : pat.vel;
     for (var r = 0; r < DRUM_ROWS; r++) {
       if (useGrid[r] && useGrid[r][s]) {
         var _useVel$s;
@@ -4989,7 +5061,7 @@ function Tabula() {
         var s = lf.step % len;
         var at = lf.nextAt;
         // Variation grid generation at this layer's step 0 (pat-keyed, cached).
-        if (s === 0 && varyModeR.current) {
+        if (s === 0 && varyModeR.current[_layer]) {
           if (_layer === "drums") {
             var vRhythm = (pat.vRhythm || 0) / 100;
             var vVelocity = (pat.vVelocity || 0) / 100;
@@ -5001,13 +5073,28 @@ function Tabula() {
                 return on;
               });
             });
+            // Anti-silence guard (matches the toggle regen): if the variation
+            // cleared every hit inside the playable window, keep the original.
+            var had = pat.grid.some(function (row) {
+              return row.some(function (on, ci) {
+                return on && ci < len;
+              });
+            });
+            var got = vGrid.some(function (row) {
+              return row.some(function (on, ci) {
+                return on && ci < len;
+              });
+            });
+            if (had && !got) vGrid = pat.grid.map(function (row) {
+              return _toConsumableArray(row);
+            });
             var vVel = pat.vel.map(function (v) {
               return Math.max(1, Math.min(127, Math.round(v + (Math.random() * 2 - 1) * vVelocity * 50)));
             });
             variedDrumGrids.current.set(pat.id, vGrid);
             variedDrumVels.current.set(pat.id, vVel);
           } else {
-            variedGrids.current.set(pat.id, genVariation(pat.grid, varyParamsR.current));
+            variedGrids.current.set(pat.id, safeVaryGrid(pat.grid, varyParamsR.current, len));
             // Self-record (synth-only) — vary the source pat and append.
             if (_layer === "synth" && recModeR.current && patsR.current.length < 8) {
               var _src$gridLen, _src$speedMult;
@@ -7585,6 +7672,11 @@ function Tabula() {
       });
     });
   };
+  // VARY is per-layer; these drive the global indicators (tab tint, mobile
+  // chip). anyVary = at least one layer on; activeVary = the layer the user
+  // is currently looking at.
+  var anyVary = varyMode.synth || varyMode.lead || varyMode.drums;
+  var activeVary = !!varyMode[activeLayer];
   return /*#__PURE__*/React.createElement("div", {
     style: S.root,
     onContextMenu: function onContextMenu(e) {
@@ -10313,7 +10405,9 @@ function Tabula() {
     }, /*#__PURE__*/React.createElement("button", {
       onClick: function onClick() {
         return setVaryMode(function (v) {
-          return !v;
+          return _objectSpread(_objectSpread({}, v), {}, {
+            drums: !v.drums
+          });
         });
       },
       style: {
@@ -10321,9 +10415,9 @@ function Tabula() {
         padding: "10px 14px",
         marginBottom: 16,
         borderRadius: 8,
-        border: "1px solid " + (varyMode ? "#c9a96e" : "rgba(200,185,165,0.18)"),
-        background: varyMode ? "rgba(201,169,110,0.14)" : "transparent",
-        color: varyMode ? "#c9a96e" : "rgba(210,195,175,0.55)",
+        border: "1px solid " + (varyMode.drums ? "#c9a96e" : "rgba(200,185,165,0.18)"),
+        background: varyMode.drums ? "rgba(201,169,110,0.14)" : "transparent",
+        color: varyMode.drums ? "#c9a96e" : "rgba(210,195,175,0.55)",
         fontSize: 10,
         letterSpacing: 2.5,
         fontWeight: 700,
@@ -10339,10 +10433,10 @@ function Tabula() {
         width: 8,
         height: 8,
         borderRadius: "50%",
-        background: varyMode ? "#c9a96e" : "rgba(210,195,175,0.25)",
-        boxShadow: varyMode ? "0 0 6px #c9a96e" : "none"
+        background: varyMode.drums ? "#c9a96e" : "rgba(210,195,175,0.25)",
+        boxShadow: varyMode.drums ? "0 0 6px #c9a96e" : "none"
       }
-    }), "VARY ", varyMode ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
+    }), "DRUMS VARY ", varyMode.drums ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 9,
         letterSpacing: 2,
@@ -10489,7 +10583,7 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("button", {
     onClick: function onClick() {
       return setVaryMode(function (v) {
-        return !v;
+        return _objectSpread(_objectSpread({}, v), {}, _defineProperty({}, activeLayer, !v[activeLayer]));
       });
     },
     style: {
@@ -10497,9 +10591,9 @@ function Tabula() {
       padding: "10px 14px",
       marginBottom: 10,
       borderRadius: 8,
-      border: "1px solid " + (varyMode ? "#c9a96e" : "rgba(200,185,165,0.18)"),
-      background: varyMode ? "rgba(201,169,110,0.14)" : "transparent",
-      color: varyMode ? "#c9a96e" : "rgba(210,195,175,0.55)",
+      border: "1px solid " + (varyMode[activeLayer] ? C_VARY : "rgba(200,185,165,0.18)"),
+      background: varyMode[activeLayer] ? "rgba(201,169,110,0.14)" : "transparent",
+      color: varyMode[activeLayer] ? C_VARY : "rgba(210,195,175,0.55)",
       fontSize: 10,
       letterSpacing: 2.5,
       fontWeight: 700,
@@ -10515,10 +10609,10 @@ function Tabula() {
       width: 8,
       height: 8,
       borderRadius: "50%",
-      background: varyMode ? "#c9a96e" : "rgba(210,195,175,0.25)",
-      boxShadow: varyMode ? "0 0 6px #c9a96e" : "none"
+      background: varyMode[activeLayer] ? C_VARY : "rgba(210,195,175,0.25)",
+      boxShadow: varyMode[activeLayer] ? "0 0 6px " + C_VARY : "none"
     }
-  }), "VARY ", varyMode ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
+  }), activeLayer === "lead" ? "MONO" : "POLY", " VARY ", varyMode[activeLayer] ? "ON" : "OFF"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
@@ -10527,7 +10621,7 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement(SynthSection, {
     title: "RHYTHM VARY / MUT8",
-    accent: "#c4727a"
+    accent: C_VARY
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10544,7 +10638,7 @@ function Tabula() {
     max: 60,
     onChange: setVDropRate,
     display: vDropRate + "%",
-    accent: "#c4727a"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "SHIFT",
@@ -10553,7 +10647,7 @@ function Tabula() {
     max: 60,
     onChange: setVShiftRate,
     display: vShiftRate + "%",
-    accent: "#c4727a"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "RANGE",
@@ -10562,10 +10656,10 @@ function Tabula() {
     max: 8,
     onChange: setVShiftRange,
     display: vShiftRange + "st",
-    accent: "#c4727a"
+    accent: C_VARY
   }))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "MELODY VARY / MUT8",
-    accent: "#6c9ad6"
+    accent: C_VARY
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10582,7 +10676,7 @@ function Tabula() {
     max: 60,
     onChange: setVPitchRate,
     display: vPitchRate + "%",
-    accent: "#6c9ad6"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "RANGE",
@@ -10591,7 +10685,7 @@ function Tabula() {
     max: 12,
     onChange: setVPitchRange,
     display: vPitchRange + "st",
-    accent: "#6c9ad6"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     vertical: true,
     label: "GHOST",
@@ -10600,10 +10694,10 @@ function Tabula() {
     max: 60,
     onChange: setVGhostRate,
     display: vGhostRate + "%",
-    accent: "#6c9ad6"
+    accent: C_VARY
   }))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "STEP VARY / MUT8",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "4px 12px 10px",
@@ -10618,7 +10712,7 @@ function Tabula() {
     max: 100,
     onChange: setVVelJitter,
     display: vVelJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "FLT",
     value: vFltJitter,
@@ -10626,7 +10720,7 @@ function Tabula() {
     max: 100,
     onChange: setVFltJitter,
     display: vFltJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "DLY",
     value: vDlyJitter,
@@ -10634,7 +10728,7 @@ function Tabula() {
     max: 100,
     onChange: setVDlyJitter,
     display: vDlyJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "RHY",
     value: vRhyJitter,
@@ -10642,7 +10736,7 @@ function Tabula() {
     max: 100,
     onChange: setVRhyJitter,
     display: vRhyJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "OCT",
     value: vOctJitter,
@@ -10650,7 +10744,7 @@ function Tabula() {
     max: 100,
     onChange: setVOctJitter,
     display: vOctJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "GLIDE",
     value: vGlideJitter,
@@ -10658,7 +10752,7 @@ function Tabula() {
     max: 100,
     onChange: setVGlideJitter,
     display: vGlideJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }), /*#__PURE__*/React.createElement(KnobSlider, {
     label: "DUR",
     value: vDurJitter,
@@ -10666,7 +10760,7 @@ function Tabula() {
     max: 100,
     onChange: setVDurJitter,
     display: vDurJitter + "%",
-    accent: "#9fb4c7"
+    accent: C_VARY
   }))))), activeLayer !== "drums" && page === "sound" && /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
@@ -11087,9 +11181,9 @@ function Tabula() {
       lbl = _ref45[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
-      style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && varyMode ? {
-        color: "#c9a96e",
-        borderColor: "#c9a96e"
+      style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && activeVary ? {
+        color: C_VARY,
+        borderColor: C_VARY
       } : {}),
       onClick: function onClick() {
         setPage(p);
@@ -12329,9 +12423,9 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "vary" || varyMode ? "rgba(201,169,110,0.55)" : "rgba(200,185,165,0.1)"),
+      border: "1px solid " + (activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.55)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
-      background: activeSheet === "vary" || varyMode ? "rgba(201,169,110,0.1)" : "transparent",
+      background: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.1)" : "transparent",
       cursor: "pointer",
       gap: 0,
       fontFamily: "inherit",
@@ -12346,13 +12440,13 @@ function Tabula() {
     style: {
       fontSize: 12,
       lineHeight: 1.1,
-      color: activeSheet === "vary" || varyMode ? "#c9a96e" : "rgba(210,195,175,0.5)"
+      color: activeSheet === "vary" || anyVary ? "#c9a96e" : "rgba(210,195,175,0.5)"
     }
   }, "\uFF5E"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 5,
       letterSpacing: 1.5,
-      color: activeSheet === "vary" || varyMode ? "rgba(201,169,110,0.7)" : "rgba(210,195,175,0.35)"
+      color: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.7)" : "rgba(210,195,175,0.35)"
     }
   }, "VARY")), /*#__PURE__*/React.createElement("button", {
     style: {
@@ -13822,9 +13916,9 @@ function Tabula() {
     style: {
       padding: "4px 14px",
       borderRadius: 20,
-      border: "1px solid " + (varyMode ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.2)"),
-      background: varyMode ? "rgba(201,169,110,0.12)" : "transparent",
-      color: varyMode ? "#c9a96e" : "rgba(200,185,165,0.4)",
+      border: "1px solid " + (varyMode[activeLayer] ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.2)"),
+      background: varyMode[activeLayer] ? "rgba(201,169,110,0.12)" : "transparent",
+      color: varyMode[activeLayer] ? C_VARY : "rgba(200,185,165,0.4)",
       fontSize: 10,
       letterSpacing: 1,
       cursor: "pointer",
@@ -13832,14 +13926,14 @@ function Tabula() {
     },
     onClick: function onClick() {
       return setVaryMode(function (v) {
-        return !v;
+        return _objectSpread(_objectSpread({}, v), {}, _defineProperty({}, activeLayer, !v[activeLayer]));
       });
     }
-  }, varyMode ? "VARY ON" : "VARY OFF")), /*#__PURE__*/React.createElement("div", {
+  }, (activeLayer === "lead" ? "MONO" : "POLY") + " VARY " + (varyMode[activeLayer] ? "ON" : "OFF"))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 8,
       letterSpacing: 1.5,
-      color: "#c4727a",
+      color: C_VARY,
       fontWeight: 600,
       marginBottom: 8
     }
@@ -13911,7 +14005,7 @@ function Tabula() {
         top: 0,
         bottom: 0,
         width: val / max * 100 + "%",
-        background: "rgba(196,114,122,0.45)",
+        background: "rgba(201,169,110,0.45)",
         borderRadius: 3
       }
     }), /*#__PURE__*/React.createElement("div", {
@@ -13929,7 +14023,7 @@ function Tabula() {
     style: {
       fontSize: 8,
       letterSpacing: 1.5,
-      color: "#6c9ad6",
+      color: C_VARY,
       fontWeight: 600,
       marginBottom: 8,
       marginTop: 14
@@ -14002,7 +14096,7 @@ function Tabula() {
         top: 0,
         bottom: 0,
         width: val / max * 100 + "%",
-        background: "rgba(108,154,214,0.45)",
+        background: "rgba(201,169,110,0.45)",
         borderRadius: 3
       }
     }), /*#__PURE__*/React.createElement("div", {
@@ -14020,7 +14114,7 @@ function Tabula() {
     style: {
       fontSize: 8,
       letterSpacing: 1.5,
-      color: "#9fb4c7",
+      color: C_VARY,
       fontWeight: 600,
       marginBottom: 8,
       marginTop: 14
@@ -14091,7 +14185,7 @@ function Tabula() {
         top: 0,
         bottom: 0,
         width: val + "%",
-        background: "rgba(159,180,199,0.45)",
+        background: "rgba(201,169,110,0.45)",
         borderRadius: 3
       }
     }), /*#__PURE__*/React.createElement("div", {
