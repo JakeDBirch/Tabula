@@ -285,6 +285,14 @@ const normVary=(v)=>{
   if(v&&typeof v==="object")return {synth:!!v.synth,lead:!!v.lead,drums:!!v.drums};
   const b=!!v; return {synth:b,lead:b,drums:b};
 };
+// Legacy saves named patterns/phrases/sections with letters ("A","B",…). The
+// app now uses abstract glyphs assigned by index. On load, any name that isn't
+// already one of the glyph symbols gets reassigned to its index-based glyph so
+// old projects show the new icons. Glyph names pass through untouched (so
+// current saves are unaffected). IDs are preserved — chains are id-based.
+const relabelByIndex=(arr,symFn)=>Array.isArray(arr)
+  ? arr.map((p,i)=>(p&&SYM_POOL.includes(p.name))?p:{...p,name:symFn(i)})
+  : arr;
 const FILT_MODES=["off","lp","hp","bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
@@ -2221,7 +2229,7 @@ export default function Tabula(){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
           const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if(ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
+          if(ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
           if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
           layerStoreR.current[layer]=ld;
         }
@@ -2234,7 +2242,7 @@ export default function Tabula(){
     setActiveLayer(s.activeLayer||"synth");
     const maxId=Math.max(0,...s.pats.map(p=>p.id));if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(migratePats(s.pats,s.speedMult));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
+    setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
     // Old saves predate some fields (e.g. swing, speedMult); without explicit
     // fallback the previous project's value would leak into this load.
@@ -2282,12 +2290,12 @@ export default function Tabula(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
-    if(s.drumPats)setDrumPats(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}));
+    if(s.drumPats)setDrumPats(relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
-    if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats));
-    if(s.drumPhrases)setDrumPhrases(sanitizePhrases(s.drumPhrases,s.drumPats||[]));
-    if(s.sections)setSections(s.sections);
+    if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats),symPhr));
+    if(s.drumPhrases)setDrumPhrases(relabelByIndex(sanitizePhrases(s.drumPhrases,s.drumPats||[]),symPhr));
+    if(s.sections)setSections(relabelByIndex(s.sections,symSec));
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
@@ -2457,7 +2465,7 @@ export default function Tabula(){
     if(!rawState)return;
     const s=migrateLegacyBass(rawState);
     const maxId=Math.max(0,...(s.pats||[]).map(p=>p.id));if(maxId>=_id)_id=maxId+1;
-    if(s.pats)setPats(migratePats(s.pats,s.speedMult));
+    if(s.pats)setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     // Apply with fallback to defaults — share imports should reset to a clean
     // baseline for anything the link doesn't carry, same rule as doLoad.
@@ -2492,12 +2500,12 @@ export default function Tabula(){
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    if(s.drumPats)setDrumPats(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}));
+    if(s.drumPats)setDrumPats(relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
-    if(s.synthPhrases)setSynthPhrases(sanitizePhrases(s.synthPhrases,s.pats||[]));
-    if(s.drumPhrases)setDrumPhrases(sanitizePhrases(s.drumPhrases,s.drumPats||[]));
-    if(s.sections)setSections(s.sections);
+    if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats||[]),symPhr));
+    if(s.drumPhrases)setDrumPhrases(relabelByIndex(sanitizePhrases(s.drumPhrases,s.drumPats||[]),symPhr));
+    if(s.sections)setSections(relabelByIndex(s.sections,symSec));
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);

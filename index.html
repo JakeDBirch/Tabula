@@ -583,6 +583,18 @@ var normVary = function normVary(v) {
     drums: b
   };
 };
+// Legacy saves named patterns/phrases/sections with letters ("A","B",…). The
+// app now uses abstract glyphs assigned by index. On load, any name that isn't
+// already one of the glyph symbols gets reassigned to its index-based glyph so
+// old projects show the new icons. Glyph names pass through untouched (so
+// current saves are unaffected). IDs are preserved — chains are id-based.
+var relabelByIndex = function relabelByIndex(arr, symFn) {
+  return Array.isArray(arr) ? arr.map(function (p, i) {
+    return p && SYM_POOL.includes(p.name) ? p : _objectSpread(_objectSpread({}, p), {}, {
+      name: symFn(i)
+    });
+  }) : arr;
+};
 var FILT_MODES = ["off", "lp", "hp", "bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 var filtCutHz = function filtCutHz(v) {
@@ -4280,7 +4292,7 @@ function Tabula() {
         var layer = _SYNTH_LAYERS2[_i4];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if (ld.pats) ld.pats = migratePats(ld.pats, s.speedMult);
+          if (ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
           if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
           layerStoreR.current[layer] = ld;
         }
@@ -4296,7 +4308,7 @@ function Tabula() {
     }))));
     if (maxId >= _id) _id = maxId + 1;
     var cleanChain = sanitizeChain(s.chain, s.pats);
-    setPats(migratePats(s.pats, s.speedMult));
+    setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
     setChain(cleanChain.length ? cleanChain : [s.activeId || s.pats[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
     // Old saves predate some fields (e.g. swing, speedMult); without explicit
@@ -4373,17 +4385,17 @@ function Tabula() {
     });
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
-    if (s.drumPats) setDrumPats(s.drumPats.map(function (p) {
+    if (s.drumPats) setDrumPats(relabelByIndex(s.drumPats.map(function (p) {
       var mp = migrateDrumPatRows(p);
       return Object.assign({}, mp, {
         mix: fillDrumMix(mp.mix)
       });
-    }));
+    }), symPat));
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
     if (s.drumChain) setDrumChain(sanitizeChain(s.drumChain, s.drumPats || []));
-    if (s.synthPhrases) setSynthPhrases(sanitizePhrases(s.synthPhrases, s.pats));
-    if (s.drumPhrases) setDrumPhrases(sanitizePhrases(s.drumPhrases, s.drumPats || []));
-    if (s.sections) setSections(s.sections);
+    if (s.synthPhrases) setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases, s.pats), symPhr));
+    if (s.drumPhrases) setDrumPhrases(relabelByIndex(sanitizePhrases(s.drumPhrases, s.drumPats || []), symPhr));
+    if (s.sections) setSections(relabelByIndex(s.sections, symSec));
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
     if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
@@ -4766,7 +4778,7 @@ function Tabula() {
       return p.id;
     }))));
     if (maxId >= _id) _id = maxId + 1;
-    if (s.pats) setPats(migratePats(s.pats, s.speedMult));
+    if (s.pats) setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
     if (s.chain) {
       var cc = sanitizeChain(s.chain, s.pats || []);
       setChain(cc.length ? cc : [s.activeId || s.pats && s.pats[0] && s.pats[0].id || 1]);
@@ -4832,17 +4844,17 @@ function Tabula() {
       lead: false,
       drums: false
     });
-    if (s.drumPats) setDrumPats(s.drumPats.map(function (p) {
+    if (s.drumPats) setDrumPats(relabelByIndex(s.drumPats.map(function (p) {
       var mp = migrateDrumPatRows(p);
       return Object.assign({}, mp, {
         mix: fillDrumMix(mp.mix)
       });
-    }));
+    }), symPat));
     if (s.activeDrumId != null) setActiveDrumId(s.activeDrumId);
     if (s.drumChain) setDrumChain(sanitizeChain(s.drumChain, s.drumPats || []));
-    if (s.synthPhrases) setSynthPhrases(sanitizePhrases(s.synthPhrases, s.pats || []));
-    if (s.drumPhrases) setDrumPhrases(sanitizePhrases(s.drumPhrases, s.drumPats || []));
-    if (s.sections) setSections(s.sections);
+    if (s.synthPhrases) setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases, s.pats || []), symPhr));
+    if (s.drumPhrases) setDrumPhrases(relabelByIndex(sanitizePhrases(s.drumPhrases, s.drumPats || []), symPhr));
+    if (s.sections) setSections(relabelByIndex(s.sections, symSec));
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
     if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
