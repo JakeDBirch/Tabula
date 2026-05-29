@@ -61,6 +61,7 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
+const C_SAT="#d8a050"; // global master saturation accent
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 const C_VARY="#c9a96e";
@@ -355,6 +356,7 @@ const SESSION_DEFAULTS = Object.freeze({
   bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
+  satAmt:0,
   drumLevel:85, activeKit:DEFAULT_KIT,
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
@@ -683,7 +685,13 @@ class Bell{
   async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();
     await this.ctx.resume();
-    const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
+    const m=this.ctx.createGain();m.gain.value=0.55;this.master=m;
+    // Global master saturation. Everything sums into `m` — synth, mono, the
+    // reverb/delay returns, and the drum bus (DrumEngine connects its master
+    // into this node) — so a waveshaper between `m` and the destination is a
+    // true master FX. Identity curve at amt=0 = clean bypass.
+    const sat=this.ctx.createWaveShaper();sat.curve=makeSatCurve(0);sat.oversample="2x";
+    m.connect(sat);sat.connect(this.ctx.destination);this.satShaper=sat;
 
     // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -797,6 +805,12 @@ class Bell{
   }
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
+  }
+  // Global master saturation amount (0..100). Swaps the master waveshaper
+  // curve; 0 = identity (clean). Shares makeSatCurve with the per-voice drum
+  // saturation so the character is consistent across the app.
+  setSaturation(pct){if(!this.ready||!this.satShaper)return;
+    this.satShaper.curve=makeSatCurve(Math.max(0,Math.min(100,pct))/100);
   }
   // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
   // Each entry schedules a smooth filter cutoff transition at that time using
@@ -1776,6 +1790,7 @@ export default function Tabula(){
   const [rvLfDamp,   setRvLfDamp]   = useState(0);  // LF damp shelf cut (0=none, 100=full)
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
+  const [satAmt,     setSatAmt]     = useState(0);  // global master saturation (0..100)
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -2080,6 +2095,7 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);},[rvLfDamp]);
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
+  useEffect(()=>{bell.current.setSaturation&&bell.current.setSaturation(satAmt);},[satAmt]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   // Push the active drum pat's mix to the engine whenever it changes. Per-hit
   // mix application (inside DrumEngine.play) handles song-mode pat switches;
@@ -2137,7 +2153,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     varyMode,loopMode,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
@@ -2183,7 +2199,7 @@ export default function Tabula(){
     setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],
-     ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+     ["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2374,7 +2390,7 @@ export default function Tabula(){
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2480,7 +2496,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setDrumLevel(85);
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setSatAmt(0);setDrumLevel(85);
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -2548,7 +2564,7 @@ export default function Tabula(){
   const getShareState=()=>({
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
     trackMute,trackSolo,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
@@ -2605,7 +2621,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3035,6 +3051,7 @@ export default function Tabula(){
     bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
+    bell.current.setSaturation&&bell.current.setSaturation(satAmt);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
     if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
@@ -4351,6 +4368,39 @@ export default function Tabula(){
   const anyVary = varyMode.synth||varyMode.lead||varyMode.drums;
   const activeVary = !!varyMode[activeLayer];
 
+  // ── GLOBAL FX panel ──────────────────────────────────────────────────────
+  // The reverb, delay and master-saturation *design* params. These are global
+  // (shared by every layer); each layer's SOUND page only carries its own SEND
+  // amount into the reverb/delay buses. Rendered identically on the desktop FX
+  // tab and the mobile FX sheet.
+  const globalFxSections = (<>
+    <SynthSection title="DELAY" accent={C_DLY}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+        <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}            accent={C_DLY}/>
+        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}         accent={C_DLY}/>
+        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}         accent={C_DLY}/>
+        <KnobSlider label="→ REV"  value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}            accent={C_DLY}/>
+      </div>
+    </SynthSection>
+    <SynthSection title="REVERB" accent={C_REV}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
+        <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
+        {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
+        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"} accent={C_REV}/>
+        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}    accent={C_REV}/>
+      </div>
+    </SynthSection>
+    <SynthSection title="SATURATION" accent={C_SAT}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+        {/* Master-bus drive — affects the whole mix (synth, mono, drums + FX
+            returns all sum through the master). 0 = clean. */}
+        <KnobSlider label="DRIVE" value={satAmt} min={0} max={100} onChange={setSatAmt} display={satAmt+"%"} accent={C_SAT}/>
+      </div>
+    </SynthSection>
+  </>);
+
   return(
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
@@ -5606,28 +5656,30 @@ export default function Tabula(){
                         </div>
                       </div>
                     </SynthSection>
+                    {/* Per-layer FX is just the SEND into the shared reverb/delay
+                        buses. The bus design lives on the global FX tab. */}
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SEND"   value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
-                        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                        <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
-                        <KnobSlider label="→ REV"  value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}             accent={C_DLY}/>
+                        <KnobSlider label="SEND"   value={dlySend}   min={0} max={100} onChange={setDlySend}   display={dlySend+"%"} accent={C_DLY}/>
+                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
-                        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
-                        <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}     accent={C_REV}/>
-                        {/* HF DAMP: slider position is "openness" (right = bright = 0 damp,
-                            left = dark = 100 damp). Displayed value is the damping amount so
-                            the number matches the label semantics. */}
-                        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"}       accent={C_REV}/>
-                        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}        accent={C_REV}/>
+                        <KnobSlider label="SEND"   value={rvSend}    min={0} max={100} onChange={setRvSend}    display={rvSend+"%"}  accent={C_REV}/>
+                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
+                </div>
+              </div>
+            )}
+            {/* Global FX page — reverb / delay / master saturation design. Same
+                for every layer (these buses are shared), drums included. */}
+            {page==="fx"&&(
+              <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
+                  {globalFxSections}
                 </div>
               </div>
             )}
@@ -5637,7 +5689,7 @@ export default function Tabula(){
           {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["vary","VARY"]].map(([p,lbl])=>(
+            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["fx","FX"],["vary","VARY"]].map(([p,lbl])=>(
               <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
@@ -6143,6 +6195,12 @@ export default function Tabula(){
                 <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
                 <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
               </button>
+              {/* FX chip — global reverb/delay/saturation design */}
+              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":satAmt>0?C_SAT+"55":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
+                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"||satAmt>0?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
+                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
+              </button>
               {/* VARY chip */}
               <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||anyVary?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
@@ -6343,25 +6401,17 @@ export default function Tabula(){
                               </div>
                             </div>
                           </SynthSection>
+                          {/* Per-layer FX = SEND only; design lives on the FX sheet. */}
                           <SynthSection title="DELAY" accent={C_DLY}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SEND"  value={dlySend}   min={0} max={100}                onChange={setDlySend}   display={dlySend+"%"}              accent={C_DLY}/>
-                              <KnobSlider label="TIME"  value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-                              <KnobSlider label="FDBK"  value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}             accent={C_DLY}/>
-                              <KnobSlider label="HP"    value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}          accent={C_DLY}/>
-                              <KnobSlider label="LP"    value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}          accent={C_DLY}/>
-                              <KnobSlider label="→ REV" value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}             accent={C_DLY}/>
+                              <KnobSlider label="SEND" value={dlySend} min={0} max={100} onChange={setDlySend} display={dlySend+"%"} accent={C_DLY}/>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SEND"    value={rvSend}     min={0} max={100} onChange={setRvSend}     display={rvSend+"%"}        accent={C_REV}/>
-                              <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}        accent={C_REV}/>
-                              <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"}   accent={C_REV}/>
-                              {/* HF DAMP: slider position is openness (right=bright=0 damp,
-                                  left=dark=100 damp). Display reads the damping amount. */}
-                              <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"}       accent={C_REV}/>
-                              <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}      accent={C_REV}/>
+                              <KnobSlider label="SEND" value={rvSend} min={0} max={100} onChange={setRvSend} display={rvSend+"%"} accent={C_REV}/>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
                         </div>
@@ -6476,6 +6526,15 @@ export default function Tabula(){
                       </div>
                       </div>);
                     })()}
+                  </div>
+                )}
+                {/* FX sheet — global reverb / delay / master saturation design */}
+                {activeSheet==="fx"&&(
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      {globalFxSections}
+                    </div>
                   </div>
                 )}
                 {/* PROJECT sheet */}

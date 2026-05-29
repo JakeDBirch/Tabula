@@ -178,6 +178,7 @@ var C_OSC = "#7ecfb3",
   C_FILT = "#c97b8a",
   C_DLY = "#8bbf9f",
   C_REV = "#a8b8d0";
+var C_SAT = "#d8a050"; // global master saturation accent
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 var C_VARY = "#c9a96e";
@@ -690,6 +691,7 @@ var SESSION_DEFAULTS = Object.freeze({
   rvLfDamp: 0,
   rvPreDelay: 0,
   dlyToRev: 0,
+  satAmt: 0,
   drumLevel: 85,
   activeKit: DEFAULT_KIT,
   vDropRate: 13,
@@ -1492,7 +1494,7 @@ var Bell = /*#__PURE__*/function () {
     value: function () {
       var _init = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(dlyT, fbv, sendPct, dlyHpV, dlyLpV) {
         var _this = this;
-        var m, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
+        var m, sat, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
         return _regenerator().w(function (_context3) {
           while (1) switch (_context3.n) {
             case 0:
@@ -1502,8 +1504,17 @@ var Bell = /*#__PURE__*/function () {
             case 1:
               m = this.ctx.createGain();
               m.gain.value = 0.55;
-              m.connect(this.ctx.destination);
               this.master = m;
+              // Global master saturation. Everything sums into `m` — synth, mono, the
+              // reverb/delay returns, and the drum bus (DrumEngine connects its master
+              // into this node) — so a waveshaper between `m` and the destination is a
+              // true master FX. Identity curve at amt=0 = clean bypass.
+              sat = this.ctx.createWaveShaper();
+              sat.curve = makeSatCurve(0);
+              sat.oversample = "2x";
+              m.connect(sat);
+              sat.connect(this.ctx.destination);
+              this.satShaper = sat;
 
               // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
               // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -1713,6 +1724,15 @@ var Bell = /*#__PURE__*/function () {
     value: function setDlyToRev(pct) {
       if (!this.ready || !this.dlyToRev) return;
       this.dlyToRev.gain.setTargetAtTime(Math.max(0, Math.min(100, pct)) / 100, this.ctx.currentTime, 0.02);
+    }
+    // Global master saturation amount (0..100). Swaps the master waveshaper
+    // curve; 0 = identity (clean). Shares makeSatCurve with the per-voice drum
+    // saturation so the character is consistent across the app.
+  }, {
+    key: "setSaturation",
+    value: function setSaturation(pct) {
+      if (!this.ready || !this.satShaper) return;
+      this.satShaper.curve = makeSatCurve(Math.max(0, Math.min(100, pct)) / 100);
     }
     // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
     // Each entry schedules a smooth filter cutoff transition at that time using
@@ -3351,31 +3371,35 @@ function Tabula() {
     _useState134 = _slicedToArray(_useState133, 2),
     dlyToRev = _useState134[0],
     setDlyToRev = _useState134[1]; // delay output → reverb input send
+  var _useState135 = useState(0),
+    _useState136 = _slicedToArray(_useState135, 2),
+    satAmt = _useState136[0],
+    setSatAmt = _useState136[1]; // global master saturation (0..100)
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState135 = useState(85),
-    _useState136 = _slicedToArray(_useState135, 2),
-    drumLevel = _useState136[0],
-    setDrumLevel = _useState136[1];
+  var _useState137 = useState(85),
+    _useState138 = _slicedToArray(_useState137, 2),
+    drumLevel = _useState138[0],
+    setDrumLevel = _useState138[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
-  var _useState137 = useState({
-      synth: false,
-      lead: false,
-      drums: false
-    }),
-    _useState138 = _slicedToArray(_useState137, 2),
-    trackMute = _useState138[0],
-    setTrackMute = _useState138[1];
   var _useState139 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
     _useState140 = _slicedToArray(_useState139, 2),
-    trackSolo = _useState140[0],
-    setTrackSolo = _useState140[1];
+    trackMute = _useState140[0],
+    setTrackMute = _useState140[1];
+  var _useState141 = useState({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
+    _useState142 = _slicedToArray(_useState141, 2),
+    trackSolo = _useState142[0],
+    setTrackSolo = _useState142[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -3403,64 +3427,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState141 = useState([initDrum]),
-    _useState142 = _slicedToArray(_useState141, 2),
-    drumPats = _useState142[0],
-    setDrumPats = _useState142[1];
-  var _useState143 = useState(initDrum.id),
+  var _useState143 = useState([initDrum]),
     _useState144 = _slicedToArray(_useState143, 2),
-    activeDrumId = _useState144[0],
-    setActiveDrumId = _useState144[1];
-  var _useState145 = useState([initDrum.id]),
+    drumPats = _useState144[0],
+    setDrumPats = _useState144[1];
+  var _useState145 = useState(initDrum.id),
     _useState146 = _slicedToArray(_useState145, 2),
-    drumChain = _useState146[0],
-    setDrumChain = _useState146[1];
-  var _useState147 = useState(null),
+    activeDrumId = _useState146[0],
+    setActiveDrumId = _useState146[1];
+  var _useState147 = useState([initDrum.id]),
     _useState148 = _slicedToArray(_useState147, 2),
-    drumClipboard = _useState148[0],
-    setDrumClipboard = _useState148[1];
+    drumChain = _useState148[0],
+    setDrumChain = _useState148[1];
+  var _useState149 = useState(null),
+    _useState150 = _slicedToArray(_useState149, 2),
+    drumClipboard = _useState150[0],
+    setDrumClipboard = _useState150[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState149 = useState([{
+  var _useState151 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState150 = _slicedToArray(_useState149, 2),
-    synthPhrases = _useState150[0],
-    setSynthPhrases = _useState150[1];
-  var _useState151 = useState([{
+    _useState152 = _slicedToArray(_useState151, 2),
+    synthPhrases = _useState152[0],
+    setSynthPhrases = _useState152[1];
+  var _useState153 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState152 = _slicedToArray(_useState151, 2),
-    drumPhrases = _useState152[0],
-    setDrumPhrases = _useState152[1];
-  var _useState153 = useState([{
+    _useState154 = _slicedToArray(_useState153, 2),
+    drumPhrases = _useState154[0],
+    setDrumPhrases = _useState154[1];
+  var _useState155 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
-    _useState154 = _slicedToArray(_useState153, 2),
-    sections = _useState154[0],
-    setSections = _useState154[1];
-  var _useState155 = useState("SP1"),
     _useState156 = _slicedToArray(_useState155, 2),
-    activeSynthPhraseId = _useState156[0],
-    setActiveSynthPhraseId = _useState156[1];
-  var _useState157 = useState("DP1"),
+    sections = _useState156[0],
+    setSections = _useState156[1];
+  var _useState157 = useState("SP1"),
     _useState158 = _slicedToArray(_useState157, 2),
-    activeDrumPhraseId = _useState158[0],
-    setActiveDrumPhraseId = _useState158[1];
-  var _useState159 = useState("SC1"),
+    activeSynthPhraseId = _useState158[0],
+    setActiveSynthPhraseId = _useState158[1];
+  var _useState159 = useState("DP1"),
     _useState160 = _slicedToArray(_useState159, 2),
-    activeSectionId = _useState160[0],
-    setActiveSectionId = _useState160[1];
-  var _useState161 = useState("patterns"),
+    activeDrumPhraseId = _useState160[0],
+    setActiveDrumPhraseId = _useState160[1];
+  var _useState161 = useState("SC1"),
     _useState162 = _slicedToArray(_useState161, 2),
-    seqTab = _useState162[0],
-    setSeqTab = _useState162[1]; // "patterns"|"phrases"|"sections"
+    activeSectionId = _useState162[0],
+    setActiveSectionId = _useState162[1];
+  var _useState163 = useState("patterns"),
+    _useState164 = _slicedToArray(_useState163, 2),
+    seqTab = _useState164[0],
+    setSeqTab = _useState164[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -3513,27 +3537,27 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState163 = useState("sequence"),
-    _useState164 = _slicedToArray(_useState163, 2),
-    seqPage = _useState164[0],
-    setSeqPage = _useState164[1]; // "sequence"|"step"
+  var _useState165 = useState("sequence"),
+    _useState166 = _slicedToArray(_useState165, 2),
+    seqPage = _useState166[0],
+    setSeqPage = _useState166[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState165 = useState(false),
-    _useState166 = _slicedToArray(_useState165, 2),
-    songMode = _useState166[0],
-    setSongMode = _useState166[1];
+  var _useState167 = useState(false),
+    _useState168 = _slicedToArray(_useState167, 2),
+    songMode = _useState168[0],
+    setSongMode = _useState168[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState167 = useState(false),
-    _useState168 = _slicedToArray(_useState167, 2),
-    songView = _useState168[0],
-    setSongView = _useState168[1];
+  var _useState169 = useState(false),
+    _useState170 = _slicedToArray(_useState169, 2),
+    songView = _useState170[0],
+    setSongView = _useState170[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
@@ -3543,36 +3567,36 @@ function Tabula() {
   // separate additive flag (songRandom) that layers on top of either:
   //   sync   + random → all layers play the SAME randomly-chosen column each bar
   //   free   + random → each layer independently jumps to a random populated bar
-  var _useState169 = useState("sync"),
-    _useState170 = _slicedToArray(_useState169, 2),
-    songSyncMode = _useState170[0],
-    setSongSyncMode = _useState170[1];
-  var _useState171 = useState(false),
+  var _useState171 = useState("sync"),
     _useState172 = _slicedToArray(_useState171, 2),
-    songRandom = _useState172[0],
-    setSongRandom = _useState172[1];
+    songSyncMode = _useState172[0],
+    setSongSyncMode = _useState172[1];
+  var _useState173 = useState(false),
+    _useState174 = _slicedToArray(_useState173, 2),
+    songRandom = _useState174[0],
+    setSongRandom = _useState174[1];
   var songRandomR = useRef(false);
-  var _useState173 = useState({
+  var _useState175 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState174 = _slicedToArray(_useState173, 2),
-    songMatrix = _useState174[0],
-    setSongMatrix = _useState174[1];
-  var _useState175 = useState(-1),
     _useState176 = _slicedToArray(_useState175, 2),
-    songBar = _useState176[0],
-    setSongBar = _useState176[1]; // sync mode current bar; -1 when stopped
+    songMatrix = _useState176[0],
+    setSongMatrix = _useState176[1];
+  var _useState177 = useState(-1),
+    _useState178 = _slicedToArray(_useState177, 2),
+    songBar = _useState178[0],
+    setSongBar = _useState178[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState177 = useState({
+  var _useState179 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState178 = _slicedToArray(_useState177, 2),
-    songBarLayer = _useState178[0],
-    setSongBarLayer = _useState178[1];
+    _useState180 = _slicedToArray(_useState179, 2),
+    songBarLayer = _useState180[0],
+    setSongBarLayer = _useState180[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -3953,6 +3977,9 @@ function Tabula() {
     bell.current.setDlyToRev(dlyToRev);
   }, [dlyToRev]);
   useEffect(function () {
+    bell.current.setSaturation && bell.current.setSaturation(satAmt);
+  }, [satAmt]);
+  useEffect(function () {
     drumEngine.current.setMasterLevel && drumEngine.current.setMasterLevel(drumLevel);
   }, [drumLevel]);
   // Push the active drum pat's mix to the engine whenever it changes. Per-hit
@@ -4061,6 +4088,7 @@ function Tabula() {
       rvLfDamp: rvLfDamp,
       rvPreDelay: rvPreDelay,
       dlyToRev: dlyToRev,
+      satAmt: satAmt,
       drumLevel: drumLevel,
       trackMute: _objectSpread({}, trackMute),
       trackSolo: _objectSpread({}, trackSolo),
@@ -4143,7 +4171,7 @@ function Tabula() {
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0)
     });
-    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref9) {
+    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["satAmt", setSatAmt], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref9) {
       var _ref0 = _slicedToArray(_ref9, 2),
         k = _ref0[0],
         fn = _ref0[1];
@@ -4490,7 +4518,7 @@ function Tabula() {
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
-    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref10) {
+    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["satAmt", setSatAmt], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref10) {
       var _ref11 = _slicedToArray(_ref10, 2),
         k = _ref11[0],
         fn = _ref11[1];
@@ -4719,6 +4747,7 @@ function Tabula() {
     setRvLfDamp(0);
     setRvPreDelay(0);
     setDlyToRev(0);
+    setSatAmt(0);
     setDrumLevel(85);
     setVDropRate(13);
     setVShiftRate(17);
@@ -4822,14 +4851,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState179 = useState(null),
-    _useState180 = _slicedToArray(_useState179, 2),
-    gridPx = _useState180[0],
-    setGridPx = _useState180[1];
   var _useState181 = useState(null),
     _useState182 = _slicedToArray(_useState181, 2),
-    editOuter = _useState182[0],
-    setEditOuter = _useState182[1];
+    gridPx = _useState182[0],
+    setGridPx = _useState182[1];
+  var _useState183 = useState(null),
+    _useState184 = _slicedToArray(_useState183, 2),
+    editOuter = _useState184[0],
+    setEditOuter = _useState184[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -4868,6 +4897,7 @@ function Tabula() {
       rvLfDamp: rvLfDamp,
       rvPreDelay: rvPreDelay,
       dlyToRev: dlyToRev,
+      satAmt: satAmt,
       drumLevel: drumLevel,
       trackMute: trackMute,
       trackSolo: trackSolo,
@@ -4991,7 +5021,7 @@ function Tabula() {
     if (s.activeSynthPhraseId) setActiveSynthPhraseId(s.activeSynthPhraseId);
     if (s.activeDrumPhraseId) setActiveDrumPhraseId(s.activeDrumPhraseId);
     if (s.activeSectionId) setActiveSectionId(s.activeSectionId);
-    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref12) {
+    [["dlyIdx", setDlyIdx], ["dlyFbPct", setDlyFbPct], ["dlyHpVal", setDlyHpVal], ["dlyLpVal", setDlyLpVal], ["rvSize", setRvSize], ["rvDamp", setRvDamp], ["rvLfDamp", setRvLfDamp], ["rvPreDelay", setRvPreDelay], ["dlyToRev", setDlyToRev], ["satAmt", setSatAmt], ["drumLevel", setDrumLevel], ["vDropRate", setVDropRate], ["vShiftRate", setVShiftRate], ["vShiftRange", setVShiftRange], ["vPitchRate", setVPitchRate], ["vPitchRange", setVPitchRange], ["vGhostRate", setVGhostRate], ["vVelJitter", setVVelJitter], ["vFltJitter", setVFltJitter], ["vDlyJitter", setVDlyJitter], ["vRhyJitter", setVRhyJitter], ["vOctJitter", setVOctJitter], ["vGlideJitter", setVGlideJitter], ["vDurJitter", setVDurJitter]].forEach(function (_ref12) {
       var _ref13 = _slicedToArray(_ref12, 2),
         k = _ref13[0],
         fn = _ref13[1];
@@ -5635,6 +5665,7 @@ function Tabula() {
             bell.current.setRvLfDamp && bell.current.setRvLfDamp(rvLfDamp);
             bell.current.setRvPreDelay && bell.current.setRvPreDelay(rvPreDelay);
             bell.current.setDlyToRev && bell.current.setDlyToRev(dlyToRev);
+            bell.current.setSaturation && bell.current.setSaturation(satAmt);
             drumEngine.current.setMasterLevel && drumEngine.current.setMasterLevel(drumLevel);
             // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
             if (!silentLoopR.current) silentLoopR.current = createSilentLoop();
@@ -8022,10 +8053,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState183 = useState(false),
-    _useState184 = _slicedToArray(_useState183, 2),
-    bpmDragging = _useState184[0],
-    setBpmDragging = _useState184[1];
+  var _useState185 = useState(false),
+    _useState186 = _slicedToArray(_useState185, 2),
+    bpmDragging = _useState186[0],
+    setBpmDragging = _useState186[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -8054,10 +8085,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState185 = useState(false),
-    _useState186 = _slicedToArray(_useState185, 2),
-    stDragging = _useState186[0],
-    setStDragging = _useState186[1];
+  var _useState187 = useState(false),
+    _useState188 = _slicedToArray(_useState187, 2),
+    stDragging = _useState188[0],
+    setStDragging = _useState188[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -8086,10 +8117,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState187 = useState(false),
-    _useState188 = _slicedToArray(_useState187, 2),
-    swingDragging = _useState188[0],
-    setSwingDragging = _useState188[1];
+  var _useState189 = useState(false),
+    _useState190 = _slicedToArray(_useState189, 2),
+    swingDragging = _useState190[0],
+    setSwingDragging = _useState190[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -8303,6 +8334,125 @@ function Tabula() {
   // is currently looking at.
   var anyVary = varyMode.synth || varyMode.lead || varyMode.drums;
   var activeVary = !!varyMode[activeLayer];
+
+  // ── GLOBAL FX panel ──────────────────────────────────────────────────────
+  // The reverb, delay and master-saturation *design* params. These are global
+  // (shared by every layer); each layer's SOUND page only carries its own SEND
+  // amount into the reverb/delay buses. Rendered identically on the desktop FX
+  // tab and the mobile FX sheet.
+  var globalFxSections = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(SynthSection, {
+    title: "DELAY",
+    accent: C_DLY
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "4px 12px 10px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "TIME",
+    value: dlyIdx,
+    min: 0,
+    max: DLY_NOTES.length - 1,
+    onChange: setDlyIdx,
+    display: DLY_NOTES[dlyIdx].label,
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "FDBK",
+    value: dlyFbPct,
+    min: 0,
+    max: 95,
+    onChange: setDlyFbPct,
+    display: dlyFbPct + "%",
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "HP",
+    value: dlyHpVal,
+    min: 0,
+    max: 100,
+    onChange: setDlyHpVal,
+    display: hpLbl(dlyHpVal),
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "LP",
+    value: dlyLpVal,
+    min: 0,
+    max: 100,
+    onChange: setDlyLpVal,
+    display: lpLbl(dlyLpVal),
+    accent: C_DLY
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "\u2192 REV",
+    value: dlyToRev,
+    min: 0,
+    max: 100,
+    onChange: setDlyToRev,
+    display: dlyToRev + "%",
+    accent: C_DLY
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "REVERB",
+    accent: C_REV
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "4px 12px 10px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "SIZE",
+    value: rvSize,
+    min: 0,
+    max: 100,
+    onChange: setRvSize,
+    display: rvSize + "%",
+    accent: C_REV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "PRE",
+    value: rvPreDelay,
+    min: 0,
+    max: 250,
+    onChange: setRvPreDelay,
+    display: rvPreDelay + "ms",
+    accent: C_REV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "HF DAMP",
+    value: 100 - rvDamp,
+    min: 0,
+    max: 100,
+    onChange: function onChange(v) {
+      return setRvDamp(100 - v);
+    },
+    display: rvDamp + "%",
+    accent: C_REV
+  }), /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "LF DAMP",
+    value: rvLfDamp,
+    min: 0,
+    max: 100,
+    onChange: setRvLfDamp,
+    display: rvLfDamp + "%",
+    accent: C_REV
+  }))), /*#__PURE__*/React.createElement(SynthSection, {
+    title: "SATURATION",
+    accent: C_SAT
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "4px 12px 10px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement(KnobSlider, {
+    label: "DRIVE",
+    value: satAmt,
+    min: 0,
+    max: 100,
+    onChange: setSatAmt,
+    display: satAmt + "%",
+    accent: C_SAT
+  }))));
   return /*#__PURE__*/React.createElement("div", {
     style: S.root,
     onContextMenu: function onContextMenu(e) {
@@ -11811,47 +11961,15 @@ function Tabula() {
     onChange: setDlySend,
     display: dlySend + "%",
     accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "TIME",
-    value: dlyIdx,
-    min: 0,
-    max: DLY_NOTES.length - 1,
-    onChange: setDlyIdx,
-    display: DLY_NOTES[dlyIdx].label,
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "FDBK",
-    value: dlyFbPct,
-    min: 0,
-    max: 95,
-    onChange: setDlyFbPct,
-    display: dlyFbPct + "%",
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HP",
-    value: dlyHpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyHpVal,
-    display: hpLbl(dlyHpVal),
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "LP",
-    value: dlyLpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyLpVal,
-    display: lpLbl(dlyLpVal),
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "\u2192 REV",
-    value: dlyToRev,
-    min: 0,
-    max: 100,
-    onChange: setDlyToRev,
-    display: dlyToRev + "%",
-    accent: C_DLY
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 8,
+      letterSpacing: 1,
+      color: "rgba(210,195,175,0.3)",
+      textAlign: "center",
+      paddingTop: 2
+    }
+  }, "design \u2192 FX tab"))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "REVERB",
     accent: C_REV
   }, /*#__PURE__*/React.createElement("div", {
@@ -11869,46 +11987,42 @@ function Tabula() {
     onChange: setRvSend,
     display: rvSend + "%",
     accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SIZE",
-    value: rvSize,
-    min: 0,
-    max: 100,
-    onChange: setRvSize,
-    display: rvSize + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "PRE",
-    value: rvPreDelay,
-    min: 0,
-    max: 250,
-    onChange: setRvPreDelay,
-    display: rvPreDelay + "ms",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF DAMP",
-    value: 100 - rvDamp,
-    min: 0,
-    max: 100,
-    onChange: function onChange(v) {
-      return setRvDamp(100 - v);
-    },
-    display: rvDamp + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "LF DAMP",
-    value: rvLfDamp,
-    min: 0,
-    max: 100,
-    onChange: setRvLfDamp,
-    display: rvLfDamp + "%",
-    accent: C_REV
-  }))))))), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 8,
+      letterSpacing: 1,
+      color: "rgba(210,195,175,0.3)",
+      textAlign: "center",
+      paddingTop: 2
+    }
+  }, "design \u2192 FX tab"))))), page === "fx" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      minHeight: 0,
+      overflowY: "auto",
+      padding: "8px 12px 40px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      letterSpacing: 2,
+      color: "rgba(210,195,175,0.35)",
+      fontWeight: 500,
+      marginBottom: 10
+    }
+  }, "GLOBAL FX"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
+      gap: 8,
+      alignItems: "start"
+    }
+  }, globalFxSections)))), /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, S.tabs), {}, {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["vary", "VARY"]].map(function (_ref47) {
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]].map(function (_ref47) {
     var _ref48 = _slicedToArray(_ref47, 2),
       p = _ref48[0],
       lbl = _ref48[1];
@@ -13253,6 +13367,39 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
+      border: "1px solid " + (activeSheet === "fx" ? C_SAT + "99" : satAmt > 0 ? C_SAT + "55" : "rgba(200,185,165,0.1)"),
+      borderRadius: 8,
+      background: activeSheet === "fx" ? C_SAT + "1a" : "transparent",
+      cursor: "pointer",
+      gap: 0,
+      fontFamily: "inherit",
+      padding: 0
+    },
+    onClick: function onClick() {
+      return setActiveSheet(function (s) {
+        return s === "fx" ? null : "fx";
+      });
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      lineHeight: 1.1,
+      color: activeSheet === "fx" || satAmt > 0 ? C_SAT : "rgba(210,195,175,0.5)"
+    }
+  }, "\u224B"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 5,
+      letterSpacing: 1.5,
+      color: activeSheet === "fx" ? C_SAT : "rgba(210,195,175,0.35)"
+    }
+  }, "FX")), /*#__PURE__*/React.createElement("button", {
+    style: {
+      flex: 1,
+      height: 34,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
       border: "1px solid " + (activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.55)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
       background: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.1)" : "transparent",
@@ -13988,47 +14135,14 @@ function Tabula() {
     onChange: setDlySend,
     display: dlySend + "%",
     accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "TIME",
-    value: dlyIdx,
-    min: 0,
-    max: DLY_NOTES.length - 1,
-    onChange: setDlyIdx,
-    display: DLY_NOTES[dlyIdx].label,
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "FDBK",
-    value: dlyFbPct,
-    min: 0,
-    max: 95,
-    onChange: setDlyFbPct,
-    display: dlyFbPct + "%",
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HP",
-    value: dlyHpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyHpVal,
-    display: hpLbl(dlyHpVal),
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "LP",
-    value: dlyLpVal,
-    min: 0,
-    max: 100,
-    onChange: setDlyLpVal,
-    display: lpLbl(dlyLpVal),
-    accent: C_DLY
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "\u2192 REV",
-    value: dlyToRev,
-    min: 0,
-    max: 100,
-    onChange: setDlyToRev,
-    display: dlyToRev + "%",
-    accent: C_DLY
-  }))), /*#__PURE__*/React.createElement(SynthSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 7,
+      letterSpacing: 1,
+      color: "rgba(210,195,175,0.3)",
+      textAlign: "center"
+    }
+  }, "design \u2192 FX"))), /*#__PURE__*/React.createElement(SynthSection, {
     title: "REVERB",
     accent: C_REV
   }, /*#__PURE__*/React.createElement("div", {
@@ -14046,41 +14160,14 @@ function Tabula() {
     onChange: setRvSend,
     display: rvSend + "%",
     accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "SIZE",
-    value: rvSize,
-    min: 0,
-    max: 100,
-    onChange: setRvSize,
-    display: rvSize + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "PRE",
-    value: rvPreDelay,
-    min: 0,
-    max: 250,
-    onChange: setRvPreDelay,
-    display: rvPreDelay + "ms",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "HF DAMP",
-    value: 100 - rvDamp,
-    min: 0,
-    max: 100,
-    onChange: function onChange(v) {
-      return setRvDamp(100 - v);
-    },
-    display: rvDamp + "%",
-    accent: C_REV
-  }), /*#__PURE__*/React.createElement(KnobSlider, {
-    label: "LF DAMP",
-    value: rvLfDamp,
-    min: 0,
-    max: 100,
-    onChange: setRvLfDamp,
-    display: rvLfDamp + "%",
-    accent: C_REV
-  }))))), activeLayer === "drums" && function () {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 7,
+      letterSpacing: 1,
+      color: "rgba(210,195,175,0.3)",
+      textAlign: "center"
+    }
+  }, "design \u2192 FX"))))), activeLayer === "drums" && function () {
     var dPat = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
@@ -14510,7 +14597,21 @@ function Tabula() {
         }
       }, "\u2715")));
     })));
-  }()), activeSheet === "project" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }()), activeSheet === "fx" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      letterSpacing: 2,
+      color: "rgba(210,195,175,0.35)",
+      fontWeight: 500,
+      marginBottom: 12
+    }
+  }, "GLOBAL FX"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 8
+    }
+  }, globalFxSections)), activeSheet === "project" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
       letterSpacing: 2,
