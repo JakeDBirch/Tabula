@@ -1873,7 +1873,7 @@ export default function Tabula(){
     rvSend: 30,        // 0..100; per-layer send into the global reverb bus
     mix: 85,           // 0..100; mixer level multiplier on this layer's voices
     subLevel: 0,       // 0..100; MONO-only sub-oscillator (1 octave down)
-    spread: 0,         // 0..100; POLY-only stereo spread of detune stack
+    spread: 50,        // 0..100; POLY-only stereo spread of detune stack
     // Per-section velocity tracking. 0 = velocity has no effect on that
     // section; 100 = full sensitivity (low-vel notes fully attenuated /
     // shortened / un-filtered, depending on which section). Each section
@@ -1891,6 +1891,7 @@ export default function Tabula(){
   const DEFAULT_LP_MONO = (octave)=>({
     ...DEFAULT_LP(octave),
     detune:0,
+    subLevel:50,   // MONO sub-oscillator on by default (1 octave down)
     monoSingle:true,
     glide:0,
   });
