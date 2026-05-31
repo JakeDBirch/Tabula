@@ -634,6 +634,47 @@ function StepPicker({label,display,sub,onDec,onInc,accent}){
     </div>
   );
 }
+// Stereo output meter — reads Bell's master peak via rAF while playing. Self-
+// contained so its 60fps updates don't re-render the rest of the app.
+function OutputMeter({bellRef,playing}){
+  const [lv,setLv]=useState([0,0,0,0]);
+  const peak=useRef([0,0]);
+  useEffect(()=>{
+    if(!playing){setLv([0,0,0,0]);peak.current=[0,0];return;}
+    let raf;
+    const tick=()=>{
+      const b=bellRef.current;const m=(b&&b.getMeter)?b.getMeter():[0,0];
+      const ph=peak.current;ph[0]=Math.max(m[0],ph[0]*0.93);ph[1]=Math.max(m[1],ph[1]*0.93);
+      setLv([m[0],m[1],ph[0],ph[1]]);
+      raf=requestAnimationFrame(tick);
+    };
+    raf=requestAnimationFrame(tick);
+    return ()=>cancelAnimationFrame(raf);
+  },[playing,bellRef]);
+  const toPct=v=>Math.min(100,Math.max(0,Math.pow(Math.min(1,v),0.5)*100)); // perceptual
+  const bar=(v,pkv,label)=>{
+    const pct=toPct(v),pk=toPct(pkv);
+    const col=pct>92?"#e07060":pct>78?"#d8a050":"#7aaa96";
+    return(
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{width:10,fontSize:8,color:"rgba(210,195,175,0.4)",fontWeight:700}}>{label}</span>
+        <div style={{flex:1,height:7,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",left:0,top:0,bottom:0,width:pct+"%",background:col,borderRadius:4}}/>
+          <div style={{position:"absolute",left:"78%",top:0,bottom:0,width:1,background:"rgba(216,160,80,0.45)"}}/>
+          <div style={{position:"absolute",left:"92%",top:0,bottom:0,width:1,background:"rgba(224,112,96,0.55)"}}/>
+          {pk>1&&<div style={{position:"absolute",left:`calc(${Math.min(99,pk)}% - 1px)`,top:0,bottom:0,width:2,background:"rgba(255,255,255,0.75)"}}/>}
+        </div>
+      </div>
+    );
+  };
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:12}}>
+      <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.35)",fontWeight:600,marginBottom:1}}>OUTPUT</div>
+      {bar(lv[0],lv[2],"L")}
+      {bar(lv[1],lv[3],"R")}
+    </div>
+  );
+}
 
 // ─── Step param lane definitions ─────────────────────────────────────────────
 const LANES=[
@@ -775,6 +816,15 @@ class Bell{
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();
     await this.ctx.resume();
     const m=this.ctx.createGain();m.gain.value=0.55;m.connect(this.ctx.destination);this.master=m;
+    // Stereo output metering — tap the master into L/R analysers (read by the
+    // OutputMeter UI). Analysers are sinks; they don't need to connect onward.
+    try{
+      const split=this.ctx.createChannelSplitter(2);
+      const aL=this.ctx.createAnalyser();aL.fftSize=256;aL.smoothingTimeConstant=0.5;
+      const aR=this.ctx.createAnalyser();aR.fftSize=256;aR.smoothingTimeConstant=0.5;
+      m.connect(split);split.connect(aL,0);split.connect(aR,1);
+      this.meterL=aL;this.meterR=aR;
+    }catch(e){this.meterL=this.meterR=null;}
 
     // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -1337,6 +1387,12 @@ class DrumEngine{
     this.activeOH=null;
   }
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
+  // Current stereo output peak (0..1 linear) for the output meters.
+  getMeter(){
+    if(!this.meterL)return [0,0];
+    const read=an=>{const b=new Float32Array(an.fftSize);an.getFloatTimeDomainData(b);let p=0;for(let i=0;i<b.length;i++){const a=Math.abs(b[i]);if(a>p)p=a;}return p;};
+    return [read(this.meterL),read(this.meterR)];
+  }
 
   // Exponential envelope — no linear-to-zero artifacts
   _env(g,t,pk,atk,dec,sus,rel){
@@ -1701,6 +1757,9 @@ export default function Tabula(){
   // pattern property). Per-pattern MOTION automation (pat.motion) only overlays
   // this base while MOTION mode is on; with MOTION off the mix is fully static.
   const [drumMix,setDrumMixArr]=useState(defaultDrumMix());
+  // Mixer group linking — defeatable per group. Both default ON.
+  const [linkHat,setLinkHat]=useState(true);  // CH+OH move together
+  const [linkTom,setLinkTom]=useState(true);  // LT+MT+HT move together (all but pan)
   const drumMixR=useRef(drumMix); useEffect(()=>{drumMixR.current=drumMix;},[drumMix]);
 
   // Track window width to drive responsive left column layout
@@ -4205,11 +4264,13 @@ export default function Tabula(){
   const _HAT_ROWS=[_rowOf("CH"),_rowOf("OH")];
   const _TOM_ROWS=[_rowOf("LT"),_rowOf("MT"),_rowOf("HT")];
   const _HAT_KEYS=new Set(["pan","level","rvSend","dlySend","pitch","filt","filtCut","env","sat"]);
-  const _TOM_KEYS=new Set(["level"]);
-  // Which rows a given (row,key) edit should write to (always includes row).
+  // Toms link everything EXCEPT pan, so they can still spread across the field.
+  const _TOM_KEYS=new Set(["level","rvSend","dlySend","pitch","filt","filtCut","env","sat"]);
+  // Which rows a given (row,key) edit writes to (always includes row). Each
+  // group's link is defeatable via its toggle (linkHat / linkTom).
   const _linkedRows=(row,key)=>{
-    if(_HAT_ROWS.includes(row)&&_HAT_KEYS.has(key))return _HAT_ROWS;
-    if(_TOM_ROWS.includes(row)&&_TOM_KEYS.has(key))return _TOM_ROWS;
+    if(linkHat&&_HAT_ROWS.includes(row)&&_HAT_KEYS.has(key))return _HAT_ROWS;
+    if(linkTom&&_TOM_ROWS.includes(row)&&_TOM_KEYS.has(key))return _TOM_ROWS;
     return [row];
   };
   // Edit the GLOBAL mix (not per-pattern). Link groups (hats, tom levels)
@@ -5308,6 +5369,7 @@ export default function Tabula(){
                 {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
                 {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
                 {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
+                <OutputMeter bellRef={bell} playing={playing}/>
               </div>
             );
           })()}
@@ -5737,6 +5799,11 @@ export default function Tabula(){
                 </div>
                 <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
                   <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIXER</div>
+                  {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
+                  {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
+                    <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
+                      style={{padding:"3px 7px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(200,185,165,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(210,195,175,0.4)"}}>{"⛓ "+lbl}</button>
+                  ))}
                   <div style={{flex:1}}/>
                   {/* MOTION mode + record arm. In MOTION mode dragging a slider
                       is a live override; with REC armed during playback the hold
@@ -6895,7 +6962,11 @@ export default function Tabula(){
                       // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
                       // vertical level fader → REC) but at a narrower width.
                       return(<div>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+                        {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
+                          <button key={lbl} onClick={()=>set(v=>!v)}
+                            style={{padding:"4px 8px",borderRadius:5,fontSize:8,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(200,185,165,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(210,195,175,0.4)"}}>{"⛓ "+lbl}</button>
+                        ))}
                         <button onClick={()=>setMotionEnabled(v=>!v)}
                           style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(200,185,165,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(210,195,175,0.45)"}}>MOTION</button>
                         {motionEnabled&&(
@@ -7059,6 +7130,7 @@ export default function Tabula(){
                           {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
                           {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
                           {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
+                          <OutputMeter bellRef={bell} playing={playing}/>
                         </div>
                       );
                     })()}
