@@ -408,6 +408,38 @@ const serializeSamples=(map)=>{
   return out;
 };
 
+// ── MIDI (Standard MIDI File) export ─────────────────────────────────────────
+// General-MIDI note number per drum voice (channel 10). Best-fit GM percussion.
+const GM_DRUM={BD:36,SD:38,RM:37,CP:39,HT:50,MT:47,LT:43,CH:42,OH:46,CY:49,CL:75,SH:70,CB:56};
+const PPQ=480; // ticks per quarter note
+const TICKS_16=PPQ/4; // one 16th-note step
+// Hz → nearest MIDI note number (A4=440=69), clamped to valid range.
+const freqToMidi=(f)=>Math.max(0,Math.min(127,Math.round(69+12*Math.log2(f/440))));
+// Variable-length quantity (MIDI delta-times).
+const _vlq=(n)=>{n=Math.max(0,Math.round(n));let b=[n&0x7f];n=Math.floor(n/128);while(n>0){b.unshift((n&0x7f)|0x80);n=Math.floor(n/128);}return b;};
+const _str=(s)=>Array.from(s).map(c=>c.charCodeAt(0));
+const _u32=(n)=>[(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255];
+// events: [{tick, data:[status,...]}] — built into an MTrk chunk (sorted, delta-encoded).
+const _midiTrack=(events)=>{
+  events.sort((a,b)=>a.tick-b.tick||(a.order||0)-(b.order||0));
+  const body=[];let last=0;
+  for(const e of events){body.push(..._vlq(e.tick-last),...e.data);last=e.tick;}
+  body.push(0x00,0xFF,0x2F,0x00); // End of Track
+  return [..._str("MTrk"),..._u32(body.length),...body];
+};
+// tracks: array of event-arrays. Returns a Blob (format-1 SMF).
+const buildSMF=(tracks)=>{
+  const head=[..._str("MThd"),..._u32(6),0x00,0x01,(tracks.length>>8)&255,tracks.length&255,(PPQ>>8)&255,PPQ&255];
+  let bytes=[...head];
+  for(const t of tracks)bytes.push(..._midiTrack(t));
+  return new Uint8Array(bytes);
+};
+const downloadBlob=(data,filename,type)=>{
+  const blob=(data instanceof Blob)?data:new Blob([data],{type:type||"application/octet-stream"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+};
+
 const genVariation=(grid,vp={})=>{
   const g=grid.map(r=>[...r]);
   const drop=(vp.dropRate??13)/100;
@@ -1700,6 +1732,7 @@ export default function Tabula(){
   // that don't come from a kit — loading a kit replaces them all.
   const [activeKit, setActiveKit] = useState(DEFAULT_KIT);
   const [kitLoading, setKitLoading] = useState(false);
+  const [exporting, setExporting] = useState(false); // MP3 bounce in progress
   const recorderRef = useRef(null);
   const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -2756,6 +2789,190 @@ export default function Tabula(){
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tabula-preset.json";a.click();
   };
 
+  // ── Song export helpers (shared by MIDI + MP3) ────────────────────────────
+  // Resolve a synth-type layer's patterns (active layer is live in `pats`;
+  // others sit in layerStoreR) and its active pattern id.
+  const _layerPats=(layer)=> activeLayer===layer ? pats : (layerStoreR.current[layer]?.pats||[]);
+  const _activeIdFor=(layer)=> activeLayer===layer ? activeId : (layerStoreR.current[layer]?.activeId);
+  // Ordered bars to export: the full populated song matrix, else one bar of the
+  // active patterns. Each entry = {synth,lead,drums} pattern ids (or null).
+  const _exportBars=()=>{
+    const sm=songMatrix;
+    let first=-1,last=-1;
+    for(let i=0;i<64;i++){ if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){ if(first<0)first=i; last=i; } }
+    if(songMode&&first>=0){
+      const bars=[];
+      for(let b=first;b<=last;b++)bars.push({synth:sm.synth[b],lead:sm.lead[b],drums:sm.drums[b]});
+      return bars;
+    }
+    return [{synth:_activeIdFor("synth"),lead:_activeIdFor("lead"),drums:activeDrumId}];
+  };
+
+  // Export the song arrangement as a Standard MIDI File. Each bar = 16 sixteenth
+  // steps; a pattern shorter than 16 loops within the bar (mirrors playback).
+  // POLY/MONO are pitched (row→scale freq→nearest MIDI note, + per-step octave,
+  // + layer octave, + transpose); DRUMS map to GM percussion on channel 10.
+  // Performance layers (VARY/MOTION/per-pattern speed) are NOT baked in — this
+  // is the underlying composition (the MP3 bounce captures the performance).
+  const exportMIDI=()=>{
+    const bars=_exportBars();
+    const freqs=(SCALES[scale]||SCALES.major).freqs;
+    const usPerQ=Math.round(60000000/Math.max(1,bpm));
+    const meta=[{tick:0,data:[0xFF,0x51,0x03,(usPerQ>>16)&255,(usPerQ>>8)&255,usPerQ&255]},
+                {tick:0,data:[0xFF,0x58,0x04,4,2,24,8]}];
+    const tName=(n)=>({tick:0,data:[0xFF,0x03,n.length,..._str(n)]});
+    const synthEv=[],leadEv=[],drumEv=[];
+    bars.forEach((bar,bi)=>{
+      const barTick=bi*16*TICKS_16;
+      [["synth",synthEv,0],["lead",leadEv,1]].forEach(([layer,ev,ch])=>{
+        const pat=_layerPats(layer).find(p=>p.id===bar[layer]);
+        if(!pat||!pat.grid)return;
+        const len=pat.gridLen||16;
+        const layerOct=(layerParams[layer]&&layerParams[layer].octave)||0;
+        const mono=!!(layerParams[layer]&&layerParams[layer].monoSingle);
+        for(let s=0;s<16;s++){
+          const ps=s%len;
+          const sp=(pat.params&&pat.params[ps])||null;
+          const vel=Math.max(1,Math.min(127,Math.round(sp?(sp.vel??100):100)));
+          const stepOct=(sp?(sp.oct??2):2)-2;
+          const rhy=Math.max(1,sp?Math.round(sp.rhy??1):1);
+          let rows=[];for(let r=0;r<ROWS;r++)if(pat.grid[r]&&pat.grid[r][ps])rows.push(r);
+          if(mono&&rows.length>1)rows=[rows[0]];
+          for(const r of rows){
+            const note=Math.max(0,Math.min(127,freqToMidi(freqs[r])+12*(stepOct+layerOct)+transpose));
+            if(rhy>1){
+              for(let k=0;k<rhy;k++){
+                const on=barTick+s*TICKS_16+Math.round(k*TICKS_16/rhy);
+                const off=on+Math.max(6,Math.round(TICKS_16/rhy*0.85));
+                ev.push({tick:on,order:1,data:[0x90|ch,note,vel]},{tick:off,order:0,data:[0x80|ch,note,0]});
+              }
+            }else{
+              const lenSteps=Math.max(1,(pat.durs&&pat.durs[r]&&pat.durs[r][ps])||1);
+              const on=barTick+s*TICKS_16;
+              const off=on+Math.max(6,lenSteps*TICKS_16-6);
+              ev.push({tick:on,order:1,data:[0x90|ch,note,vel]},{tick:off,order:0,data:[0x80|ch,note,0]});
+            }
+          }
+        }
+      });
+      const dp=drumPats.find(p=>p.id===bar.drums);
+      if(dp&&dp.grid){
+        const len=dp.gridLen||16;
+        for(let s=0;s<16;s++){
+          const ps=s%len;
+          for(let r=0;r<DRUM_ROWS;r++){
+            if(!(dp.grid[r]&&dp.grid[r][ps]))continue;
+            const note=GM_DRUM[DRUM_VOICES[r].key];if(note==null)continue;
+            const vr=dp.vel&&dp.vel[r];
+            const vel=Math.max(1,Math.min(127,Math.round((Array.isArray(vr)?vr[ps]:100)??100)));
+            const rat=(dp.rat&&dp.rat[r]&&dp.rat[r][ps])||1;
+            for(let k=0;k<rat;k++){
+              const on=barTick+s*TICKS_16+Math.round(k*TICKS_16/rat);
+              const off=on+Math.max(6,Math.round(TICKS_16/rat*0.5));
+              drumEv.push({tick:on,order:1,data:[0x99,note,vel]},{tick:off,order:0,data:[0x89,note,0]});
+            }
+          }
+        }
+      }
+    });
+    downloadBlob(buildSMF([[...meta],[tName("POLY"),...synthEv],[tName("MONO"),...leadEv],[tName("DRUMS"),...drumEv]]),"tabula-song.mid","audio/midi");
+    showFlash("MIDI EXPORTED");
+  };
+
+  // ── MP3 bounce (realtime loopback capture of one song cycle) ──────────────
+  // lamejs (MP3 encoder) is loaded on demand from a CDN — only when the user
+  // actually bounces, so the bundle stays lean.
+  const lameRef=useRef(null);
+  const loadLame=()=>new Promise((resolve)=>{
+    if(window.lamejs){resolve(window.lamejs);return;}
+    if(lameRef.current){resolve(lameRef.current);return;}
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js";
+    s.onload=()=>{lameRef.current=window.lamejs||null;resolve(lameRef.current);};
+    s.onerror=()=>resolve(null);
+    document.head.appendChild(s);
+  });
+  const _concatF32=(chunks)=>{let n=0;for(const c of chunks)n+=c.length;const out=new Float32Array(n);let o=0;for(const c of chunks){out.set(c,o);o+=c.length;}return out;};
+  const _waitAudio=(ctx,untilSec)=>new Promise(res=>{
+    const startWall=performance.now(),cap=(untilSec-ctx.currentTime)*1000+8000; // safety: never hang if the clock stalls
+    const id=setInterval(()=>{if(ctx.currentTime>=untilSec||performance.now()-startWall>cap){clearInterval(id);res();}},40);
+  });
+  const encodeMP3=(lame,left,right,sr)=>{
+    const enc=new lame.Mp3Encoder(2,sr,160);
+    const toI16=(f)=>{const o=new Int16Array(f.length);for(let i=0;i<f.length;i++){const s=Math.max(-1,Math.min(1,f[i]));o[i]=s<0?s*0x8000:s*0x7FFF;}return o;};
+    const li=toI16(left),ri=toI16(right),BLK=1152,data=[];
+    for(let i=0;i<li.length;i+=BLK){const buf=enc.encodeBuffer(li.subarray(i,i+BLK),ri.subarray(i,i+BLK));if(buf.length>0)data.push(new Uint8Array(buf));}
+    const end=enc.flush();if(end.length>0)data.push(new Uint8Array(end));
+    return new Blob(data,{type:"audio/mpeg"});
+  };
+  const exportingR=useRef(false);
+  const exportMP3=async()=>{
+    if(exportingR.current)return;
+    exportingR.current=true;setExporting(true);
+    let cap=null,sink=null,master=null,restore=null;
+    try{
+      // Engine must exist for the master tap. Init silently if it never played.
+      if(!bell.current.ready){
+        const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
+        await bell.current.init(dlyT,dlyFbPct/100,50,dlyHpVal,dlyLpVal);
+      } else { await bell.current.resume(); }
+      if(!drumEngine.current.ready)await drumEngine.current.init(bell.current.master,bell.current.rev,bell.current.dly);
+      if(playingR.current)await startStop(); // ensure stopped, start clean from the top
+      const ctx=bell.current.ctx; master=bell.current.master;
+      if(!ctx||!master){showFlash("AUDIO NOT READY");return;}
+      const lame=await loadLame();
+      if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
+      const barCount=Math.max(1,_exportBars().length);
+      const cycleSec=barCount*4*60/Math.max(1,bpm); // sync: 16 abs steps = 4 beats/bar
+      const tailSec=2;
+      // Tap the master into a recorder (silent parallel path; no double audio).
+      cap=ctx.createScriptProcessor(4096,2,2);
+      const Lc=[],Rc=[];let capturing=false;
+      cap.onaudioprocess=(e)=>{ if(!capturing)return;
+        const ib=e.inputBuffer;
+        Lc.push(new Float32Array(ib.getChannelData(0)));
+        Rc.push(new Float32Array(ib.numberOfChannels>1?ib.getChannelData(1):ib.getChannelData(0)));
+      };
+      sink=ctx.createGain();sink.gain.value=0;
+      master.connect(cap);cap.connect(sink);sink.connect(ctx.destination);
+      // Force a clean linear song pass from the top (restore after).
+      const haveSong=(()=>{const sm=songMatrix;for(let i=0;i<64;i++)if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)return true;return false;})();
+      if(haveSong){
+        restore={mode:songModeR.current,sync:songSyncR.current,rand:songRandomR.current,loop:loopR.current};
+        songModeR.current=true;setSongMode(true);
+        songSyncR.current="sync";setSongSyncMode("sync");
+        songRandomR.current=false;setSongRandom(false);
+        loopR.current=false;setLoopMode(false); // LOOP would solo one pattern, not play the song
+        // Start the song at its first populated bar. startStop only does this
+        // when its `songMode` state closure is true; we force it via the ref so
+        // the bounce starts from the top even if the user wasn't in song mode.
+        let firstBar=0;{const sm=songMatrix;for(let i=0;i<64;i++){if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}}}
+        songBarR.current=firstBar;setSongBar(firstBar);
+      }
+      showFlash("BOUNCING…");
+      capturing=true;
+      await startStop();                       // start playback from the song top
+      const t0=ctx.currentTime;
+      await _waitAudio(ctx,t0+cycleSec);        // one full cycle
+      if(playingR.current)await startStop();    // stop notes; FX tail keeps ringing
+      await _waitAudio(ctx,t0+cycleSec+tailSec);// capture the tail
+      capturing=false;
+      const L=_concatF32(Lc),R=_concatF32(Rc);
+      if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
+      showFlash("ENCODING…");
+      const blob=encodeMP3(lame,L,R,ctx.sampleRate);
+      downloadBlob(blob,"tabula-song.mp3","audio/mpeg");
+      showFlash("MP3 EXPORTED");
+    }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
+    finally{
+      try{if(master&&cap)master.disconnect(cap);}catch(e){}
+      try{if(cap)cap.disconnect();cap&&(cap.onaudioprocess=null);}catch(e){}
+      try{if(sink)sink.disconnect();}catch(e){}
+      if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);songSyncR.current=restore.sync;setSongSyncMode(restore.sync);songRandomR.current=restore.rand;setSongRandom(restore.rand);loopR.current=restore.loop;setLoopMode(restore.loop);}
+      exportingR.current=false;setExporting(false);
+    }
+  };
+
   const handleImport=e=>{
     const file=e.target.files?.[0];if(!file)return;
     const reader=new FileReader();
@@ -3119,8 +3336,12 @@ export default function Tabula(){
   /* legacy unified sync scheduler — body removed in the per-layer rewrite */
 
   const startStop=async()=>{
-    if(playing){
+    // Read/write the LIVE ref (not the `playing` state closure) so rapid
+    // programmatic start→stop calls (the MP3 bounce) resolve correctly within
+    // one render. Button clicks are unaffected (state is settled there).
+    if(playingR.current){
       clearInterval(tmrR.current);
+      playingR.current=false;
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,drums:-1});
@@ -3196,6 +3417,7 @@ export default function Tabula(){
       setSongBarLayer({synth:layerFirst.synth,lead:layerFirst.lead,drums:layerFirst.drums});
     }
     nextNoteR.current=t0; // master clock for visual playhead + bar advance
+    playingR.current=true;
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
   };
   useEffect(()=>()=>clearInterval(tmrR.current),[]);
@@ -5101,6 +5323,8 @@ export default function Tabula(){
                   <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={copyShareLink}>{winW>650?"LINK":"LNK"}</button>
                   <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportJSON}>{winW>650?"EXPORT":"EXP"}</button>
                   <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={()=>importRef.current?.click()}>{winW>650?"IMPORT":"IMP"}</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportMIDI}>MIDI</button>
+                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0,opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
                 </div>
                 <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
@@ -6824,6 +7048,8 @@ export default function Tabula(){
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
+                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportMIDI}>MIDI</button>
+                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0",opacity:exporting?0.5:1})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
                     </div>
                     <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
                   </div>

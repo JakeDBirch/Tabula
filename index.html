@@ -22,11 +22,11 @@ const { useState, useEffect, useRef, useCallback, Fragment } = React;
 function _classCallCheck(a, n) { if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function"); }
 function _defineProperties(e, r) { for (var t = 0; t < r.length; t++) { var o = r[t]; o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, _toPropertyKey(o.key), o); } }
 function _createClass(e, r, t) { return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", { writable: !1 }), e; }
-function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n7 = 0, F = function F() {}; return { s: F, n: function n() { return _n7 >= r.length ? { done: !0 } : { done: !1, value: r[_n7++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
 function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
 function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
+function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n7 = 0, F = function F() {}; return { s: F, n: function n() { return _n7 >= r.length ? { done: !0 } : { done: !1, value: r[_n7++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */ var e, t, r = "function" == typeof Symbol ? Symbol : {}, n = r.iterator || "@@iterator", o = r.toStringTag || "@@toStringTag"; function i(r, n, o, i) { var c = n && n.prototype instanceof Generator ? n : Generator, u = Object.create(c.prototype); return _regeneratorDefine2(u, "_invoke", function (r, n, o) { var i, c, u, f = 0, p = o || [], y = !1, G = { p: 0, n: 0, v: e, a: d, f: d.bind(e, 4), d: function d(t, r) { return i = t, c = 0, u = e, G.n = r, a; } }; function d(r, n) { for (c = r, u = n, t = 0; !y && f && !o && t < p.length; t++) { var o, i = p[t], d = G.p, l = i[2]; r > 3 ? (o = l === n) && (u = i[(c = i[4]) ? 5 : (c = 3, 3)], i[4] = i[5] = e) : i[0] <= d && ((o = r < 2 && d < i[1]) ? (c = 0, G.v = n, G.n = i[1]) : d < l && (o = r < 3 || i[0] > n || n > l) && (i[4] = r, i[5] = n, G.n = l, c = 0)); } if (o || r > 1) return a; throw y = !0, n; } return function (o, p, l) { if (f > 1) throw TypeError("Generator is already running"); for (y && 1 === p && d(p, l), c = p, u = l; (t = c < 2 ? e : u) || !y;) { i || (c ? c < 3 ? (c > 1 && (G.n = -1), d(c, u)) : G.n = u : G.v = u); try { if (f = 2, i) { if (c || (o = "next"), t = i[o]) { if (!(t = t.call(i, u))) throw TypeError("iterator result is not an object"); if (!t.done) return t; u = t.value, c < 2 && (c = 0); } else 1 === c && (t = i["return"]) && t.call(i), c < 2 && (u = TypeError("The iterator does not provide a '" + o + "' method"), c = 1); i = e; } else if ((t = (y = G.n < 0) ? u : r.call(n, G)) !== a) break; } catch (t) { i = e, c = 1, u = t; } finally { f = 1; } } return { value: t, done: y }; }; }(r, o, i), !0), u; } var a = {}; function Generator() {} function GeneratorFunction() {} function GeneratorFunctionPrototype() {} t = Object.getPrototypeOf; var c = [][n] ? t(t([][n]())) : (_regeneratorDefine2(t = {}, n, function () { return this; }), t), u = GeneratorFunctionPrototype.prototype = Generator.prototype = Object.create(c); function f(e) { return Object.setPrototypeOf ? Object.setPrototypeOf(e, GeneratorFunctionPrototype) : (e.__proto__ = GeneratorFunctionPrototype, _regeneratorDefine2(e, o, "GeneratorFunction")), e.prototype = Object.create(u), e; } return GeneratorFunction.prototype = GeneratorFunctionPrototype, _regeneratorDefine2(u, "constructor", GeneratorFunctionPrototype), _regeneratorDefine2(GeneratorFunctionPrototype, "constructor", GeneratorFunction), GeneratorFunction.displayName = "GeneratorFunction", _regeneratorDefine2(GeneratorFunctionPrototype, o, "GeneratorFunction"), _regeneratorDefine2(u), _regeneratorDefine2(u, o, "Generator"), _regeneratorDefine2(u, n, function () { return this; }), _regeneratorDefine2(u, "toString", function () { return "[object Generator]"; }), (_regenerator = function _regenerator() { return { w: i, m: f }; })(); }
 function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
@@ -901,6 +901,102 @@ var serializeSamples = function serializeSamples(map) {
   }
   return out;
 };
+
+// ── MIDI (Standard MIDI File) export ─────────────────────────────────────────
+// General-MIDI note number per drum voice (channel 10). Best-fit GM percussion.
+var GM_DRUM = {
+  BD: 36,
+  SD: 38,
+  RM: 37,
+  CP: 39,
+  HT: 50,
+  MT: 47,
+  LT: 43,
+  CH: 42,
+  OH: 46,
+  CY: 49,
+  CL: 75,
+  SH: 70,
+  CB: 56
+};
+var PPQ = 480; // ticks per quarter note
+var TICKS_16 = PPQ / 4; // one 16th-note step
+// Hz → nearest MIDI note number (A4=440=69), clamped to valid range.
+var freqToMidi = function freqToMidi(f) {
+  return Math.max(0, Math.min(127, Math.round(69 + 12 * Math.log2(f / 440))));
+};
+// Variable-length quantity (MIDI delta-times).
+var _vlq = function _vlq(n) {
+  n = Math.max(0, Math.round(n));
+  var b = [n & 0x7f];
+  n = Math.floor(n / 128);
+  while (n > 0) {
+    b.unshift(n & 0x7f | 0x80);
+    n = Math.floor(n / 128);
+  }
+  return b;
+};
+var _str = function _str(s) {
+  return Array.from(s).map(function (c) {
+    return c.charCodeAt(0);
+  });
+};
+var _u32 = function _u32(n) {
+  return [n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255];
+};
+// events: [{tick, data:[status,...]}] — built into an MTrk chunk (sorted, delta-encoded).
+var _midiTrack = function _midiTrack(events) {
+  events.sort(function (a, b) {
+    return a.tick - b.tick || (a.order || 0) - (b.order || 0);
+  });
+  var body = [];
+  var last = 0;
+  var _iterator = _createForOfIteratorHelper(events),
+    _step;
+  try {
+    for (_iterator.s(); !(_step = _iterator.n()).done;) {
+      var e = _step.value;
+      body.push.apply(body, _toConsumableArray(_vlq(e.tick - last)).concat(_toConsumableArray(e.data)));
+      last = e.tick;
+    }
+  } catch (err) {
+    _iterator.e(err);
+  } finally {
+    _iterator.f();
+  }
+  body.push(0x00, 0xFF, 0x2F, 0x00); // End of Track
+  return [].concat(_toConsumableArray(_str("MTrk")), _toConsumableArray(_u32(body.length)), body);
+};
+// tracks: array of event-arrays. Returns a Blob (format-1 SMF).
+var buildSMF = function buildSMF(tracks) {
+  var head = [].concat(_toConsumableArray(_str("MThd")), _toConsumableArray(_u32(6)), [0x00, 0x01, tracks.length >> 8 & 255, tracks.length & 255, PPQ >> 8 & 255, PPQ & 255]);
+  var bytes = _toConsumableArray(head);
+  var _iterator2 = _createForOfIteratorHelper(tracks),
+    _step2;
+  try {
+    for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
+      var t = _step2.value;
+      bytes.push.apply(bytes, _toConsumableArray(_midiTrack(t)));
+    }
+  } catch (err) {
+    _iterator2.e(err);
+  } finally {
+    _iterator2.f();
+  }
+  return new Uint8Array(bytes);
+};
+var downloadBlob = function downloadBlob(data, filename, type) {
+  var blob = data instanceof Blob ? data : new Blob([data], {
+    type: type || "application/octet-stream"
+  });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(function () {
+    return URL.revokeObjectURL(a.href);
+  }, 2000);
+};
 var genVariation = function genVariation(grid) {
   var _vp$dropRate, _vp$shiftRate, _vp$shiftRange, _vp$pitchRate, _vp$pitchRange, _vp$ghostRate;
   var vp = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
@@ -958,13 +1054,13 @@ var genVariation = function genVariation(grid) {
     }
   }
   if (ghost > 0) {
-    var _iterator = _createForOfIteratorHelper(on),
-      _step;
+    var _iterator3 = _createForOfIteratorHelper(on),
+      _step3;
     try {
-      for (_iterator.s(); !(_step = _iterator.n()).done;) {
-        var _step$value = _slicedToArray(_step.value, 2),
-          br = _step$value[0],
-          bc = _step$value[1];
+      for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
+        var _step3$value = _slicedToArray(_step3.value, 2),
+          br = _step3$value[0],
+          bc = _step3$value[1];
         if (Math.random() < ghost) {
           var _nr = Math.max(0, Math.min(ROWS - 1, br + Math.floor(Math.random() * 3) - 1));
           var _nc = (bc + Math.floor(Math.random() * 5) - 2 + COLS) % COLS;
@@ -972,9 +1068,9 @@ var genVariation = function genVariation(grid) {
         }
       }
     } catch (err) {
-      _iterator.e(err);
+      _iterator3.e(err);
     } finally {
-      _iterator.f();
+      _iterator3.f();
     }
   }
   // Safety guard: if the input grid had notes but the varied output is now
@@ -1729,17 +1825,17 @@ var Bell = /*#__PURE__*/function () {
       // at the top of the range — shelf cuts accumulate per pass, so nothing
       // builds up unbounded.
       var fb = 0.40 + Math.max(0, Math.min(100, pct)) / 100 * 0.56; // 0.40..0.96
-      var _iterator2 = _createForOfIteratorHelper(this.rvCombs),
-        _step2;
+      var _iterator4 = _createForOfIteratorHelper(this.rvCombs),
+        _step4;
       try {
-        for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
-          var c = _step2.value;
+        for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
+          var c = _step4.value;
           c.fb.gain.setTargetAtTime(fb, this.ctx.currentTime, 0.02);
         }
       } catch (err) {
-        _iterator2.e(err);
+        _iterator4.e(err);
       } finally {
-        _iterator2.f();
+        _iterator4.f();
       }
     }
     // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
@@ -1753,17 +1849,17 @@ var Bell = /*#__PURE__*/function () {
     value: function setRvDamp(pct) {
       if (!this.ready || !this.rvCombs) return;
       var gdb = -(Math.max(0, Math.min(100, pct)) / 100) * 12; // 0 → -12 dB
-      var _iterator3 = _createForOfIteratorHelper(this.rvCombs),
-        _step3;
+      var _iterator5 = _createForOfIteratorHelper(this.rvCombs),
+        _step5;
       try {
-        for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
-          var c = _step3.value;
+        for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+          var c = _step5.value;
           if (c.hsh) c.hsh.gain.setTargetAtTime(gdb, this.ctx.currentTime, 0.02);
         }
       } catch (err) {
-        _iterator3.e(err);
+        _iterator5.e(err);
       } finally {
-        _iterator3.f();
+        _iterator5.f();
       }
     }
     // LF damping — low-shelf gain (dB cut). Same compounding behaviour applied
@@ -1773,17 +1869,17 @@ var Bell = /*#__PURE__*/function () {
     value: function setRvLfDamp(pct) {
       if (!this.ready || !this.rvCombs) return;
       var gdb = -(Math.max(0, Math.min(100, pct)) / 100) * 12;
-      var _iterator4 = _createForOfIteratorHelper(this.rvCombs),
-        _step4;
+      var _iterator6 = _createForOfIteratorHelper(this.rvCombs),
+        _step6;
       try {
-        for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
-          var c = _step4.value;
+        for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+          var c = _step6.value;
           if (c.lsh) c.lsh.gain.setTargetAtTime(gdb, this.ctx.currentTime, 0.02);
         }
       } catch (err) {
-        _iterator4.e(err);
+        _iterator6.e(err);
       } finally {
-        _iterator4.f();
+        _iterator6.f();
       }
     }
     // Pre-delay — delay between input and reverb combs (initial reflection time).
@@ -1844,19 +1940,19 @@ var Bell = /*#__PURE__*/function () {
         } catch (e) {}
         // Stop the oscs just after the fade completes — gain is already 0 by
         // ct+0.009, so stopping is silent.
-        var _iterator5 = _createForOfIteratorHelper(prev.oscs || []),
-          _step5;
+        var _iterator7 = _createForOfIteratorHelper(prev.oscs || []),
+          _step7;
         try {
-          for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
-            var osc = _step5.value;
+          for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
+            var osc = _step7.value;
             try {
               osc.stop(ct + 0.012);
             } catch (e) {}
           }
         } catch (err) {
-          _iterator5.e(err);
+          _iterator7.e(err);
         } finally {
-          _iterator5.f();
+          _iterator7.f();
         }
         this.monoActiveVoice = null;
       }
@@ -1937,12 +2033,12 @@ var Bell = /*#__PURE__*/function () {
       // each sub-step time so the filter "animates" through the held note. Each
       // entry's flt produces a target sustain cutoff; setTargetAtTime smooths it.
       if (hasMods && envAmt > 0.01) {
-        var _iterator6 = _createForOfIteratorHelper(mods),
-          _step6;
+        var _iterator8 = _createForOfIteratorHelper(mods),
+          _step8;
         try {
-          for (_iterator6.s(); !(_step6 = _iterator6.n()).done;) {
+          for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
             var _m$sp$flt;
-            var m = _step6.value;
+            var m = _step8.value;
             if (m.at <= t + atk + dec || m.at >= t + dur) continue; // only inside the sustain window
             var mFltDev = m.sp ? (((_m$sp$flt = m.sp.flt) !== null && _m$sp$flt !== void 0 ? _m$sp$flt : 50) - 50) / 50 : 0;
             var mCutOff = mFltDev * 0.3 * 40;
@@ -1955,9 +2051,9 @@ var Bell = /*#__PURE__*/function () {
             vcf.frequency.setTargetAtTime(mSusHz, m.at, 0.015);
           }
         } catch (err) {
-          _iterator6.e(err);
+          _iterator8.e(err);
         } finally {
-          _iterator6.f();
+          _iterator8.f();
         }
       }
       var vca = this.ctx.createGain();
@@ -2116,11 +2212,11 @@ var Bell = /*#__PURE__*/function () {
       if (hasMods) {
         var prevModFreq = playFreq;
         var prevModGlide = !!(sp && sp.glide);
-        var _iterator7 = _createForOfIteratorHelper(mods),
-          _step7;
+        var _iterator9 = _createForOfIteratorHelper(mods),
+          _step9;
         try {
-          for (_iterator7.s(); !(_step7 = _iterator7.n()).done;) {
-            var _m2 = _step7.value;
+          for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+            var _m2 = _step9.value;
             if (_m2.at <= t || _m2.at >= t + dur) continue;
             var mStepOct = _m2.sp ? _m2.sp.oct - 2 : 0;
             var mPlayFreq = freq * Math.pow(2, mStepOct + layerOct);
@@ -2139,9 +2235,9 @@ var Bell = /*#__PURE__*/function () {
             prevModGlide = !!(_m2.sp && _m2.sp.glide);
           }
         } catch (err) {
-          _iterator7.e(err);
+          _iterator9.e(err);
         } finally {
-          _iterator7.f();
+          _iterator9.f();
         }
       }
       vcf.connect(vca);
@@ -3197,43 +3293,47 @@ function Tabula() {
     _useState74 = _slicedToArray(_useState73, 2),
     kitLoading = _useState74[0],
     setKitLoading = _useState74[1];
+  var _useState75 = useState(false),
+    _useState76 = _slicedToArray(_useState75, 2),
+    exporting = _useState76[0],
+    setExporting = _useState76[1]; // MP3 bounce in progress
   var recorderRef = useRef(null);
   var recordStreamRef = useRef(null);
-  var _useState75 = useState(0),
-    _useState76 = _slicedToArray(_useState75, 2),
-    swing = _useState76[0],
-    setSwing = _useState76[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState77 = useState(0),
+    _useState78 = _slicedToArray(_useState77, 2),
+    swing = _useState78[0],
+    setSwing = _useState78[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState77 = useState(1),
-    _useState78 = _slicedToArray(_useState77, 2),
-    speedMult = _useState78[0],
-    setSpeedMult = _useState78[1];
-  var speedMultR = useRef(1);
-  var _useState79 = useState(false),
+  var _useState79 = useState(1),
     _useState80 = _slicedToArray(_useState79, 2),
-    showMenu = _useState80[0],
-    setShowMenu = _useState80[1];
+    speedMult = _useState80[0],
+    setSpeedMult = _useState80[1];
+  var speedMultR = useRef(1);
   var _useState81 = useState(false),
     _useState82 = _slicedToArray(_useState81, 2),
-    topTrayOpen = _useState82[0],
-    setTopTrayOpen = _useState82[1];
+    showMenu = _useState82[0],
+    setShowMenu = _useState82[1];
   var _useState83 = useState(false),
     _useState84 = _slicedToArray(_useState83, 2),
-    bottomTrayOpen = _useState84[0],
-    setBottomTrayOpen = _useState84[1];
-  var _useState85 = useState(null),
+    topTrayOpen = _useState84[0],
+    setTopTrayOpen = _useState84[1];
+  var _useState85 = useState(false),
     _useState86 = _slicedToArray(_useState85, 2),
-    patMenu = _useState86[0],
-    setPatMenu = _useState86[1]; // {id, x, y}
+    bottomTrayOpen = _useState86[0],
+    setBottomTrayOpen = _useState86[1];
   var _useState87 = useState(null),
     _useState88 = _slicedToArray(_useState87, 2),
-    drumMenu = _useState88[0],
-    setDrumMenu = _useState88[1]; // {id, x, y}
+    patMenu = _useState88[0],
+    setPatMenu = _useState88[1]; // {id, x, y}
   var _useState89 = useState(null),
     _useState90 = _slicedToArray(_useState89, 2),
-    paramPopup = _useState90[0],
-    setParamPopup = _useState90[1]; // {col,x,y,activeArm,values}
+    drumMenu = _useState90[0],
+    setDrumMenu = _useState90[1]; // {id, x, y}
+  var _useState91 = useState(null),
+    _useState92 = _slicedToArray(_useState91, 2),
+    paramPopup = _useState92[0],
+    setParamPopup = _useState92[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var varyLongPressR = useRef(null);
@@ -3242,69 +3342,69 @@ function Tabula() {
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState91 = useState(null),
-    _useState92 = _slicedToArray(_useState91, 2),
-    chainDrag = _useState92[0],
-    setChainDrag = _useState92[1]; // {type,id,fromIdx,x,y}
-  var chainStripRef = useRef(null);
-  var chainDragR = useRef(null); // mirror of chainDrag for handlers
   var _useState93 = useState(null),
     _useState94 = _slicedToArray(_useState93, 2),
-    patternDrag = _useState94[0],
-    setPatternDrag = _useState94[1]; // {patId, name, accent, x, y, overDrop}
-  // Vary params
-  var _useState95 = useState(13),
+    chainDrag = _useState94[0],
+    setChainDrag = _useState94[1]; // {type,id,fromIdx,x,y}
+  var chainStripRef = useRef(null);
+  var chainDragR = useRef(null); // mirror of chainDrag for handlers
+  var _useState95 = useState(null),
     _useState96 = _slicedToArray(_useState95, 2),
-    vDropRate = _useState96[0],
-    setVDropRate = _useState96[1];
-  var _useState97 = useState(17),
+    patternDrag = _useState96[0],
+    setPatternDrag = _useState96[1]; // {patId, name, accent, x, y, overDrop}
+  // Vary params
+  var _useState97 = useState(13),
     _useState98 = _slicedToArray(_useState97, 2),
-    vShiftRate = _useState98[0],
-    setVShiftRate = _useState98[1];
-  var _useState99 = useState(1),
+    vDropRate = _useState98[0],
+    setVDropRate = _useState98[1];
+  var _useState99 = useState(17),
     _useState100 = _slicedToArray(_useState99, 2),
-    vShiftRange = _useState100[0],
-    setVShiftRange = _useState100[1];
-  var _useState101 = useState(0),
+    vShiftRate = _useState100[0],
+    setVShiftRate = _useState100[1];
+  var _useState101 = useState(1),
     _useState102 = _slicedToArray(_useState101, 2),
-    vPitchRate = _useState102[0],
-    setVPitchRate = _useState102[1];
-  var _useState103 = useState(1),
+    vShiftRange = _useState102[0],
+    setVShiftRange = _useState102[1];
+  var _useState103 = useState(0),
     _useState104 = _slicedToArray(_useState103, 2),
-    vPitchRange = _useState104[0],
-    setVPitchRange = _useState104[1];
-  var _useState105 = useState(0),
+    vPitchRate = _useState104[0],
+    setVPitchRate = _useState104[1];
+  var _useState105 = useState(1),
     _useState106 = _slicedToArray(_useState105, 2),
-    vGhostRate = _useState106[0],
-    setVGhostRate = _useState106[1];
+    vPitchRange = _useState106[0],
+    setVPitchRange = _useState106[1];
   var _useState107 = useState(0),
     _useState108 = _slicedToArray(_useState107, 2),
-    vVelJitter = _useState108[0],
-    setVVelJitter = _useState108[1];
+    vGhostRate = _useState108[0],
+    setVGhostRate = _useState108[1];
   var _useState109 = useState(0),
     _useState110 = _slicedToArray(_useState109, 2),
-    vFltJitter = _useState110[0],
-    setVFltJitter = _useState110[1];
+    vVelJitter = _useState110[0],
+    setVVelJitter = _useState110[1];
   var _useState111 = useState(0),
     _useState112 = _slicedToArray(_useState111, 2),
-    vDlyJitter = _useState112[0],
-    setVDlyJitter = _useState112[1];
+    vFltJitter = _useState112[0],
+    setVFltJitter = _useState112[1];
   var _useState113 = useState(0),
     _useState114 = _slicedToArray(_useState113, 2),
-    vRhyJitter = _useState114[0],
-    setVRhyJitter = _useState114[1];
+    vDlyJitter = _useState114[0],
+    setVDlyJitter = _useState114[1];
   var _useState115 = useState(0),
     _useState116 = _slicedToArray(_useState115, 2),
-    vOctJitter = _useState116[0],
-    setVOctJitter = _useState116[1];
+    vRhyJitter = _useState116[0],
+    setVRhyJitter = _useState116[1];
   var _useState117 = useState(0),
     _useState118 = _slicedToArray(_useState117, 2),
-    vGlideJitter = _useState118[0],
-    setVGlideJitter = _useState118[1];
+    vOctJitter = _useState118[0],
+    setVOctJitter = _useState118[1];
   var _useState119 = useState(0),
     _useState120 = _slicedToArray(_useState119, 2),
-    vDurJitter = _useState120[0],
-    setVDurJitter = _useState120[1];
+    vGlideJitter = _useState120[0],
+    setVGlideJitter = _useState120[1];
+  var _useState121 = useState(0),
+    _useState122 = _slicedToArray(_useState121, 2),
+    vDurJitter = _useState122[0],
+    setVDurJitter = _useState122[1];
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -3370,13 +3470,13 @@ function Tabula() {
       })
     };
   };
-  var _useState121 = useState({
+  var _useState123 = useState({
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
-    _useState122 = _slicedToArray(_useState121, 2),
-    layerParams = _useState122[0],
-    setLayerParams = _useState122[1];
+    _useState124 = _slicedToArray(_useState123, 2),
+    layerParams = _useState124[0],
+    setLayerParams = _useState124[1];
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
@@ -3436,74 +3536,74 @@ function Tabula() {
     setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
-  var _useState123 = useState(3),
-    _useState124 = _slicedToArray(_useState123, 2),
-    dlyIdx = _useState124[0],
-    setDlyIdx = _useState124[1];
-  var _useState125 = useState(45),
+  var _useState125 = useState(3),
     _useState126 = _slicedToArray(_useState125, 2),
-    dlyFbPct = _useState126[0],
-    setDlyFbPct = _useState126[1];
-  var _useState127 = useState(8),
+    dlyIdx = _useState126[0],
+    setDlyIdx = _useState126[1];
+  var _useState127 = useState(45),
     _useState128 = _slicedToArray(_useState127, 2),
-    dlyHpVal = _useState128[0],
-    setDlyHpVal = _useState128[1];
-  var _useState129 = useState(78),
+    dlyFbPct = _useState128[0],
+    setDlyFbPct = _useState128[1];
+  var _useState129 = useState(8),
     _useState130 = _slicedToArray(_useState129, 2),
-    dlyLpVal = _useState130[0],
-    setDlyLpVal = _useState130[1];
+    dlyHpVal = _useState130[0],
+    setDlyHpVal = _useState130[1];
+  var _useState131 = useState(78),
+    _useState132 = _slicedToArray(_useState131, 2),
+    dlyLpVal = _useState132[0],
+    setDlyLpVal = _useState132[1];
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  var _useState131 = useState(50),
-    _useState132 = _slicedToArray(_useState131, 2),
-    rvSize = _useState132[0],
-    setRvSize = _useState132[1]; // comb feedback (0..100)
-  var _useState133 = useState(40),
+  var _useState133 = useState(50),
     _useState134 = _slicedToArray(_useState133, 2),
-    rvDamp = _useState134[0],
-    setRvDamp = _useState134[1]; // HF damp shelf cut (0=none, 100=full)
-  var _useState135 = useState(0),
+    rvSize = _useState134[0],
+    setRvSize = _useState134[1]; // comb feedback (0..100)
+  var _useState135 = useState(40),
     _useState136 = _slicedToArray(_useState135, 2),
-    rvLfDamp = _useState136[0],
-    setRvLfDamp = _useState136[1]; // LF damp shelf cut (0=none, 100=full)
+    rvDamp = _useState136[0],
+    setRvDamp = _useState136[1]; // HF damp shelf cut (0=none, 100=full)
   var _useState137 = useState(0),
     _useState138 = _slicedToArray(_useState137, 2),
-    rvPreDelay = _useState138[0],
-    setRvPreDelay = _useState138[1]; // pre-delay (ms, 0..500)
+    rvLfDamp = _useState138[0],
+    setRvLfDamp = _useState138[1]; // LF damp shelf cut (0=none, 100=full)
   var _useState139 = useState(0),
     _useState140 = _slicedToArray(_useState139, 2),
-    dlyToRev = _useState140[0],
-    setDlyToRev = _useState140[1]; // delay output → reverb input send
+    rvPreDelay = _useState140[0],
+    setRvPreDelay = _useState140[1]; // pre-delay (ms, 0..500)
   var _useState141 = useState(0),
     _useState142 = _slicedToArray(_useState141, 2),
-    satAmt = _useState142[0],
-    setSatAmt = _useState142[1]; // global master saturation (0..100)
+    dlyToRev = _useState142[0],
+    setDlyToRev = _useState142[1]; // delay output → reverb input send
+  var _useState143 = useState(0),
+    _useState144 = _slicedToArray(_useState143, 2),
+    satAmt = _useState144[0],
+    setSatAmt = _useState144[1]; // global master saturation (0..100)
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState143 = useState(85),
-    _useState144 = _slicedToArray(_useState143, 2),
-    drumLevel = _useState144[0],
-    setDrumLevel = _useState144[1];
+  var _useState145 = useState(85),
+    _useState146 = _slicedToArray(_useState145, 2),
+    drumLevel = _useState146[0],
+    setDrumLevel = _useState146[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
-  var _useState145 = useState({
-      synth: false,
-      lead: false,
-      drums: false
-    }),
-    _useState146 = _slicedToArray(_useState145, 2),
-    trackMute = _useState146[0],
-    setTrackMute = _useState146[1];
   var _useState147 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
     _useState148 = _slicedToArray(_useState147, 2),
-    trackSolo = _useState148[0],
-    setTrackSolo = _useState148[1];
+    trackMute = _useState148[0],
+    setTrackMute = _useState148[1];
+  var _useState149 = useState({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
+    _useState150 = _slicedToArray(_useState149, 2),
+    trackSolo = _useState150[0],
+    setTrackSolo = _useState150[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -3531,64 +3631,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState149 = useState([initDrum]),
-    _useState150 = _slicedToArray(_useState149, 2),
-    drumPats = _useState150[0],
-    setDrumPats = _useState150[1];
-  var _useState151 = useState(initDrum.id),
+  var _useState151 = useState([initDrum]),
     _useState152 = _slicedToArray(_useState151, 2),
-    activeDrumId = _useState152[0],
-    setActiveDrumId = _useState152[1];
-  var _useState153 = useState([initDrum.id]),
+    drumPats = _useState152[0],
+    setDrumPats = _useState152[1];
+  var _useState153 = useState(initDrum.id),
     _useState154 = _slicedToArray(_useState153, 2),
-    drumChain = _useState154[0],
-    setDrumChain = _useState154[1];
-  var _useState155 = useState(null),
+    activeDrumId = _useState154[0],
+    setActiveDrumId = _useState154[1];
+  var _useState155 = useState([initDrum.id]),
     _useState156 = _slicedToArray(_useState155, 2),
-    drumClipboard = _useState156[0],
-    setDrumClipboard = _useState156[1];
+    drumChain = _useState156[0],
+    setDrumChain = _useState156[1];
+  var _useState157 = useState(null),
+    _useState158 = _slicedToArray(_useState157, 2),
+    drumClipboard = _useState158[0],
+    setDrumClipboard = _useState158[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState157 = useState([{
+  var _useState159 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState158 = _slicedToArray(_useState157, 2),
-    synthPhrases = _useState158[0],
-    setSynthPhrases = _useState158[1];
-  var _useState159 = useState([{
+    _useState160 = _slicedToArray(_useState159, 2),
+    synthPhrases = _useState160[0],
+    setSynthPhrases = _useState160[1];
+  var _useState161 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState160 = _slicedToArray(_useState159, 2),
-    drumPhrases = _useState160[0],
-    setDrumPhrases = _useState160[1];
-  var _useState161 = useState([{
+    _useState162 = _slicedToArray(_useState161, 2),
+    drumPhrases = _useState162[0],
+    setDrumPhrases = _useState162[1];
+  var _useState163 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
-    _useState162 = _slicedToArray(_useState161, 2),
-    sections = _useState162[0],
-    setSections = _useState162[1];
-  var _useState163 = useState("SP1"),
     _useState164 = _slicedToArray(_useState163, 2),
-    activeSynthPhraseId = _useState164[0],
-    setActiveSynthPhraseId = _useState164[1];
-  var _useState165 = useState("DP1"),
+    sections = _useState164[0],
+    setSections = _useState164[1];
+  var _useState165 = useState("SP1"),
     _useState166 = _slicedToArray(_useState165, 2),
-    activeDrumPhraseId = _useState166[0],
-    setActiveDrumPhraseId = _useState166[1];
-  var _useState167 = useState("SC1"),
+    activeSynthPhraseId = _useState166[0],
+    setActiveSynthPhraseId = _useState166[1];
+  var _useState167 = useState("DP1"),
     _useState168 = _slicedToArray(_useState167, 2),
-    activeSectionId = _useState168[0],
-    setActiveSectionId = _useState168[1];
-  var _useState169 = useState("patterns"),
+    activeDrumPhraseId = _useState168[0],
+    setActiveDrumPhraseId = _useState168[1];
+  var _useState169 = useState("SC1"),
     _useState170 = _slicedToArray(_useState169, 2),
-    seqTab = _useState170[0],
-    setSeqTab = _useState170[1]; // "patterns"|"phrases"|"sections"
+    activeSectionId = _useState170[0],
+    setActiveSectionId = _useState170[1];
+  var _useState171 = useState("patterns"),
+    _useState172 = _slicedToArray(_useState171, 2),
+    seqTab = _useState172[0],
+    setSeqTab = _useState172[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -3641,27 +3741,27 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState171 = useState("sequence"),
-    _useState172 = _slicedToArray(_useState171, 2),
-    seqPage = _useState172[0],
-    setSeqPage = _useState172[1]; // "sequence"|"step"
+  var _useState173 = useState("sequence"),
+    _useState174 = _slicedToArray(_useState173, 2),
+    seqPage = _useState174[0],
+    setSeqPage = _useState174[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState173 = useState(false),
-    _useState174 = _slicedToArray(_useState173, 2),
-    songMode = _useState174[0],
-    setSongMode = _useState174[1];
+  var _useState175 = useState(false),
+    _useState176 = _slicedToArray(_useState175, 2),
+    songMode = _useState176[0],
+    setSongMode = _useState176[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState175 = useState(false),
-    _useState176 = _slicedToArray(_useState175, 2),
-    songView = _useState176[0],
-    setSongView = _useState176[1];
+  var _useState177 = useState(false),
+    _useState178 = _slicedToArray(_useState177, 2),
+    songView = _useState178[0],
+    setSongView = _useState178[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
@@ -3671,36 +3771,36 @@ function Tabula() {
   // separate additive flag (songRandom) that layers on top of either:
   //   sync   + random → all layers play the SAME randomly-chosen column each bar
   //   free   + random → each layer independently jumps to a random populated bar
-  var _useState177 = useState("sync"),
-    _useState178 = _slicedToArray(_useState177, 2),
-    songSyncMode = _useState178[0],
-    setSongSyncMode = _useState178[1];
-  var _useState179 = useState(false),
+  var _useState179 = useState("sync"),
     _useState180 = _slicedToArray(_useState179, 2),
-    songRandom = _useState180[0],
-    setSongRandom = _useState180[1];
+    songSyncMode = _useState180[0],
+    setSongSyncMode = _useState180[1];
+  var _useState181 = useState(false),
+    _useState182 = _slicedToArray(_useState181, 2),
+    songRandom = _useState182[0],
+    setSongRandom = _useState182[1];
   var songRandomR = useRef(false);
-  var _useState181 = useState({
+  var _useState183 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState182 = _slicedToArray(_useState181, 2),
-    songMatrix = _useState182[0],
-    setSongMatrix = _useState182[1];
-  var _useState183 = useState(-1),
     _useState184 = _slicedToArray(_useState183, 2),
-    songBar = _useState184[0],
-    setSongBar = _useState184[1]; // sync mode current bar; -1 when stopped
+    songMatrix = _useState184[0],
+    setSongMatrix = _useState184[1];
+  var _useState185 = useState(-1),
+    _useState186 = _slicedToArray(_useState185, 2),
+    songBar = _useState186[0],
+    setSongBar = _useState186[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState185 = useState({
+  var _useState187 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState186 = _slicedToArray(_useState185, 2),
-    songBarLayer = _useState186[0],
-    setSongBarLayer = _useState186[1];
+    _useState188 = _slicedToArray(_useState187, 2),
+    songBarLayer = _useState188[0],
+    setSongBarLayer = _useState188[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -3955,28 +4055,28 @@ function Tabula() {
       var _layerStoreR$current, _layerStoreR$current2;
       var vp = varyParamsR.current;
       var regenSynth = function regenSynth(pats) {
-        var _iterator8 = _createForOfIteratorHelper(pats || []),
-          _step8;
+        var _iterator0 = _createForOfIteratorHelper(pats || []),
+          _step0;
         try {
-          for (_iterator8.s(); !(_step8 = _iterator8.n()).done;) {
-            var p = _step8.value;
+          for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
+            var p = _step0.value;
             if (!p || !p.grid) continue;
             variedGrids.current.set(p.id, safeVaryGrid(p.grid, vp, p.gridLen));
           }
         } catch (err) {
-          _iterator8.e(err);
+          _iterator0.e(err);
         } finally {
-          _iterator8.f();
+          _iterator0.f();
         }
       };
       if (varyMode.synth) regenSynth(activeLayer === "synth" ? patsR.current : (_layerStoreR$current = layerStoreR.current) === null || _layerStoreR$current === void 0 || (_layerStoreR$current = _layerStoreR$current.synth) === null || _layerStoreR$current === void 0 ? void 0 : _layerStoreR$current.pats);
       if (varyMode.lead) regenSynth(activeLayer === "lead" ? patsR.current : (_layerStoreR$current2 = layerStoreR.current) === null || _layerStoreR$current2 === void 0 || (_layerStoreR$current2 = _layerStoreR$current2.lead) === null || _layerStoreR$current2 === void 0 ? void 0 : _layerStoreR$current2.pats);
       if (varyMode.drums) {
-        var _iterator9 = _createForOfIteratorHelper(drumPatsR.current || []),
-          _step9;
+        var _iterator1 = _createForOfIteratorHelper(drumPatsR.current || []),
+          _step1;
         try {
           var _loop = function _loop() {
-            var dp = _step9.value;
+            var dp = _step1.value;
             if (!dp || !dp.grid) return 1; // continue
             var vRhythm = (dp.vRhythm || 0) / 100;
             var vVelocity = (dp.vVelocity || 0) / 100;
@@ -4014,13 +4114,13 @@ function Tabula() {
             variedDrumGrids.current.set(dp.id, vGrid);
             variedDrumVels.current.set(dp.id, vVel);
           };
-          for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+          for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
             if (_loop()) continue;
           }
         } catch (err) {
-          _iterator9.e(err);
+          _iterator1.e(err);
         } finally {
-          _iterator9.f();
+          _iterator1.f();
         }
       }
     } catch (e) {
@@ -4979,14 +5079,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState187 = useState(null),
-    _useState188 = _slicedToArray(_useState187, 2),
-    gridPx = _useState188[0],
-    setGridPx = _useState188[1];
   var _useState189 = useState(null),
     _useState190 = _slicedToArray(_useState189, 2),
-    editOuter = _useState190[0],
-    setEditOuter = _useState190[1];
+    gridPx = _useState190[0],
+    setGridPx = _useState190[1];
+  var _useState191 = useState(null),
+    _useState192 = _slicedToArray(_useState191, 2),
+    editOuter = _useState192[0],
+    setEditOuter = _useState192[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -5281,6 +5381,466 @@ function Tabula() {
     a.download = "tabula-preset.json";
     a.click();
   };
+
+  // ── Song export helpers (shared by MIDI + MP3) ────────────────────────────
+  // Resolve a synth-type layer's patterns (active layer is live in `pats`;
+  // others sit in layerStoreR) and its active pattern id.
+  var _layerPats = function _layerPats(layer) {
+    var _layerStoreR$current$;
+    return activeLayer === layer ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || [];
+  };
+  var _activeIdFor = function _activeIdFor(layer) {
+    var _layerStoreR$current$2;
+    return activeLayer === layer ? activeId : (_layerStoreR$current$2 = layerStoreR.current[layer]) === null || _layerStoreR$current$2 === void 0 ? void 0 : _layerStoreR$current$2.activeId;
+  };
+  // Ordered bars to export: the full populated song matrix, else one bar of the
+  // active patterns. Each entry = {synth,lead,drums} pattern ids (or null).
+  var _exportBars = function _exportBars() {
+    var sm = songMatrix;
+    var first = -1,
+      last = -1;
+    for (var i = 0; i < 64; i++) {
+      if (sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null) {
+        if (first < 0) first = i;
+        last = i;
+      }
+    }
+    if (songMode && first >= 0) {
+      var bars = [];
+      for (var b = first; b <= last; b++) bars.push({
+        synth: sm.synth[b],
+        lead: sm.lead[b],
+        drums: sm.drums[b]
+      });
+      return bars;
+    }
+    return [{
+      synth: _activeIdFor("synth"),
+      lead: _activeIdFor("lead"),
+      drums: activeDrumId
+    }];
+  };
+
+  // Export the song arrangement as a Standard MIDI File. Each bar = 16 sixteenth
+  // steps; a pattern shorter than 16 loops within the bar (mirrors playback).
+  // POLY/MONO are pitched (row→scale freq→nearest MIDI note, + per-step octave,
+  // + layer octave, + transpose); DRUMS map to GM percussion on channel 10.
+  // Performance layers (VARY/MOTION/per-pattern speed) are NOT baked in — this
+  // is the underlying composition (the MP3 bounce captures the performance).
+  var exportMIDI = function exportMIDI() {
+    var bars = _exportBars();
+    var freqs = (SCALES[scale] || SCALES.major).freqs;
+    var usPerQ = Math.round(60000000 / Math.max(1, bpm));
+    var meta = [{
+      tick: 0,
+      data: [0xFF, 0x51, 0x03, usPerQ >> 16 & 255, usPerQ >> 8 & 255, usPerQ & 255]
+    }, {
+      tick: 0,
+      data: [0xFF, 0x58, 0x04, 4, 2, 24, 8]
+    }];
+    var tName = function tName(n) {
+      return {
+        tick: 0,
+        data: [0xFF, 0x03, n.length].concat(_toConsumableArray(_str(n)))
+      };
+    };
+    var synthEv = [],
+      leadEv = [],
+      drumEv = [];
+    bars.forEach(function (bar, bi) {
+      var barTick = bi * 16 * TICKS_16;
+      [["synth", synthEv, 0], ["lead", leadEv, 1]].forEach(function (_ref14) {
+        var _ref15 = _slicedToArray(_ref14, 3),
+          layer = _ref15[0],
+          ev = _ref15[1],
+          ch = _ref15[2];
+        var pat = _layerPats(layer).find(function (p) {
+          return p.id === bar[layer];
+        });
+        if (!pat || !pat.grid) return;
+        var len = pat.gridLen || 16;
+        var layerOct = layerParams[layer] && layerParams[layer].octave || 0;
+        var mono = !!(layerParams[layer] && layerParams[layer].monoSingle);
+        for (var s = 0; s < 16; s++) {
+          var _sp$vel, _sp$oct, _sp$rhy;
+          var ps = s % len;
+          var sp = pat.params && pat.params[ps] || null;
+          var vel = Math.max(1, Math.min(127, Math.round(sp ? (_sp$vel = sp.vel) !== null && _sp$vel !== void 0 ? _sp$vel : 100 : 100)));
+          var stepOct = (sp ? (_sp$oct = sp.oct) !== null && _sp$oct !== void 0 ? _sp$oct : 2 : 2) - 2;
+          var rhy = Math.max(1, sp ? Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1) : 1);
+          var rows = [];
+          for (var r = 0; r < ROWS; r++) if (pat.grid[r] && pat.grid[r][ps]) rows.push(r);
+          if (mono && rows.length > 1) rows = [rows[0]];
+          for (var _i8 = 0, _rows = rows; _i8 < _rows.length; _i8++) {
+            var _r5 = _rows[_i8];
+            var note = Math.max(0, Math.min(127, freqToMidi(freqs[_r5]) + 12 * (stepOct + layerOct) + transpose));
+            if (rhy > 1) {
+              for (var k = 0; k < rhy; k++) {
+                var on = barTick + s * TICKS_16 + Math.round(k * TICKS_16 / rhy);
+                var off = on + Math.max(6, Math.round(TICKS_16 / rhy * 0.85));
+                ev.push({
+                  tick: on,
+                  order: 1,
+                  data: [0x90 | ch, note, vel]
+                }, {
+                  tick: off,
+                  order: 0,
+                  data: [0x80 | ch, note, 0]
+                });
+              }
+            } else {
+              var lenSteps = Math.max(1, pat.durs && pat.durs[_r5] && pat.durs[_r5][ps] || 1);
+              var _on = barTick + s * TICKS_16;
+              var _off = _on + Math.max(6, lenSteps * TICKS_16 - 6);
+              ev.push({
+                tick: _on,
+                order: 1,
+                data: [0x90 | ch, note, vel]
+              }, {
+                tick: _off,
+                order: 0,
+                data: [0x80 | ch, note, 0]
+              });
+            }
+          }
+        }
+      });
+      var dp = drumPats.find(function (p) {
+        return p.id === bar.drums;
+      });
+      if (dp && dp.grid) {
+        var len = dp.gridLen || 16;
+        for (var s = 0; s < 16; s++) {
+          var ps = s % len;
+          for (var r = 0; r < DRUM_ROWS; r++) {
+            var _ref16;
+            if (!(dp.grid[r] && dp.grid[r][ps])) continue;
+            var note = GM_DRUM[DRUM_VOICES[r].key];
+            if (note == null) continue;
+            var vr = dp.vel && dp.vel[r];
+            var vel = Math.max(1, Math.min(127, Math.round((_ref16 = Array.isArray(vr) ? vr[ps] : 100) !== null && _ref16 !== void 0 ? _ref16 : 100)));
+            var rat = dp.rat && dp.rat[r] && dp.rat[r][ps] || 1;
+            for (var k = 0; k < rat; k++) {
+              var on = barTick + s * TICKS_16 + Math.round(k * TICKS_16 / rat);
+              var off = on + Math.max(6, Math.round(TICKS_16 / rat * 0.5));
+              drumEv.push({
+                tick: on,
+                order: 1,
+                data: [0x99, note, vel]
+              }, {
+                tick: off,
+                order: 0,
+                data: [0x89, note, 0]
+              });
+            }
+          }
+        }
+      }
+    });
+    downloadBlob(buildSMF([[].concat(meta), [tName("POLY")].concat(synthEv), [tName("MONO")].concat(leadEv), [tName("DRUMS")].concat(drumEv)]), "tabula-song.mid", "audio/midi");
+    showFlash("MIDI EXPORTED");
+  };
+
+  // ── MP3 bounce (realtime loopback capture of one song cycle) ──────────────
+  // lamejs (MP3 encoder) is loaded on demand from a CDN — only when the user
+  // actually bounces, so the bundle stays lean.
+  var lameRef = useRef(null);
+  var loadLame = function loadLame() {
+    return new Promise(function (resolve) {
+      if (window.lamejs) {
+        resolve(window.lamejs);
+        return;
+      }
+      if (lameRef.current) {
+        resolve(lameRef.current);
+        return;
+      }
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js";
+      s.onload = function () {
+        lameRef.current = window.lamejs || null;
+        resolve(lameRef.current);
+      };
+      s.onerror = function () {
+        return resolve(null);
+      };
+      document.head.appendChild(s);
+    });
+  };
+  var _concatF32 = function _concatF32(chunks) {
+    var n = 0;
+    var _iterator10 = _createForOfIteratorHelper(chunks),
+      _step10;
+    try {
+      for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
+        var c = _step10.value;
+        n += c.length;
+      }
+    } catch (err) {
+      _iterator10.e(err);
+    } finally {
+      _iterator10.f();
+    }
+    var out = new Float32Array(n);
+    var o = 0;
+    var _iterator11 = _createForOfIteratorHelper(chunks),
+      _step11;
+    try {
+      for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
+        var _c6 = _step11.value;
+        out.set(_c6, o);
+        o += _c6.length;
+      }
+    } catch (err) {
+      _iterator11.e(err);
+    } finally {
+      _iterator11.f();
+    }
+    return out;
+  };
+  var _waitAudio = function _waitAudio(ctx, untilSec) {
+    return new Promise(function (res) {
+      var startWall = performance.now(),
+        cap = (untilSec - ctx.currentTime) * 1000 + 8000; // safety: never hang if the clock stalls
+      var id = setInterval(function () {
+        if (ctx.currentTime >= untilSec || performance.now() - startWall > cap) {
+          clearInterval(id);
+          res();
+        }
+      }, 40);
+    });
+  };
+  var encodeMP3 = function encodeMP3(lame, left, right, sr) {
+    var enc = new lame.Mp3Encoder(2, sr, 160);
+    var toI16 = function toI16(f) {
+      var o = new Int16Array(f.length);
+      for (var i = 0; i < f.length; i++) {
+        var s = Math.max(-1, Math.min(1, f[i]));
+        o[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return o;
+    };
+    var li = toI16(left),
+      ri = toI16(right),
+      BLK = 1152,
+      data = [];
+    for (var i = 0; i < li.length; i += BLK) {
+      var buf = enc.encodeBuffer(li.subarray(i, i + BLK), ri.subarray(i, i + BLK));
+      if (buf.length > 0) data.push(new Uint8Array(buf));
+    }
+    var end = enc.flush();
+    if (end.length > 0) data.push(new Uint8Array(end));
+    return new Blob(data, {
+      type: "audio/mpeg"
+    });
+  };
+  var exportingR = useRef(false);
+  var exportMP3 = /*#__PURE__*/function () {
+    var _ref17 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
+      var cap, sink, master, restore, dlyT, ctx, lame, barCount, cycleSec, tailSec, Lc, Rc, capturing, haveSong, firstBar, sm, i, t0, L, R, blob, _t5;
+      return _regenerator().w(function (_context9) {
+        while (1) switch (_context9.p = _context9.n) {
+          case 0:
+            if (!exportingR.current) {
+              _context9.n = 1;
+              break;
+            }
+            return _context9.a(2);
+          case 1:
+            exportingR.current = true;
+            setExporting(true);
+            cap = null, sink = null, master = null, restore = null;
+            _context9.p = 2;
+            if (bell.current.ready) {
+              _context9.n = 4;
+              break;
+            }
+            dlyT = 60 / bpm * DLY_NOTES[dlyIdx].mult;
+            _context9.n = 3;
+            return bell.current.init(dlyT, dlyFbPct / 100, 50, dlyHpVal, dlyLpVal);
+          case 3:
+            _context9.n = 5;
+            break;
+          case 4:
+            _context9.n = 5;
+            return bell.current.resume();
+          case 5:
+            if (drumEngine.current.ready) {
+              _context9.n = 6;
+              break;
+            }
+            _context9.n = 6;
+            return drumEngine.current.init(bell.current.master, bell.current.rev, bell.current.dly);
+          case 6:
+            if (!playingR.current) {
+              _context9.n = 7;
+              break;
+            }
+            _context9.n = 7;
+            return _startStop();
+          case 7:
+            // ensure stopped, start clean from the top
+            ctx = bell.current.ctx;
+            master = bell.current.master;
+            if (!(!ctx || !master)) {
+              _context9.n = 8;
+              break;
+            }
+            showFlash("AUDIO NOT READY");
+            return _context9.a(2);
+          case 8:
+            _context9.n = 9;
+            return loadLame();
+          case 9:
+            lame = _context9.v;
+            if (!(!lame || !lame.Mp3Encoder)) {
+              _context9.n = 10;
+              break;
+            }
+            showFlash("MP3 LIB FAILED");
+            return _context9.a(2);
+          case 10:
+            barCount = Math.max(1, _exportBars().length);
+            cycleSec = barCount * 4 * 60 / Math.max(1, bpm); // sync: 16 abs steps = 4 beats/bar
+            tailSec = 2; // Tap the master into a recorder (silent parallel path; no double audio).
+            cap = ctx.createScriptProcessor(4096, 2, 2);
+            Lc = [], Rc = [];
+            capturing = false;
+            cap.onaudioprocess = function (e) {
+              if (!capturing) return;
+              var ib = e.inputBuffer;
+              Lc.push(new Float32Array(ib.getChannelData(0)));
+              Rc.push(new Float32Array(ib.numberOfChannels > 1 ? ib.getChannelData(1) : ib.getChannelData(0)));
+            };
+            sink = ctx.createGain();
+            sink.gain.value = 0;
+            master.connect(cap);
+            cap.connect(sink);
+            sink.connect(ctx.destination);
+            // Force a clean linear song pass from the top (restore after).
+            haveSong = function () {
+              var sm = songMatrix;
+              for (var i = 0; i < 64; i++) if (sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null) return true;
+              return false;
+            }();
+            if (!haveSong) {
+              _context9.n = 14;
+              break;
+            }
+            restore = {
+              mode: songModeR.current,
+              sync: songSyncR.current,
+              rand: songRandomR.current,
+              loop: loopR.current
+            };
+            songModeR.current = true;
+            setSongMode(true);
+            songSyncR.current = "sync";
+            setSongSyncMode("sync");
+            songRandomR.current = false;
+            setSongRandom(false);
+            loopR.current = false;
+            setLoopMode(false); // LOOP would solo one pattern, not play the song
+            // Start the song at its first populated bar. startStop only does this
+            // when its `songMode` state closure is true; we force it via the ref so
+            // the bounce starts from the top even if the user wasn't in song mode.
+            firstBar = 0;
+            sm = songMatrix;
+            i = 0;
+          case 11:
+            if (!(i < 64)) {
+              _context9.n = 13;
+              break;
+            }
+            if (!(sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null)) {
+              _context9.n = 12;
+              break;
+            }
+            firstBar = i;
+            return _context9.a(3, 13);
+          case 12:
+            i++;
+            _context9.n = 11;
+            break;
+          case 13:
+            songBarR.current = firstBar;
+            setSongBar(firstBar);
+          case 14:
+            showFlash("BOUNCING…");
+            capturing = true;
+            _context9.n = 15;
+            return _startStop();
+          case 15:
+            // start playback from the song top
+            t0 = ctx.currentTime;
+            _context9.n = 16;
+            return _waitAudio(ctx, t0 + cycleSec);
+          case 16:
+            if (!playingR.current) {
+              _context9.n = 17;
+              break;
+            }
+            _context9.n = 17;
+            return _startStop();
+          case 17:
+            _context9.n = 18;
+            return _waitAudio(ctx, t0 + cycleSec + tailSec);
+          case 18:
+            // capture the tail
+            capturing = false;
+            L = _concatF32(Lc), R = _concatF32(Rc);
+            if (L.length) {
+              _context9.n = 19;
+              break;
+            }
+            showFlash("NOTHING TO BOUNCE");
+            return _context9.a(2);
+          case 19:
+            showFlash("ENCODING…");
+            blob = encodeMP3(lame, L, R, ctx.sampleRate);
+            downloadBlob(blob, "tabula-song.mp3", "audio/mpeg");
+            showFlash("MP3 EXPORTED");
+            _context9.n = 21;
+            break;
+          case 20:
+            _context9.p = 20;
+            _t5 = _context9.v;
+            console.error("MP3 export failed", _t5);
+            showFlash("EXPORT FAILED");
+          case 21:
+            _context9.p = 21;
+            try {
+              if (master && cap) master.disconnect(cap);
+            } catch (e) {}
+            try {
+              if (cap) cap.disconnect();
+              cap && (cap.onaudioprocess = null);
+            } catch (e) {}
+            try {
+              if (sink) sink.disconnect();
+            } catch (e) {}
+            if (restore) {
+              songModeR.current = restore.mode;
+              setSongMode(restore.mode);
+              songSyncR.current = restore.sync;
+              setSongSyncMode(restore.sync);
+              songRandomR.current = restore.rand;
+              setSongRandom(restore.rand);
+              loopR.current = restore.loop;
+              setLoopMode(restore.loop);
+            }
+            exportingR.current = false;
+            setExporting(false);
+            return _context9.f(21);
+          case 22:
+            return _context9.a(2);
+        }
+      }, _callee9, null, [[2, 20, 21, 22]]);
+    }));
+    return function exportMP3() {
+      return _ref17.apply(this, arguments);
+    };
+  }();
   var handleImport = function handleImport(e) {
     var _e$target$files;
     var file = (_e$target$files = e.target.files) === null || _e$target$files === void 0 ? void 0 : _e$target$files[0];
@@ -5328,7 +5888,7 @@ function Tabula() {
   // synth-track main path used to do, but per-layer so each layer's plays
   // are independent (and per-pat speedMult can apply correctly).
   var playSynthLayerStep = function playSynthLayerStep(layer, pat, s, at, stepDur) {
-    var _sp$rhy;
+    var _sp$rhy2;
     if (!pat || !pat.grid) return;
     var layerLP = layerParamsR.current[layer];
     var freqs = SCALES[scaleR.current].freqs;
@@ -5337,7 +5897,7 @@ function Tabula() {
     var useGrid = vary ? variedGrids.current.get(pat.id) || pat.grid : pat.grid;
     var rawSp = pat.params && pat.params[s] ? pat.params[s] : null;
     var sp = vary && rawSp ? jitterStepParam(rawSp, varyParamsR.current) : rawSp;
-    var rhy = sp ? Math.max(1, Math.round((_sp$rhy = sp.rhy) !== null && _sp$rhy !== void 0 ? _sp$rhy : 1)) : 1;
+    var rhy = sp ? Math.max(1, Math.round((_sp$rhy2 = sp.rhy) !== null && _sp$rhy2 !== void 0 ? _sp$rhy2 : 1)) : 1;
     var ratch = rhy;
     var subDur = stepDur / ratch;
     // True mono at the source: a monoSingle layer plays at most ONE note per
@@ -5418,10 +5978,10 @@ function Tabula() {
     var baseMixArr = drumMixR.current || defaultDrumMix();
     for (var r = 0; r < DRUM_ROWS; r++) {
       if (useGrid[r] && useGrid[r][s]) {
-        var _ref14;
+        var _ref18;
         // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
         var velRow = useVel && useVel[r];
-        var dVel = (_ref14 = Array.isArray(velRow) ? velRow[s] : useVel === null || useVel === void 0 ? void 0 : useVel[s]) !== null && _ref14 !== void 0 ? _ref14 : 100;
+        var dVel = (_ref18 = Array.isArray(velRow) ? velRow[s] : useVel === null || useVel === void 0 ? void 0 : useVel[s]) !== null && _ref18 !== void 0 ? _ref18 : 100;
         var dMix = baseMixArr[r] || {
           level: DRUM_DEFAULT_LEVEL,
           pan: 0,
@@ -5438,11 +5998,11 @@ function Tabula() {
           // the previous (motion) pattern's last automated value.
           var eff = _objectSpread({}, dMix);
           var pm = perfMixR.current && perfMixR.current[r];
-          var _iterator0 = _createForOfIteratorHelper(MOTION_PARAMS),
-            _step0;
+          var _iterator12 = _createForOfIteratorHelper(MOTION_PARAMS),
+            _step12;
           try {
-            for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
-              var k = _step0.value;
+            for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
+              var k = _step12.value;
               if (pm && pm[k] != null) {
                 eff[k] = pm[k];
                 continue;
@@ -5451,9 +6011,9 @@ function Tabula() {
               if (mv != null) eff[k] = mv;
             }
           } catch (err) {
-            _iterator0.e(err);
+            _iterator12.e(err);
           } finally {
-            _iterator0.f();
+            _iterator12.f();
           }
           dMix = eff;
           // Per-step application — scheduled at THIS note's onset (`at`) so each
@@ -5557,16 +6117,16 @@ function Tabula() {
     var ranges = null;
     if (isFree) {
       ranges = {};
-      for (var _i8 = 0, _arr2 = ["synth", "lead", "drums"]; _i8 < _arr2.length; _i8++) {
-        var layer = _arr2[_i8];
+      for (var _i9 = 0, _arr2 = ["synth", "lead", "drums"]; _i9 < _arr2.length; _i9++) {
+        var layer = _arr2[_i9];
         var first = -1,
           last = -1;
         var bars = [];
-        for (var _i9 = 0; _i9 < 64; _i9++) {
-          if (sm[layer][_i9] != null) {
-            if (first === -1) first = _i9;
-            last = _i9;
-            bars.push(_i9);
+        for (var _i0 = 0; _i0 < 64; _i0++) {
+          if (sm[layer][_i0] != null) {
+            if (first === -1) first = _i0;
+            last = _i0;
+            bars.push(_i0);
           }
         }
         ranges[layer] = {
@@ -5582,8 +6142,8 @@ function Tabula() {
     // freeR.current[layer] = {step, nextAt, bar} per layer.
     var cursorChanged = false;
     var newCursor = _objectSpread({}, songBarLayer);
-    for (var _i0 = 0, _arr3 = ["synth", "lead", "drums"]; _i0 < _arr3.length; _i0++) {
-      var _layer = _arr3[_i0];
+    for (var _i1 = 0, _arr3 = ["synth", "lead", "drums"]; _i1 < _arr3.length; _i1++) {
+      var _layer = _arr3[_i1];
       var lf = freeR.current[_layer];
       // Free mode: skip silent layers, init bar within range.
       if (isFree) {
@@ -5712,13 +6272,13 @@ function Tabula() {
         // additive, jump to a random populated bar for this layer instead of
         // stepping linearly — "any cell, no inter-relation between layers".
         if (isFree && ns === 0) {
-          var _r5 = ranges[_layer];
+          var _r6 = ranges[_layer];
           var nb;
-          if (isRandom && _r5.bars && _r5.bars.length) {
-            nb = _r5.bars[Math.floor(Math.random() * _r5.bars.length)];
+          if (isRandom && _r6.bars && _r6.bars.length) {
+            nb = _r6.bars[Math.floor(Math.random() * _r6.bars.length)];
           } else {
             nb = lf.bar + 1;
-            if (nb > _r5.last) nb = _r5.empty ? 0 : _r5.first;
+            if (nb > _r6.last) nb = _r6.empty ? 0 : _r6.first;
           }
           lf.bar = nb;
           if (newCursor[_layer] !== lf.bar) {
@@ -5750,8 +6310,8 @@ function Tabula() {
         var nextBar = void 0;
         if (isRandom) {
           var candidates = [];
-          for (var _i1 = songFirstBar; _i1 <= songLastBar; _i1++) {
-            if (sm.synth[_i1] != null || sm.lead[_i1] != null || sm.drums[_i1] != null) candidates.push(_i1);
+          for (var _i10 = songFirstBar; _i10 <= songLastBar; _i10++) {
+            if (sm.synth[_i10] != null || sm.lead[_i10] != null || sm.drums[_i10] != null) candidates.push(_i10);
           }
           nextBar = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : songFirstBar;
         } else {
@@ -5768,8 +6328,8 @@ function Tabula() {
           drums: nextBar
         });
         // Reset per-layer step index so each layer starts new bar from step 0.
-        for (var _i10 = 0, _arr4 = ["synth", "lead", "drums"]; _i10 < _arr4.length; _i10++) {
-          var l = _arr4[_i10];
+        for (var _i11 = 0, _arr4 = ["synth", "lead", "drums"]; _i11 < _arr4.length; _i11++) {
+          var l = _arr4[_i11];
           freeR.current[l].step = 0;
           // Realign nextAt to bar boundary so layers re-sync after bar advance.
           freeR.current[l].nextAt = nextNoteR.current + absStepDur;
@@ -5784,16 +6344,17 @@ function Tabula() {
   /* legacy unified sync scheduler — body removed in the per-layer rewrite */
 
   var _startStop = /*#__PURE__*/function () {
-    var _ref15 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var dlyT, _m, r, t0, _i11, _arr5, layer, sm, layerFirst, _i12, _arr6, _layer2, f, i, firstBar, _i13, _t5;
-      return _regenerator().w(function (_context9) {
-        while (1) switch (_context9.p = _context9.n) {
+    var _ref19 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0() {
+      var dlyT, _m, r, t0, _i12, _arr5, layer, sm, layerFirst, _i13, _arr6, _layer2, f, i, firstBar, _i14, _t6;
+      return _regenerator().w(function (_context0) {
+        while (1) switch (_context0.p = _context0.n) {
           case 0:
-            if (!playing) {
-              _context9.n = 1;
+            if (!playingR.current) {
+              _context0.n = 1;
               break;
             }
             clearInterval(tmrR.current);
+            playingR.current = false;
             setPlaying(false);
             setStep(-1);
             setPlayId(null);
@@ -5822,26 +6383,26 @@ function Tabula() {
             }
             releaseWakeLock();
             if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
-            return _context9.a(2);
+            return _context0.a(2);
           case 1:
             dlyT = 60 / bpm * DLY_NOTES[dlyIdx].mult;
             if (bell.current.ready) {
-              _context9.n = 3;
+              _context0.n = 3;
               break;
             }
-            _context9.n = 2;
+            _context0.n = 2;
             return bell.current.init(dlyT, dlyFbPct / 100, 50, dlyHpVal, dlyLpVal);
           case 2:
-            _context9.n = 4;
+            _context0.n = 4;
             break;
           case 3:
-            _context9.n = 4;
+            _context0.n = 4;
             return bell.current.resume();
           case 4:
             bell.current.stepDur = 60 / bpm / 4 * speedMult;
             // Pass Bell's reverb + delay inputs so DrumEngine voices can have per-
             // channel sends. Without these refs, send knobs in the drum mixer no-op.
-            _context9.n = 5;
+            _context0.n = 5;
             return drumEngine.current.init(bell.current.master, bell.current.rev, bell.current.dly);
           case 5:
             // Re-apply the engine-side state for anything that wasn't passed into
@@ -5863,20 +6424,20 @@ function Tabula() {
             // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
             if (!silentLoopR.current) silentLoopR.current = createSilentLoop();
             if (!silentLoopR.current) {
-              _context9.n = 9;
+              _context0.n = 9;
               break;
             }
-            _context9.p = 6;
-            _context9.n = 7;
+            _context0.p = 6;
+            _context0.n = 7;
             return silentLoopR.current.play();
           case 7:
-            _context9.n = 9;
+            _context0.n = 9;
             break;
           case 8:
-            _context9.p = 8;
-            _t5 = _context9.v;
+            _context0.p = 8;
+            _t6 = _context0.v;
           case 9:
-            _context9.n = 10;
+            _context0.n = 10;
             return requestWakeLock();
           case 10:
             // MediaSession — lock screen transport controls + registers as audio app
@@ -5907,8 +6468,8 @@ function Tabula() {
             stepR.current = 0;
             t0 = bell.current.ctx.currentTime + 0.05; // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
             // song mode also sets each layer's bar to its first populated cell.
-            for (_i11 = 0, _arr5 = ["synth", "lead", "drums"]; _i11 < _arr5.length; _i11++) {
-              layer = _arr5[_i11];
+            for (_i12 = 0, _arr5 = ["synth", "lead", "drums"]; _i12 < _arr5.length; _i12++) {
+              layer = _arr5[_i12];
               freeR.current[layer] = {
                 step: 0,
                 nextAt: t0,
@@ -5916,59 +6477,59 @@ function Tabula() {
               };
             }
             if (!songMode) {
-              _context9.n = 20;
+              _context0.n = 20;
               break;
             }
             sm = songMatrix;
             layerFirst = {};
-            _i12 = 0, _arr6 = ["synth", "lead", "drums"];
+            _i13 = 0, _arr6 = ["synth", "lead", "drums"];
           case 11:
-            if (!(_i12 < _arr6.length)) {
-              _context9.n = 16;
+            if (!(_i13 < _arr6.length)) {
+              _context0.n = 16;
               break;
             }
-            _layer2 = _arr6[_i12];
+            _layer2 = _arr6[_i13];
             f = -1;
             i = 0;
           case 12:
             if (!(i < 64)) {
-              _context9.n = 14;
+              _context0.n = 14;
               break;
             }
             if (!(sm[_layer2][i] != null)) {
-              _context9.n = 13;
+              _context0.n = 13;
               break;
             }
             f = i;
-            return _context9.a(3, 14);
+            return _context0.a(3, 14);
           case 13:
             i++;
-            _context9.n = 12;
+            _context0.n = 12;
             break;
           case 14:
             layerFirst[_layer2] = f === -1 ? 0 : f;
             freeR.current[_layer2].bar = layerFirst[_layer2];
           case 15:
-            _i12++;
-            _context9.n = 11;
+            _i13++;
+            _context0.n = 11;
             break;
           case 16:
             firstBar = -1;
-            _i13 = 0;
+            _i14 = 0;
           case 17:
-            if (!(_i13 < 64)) {
-              _context9.n = 19;
+            if (!(_i14 < 64)) {
+              _context0.n = 19;
               break;
             }
-            if (!(sm.synth[_i13] != null || sm.lead[_i13] != null || sm.drums[_i13] != null)) {
-              _context9.n = 18;
+            if (!(sm.synth[_i14] != null || sm.lead[_i14] != null || sm.drums[_i14] != null)) {
+              _context0.n = 18;
               break;
             }
-            firstBar = _i13;
-            return _context9.a(3, 19);
+            firstBar = _i14;
+            return _context0.a(3, 19);
           case 18:
-            _i13++;
-            _context9.n = 17;
+            _i14++;
+            _context0.n = 17;
             break;
           case 19:
             if (firstBar === -1) firstBar = 0;
@@ -5981,15 +6542,16 @@ function Tabula() {
             });
           case 20:
             nextNoteR.current = t0; // master clock for visual playhead + bar advance
+            playingR.current = true;
             tmrR.current = setInterval(scheduler, 25);
             setPlaying(true);
           case 21:
-            return _context9.a(2);
+            return _context0.a(2);
         }
-      }, _callee9, null, [[6, 8]]);
+      }, _callee0, null, [[6, 8]]);
     }));
     return function startStop() {
-      return _ref15.apply(this, arguments);
+      return _ref19.apply(this, arguments);
     };
   }();
   useEffect(function () {
@@ -6002,77 +6564,13 @@ function Tabula() {
   useEffect(function () {
     // Resume AudioContext and silent loop when page becomes visible
     var onVisible = /*#__PURE__*/function () {
-      var _ref16 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0() {
-        var _t6, _t7, _t8;
-        return _regenerator().w(function (_context0) {
-          while (1) switch (_context0.p = _context0.n) {
-            case 0:
-              if (!(document.visibilityState === "visible")) {
-                _context0.n = 13;
-                break;
-              }
-              if (!(bell.current.ctx && bell.current.ctx.state === "suspended")) {
-                _context0.n = 4;
-                break;
-              }
-              _context0.p = 1;
-              _context0.n = 2;
-              return bell.current.ctx.resume();
-            case 2:
-              _context0.n = 4;
-              break;
-            case 3:
-              _context0.p = 3;
-              _t6 = _context0.v;
-            case 4:
-              if (!(drumEngine.current.ctx && drumEngine.current.ctx.state === "suspended")) {
-                _context0.n = 8;
-                break;
-              }
-              _context0.p = 5;
-              _context0.n = 6;
-              return drumEngine.current.ctx.resume();
-            case 6:
-              _context0.n = 8;
-              break;
-            case 7:
-              _context0.p = 7;
-              _t7 = _context0.v;
-            case 8:
-              if (!(silentLoopR.current && silentLoopR.current.paused)) {
-                _context0.n = 12;
-                break;
-              }
-              _context0.p = 9;
-              _context0.n = 10;
-              return silentLoopR.current.play();
-            case 10:
-              _context0.n = 12;
-              break;
-            case 11:
-              _context0.p = 11;
-              _t8 = _context0.v;
-            case 12:
-              // Re-request wake lock if playing
-              if (playingR.current) requestWakeLock();
-            case 13:
-              return _context0.a(2);
-          }
-        }, _callee0, null, [[9, 11], [5, 7], [1, 3]]);
-      }));
-      return function onVisible() {
-        return _ref16.apply(this, arguments);
-      };
-    }();
-    // iOS pageshow fires when returning from bfcache (app switch)
-    var onPageShow = /*#__PURE__*/function () {
-      var _ref17 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee1(e) {
-        var _t9, _t0;
+      var _ref20 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee1() {
+        var _t7, _t8, _t9;
         return _regenerator().w(function (_context1) {
           while (1) switch (_context1.p = _context1.n) {
             case 0:
-              if (!e.persisted) {
-                _context1.n = 8;
+              if (!(document.visibilityState === "visible")) {
+                _context1.n = 13;
                 break;
               }
               if (!(bell.current.ctx && bell.current.ctx.state === "suspended")) {
@@ -6087,28 +6585,92 @@ function Tabula() {
               break;
             case 3:
               _context1.p = 3;
-              _t9 = _context1.v;
+              _t7 = _context1.v;
             case 4:
-              if (!(silentLoopR.current && silentLoopR.current.paused)) {
+              if (!(drumEngine.current.ctx && drumEngine.current.ctx.state === "suspended")) {
                 _context1.n = 8;
                 break;
               }
               _context1.p = 5;
               _context1.n = 6;
-              return silentLoopR.current.play();
+              return drumEngine.current.ctx.resume();
             case 6:
               _context1.n = 8;
               break;
             case 7:
               _context1.p = 7;
-              _t0 = _context1.v;
+              _t8 = _context1.v;
             case 8:
+              if (!(silentLoopR.current && silentLoopR.current.paused)) {
+                _context1.n = 12;
+                break;
+              }
+              _context1.p = 9;
+              _context1.n = 10;
+              return silentLoopR.current.play();
+            case 10:
+              _context1.n = 12;
+              break;
+            case 11:
+              _context1.p = 11;
+              _t9 = _context1.v;
+            case 12:
+              // Re-request wake lock if playing
+              if (playingR.current) requestWakeLock();
+            case 13:
               return _context1.a(2);
           }
-        }, _callee1, null, [[5, 7], [1, 3]]);
+        }, _callee1, null, [[9, 11], [5, 7], [1, 3]]);
+      }));
+      return function onVisible() {
+        return _ref20.apply(this, arguments);
+      };
+    }();
+    // iOS pageshow fires when returning from bfcache (app switch)
+    var onPageShow = /*#__PURE__*/function () {
+      var _ref21 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10(e) {
+        var _t0, _t1;
+        return _regenerator().w(function (_context10) {
+          while (1) switch (_context10.p = _context10.n) {
+            case 0:
+              if (!e.persisted) {
+                _context10.n = 8;
+                break;
+              }
+              if (!(bell.current.ctx && bell.current.ctx.state === "suspended")) {
+                _context10.n = 4;
+                break;
+              }
+              _context10.p = 1;
+              _context10.n = 2;
+              return bell.current.ctx.resume();
+            case 2:
+              _context10.n = 4;
+              break;
+            case 3:
+              _context10.p = 3;
+              _t0 = _context10.v;
+            case 4:
+              if (!(silentLoopR.current && silentLoopR.current.paused)) {
+                _context10.n = 8;
+                break;
+              }
+              _context10.p = 5;
+              _context10.n = 6;
+              return silentLoopR.current.play();
+            case 6:
+              _context10.n = 8;
+              break;
+            case 7:
+              _context10.p = 7;
+              _t1 = _context10.v;
+            case 8:
+              return _context10.a(2);
+          }
+        }, _callee10, null, [[5, 7], [1, 3]]);
       }));
       return function onPageShow(_x11) {
-        return _ref17.apply(this, arguments);
+        return _ref21.apply(this, arguments);
       };
     }();
     document.addEventListener("visibilitychange", onVisible);
@@ -6125,43 +6687,43 @@ function Tabula() {
     playingR.current = playing;
   }, [playing]);
   var requestWakeLock = /*#__PURE__*/function () {
-    var _ref18 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10() {
-      var _t1;
-      return _regenerator().w(function (_context10) {
-        while (1) switch (_context10.p = _context10.n) {
+    var _ref22 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11() {
+      var _t10;
+      return _regenerator().w(function (_context11) {
+        while (1) switch (_context11.p = _context11.n) {
           case 0:
             if ("wakeLock" in navigator) {
-              _context10.n = 1;
+              _context11.n = 1;
               break;
             }
-            return _context10.a(2);
+            return _context11.a(2);
           case 1:
-            _context10.p = 1;
+            _context11.p = 1;
             if (!wakeLockR.current) {
-              _context10.n = 2;
+              _context11.n = 2;
               break;
             }
-            return _context10.a(2);
+            return _context11.a(2);
           case 2:
-            _context10.n = 3;
+            _context11.n = 3;
             return navigator.wakeLock.request("screen");
           case 3:
-            wakeLockR.current = _context10.v;
+            wakeLockR.current = _context11.v;
             wakeLockR.current.addEventListener("release", function () {
               wakeLockR.current = null;
             });
-            _context10.n = 5;
+            _context11.n = 5;
             break;
           case 4:
-            _context10.p = 4;
-            _t1 = _context10.v;
+            _context11.p = 4;
+            _t10 = _context11.v;
           case 5:
-            return _context10.a(2);
+            return _context11.a(2);
         }
-      }, _callee10, null, [[1, 4]]);
+      }, _callee11, null, [[1, 4]]);
     }));
     return function requestWakeLock() {
-      return _ref18.apply(this, arguments);
+      return _ref22.apply(this, arguments);
     };
   }();
   var releaseWakeLock = function releaseWakeLock() {
@@ -6195,11 +6757,11 @@ function Tabula() {
     // Use a per-touch-identifier map so multi-touch is handled correctly.
     var scrollableStarts = new Map(); // identifier → boolean
     var onTouchStart = function onTouchStart(e) {
-      var _iterator1 = _createForOfIteratorHelper(e.changedTouches),
-        _step1;
+      var _iterator13 = _createForOfIteratorHelper(e.changedTouches),
+        _step13;
       try {
-        for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
-          var t = _step1.value;
+        for (_iterator13.s(); !(_step13 = _iterator13.n()).done;) {
+          var t = _step13.value;
           var el = document.elementFromPoint(t.clientX, t.clientY);
           var scrollable = false;
           while (el && el !== document.body) {
@@ -6213,42 +6775,42 @@ function Tabula() {
           scrollableStarts.set(t.identifier, scrollable);
         }
       } catch (err) {
-        _iterator1.e(err);
+        _iterator13.e(err);
       } finally {
-        _iterator1.f();
+        _iterator13.f();
       }
     };
     var onTouchEnd = function onTouchEnd(e) {
-      var _iterator10 = _createForOfIteratorHelper(e.changedTouches),
-        _step10;
+      var _iterator14 = _createForOfIteratorHelper(e.changedTouches),
+        _step14;
       try {
-        for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
-          var t = _step10.value;
+        for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
+          var t = _step14.value;
           scrollableStarts["delete"](t.identifier);
         }
       } catch (err) {
-        _iterator10.e(err);
+        _iterator14.e(err);
       } finally {
-        _iterator10.f();
+        _iterator14.f();
       }
     };
     var noOverscroll = function noOverscroll(e) {
       // Block if ALL active touches started on non-scrollable elements
       var anyScrollable = false;
-      var _iterator11 = _createForOfIteratorHelper(e.touches),
-        _step11;
+      var _iterator15 = _createForOfIteratorHelper(e.touches),
+        _step15;
       try {
-        for (_iterator11.s(); !(_step11 = _iterator11.n()).done;) {
-          var t = _step11.value;
+        for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
+          var t = _step15.value;
           if (scrollableStarts.get(t.identifier)) {
             anyScrollable = true;
             break;
           }
         }
       } catch (err) {
-        _iterator11.e(err);
+        _iterator15.e(err);
       } finally {
-        _iterator11.f();
+        _iterator15.f();
       }
       if (!anyScrollable && e.cancelable) e.preventDefault();
     };
@@ -7649,11 +8211,11 @@ function Tabula() {
   var effDispMix = function effDispMix(dp, r, base) {
     if (!motionEnabled) return base;
     var o = _objectSpread({}, base);
-    var _iterator12 = _createForOfIteratorHelper(MOTION_PARAMS),
-      _step12;
+    var _iterator16 = _createForOfIteratorHelper(MOTION_PARAMS),
+      _step16;
     try {
-      for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
-        var k = _step12.value;
+      for (_iterator16.s(); !(_step16 = _iterator16.n()).done;) {
+        var k = _step16.value;
         if (perfMix[r] && perfMix[r][k] != null) {
           o[k] = perfMix[r][k];
           continue;
@@ -7664,9 +8226,9 @@ function Tabula() {
         }
       }
     } catch (err) {
-      _iterator12.e(err);
+      _iterator16.e(err);
     } finally {
-      _iterator12.f();
+      _iterator16.f();
     }
     return o;
   };
@@ -7739,24 +8301,24 @@ function Tabula() {
   // kits can be pre-loaded before the user hits play (the live AudioContext
   // may not exist yet). Individual mic recordings are replaced entirely.
   var loadKit = /*#__PURE__*/function () {
-    var _ref19 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee13(kitId) {
+    var _ref23 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee14(kitId) {
       var _bell$current, _drumEngine$current;
       var kit, newSamples, errors, ctx, decode;
-      return _regenerator().w(function (_context13) {
-        while (1) switch (_context13.n) {
+      return _regenerator().w(function (_context14) {
+        while (1) switch (_context14.n) {
           case 0:
             kit = DRUM_KITS.find(function (k) {
               return k.id === kitId;
             });
             if (kit) {
-              _context13.n = 1;
+              _context14.n = 1;
               break;
             }
-            return _context13.a(2);
+            return _context14.a(2);
           case 1:
             setKitLoading(true);
             if (kit.samples) {
-              _context13.n = 2;
+              _context14.n = 2;
               break;
             }
             // Sample-less kit (USER). Restore the user's OWN recorded buffers (kept in
@@ -7766,101 +8328,101 @@ function Tabula() {
             setActiveKit(kit.id);
             setKitLoading(false);
             showFlash(kit.label);
-            return _context13.a(2);
+            return _context14.a(2);
           case 2:
             newSamples = {};
             errors = []; // Prefer the live AudioContext so buffers are engine-compatible; fall back
             // to an OfflineAudioContext for pre-loading before play.
             ctx = ((_bell$current = bell.current) === null || _bell$current === void 0 ? void 0 : _bell$current.ctx) || ((_drumEngine$current = drumEngine.current) === null || _drumEngine$current === void 0 ? void 0 : _drumEngine$current.ctx) || new OfflineAudioContext(1, 1, 44100);
             decode = /*#__PURE__*/function () {
-              var _ref20 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11(url) {
-                var res, _t10;
-                return _regenerator().w(function (_context11) {
-                  while (1) switch (_context11.n) {
+              var _ref24 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(url) {
+                var res, _t11;
+                return _regenerator().w(function (_context12) {
+                  while (1) switch (_context12.n) {
                     case 0:
-                      _context11.n = 1;
+                      _context12.n = 1;
                       return fetch(url);
                     case 1:
-                      res = _context11.v;
+                      res = _context12.v;
                       if (res.ok) {
-                        _context11.n = 2;
+                        _context12.n = 2;
                         break;
                       }
                       throw new Error(res.statusText);
                     case 2:
-                      _t10 = ctx;
-                      _context11.n = 3;
+                      _t11 = ctx;
+                      _context12.n = 3;
                       return res.arrayBuffer();
                     case 3:
-                      return _context11.a(2, _t10.decodeAudioData.call(_t10, _context11.v));
+                      return _context12.a(2, _t11.decodeAudioData.call(_t11, _context12.v));
                   }
-                }, _callee11);
+                }, _callee12);
               }));
               return function decode(_x13) {
-                return _ref20.apply(this, arguments);
+                return _ref24.apply(this, arguments);
               };
             }(); // A voice spec is a URL string (single one-shot), {rr:[urls]} (round-robin
             // — random pick per hit), or {vel:[urls]} (velocity layers, soft→hard).
-            _context13.n = 3;
+            _context14.n = 3;
             return Promise.all(Object.entries(kit.samples).map(/*#__PURE__*/function () {
-              var _ref22 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(_ref21) {
-                var _ref23, voiceKey, spec, _t11, _t12, _t13;
-                return _regenerator().w(function (_context12) {
-                  while (1) switch (_context12.p = _context12.n) {
+              var _ref26 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee13(_ref25) {
+                var _ref27, voiceKey, spec, _t12, _t13, _t14;
+                return _regenerator().w(function (_context13) {
+                  while (1) switch (_context13.p = _context13.n) {
                     case 0:
-                      _ref23 = _slicedToArray(_ref21, 2), voiceKey = _ref23[0], spec = _ref23[1];
-                      _context12.p = 1;
+                      _ref27 = _slicedToArray(_ref25, 2), voiceKey = _ref27[0], spec = _ref27[1];
+                      _context13.p = 1;
                       if (!(typeof spec === "string")) {
-                        _context12.n = 3;
+                        _context13.n = 3;
                         break;
                       }
-                      _context12.n = 2;
+                      _context13.n = 2;
                       return decode(spec);
                     case 2:
-                      newSamples[voiceKey] = _context12.v;
-                      _context12.n = 7;
+                      newSamples[voiceKey] = _context13.v;
+                      _context13.n = 7;
                       break;
                     case 3:
                       if (!(spec && spec.rr)) {
-                        _context12.n = 5;
+                        _context13.n = 5;
                         break;
                       }
-                      _context12.n = 4;
+                      _context13.n = 4;
                       return Promise.all(spec.rr.map(decode));
                     case 4:
-                      _t11 = _context12.v;
+                      _t12 = _context13.v;
                       newSamples[voiceKey] = {
-                        rr: _t11
+                        rr: _t12
                       };
-                      _context12.n = 7;
+                      _context13.n = 7;
                       break;
                     case 5:
                       if (!(spec && spec.vel)) {
-                        _context12.n = 7;
+                        _context13.n = 7;
                         break;
                       }
-                      _context12.n = 6;
+                      _context13.n = 6;
                       return Promise.all(spec.vel.map(decode));
                     case 6:
-                      _t12 = _context12.v;
+                      _t13 = _context13.v;
                       newSamples[voiceKey] = {
-                        vel: _t12
+                        vel: _t13
                       };
                     case 7:
-                      _context12.n = 9;
+                      _context13.n = 9;
                       break;
                     case 8:
-                      _context12.p = 8;
-                      _t13 = _context12.v;
+                      _context13.p = 8;
+                      _t14 = _context13.v;
                       errors.push(voiceKey);
-                      console.warn("Kit sample load failed:", voiceKey, _t13);
+                      console.warn("Kit sample load failed:", voiceKey, _t14);
                     case 9:
-                      return _context12.a(2);
+                      return _context13.a(2);
                   }
-                }, _callee12, null, [[1, 8]]);
+                }, _callee13, null, [[1, 8]]);
               }));
               return function (_x14) {
-                return _ref22.apply(this, arguments);
+                return _ref26.apply(this, arguments);
               };
             }()));
           case 3:
@@ -7869,12 +8431,12 @@ function Tabula() {
             setKitLoading(false);
             showFlash(errors.length ? "".concat(kit.label, " (").concat(errors.length, " MISSING)") : kit.label);
           case 4:
-            return _context13.a(2);
+            return _context14.a(2);
         }
-      }, _callee13);
+      }, _callee14);
     }));
     return function loadKit(_x12) {
-      return _ref19.apply(this, arguments);
+      return _ref23.apply(this, arguments);
     };
   }();
   // Decode a project's saved user samples (base64 WAV) back into AudioBuffers
@@ -7892,38 +8454,38 @@ function Tabula() {
       return;
     }
     var ctx = bell.current && bell.current.ctx || drumEngine.current && drumEngine.current.ctx || new OfflineAudioContext(1, 1, 44100);
-    _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee15() {
+    _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee16() {
       var decoded;
-      return _regenerator().w(function (_context15) {
-        while (1) switch (_context15.n) {
+      return _regenerator().w(function (_context16) {
+        while (1) switch (_context16.n) {
           case 0:
             decoded = {};
-            _context15.n = 1;
+            _context16.n = 1;
             return Promise.all(Object.entries(sj).map(/*#__PURE__*/function () {
-              var _ref26 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee14(_ref25) {
-                var _ref27, k, b64, _t14;
-                return _regenerator().w(function (_context14) {
-                  while (1) switch (_context14.p = _context14.n) {
+              var _ref30 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee15(_ref29) {
+                var _ref31, k, b64, _t15;
+                return _regenerator().w(function (_context15) {
+                  while (1) switch (_context15.p = _context15.n) {
                     case 0:
-                      _ref27 = _slicedToArray(_ref25, 2), k = _ref27[0], b64 = _ref27[1];
-                      _context14.p = 1;
-                      _context14.n = 2;
+                      _ref31 = _slicedToArray(_ref29, 2), k = _ref31[0], b64 = _ref31[1];
+                      _context15.p = 1;
+                      _context15.n = 2;
                       return ctx.decodeAudioData(base64ToAb(b64));
                     case 2:
-                      decoded[k] = _context14.v;
-                      _context14.n = 4;
+                      decoded[k] = _context15.v;
+                      _context15.n = 4;
                       break;
                     case 3:
-                      _context14.p = 3;
-                      _t14 = _context14.v;
-                      console.warn("user sample decode failed", k, _t14);
+                      _context15.p = 3;
+                      _t15 = _context15.v;
+                      console.warn("user sample decode failed", k, _t15);
                     case 4:
-                      return _context14.a(2);
+                      return _context15.a(2);
                   }
-                }, _callee14, null, [[1, 3]]);
+                }, _callee15, null, [[1, 3]]);
               }));
               return function (_x15) {
-                return _ref26.apply(this, arguments);
+                return _ref30.apply(this, arguments);
               };
             }()));
           case 1:
@@ -7931,9 +8493,9 @@ function Tabula() {
             userSamplesR.current = decoded;
             if (kitId === "user") setVoiceSamples(decoded); // USER kit → play them now
           case 2:
-            return _context15.a(2);
+            return _context16.a(2);
         }
-      }, _callee15);
+      }, _callee16);
     }))();
   };
 
@@ -7945,39 +8507,39 @@ function Tabula() {
   // resulting sample begins at the first transient, not from a silent lead-in.
   // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
   var startRecord = /*#__PURE__*/function () {
-    var _ref28 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee17(voiceKey) {
-      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t16;
-      return _regenerator().w(function (_context17) {
-        while (1) switch (_context17.p = _context17.n) {
+    var _ref32 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee18(voiceKey) {
+      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick, _t17;
+      return _regenerator().w(function (_context18) {
+        while (1) switch (_context18.p = _context18.n) {
           case 0:
             if (!recordingVoice) {
-              _context17.n = 1;
+              _context18.n = 1;
               break;
             }
-            return _context17.a(2);
+            return _context18.a(2);
           case 1:
             if (!(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined")) {
-              _context17.n = 2;
+              _context18.n = 2;
               break;
             }
             showFlash("MIC UNSUPPORTED");
-            return _context17.a(2);
+            return _context18.a(2);
           case 2:
             ONSET_THRESH = 0.08; // peak deviation from center (0..1)
             SILENCE_THRESH = 0.025;
             SILENCE_HOLD_MS = 300;
             ARM_TIMEOUT_MS = 10000; // if no onset in 10s, bail out
-            _context17.p = 3;
-            _context17.n = 4;
+            _context18.p = 3;
+            _context18.n = 4;
             return navigator.mediaDevices.getUserMedia({
               audio: true
             });
           case 4:
-            stream = _context17.v;
+            stream = _context18.v;
             recordStreamRef.current = stream;
             ctx = bell.current && bell.current.ctx || drumEngine.current && drumEngine.current.ctx;
             if (ctx) {
-              _context17.n = 5;
+              _context18.n = 5;
               break;
             }
             stream.getTracks().forEach(function (t) {
@@ -7985,7 +8547,7 @@ function Tabula() {
             });
             recordStreamRef.current = null;
             showFlash("AUDIO INIT");
-            return _context17.a(2);
+            return _context18.a(2);
           case 5:
             source = ctx.createMediaStreamSource(stream);
             analyser = ctx.createAnalyser();
@@ -7999,28 +8561,28 @@ function Tabula() {
             stopped = false;
             armedStart = performance.now();
             finishWith = /*#__PURE__*/function () {
-              var _ref29 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee16() {
-                var blob, ab, audioBuf, _t15;
-                return _regenerator().w(function (_context16) {
-                  while (1) switch (_context16.p = _context16.n) {
+              var _ref33 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee17() {
+                var blob, ab, audioBuf, _t16;
+                return _regenerator().w(function (_context17) {
+                  while (1) switch (_context17.p = _context17.n) {
                     case 0:
                       stopped = true;
-                      _context16.p = 1;
+                      _context17.p = 1;
                       if (!chunks.length) {
-                        _context16.n = 4;
+                        _context17.n = 4;
                         break;
                       }
                       blob = new Blob(chunks, {
                         type: recorder && recorder.mimeType || "audio/webm"
                       });
-                      _context16.n = 2;
+                      _context17.n = 2;
                       return blob.arrayBuffer();
                     case 2:
-                      ab = _context16.v;
-                      _context16.n = 3;
+                      ab = _context17.v;
+                      _context17.n = 3;
                       return ctx.decodeAudioData(ab);
                     case 3:
-                      audioBuf = _context16.v;
+                      audioBuf = _context17.v;
                       // Store in BOTH the live map and the persistent user-kit map so the
                       // recording survives kit switches and is saved with the project.
                       setVoiceSamples(function (prev) {
@@ -8031,12 +8593,12 @@ function Tabula() {
                       });
                       showFlash("REC OK " + voiceKey);
                     case 4:
-                      _context16.n = 6;
+                      _context17.n = 6;
                       break;
                     case 5:
-                      _context16.p = 5;
-                      _t15 = _context16.v;
-                      console.error("Sample decode failed:", _t15);
+                      _context17.p = 5;
+                      _t16 = _context17.v;
+                      console.error("Sample decode failed:", _t16);
                       showFlash("DECODE FAIL");
                     case 6:
                       if (recordStreamRef.current) {
@@ -8048,12 +8610,12 @@ function Tabula() {
                       recorderRef.current = null;
                       setRecordingVoice(null);
                     case 7:
-                      return _context16.a(2);
+                      return _context17.a(2);
                   }
-                }, _callee16, null, [[1, 5]]);
+                }, _callee17, null, [[1, 5]]);
               }));
               return function finishWith() {
-                return _ref29.apply(this, arguments);
+                return _ref33.apply(this, arguments);
               };
             }();
             _tick = function tick() {
@@ -8103,21 +8665,21 @@ function Tabula() {
             };
             setRecordingVoice(voiceKey);
             if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(_tick);else setTimeout(_tick, 30);
-            _context17.n = 7;
+            _context18.n = 7;
             break;
           case 6:
-            _context17.p = 6;
-            _t16 = _context17.v;
-            console.error("Mic denied:", _t16);
+            _context18.p = 6;
+            _t17 = _context18.v;
+            console.error("Mic denied:", _t17);
             showFlash("MIC DENIED");
             setRecordingVoice(null);
           case 7:
-            return _context17.a(2);
+            return _context18.a(2);
         }
-      }, _callee17, null, [[3, 6]]);
+      }, _callee18, null, [[3, 6]]);
     }));
     return function startRecord(_x16) {
-      return _ref28.apply(this, arguments);
+      return _ref32.apply(this, arguments);
     };
   }();
   var stopRecord = function stopRecord() {
@@ -8353,18 +8915,18 @@ function Tabula() {
     if (j < 0 || j >= chain.length) return;
     setChain(function (c) {
       var n = _toConsumableArray(c);
-      var _ref30 = [n[j], n[i]];
-      n[i] = _ref30[0];
-      n[j] = _ref30[1];
+      var _ref34 = [n[j], n[i]];
+      n[i] = _ref34[0];
+      n[j] = _ref34[1];
       return n;
     });
   };
 
   // BPM drag scrubber
-  var _useState191 = useState(false),
-    _useState192 = _slicedToArray(_useState191, 2),
-    bpmDragging = _useState192[0],
-    setBpmDragging = _useState192[1];
+  var _useState193 = useState(false),
+    _useState194 = _slicedToArray(_useState193, 2),
+    bpmDragging = _useState194[0],
+    setBpmDragging = _useState194[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -8393,10 +8955,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState193 = useState(false),
-    _useState194 = _slicedToArray(_useState193, 2),
-    stDragging = _useState194[0],
-    setStDragging = _useState194[1];
+  var _useState195 = useState(false),
+    _useState196 = _slicedToArray(_useState195, 2),
+    stDragging = _useState196[0],
+    setStDragging = _useState196[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -8425,10 +8987,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState195 = useState(false),
-    _useState196 = _slicedToArray(_useState195, 2),
-    swingDragging = _useState196[0],
-    setSwingDragging = _useState196[1];
+  var _useState197 = useState(false),
+    _useState198 = _slicedToArray(_useState197, 2),
+    swingDragging = _useState198[0],
+    setSwingDragging = _useState198[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -8985,12 +9547,12 @@ function Tabula() {
       });
     }, isOnlyPat, true], ["MUT8", function () {
       return act(mutatePat1);
-    }], ["", null, true]].map(function (_ref31) {
-      var _ref32 = _slicedToArray(_ref31, 4),
-        label = _ref32[0],
-        fn = _ref32[1],
-        disabled = _ref32[2],
-        danger = _ref32[3];
+    }], ["", null, true]].map(function (_ref35) {
+      var _ref36 = _slicedToArray(_ref35, 4),
+        label = _ref36[0],
+        fn = _ref36[1],
+        disabled = _ref36[2],
+        danger = _ref36[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -9096,10 +9658,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref33) {
-    var _ref34 = _slicedToArray(_ref33, 2),
-      k = _ref34[0],
-      v = _ref34[1];
+  }, Object.entries(SCALES).map(function (_ref37) {
+    var _ref38 = _slicedToArray(_ref37, 2),
+      k = _ref38[0],
+      v = _ref38[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -9195,16 +9757,16 @@ function Tabula() {
       flexDirection: "column",
       gap: 4
     }
-  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref35) {
-    var _layerStoreR$current$, _layerStoreR$current$2;
-    var _ref36 = _slicedToArray(_ref35, 4),
-      layer = _ref36[0],
-      label = _ref36[1],
-      accent = _ref36[2],
-      accentRgb = _ref36[3];
+  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref39) {
+    var _layerStoreR$current$3, _layerStoreR$current$4;
+    var _ref40 = _slicedToArray(_ref39, 4),
+      layer = _ref40[0],
+      label = _ref40[1],
+      accent = _ref40[2],
+      accentRgb = _ref40[3];
     var isActive = activeLayer === layer;
-    var layerPats = isActive ? pats : ((_layerStoreR$current$ = layerStoreR.current[layer]) === null || _layerStoreR$current$ === void 0 ? void 0 : _layerStoreR$current$.pats) || [];
-    var layerActiveId = isActive ? activeId : (_layerStoreR$current$2 = layerStoreR.current[layer]) === null || _layerStoreR$current$2 === void 0 ? void 0 : _layerStoreR$current$2.activeId;
+    var layerPats = isActive ? pats : ((_layerStoreR$current$3 = layerStoreR.current[layer]) === null || _layerStoreR$current$3 === void 0 ? void 0 : _layerStoreR$current$3.pats) || [];
+    var layerActiveId = isActive ? activeId : (_layerStoreR$current$4 = layerStoreR.current[layer]) === null || _layerStoreR$current$4 === void 0 ? void 0 : _layerStoreR$current$4.activeId;
     return /*#__PURE__*/React.createElement("div", {
       key: layer,
       "data-layer-box": layer,
@@ -9653,11 +10215,11 @@ function Tabula() {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref37) {
-      var _ref38 = _slicedToArray(_ref37, 3),
-        l = _ref38[0],
-        f = _ref38[1],
-        d = _ref38[2];
+    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref41) {
+      var _ref42 = _slicedToArray(_ref41, 3),
+        l = _ref42[0],
+        f = _ref42[1],
+        d = _ref42[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         style: {
@@ -9687,12 +10249,12 @@ function Tabula() {
       return dupPatId(targetId);
     }, pats.length >= 8, false], ["DEL", function () {
       return delPatId(targetId);
-    }, isOnlyPat, true]].map(function (_ref39) {
-      var _ref40 = _slicedToArray(_ref39, 4),
-        l = _ref40[0],
-        f = _ref40[1],
-        d = _ref40[2],
-        danger = _ref40[3];
+    }, isOnlyPat, true]].map(function (_ref43) {
+      var _ref44 = _slicedToArray(_ref43, 4),
+        l = _ref44[0],
+        f = _ref44[1],
+        d = _ref44[2],
+        danger = _ref44[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -9716,9 +10278,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref41) {
-      var label = _ref41.label,
-        mult = _ref41.mult;
+    }, SPEED_OPTS.map(function (_ref45) {
+      var label = _ref45.label,
+        mult = _ref45.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -9745,11 +10307,11 @@ function Tabula() {
         gridTemplateColumns: "repeat(3,1fr)",
         gap: 2
       }
-    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["MUT8", mutateDrumPat1, false, false]].map(function (_ref42) {
-      var _ref43 = _slicedToArray(_ref42, 3),
-        l = _ref43[0],
-        f = _ref43[1],
-        d = _ref43[2];
+    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["MUT8", mutateDrumPat1, false, false]].map(function (_ref46) {
+      var _ref47 = _slicedToArray(_ref46, 3),
+        l = _ref47[0],
+        f = _ref47[1],
+        d = _ref47[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -9772,12 +10334,12 @@ function Tabula() {
         gridTemplateColumns: "repeat(4,1fr)",
         gap: 2
       }
-    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref44) {
-      var _ref45 = _slicedToArray(_ref44, 4),
-        l = _ref45[0],
-        f = _ref45[1],
-        d = _ref45[2],
-        danger = _ref45[3];
+    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref48) {
+      var _ref49 = _slicedToArray(_ref48, 4),
+        l = _ref49[0],
+        f = _ref49[1],
+        d = _ref49[2],
+        danger = _ref49[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -9801,9 +10363,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref46) {
-      var label = _ref46.label,
-        mult = _ref46.mult;
+    }, SPEED_OPTS.map(function (_ref50) {
+      var label = _ref50.label,
+        mult = _ref50.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -10179,7 +10741,24 @@ function Tabula() {
       var _importRef$current;
       return (_importRef$current = importRef.current) === null || _importRef$current === void 0 ? void 0 : _importRef$current.click();
     }
-  }, winW > 650 ? "IMPORT" : "IMP")), /*#__PURE__*/React.createElement("input", {
+  }, winW > 650 ? "IMPORT" : "IMP"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: winW > 900 ? "8px 0" : "4px 0",
+      fontSize: winW > 900 ? 9 : 7,
+      minWidth: 0
+    }),
+    onClick: exportMIDI
+  }, "MIDI"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: winW > 900 ? "8px 0" : "4px 0",
+      fontSize: winW > 900 ? 9 : 7,
+      minWidth: 0,
+      opacity: exporting ? 0.5 : 1,
+      cursor: exporting ? "wait" : "pointer"
+    }),
+    disabled: exporting,
+    onClick: exportMP3
+  }, exporting ? "…" : "MP3")), /*#__PURE__*/React.createElement("input", {
     ref: importRef,
     type: "file",
     accept: ".json",
@@ -10223,10 +10802,10 @@ function Tabula() {
       alignSelf: "center",
       alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref47) {
-    var _ref48 = _slicedToArray(_ref47, 2),
-      val = _ref48[0],
-      lbl = _ref48[1];
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref51) {
+    var _ref52 = _slicedToArray(_ref51, 2),
+      val = _ref52[0],
+      lbl = _ref52[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -10294,10 +10873,10 @@ function Tabula() {
         gap: 1
       }
     }, ["synth", "lead", "drums"].map(function (layer) {
-      var _layerStoreR$current$3;
+      var _layerStoreR$current$5;
       var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#6c9ad6" : "#c4727a";
       var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "108,154,214" : "196,114,122";
-      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$3 = layerStoreR.current[layer]) === null || _layerStoreR$current$3 === void 0 ? void 0 : _layerStoreR$current$3.pats) || (layer === "synth" ? pats : []);
+      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$5 = layerStoreR.current[layer]) === null || _layerStoreR$current$5 === void 0 ? void 0 : _layerStoreR$current$5.pats) || (layer === "synth" ? pats : []);
       return /*#__PURE__*/React.createElement("div", {
         key: layer,
         style: {
@@ -11532,11 +12111,11 @@ function Tabula() {
     }) || drumPats[0];
     var vRhythm = (dPat === null || dPat === void 0 ? void 0 : dPat.vRhythm) || 0;
     var vVelocity = (dPat === null || dPat === void 0 ? void 0 : dPat.vVelocity) || 0;
-    var SliderRow = function SliderRow(_ref50) {
-      var label = _ref50.label,
-        value = _ref50.value,
-        onChange = _ref50.onChange,
-        accent = _ref50.accent;
+    var SliderRow = function SliderRow(_ref54) {
+      var label = _ref54.label,
+        value = _ref54.value,
+        onChange = _ref54.onChange,
+        accent = _ref54.accent;
       return /*#__PURE__*/React.createElement("div", {
         style: {
           marginBottom: 16
@@ -11740,10 +12319,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r6 = 0; _r6 < ROWS; _r6++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r6][c2]) {
-          var _activePat$durs$_r6$c, _activePat$durs2;
-          var span = Math.max(1, (_activePat$durs$_r6$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r6]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r6$c !== void 0 ? _activePat$durs$_r6$c : 1);
+      for (var _r7 = 0; _r7 < ROWS; _r7++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r7][c2]) {
+          var _activePat$durs$_r7$c, _activePat$durs2;
+          var span = Math.max(1, (_activePat$durs$_r7$c = (_activePat$durs2 = activePat.durs) === null || _activePat$durs2 === void 0 || (_activePat$durs2 = _activePat$durs2[_r7]) === null || _activePat$durs2 === void 0 ? void 0 : _activePat$durs2[c2]) !== null && _activePat$durs$_r7$c !== void 0 ? _activePat$durs$_r7$c : 1);
           if (c < c2 + span) return true;
         }
       }
@@ -12362,10 +12941,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]].map(function (_ref51) {
-    var _ref52 = _slicedToArray(_ref51, 2),
-      p = _ref52[0],
-      lbl = _ref52[1];
+  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]].map(function (_ref55) {
+    var _ref56 = _slicedToArray(_ref55, 2),
+      p = _ref56[0],
+      lbl = _ref56[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && activeVary ? {
@@ -12505,12 +13084,12 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref53) {
-    var _ref54 = _slicedToArray(_ref53, 4),
-      lyr = _ref54[0],
-      lbl = _ref54[1],
-      c = _ref54[2],
-      cf = _ref54[3];
+  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref57) {
+    var _ref58 = _slicedToArray(_ref57, 4),
+      lyr = _ref58[0],
+      lbl = _ref58[1],
+      c = _ref58[2],
+      cf = _ref58[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       "data-layer-box": lyr,
@@ -12851,10 +13430,10 @@ function Tabula() {
       alignSelf: "center",
       alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref55) {
-    var _ref56 = _slicedToArray(_ref55, 2),
-      val = _ref56[0],
-      lbl = _ref56[1];
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref59) {
+    var _ref60 = _slicedToArray(_ref59, 2),
+      val = _ref60[0],
+      lbl = _ref60[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -12922,10 +13501,10 @@ function Tabula() {
         gap: 1
       }
     }, ["synth", "lead", "drums"].map(function (layer) {
-      var _layerStoreR$current$4;
+      var _layerStoreR$current$6;
       var accent = layer === "synth" ? "#a8c5a0" : layer === "lead" ? "#6c9ad6" : "#c4727a";
       var accentRgb = layer === "synth" ? "168,197,160" : layer === "lead" ? "108,154,214" : "196,114,122";
-      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$4 = layerStoreR.current[layer]) === null || _layerStoreR$current$4 === void 0 ? void 0 : _layerStoreR$current$4.pats) || (layer === "synth" ? pats : []);
+      var patSet = layer === "drums" ? drumPats : layer === activeLayer ? pats : ((_layerStoreR$current$6 = layerStoreR.current[layer]) === null || _layerStoreR$current$6 === void 0 ? void 0 : _layerStoreR$current$6.pats) || (layer === "synth" ? pats : []);
       return /*#__PURE__*/React.createElement("div", {
         key: layer,
         style: {
@@ -14014,10 +14593,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref58) {
-    var _ref59 = _slicedToArray(_ref58, 2),
-      k = _ref59[0],
-      v = _ref59[1];
+  }, Object.entries(SCALES).map(function (_ref62) {
+    var _ref63 = _slicedToArray(_ref62, 2),
+      k = _ref63[0],
+      v = _ref63[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -14095,12 +14674,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref60) {
-      var _ref61 = _slicedToArray(_ref60, 4),
-        l = _ref61[0],
-        f = _ref61[1],
-        d = _ref61[2],
-        danger = _ref61[3];
+    }, ops.map(function (_ref64) {
+      var _ref65 = _slicedToArray(_ref64, 4),
+        l = _ref65[0],
+        f = _ref65[1],
+        d = _ref65[2],
+        danger = _ref65[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -14190,10 +14769,10 @@ function Tabula() {
         for (var r = 0; r < ROWS; r++) if (activePat.grid[r][c]) return true;
         return false;
       }
-      for (var _r7 = 0; _r7 < ROWS; _r7++) for (var c2 = 0; c2 <= c; c2++) {
-        if (activePat.grid[_r7][c2]) {
-          var _activePat$durs$_r7$c, _activePat$durs4;
-          var span = Math.max(1, (_activePat$durs$_r7$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r7]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r7$c !== void 0 ? _activePat$durs$_r7$c : 1);
+      for (var _r8 = 0; _r8 < ROWS; _r8++) for (var c2 = 0; c2 <= c; c2++) {
+        if (activePat.grid[_r8][c2]) {
+          var _activePat$durs$_r8$c, _activePat$durs4;
+          var span = Math.max(1, (_activePat$durs$_r8$c = (_activePat$durs4 = activePat.durs) === null || _activePat$durs4 === void 0 || (_activePat$durs4 = _activePat$durs4[_r8]) === null || _activePat$durs4 === void 0 ? void 0 : _activePat$durs4[c2]) !== null && _activePat$durs$_r8$c !== void 0 ? _activePat$durs$_r8$c : 1);
           if (c < c2 + span) return true;
         }
       }
@@ -15329,7 +15908,19 @@ function Tabula() {
       var _importRef$current2;
       return (_importRef$current2 = importRef.current) === null || _importRef$current2 === void 0 ? void 0 : _importRef$current2.click();
     }
-  }, "IMPORT")), /*#__PURE__*/React.createElement("input", {
+  }, "IMPORT"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0"
+    }),
+    onClick: exportMIDI
+  }, "MIDI"), /*#__PURE__*/React.createElement("button", {
+    style: Object.assign({}, S.menuSlotBtn, {
+      padding: "10px 0",
+      opacity: exporting ? 0.5 : 1
+    }),
+    disabled: exporting,
+    onClick: exportMP3
+  }, exporting ? "…" : "MP3")), /*#__PURE__*/React.createElement("input", {
     ref: importRef,
     type: "file",
     accept: ".json",
@@ -15377,13 +15968,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref62) {
-    var _ref63 = _slicedToArray(_ref62, 5),
-      label = _ref63[0],
-      val = _ref63[1],
-      setter = _ref63[2],
-      max = _ref63[3],
-      unit = _ref63[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref66) {
+    var _ref67 = _slicedToArray(_ref66, 5),
+      label = _ref67[0],
+      val = _ref67[1],
+      setter = _ref67[2],
+      max = _ref67[3],
+      unit = _ref67[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -15468,13 +16059,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref64) {
-    var _ref65 = _slicedToArray(_ref64, 5),
-      label = _ref65[0],
-      val = _ref65[1],
-      setter = _ref65[2],
-      max = _ref65[3],
-      unit = _ref65[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref68) {
+    var _ref69 = _slicedToArray(_ref68, 5),
+      label = _ref69[0],
+      val = _ref69[1],
+      setter = _ref69[2],
+      max = _ref69[3],
+      unit = _ref69[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -15559,11 +16150,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref66) {
-    var _ref67 = _slicedToArray(_ref66, 3),
-      label = _ref67[0],
-      val = _ref67[1],
-      setter = _ref67[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref70) {
+    var _ref71 = _slicedToArray(_ref70, 3),
+      label = _ref71[0],
+      val = _ref71[1],
+      setter = _ref71[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -15719,12 +16310,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref68) {
-      var _ref69 = _slicedToArray(_ref68, 4),
-        label = _ref69[0],
-        fn = _ref69[1],
-        disabled = _ref69[2],
-        danger = _ref69[3];
+    }, isOnlyPat, true]].map(function (_ref72) {
+      var _ref73 = _slicedToArray(_ref72, 4),
+        label = _ref73[0],
+        fn = _ref73[1],
+        disabled = _ref73[2],
+        danger = _ref73[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -15808,12 +16399,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref70) {
-      var _ref71 = _slicedToArray(_ref70, 4),
-        label = _ref71[0],
-        fn = _ref71[1],
-        disabled = _ref71[2],
-        danger = _ref71[3];
+    }, isOnly, true]].map(function (_ref74) {
+      var _ref75 = _slicedToArray(_ref74, 4),
+        label = _ref75[0],
+        fn = _ref75[1],
+        disabled = _ref75[2],
+        danger = _ref75[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
