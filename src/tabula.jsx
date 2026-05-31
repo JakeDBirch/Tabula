@@ -1823,6 +1823,10 @@ export default function Tabula(){
   const [activeKit, setActiveKit] = useState(DEFAULT_KIT);
   const [kitLoading, setKitLoading] = useState(false);
   const [exporting, setExporting] = useState(false); // MP3 bounce in progress
+  // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
+  // navigator.share needs a fresh user gesture, and the bounce is async, so we
+  // stash the file and surface a SHARE button for the user to tap.
+  const [shareFile, setShareFile] = useState(null);
   const recorderRef = useRef(null);
   const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -3058,8 +3062,15 @@ export default function Tabula(){
       if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
       showFlash("ENCODING…");
       const blob=encodeMP3(lame,L,R,ctx.sampleRate);
-      downloadBlob(blob,"tabula-song.mp3","audio/mpeg");
-      showFlash("MP3 EXPORTED");
+      // On mobile (where the OS share sheet is the point — text/email the
+      // sketch), stash the file and surface a SHARE button instead of forcing a
+      // download. Desktop, or anywhere file-sharing isn't supported, downloads.
+      const file=new File([blob],"tabula-song.mp3",{type:"audio/mpeg"});
+      if(IS_MOBILE&&navigator.canShare&&navigator.canShare({files:[file]})){
+        setShareFile(file);showFlash("READY — TAP SHARE");
+      }else{
+        downloadBlob(blob,"tabula-song.mp3","audio/mpeg");showFlash("MP3 EXPORTED");
+      }
     }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
     finally{
       try{if(master&&cap)master.disconnect(cap);}catch(e){}
@@ -4869,6 +4880,20 @@ export default function Tabula(){
   return(
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
+
+      {/* MP3 share prompt (mobile) — appears after a bounce so the SHARE tap is a
+          fresh user gesture (required by navigator.share). */}
+      {shareFile&&(
+        <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:9999,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div style={{margin:"0 0 96px",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:14,background:"rgba(24,22,18,0.97)",border:"1px solid rgba(168,197,160,0.4)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)",pointerEvents:"auto"}}>
+            <span style={{fontSize:10,letterSpacing:1,color:"rgba(210,195,175,0.5)",fontWeight:600}}>MP3 READY</span>
+            <button onClick={async()=>{const f=shareFile;try{await navigator.share({files:[f],title:"Tabula",text:"Tabula sketch"});setShareFile(null);}catch(e){if(!(e&&e.name==="AbortError")){downloadBlob(f,"tabula-song.mp3","audio/mpeg");setShareFile(null);}}}}
+              style={{padding:"10px 18px",borderRadius:10,border:"1px solid #a8c5a0",background:"rgba(168,197,160,0.18)",color:"#cfe3c8",fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}>↗ SHARE</button>
+            <button onClick={()=>setShareFile(null)}
+              style={{padding:"10px 12px",borderRadius:10,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
+        </div>
+      )}
 
       {/* Synth-panel param popup */}
       {paramPopup&&(()=>{

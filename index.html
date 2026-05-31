@@ -3497,43 +3497,50 @@ function Tabula() {
     _useState82 = _slicedToArray(_useState81, 2),
     exporting = _useState82[0],
     setExporting = _useState82[1]; // MP3 bounce in progress
+  // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
+  // navigator.share needs a fresh user gesture, and the bounce is async, so we
+  // stash the file and surface a SHARE button for the user to tap.
+  var _useState83 = useState(null),
+    _useState84 = _slicedToArray(_useState83, 2),
+    shareFile = _useState84[0],
+    setShareFile = _useState84[1];
   var recorderRef = useRef(null);
   var recordStreamRef = useRef(null);
-  var _useState83 = useState(0),
-    _useState84 = _slicedToArray(_useState83, 2),
-    swing = _useState84[0],
-    setSwing = _useState84[1]; // 0–100, 0=straight, 100=full triplet swing
+  var _useState85 = useState(0),
+    _useState86 = _slicedToArray(_useState85, 2),
+    swing = _useState86[0],
+    setSwing = _useState86[1]; // 0–100, 0=straight, 100=full triplet swing
   var swingR = useRef(0);
   var gridLenR = useRef(16);
-  var _useState85 = useState(1),
-    _useState86 = _slicedToArray(_useState85, 2),
-    speedMult = _useState86[0],
-    setSpeedMult = _useState86[1];
-  var speedMultR = useRef(1);
-  var _useState87 = useState(false),
+  var _useState87 = useState(1),
     _useState88 = _slicedToArray(_useState87, 2),
-    showMenu = _useState88[0],
-    setShowMenu = _useState88[1];
+    speedMult = _useState88[0],
+    setSpeedMult = _useState88[1];
+  var speedMultR = useRef(1);
   var _useState89 = useState(false),
     _useState90 = _slicedToArray(_useState89, 2),
-    topTrayOpen = _useState90[0],
-    setTopTrayOpen = _useState90[1];
+    showMenu = _useState90[0],
+    setShowMenu = _useState90[1];
   var _useState91 = useState(false),
     _useState92 = _slicedToArray(_useState91, 2),
-    bottomTrayOpen = _useState92[0],
-    setBottomTrayOpen = _useState92[1];
-  var _useState93 = useState(null),
+    topTrayOpen = _useState92[0],
+    setTopTrayOpen = _useState92[1];
+  var _useState93 = useState(false),
     _useState94 = _slicedToArray(_useState93, 2),
-    patMenu = _useState94[0],
-    setPatMenu = _useState94[1]; // {id, x, y}
+    bottomTrayOpen = _useState94[0],
+    setBottomTrayOpen = _useState94[1];
   var _useState95 = useState(null),
     _useState96 = _slicedToArray(_useState95, 2),
-    drumMenu = _useState96[0],
-    setDrumMenu = _useState96[1]; // {id, x, y}
+    patMenu = _useState96[0],
+    setPatMenu = _useState96[1]; // {id, x, y}
   var _useState97 = useState(null),
     _useState98 = _slicedToArray(_useState97, 2),
-    paramPopup = _useState98[0],
-    setParamPopup = _useState98[1]; // {col,x,y,activeArm,values}
+    drumMenu = _useState98[0],
+    setDrumMenu = _useState98[1]; // {id, x, y}
+  var _useState99 = useState(null),
+    _useState100 = _slicedToArray(_useState99, 2),
+    paramPopup = _useState100[0],
+    setParamPopup = _useState100[1]; // {col,x,y,activeArm,values}
   var popupR = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   var longPressR = useRef(null); // setTimeout id
   var varyLongPressR = useRef(null);
@@ -3542,69 +3549,69 @@ function Tabula() {
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
   var pointerCountR = useRef(0); // active pointers on grid
-  var _useState99 = useState(null),
-    _useState100 = _slicedToArray(_useState99, 2),
-    chainDrag = _useState100[0],
-    setChainDrag = _useState100[1]; // {type,id,fromIdx,x,y}
-  var chainStripRef = useRef(null);
-  var chainDragR = useRef(null); // mirror of chainDrag for handlers
   var _useState101 = useState(null),
     _useState102 = _slicedToArray(_useState101, 2),
-    patternDrag = _useState102[0],
-    setPatternDrag = _useState102[1]; // {patId, name, accent, x, y, overDrop}
-  // Vary params
-  var _useState103 = useState(13),
+    chainDrag = _useState102[0],
+    setChainDrag = _useState102[1]; // {type,id,fromIdx,x,y}
+  var chainStripRef = useRef(null);
+  var chainDragR = useRef(null); // mirror of chainDrag for handlers
+  var _useState103 = useState(null),
     _useState104 = _slicedToArray(_useState103, 2),
-    vDropRate = _useState104[0],
-    setVDropRate = _useState104[1];
-  var _useState105 = useState(17),
+    patternDrag = _useState104[0],
+    setPatternDrag = _useState104[1]; // {patId, name, accent, x, y, overDrop}
+  // Vary params
+  var _useState105 = useState(13),
     _useState106 = _slicedToArray(_useState105, 2),
-    vShiftRate = _useState106[0],
-    setVShiftRate = _useState106[1];
-  var _useState107 = useState(1),
+    vDropRate = _useState106[0],
+    setVDropRate = _useState106[1];
+  var _useState107 = useState(17),
     _useState108 = _slicedToArray(_useState107, 2),
-    vShiftRange = _useState108[0],
-    setVShiftRange = _useState108[1];
-  var _useState109 = useState(0),
+    vShiftRate = _useState108[0],
+    setVShiftRate = _useState108[1];
+  var _useState109 = useState(1),
     _useState110 = _slicedToArray(_useState109, 2),
-    vPitchRate = _useState110[0],
-    setVPitchRate = _useState110[1];
-  var _useState111 = useState(1),
+    vShiftRange = _useState110[0],
+    setVShiftRange = _useState110[1];
+  var _useState111 = useState(0),
     _useState112 = _slicedToArray(_useState111, 2),
-    vPitchRange = _useState112[0],
-    setVPitchRange = _useState112[1];
-  var _useState113 = useState(0),
+    vPitchRate = _useState112[0],
+    setVPitchRate = _useState112[1];
+  var _useState113 = useState(1),
     _useState114 = _slicedToArray(_useState113, 2),
-    vGhostRate = _useState114[0],
-    setVGhostRate = _useState114[1];
+    vPitchRange = _useState114[0],
+    setVPitchRange = _useState114[1];
   var _useState115 = useState(0),
     _useState116 = _slicedToArray(_useState115, 2),
-    vVelJitter = _useState116[0],
-    setVVelJitter = _useState116[1];
+    vGhostRate = _useState116[0],
+    setVGhostRate = _useState116[1];
   var _useState117 = useState(0),
     _useState118 = _slicedToArray(_useState117, 2),
-    vFltJitter = _useState118[0],
-    setVFltJitter = _useState118[1];
+    vVelJitter = _useState118[0],
+    setVVelJitter = _useState118[1];
   var _useState119 = useState(0),
     _useState120 = _slicedToArray(_useState119, 2),
-    vDlyJitter = _useState120[0],
-    setVDlyJitter = _useState120[1];
+    vFltJitter = _useState120[0],
+    setVFltJitter = _useState120[1];
   var _useState121 = useState(0),
     _useState122 = _slicedToArray(_useState121, 2),
-    vRhyJitter = _useState122[0],
-    setVRhyJitter = _useState122[1];
+    vDlyJitter = _useState122[0],
+    setVDlyJitter = _useState122[1];
   var _useState123 = useState(0),
     _useState124 = _slicedToArray(_useState123, 2),
-    vOctJitter = _useState124[0],
-    setVOctJitter = _useState124[1];
+    vRhyJitter = _useState124[0],
+    setVRhyJitter = _useState124[1];
   var _useState125 = useState(0),
     _useState126 = _slicedToArray(_useState125, 2),
-    vGlideJitter = _useState126[0],
-    setVGlideJitter = _useState126[1];
+    vOctJitter = _useState126[0],
+    setVOctJitter = _useState126[1];
   var _useState127 = useState(0),
     _useState128 = _slicedToArray(_useState127, 2),
-    vDurJitter = _useState128[0],
-    setVDurJitter = _useState128[1];
+    vGlideJitter = _useState128[0],
+    setVGlideJitter = _useState128[1];
+  var _useState129 = useState(0),
+    _useState130 = _slicedToArray(_useState129, 2),
+    vDurJitter = _useState130[0],
+    setVDurJitter = _useState130[1];
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -3672,13 +3679,13 @@ function Tabula() {
       })
     };
   };
-  var _useState129 = useState({
+  var _useState131 = useState({
       synth: DEFAULT_LP(0),
       lead: DEFAULT_LP_MONO(0) // mono layer; user adjusts octave to taste
     }),
-    _useState130 = _slicedToArray(_useState129, 2),
-    layerParams = _useState130[0],
-    setLayerParams = _useState130[1];
+    _useState132 = _slicedToArray(_useState131, 2),
+    layerParams = _useState132[0],
+    setLayerParams = _useState132[1];
 
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
@@ -3738,74 +3745,74 @@ function Tabula() {
     setGlideLP = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
-  var _useState131 = useState(3),
-    _useState132 = _slicedToArray(_useState131, 2),
-    dlyIdx = _useState132[0],
-    setDlyIdx = _useState132[1];
-  var _useState133 = useState(45),
+  var _useState133 = useState(3),
     _useState134 = _slicedToArray(_useState133, 2),
-    dlyFbPct = _useState134[0],
-    setDlyFbPct = _useState134[1];
-  var _useState135 = useState(8),
+    dlyIdx = _useState134[0],
+    setDlyIdx = _useState134[1];
+  var _useState135 = useState(45),
     _useState136 = _slicedToArray(_useState135, 2),
-    dlyHpVal = _useState136[0],
-    setDlyHpVal = _useState136[1];
-  var _useState137 = useState(78),
+    dlyFbPct = _useState136[0],
+    setDlyFbPct = _useState136[1];
+  var _useState137 = useState(8),
     _useState138 = _slicedToArray(_useState137, 2),
-    dlyLpVal = _useState138[0],
-    setDlyLpVal = _useState138[1];
+    dlyHpVal = _useState138[0],
+    setDlyHpVal = _useState138[1];
+  var _useState139 = useState(78),
+    _useState140 = _slicedToArray(_useState139, 2),
+    dlyLpVal = _useState140[0],
+    setDlyLpVal = _useState140[1];
   // Global reverb knobs — per-layer rvSend lives in layerParams[*].rvSend.
   // No "wet" master — per-layer SEND already covers wet level cleanly;
   // having both was confusing and made it too easy to drench the mix.
-  var _useState139 = useState(50),
-    _useState140 = _slicedToArray(_useState139, 2),
-    rvSize = _useState140[0],
-    setRvSize = _useState140[1]; // comb feedback (0..100)
-  var _useState141 = useState(40),
+  var _useState141 = useState(50),
     _useState142 = _slicedToArray(_useState141, 2),
-    rvDamp = _useState142[0],
-    setRvDamp = _useState142[1]; // HF damp shelf cut (0=none, 100=full)
-  var _useState143 = useState(0),
+    rvSize = _useState142[0],
+    setRvSize = _useState142[1]; // comb feedback (0..100)
+  var _useState143 = useState(40),
     _useState144 = _slicedToArray(_useState143, 2),
-    rvLfDamp = _useState144[0],
-    setRvLfDamp = _useState144[1]; // LF damp shelf cut (0=none, 100=full)
+    rvDamp = _useState144[0],
+    setRvDamp = _useState144[1]; // HF damp shelf cut (0=none, 100=full)
   var _useState145 = useState(0),
     _useState146 = _slicedToArray(_useState145, 2),
-    rvPreDelay = _useState146[0],
-    setRvPreDelay = _useState146[1]; // pre-delay (ms, 0..500)
+    rvLfDamp = _useState146[0],
+    setRvLfDamp = _useState146[1]; // LF damp shelf cut (0=none, 100=full)
   var _useState147 = useState(0),
     _useState148 = _slicedToArray(_useState147, 2),
-    dlyToRev = _useState148[0],
-    setDlyToRev = _useState148[1]; // delay output → reverb input send
+    rvPreDelay = _useState148[0],
+    setRvPreDelay = _useState148[1]; // pre-delay (ms, 0..500)
   var _useState149 = useState(0),
     _useState150 = _slicedToArray(_useState149, 2),
-    satAmt = _useState150[0],
-    setSatAmt = _useState150[1]; // global master saturation (0..100)
+    dlyToRev = _useState150[0],
+    setDlyToRev = _useState150[1]; // delay output → reverb input send
+  var _useState151 = useState(0),
+    _useState152 = _slicedToArray(_useState151, 2),
+    satAmt = _useState152[0],
+    setSatAmt = _useState152[1]; // global master saturation (0..100)
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
-  var _useState151 = useState(85),
-    _useState152 = _slicedToArray(_useState151, 2),
-    drumLevel = _useState152[0],
-    setDrumLevel = _useState152[1];
+  var _useState153 = useState(85),
+    _useState154 = _slicedToArray(_useState153, 2),
+    drumLevel = _useState154[0],
+    setDrumLevel = _useState154[1];
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
-  var _useState153 = useState({
-      synth: false,
-      lead: false,
-      drums: false
-    }),
-    _useState154 = _slicedToArray(_useState153, 2),
-    trackMute = _useState154[0],
-    setTrackMute = _useState154[1];
   var _useState155 = useState({
       synth: false,
       lead: false,
       drums: false
     }),
     _useState156 = _slicedToArray(_useState155, 2),
-    trackSolo = _useState156[0],
-    setTrackSolo = _useState156[1];
+    trackMute = _useState156[0],
+    setTrackMute = _useState156[1];
+  var _useState157 = useState({
+      synth: false,
+      lead: false,
+      drums: false
+    }),
+    _useState158 = _slicedToArray(_useState157, 2),
+    trackSolo = _useState158[0],
+    setTrackSolo = _useState158[1];
   var trackMuteR = useRef(trackMute);
   var trackSoloR = useRef(trackSolo);
   useEffect(function () {
@@ -3833,64 +3840,64 @@ function Tabula() {
   var wakeLockR = useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
   var initDrum = mkDrumPat(symPat(0));
-  var _useState157 = useState([initDrum]),
-    _useState158 = _slicedToArray(_useState157, 2),
-    drumPats = _useState158[0],
-    setDrumPats = _useState158[1];
-  var _useState159 = useState(initDrum.id),
+  var _useState159 = useState([initDrum]),
     _useState160 = _slicedToArray(_useState159, 2),
-    activeDrumId = _useState160[0],
-    setActiveDrumId = _useState160[1];
-  var _useState161 = useState([initDrum.id]),
+    drumPats = _useState160[0],
+    setDrumPats = _useState160[1];
+  var _useState161 = useState(initDrum.id),
     _useState162 = _slicedToArray(_useState161, 2),
-    drumChain = _useState162[0],
-    setDrumChain = _useState162[1];
-  var _useState163 = useState(null),
+    activeDrumId = _useState162[0],
+    setActiveDrumId = _useState162[1];
+  var _useState163 = useState([initDrum.id]),
     _useState164 = _slicedToArray(_useState163, 2),
-    drumClipboard = _useState164[0],
-    setDrumClipboard = _useState164[1];
+    drumChain = _useState164[0],
+    setDrumChain = _useState164[1];
+  var _useState165 = useState(null),
+    _useState166 = _slicedToArray(_useState165, 2),
+    drumClipboard = _useState166[0],
+    setDrumClipboard = _useState166[1];
   // ── Phrase & Section architecture ──────────────────────────────────────────
-  var _useState165 = useState([{
+  var _useState167 = useState([{
       id: "SP1",
       name: symPhr(0),
       chain: [1]
     }]),
-    _useState166 = _slicedToArray(_useState165, 2),
-    synthPhrases = _useState166[0],
-    setSynthPhrases = _useState166[1];
-  var _useState167 = useState([{
+    _useState168 = _slicedToArray(_useState167, 2),
+    synthPhrases = _useState168[0],
+    setSynthPhrases = _useState168[1];
+  var _useState169 = useState([{
       id: "DP1",
       name: symPhr(0),
       chain: [initDrum.id]
     }]),
-    _useState168 = _slicedToArray(_useState167, 2),
-    drumPhrases = _useState168[0],
-    setDrumPhrases = _useState168[1];
-  var _useState169 = useState([{
+    _useState170 = _slicedToArray(_useState169, 2),
+    drumPhrases = _useState170[0],
+    setDrumPhrases = _useState170[1];
+  var _useState171 = useState([{
       id: "SC1",
       name: symSec(0),
       synthPhraseIds: [],
       drumPhraseIds: []
     }]),
-    _useState170 = _slicedToArray(_useState169, 2),
-    sections = _useState170[0],
-    setSections = _useState170[1];
-  var _useState171 = useState("SP1"),
     _useState172 = _slicedToArray(_useState171, 2),
-    activeSynthPhraseId = _useState172[0],
-    setActiveSynthPhraseId = _useState172[1];
-  var _useState173 = useState("DP1"),
+    sections = _useState172[0],
+    setSections = _useState172[1];
+  var _useState173 = useState("SP1"),
     _useState174 = _slicedToArray(_useState173, 2),
-    activeDrumPhraseId = _useState174[0],
-    setActiveDrumPhraseId = _useState174[1];
-  var _useState175 = useState("SC1"),
+    activeSynthPhraseId = _useState174[0],
+    setActiveSynthPhraseId = _useState174[1];
+  var _useState175 = useState("DP1"),
     _useState176 = _slicedToArray(_useState175, 2),
-    activeSectionId = _useState176[0],
-    setActiveSectionId = _useState176[1];
-  var _useState177 = useState("patterns"),
+    activeDrumPhraseId = _useState176[0],
+    setActiveDrumPhraseId = _useState176[1];
+  var _useState177 = useState("SC1"),
     _useState178 = _slicedToArray(_useState177, 2),
-    seqTab = _useState178[0],
-    setSeqTab = _useState178[1]; // "patterns"|"phrases"|"sections"
+    activeSectionId = _useState178[0],
+    setActiveSectionId = _useState178[1];
+  var _useState179 = useState("patterns"),
+    _useState180 = _slicedToArray(_useState179, 2),
+    seqTab = _useState180[0],
+    setSeqTab = _useState180[1]; // "patterns"|"phrases"|"sections"
   // ── Synth-type layer store ─────────────────────────────────────────────
   // The app now exposes TWO synth-type layers: POLY (polyphonic, internal key
   // "synth") and MONO (monophonic lead/bass, internal key "lead"). Internal
@@ -3943,27 +3950,27 @@ function Tabula() {
     }
     setActiveLayer(newLayer);
   };
-  var _useState179 = useState("sequence"),
-    _useState180 = _slicedToArray(_useState179, 2),
-    seqPage = _useState180[0],
-    setSeqPage = _useState180[1]; // "sequence"|"step"
+  var _useState181 = useState("sequence"),
+    _useState182 = _slicedToArray(_useState181, 2),
+    seqPage = _useState182[0],
+    setSeqPage = _useState182[1]; // "sequence"|"step"
 
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
   // songMode is the persistent playback intent: when true, the song matrix drives
   // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  var _useState181 = useState(false),
-    _useState182 = _slicedToArray(_useState181, 2),
-    songMode = _useState182[0],
-    setSongMode = _useState182[1];
+  var _useState183 = useState(false),
+    _useState184 = _slicedToArray(_useState183, 2),
+    songMode = _useState184[0],
+    setSongMode = _useState184[1];
   // songView is the UI gate: when true, the matrix is shown; when false, the
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
-  var _useState183 = useState(false),
-    _useState184 = _slicedToArray(_useState183, 2),
-    songView = _useState184[0],
-    setSongView = _useState184[1];
+  var _useState185 = useState(false),
+    _useState186 = _slicedToArray(_useState185, 2),
+    songView = _useState186[0],
+    setSongView = _useState186[1];
   // Song playback mode: "sync" = single shared cursor across all four layers,
   // "free" = each layer has its own cursor and advances independently,
   // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
@@ -3973,36 +3980,36 @@ function Tabula() {
   // separate additive flag (songRandom) that layers on top of either:
   //   sync   + random → all layers play the SAME randomly-chosen column each bar
   //   free   + random → each layer independently jumps to a random populated bar
-  var _useState185 = useState("sync"),
-    _useState186 = _slicedToArray(_useState185, 2),
-    songSyncMode = _useState186[0],
-    setSongSyncMode = _useState186[1];
-  var _useState187 = useState(false),
+  var _useState187 = useState("sync"),
     _useState188 = _slicedToArray(_useState187, 2),
-    songRandom = _useState188[0],
-    setSongRandom = _useState188[1];
+    songSyncMode = _useState188[0],
+    setSongSyncMode = _useState188[1];
+  var _useState189 = useState(false),
+    _useState190 = _slicedToArray(_useState189, 2),
+    songRandom = _useState190[0],
+    setSongRandom = _useState190[1];
   var songRandomR = useRef(false);
-  var _useState189 = useState({
+  var _useState191 = useState({
       synth: Array(64).fill(null),
       lead: Array(64).fill(null),
       drums: Array(64).fill(null)
     }),
-    _useState190 = _slicedToArray(_useState189, 2),
-    songMatrix = _useState190[0],
-    setSongMatrix = _useState190[1];
-  var _useState191 = useState(-1),
     _useState192 = _slicedToArray(_useState191, 2),
-    songBar = _useState192[0],
-    setSongBar = _useState192[1]; // sync mode current bar; -1 when stopped
+    songMatrix = _useState192[0],
+    setSongMatrix = _useState192[1];
+  var _useState193 = useState(-1),
+    _useState194 = _slicedToArray(_useState193, 2),
+    songBar = _useState194[0],
+    setSongBar = _useState194[1]; // sync mode current bar; -1 when stopped
   // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
-  var _useState193 = useState({
+  var _useState195 = useState({
       synth: -1,
       lead: -1,
       drums: -1
     }),
-    _useState194 = _slicedToArray(_useState193, 2),
-    songBarLayer = _useState194[0],
-    setSongBarLayer = _useState194[1];
+    _useState196 = _slicedToArray(_useState195, 2),
+    songBarLayer = _useState196[0],
+    setSongBarLayer = _useState196[1];
   var songBarR = useRef(-1);
   var songModeR = useRef(false);
   var songSyncR = useRef("sync");
@@ -5281,14 +5288,14 @@ function Tabula() {
   }, [gridLen]);
 
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  var _useState195 = useState(null),
-    _useState196 = _slicedToArray(_useState195, 2),
-    gridPx = _useState196[0],
-    setGridPx = _useState196[1];
   var _useState197 = useState(null),
     _useState198 = _slicedToArray(_useState197, 2),
-    editOuter = _useState198[0],
-    setEditOuter = _useState198[1];
+    gridPx = _useState198[0],
+    setGridPx = _useState198[1];
+  var _useState199 = useState(null),
+    _useState200 = _slicedToArray(_useState199, 2),
+    editOuter = _useState200[0],
+    setEditOuter = _useState200[1];
   var editOuterRef = useCallback(function (node) {
     return setEditOuter(node);
   }, []);
@@ -5839,7 +5846,7 @@ function Tabula() {
   var exportingR = useRef(false);
   var exportMP3 = /*#__PURE__*/function () {
     var _ref18 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var cap, sink, master, restore, dlyT, ctx, lame, barCount, cycleSec, tailSec, Lc, Rc, capturing, haveSong, firstBar, sm, i, t0, L, R, blob, _t5, _t6;
+      var cap, sink, master, restore, dlyT, ctx, lame, barCount, cycleSec, tailSec, Lc, Rc, capturing, haveSong, firstBar, sm, i, t0, L, R, blob, file, _t5, _t6;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -6020,9 +6027,21 @@ function Tabula() {
             return _context9.a(2);
           case 23:
             showFlash("ENCODING…");
-            blob = encodeMP3(lame, L, R, ctx.sampleRate);
-            downloadBlob(blob, "tabula-song.mp3", "audio/mpeg");
-            showFlash("MP3 EXPORTED");
+            blob = encodeMP3(lame, L, R, ctx.sampleRate); // On mobile (where the OS share sheet is the point — text/email the
+            // sketch), stash the file and surface a SHARE button instead of forcing a
+            // download. Desktop, or anywhere file-sharing isn't supported, downloads.
+            file = new File([blob], "tabula-song.mp3", {
+              type: "audio/mpeg"
+            });
+            if (IS_MOBILE && navigator.canShare && navigator.canShare({
+              files: [file]
+            })) {
+              setShareFile(file);
+              showFlash("READY — TAP SHARE");
+            } else {
+              downloadBlob(blob, "tabula-song.mp3", "audio/mpeg");
+              showFlash("MP3 EXPORTED");
+            }
             _context9.n = 25;
             break;
           case 24:
@@ -9160,10 +9179,10 @@ function Tabula() {
   };
 
   // BPM drag scrubber
-  var _useState199 = useState(false),
-    _useState200 = _slicedToArray(_useState199, 2),
-    bpmDragging = _useState200[0],
-    setBpmDragging = _useState200[1];
+  var _useState201 = useState(false),
+    _useState202 = _slicedToArray(_useState201, 2),
+    bpmDragging = _useState202[0],
+    setBpmDragging = _useState202[1];
   var bpmDragRef = useRef(null);
   var bpmDragData = useRef({
     startY: 0,
@@ -9192,10 +9211,10 @@ function Tabula() {
     bpmDraggingR.current = false;
     setBpmDragging(false);
   }, []);
-  var _useState201 = useState(false),
-    _useState202 = _slicedToArray(_useState201, 2),
-    stDragging = _useState202[0],
-    setStDragging = _useState202[1];
+  var _useState203 = useState(false),
+    _useState204 = _slicedToArray(_useState203, 2),
+    stDragging = _useState204[0],
+    setStDragging = _useState204[1];
   var stDragRef = useRef(null);
   var stDragData = useRef({
     startY: 0,
@@ -9224,10 +9243,10 @@ function Tabula() {
     stDraggingR.current = false;
     setStDragging(false);
   }, []);
-  var _useState203 = useState(false),
-    _useState204 = _slicedToArray(_useState203, 2),
-    swingDragging = _useState204[0],
-    setSwingDragging = _useState204[1];
+  var _useState205 = useState(false),
+    _useState206 = _slicedToArray(_useState205, 2),
+    swingDragging = _useState206[0],
+    setSwingDragging = _useState206[1];
   var swingDragRef = useRef(null);
   var swingDragData = useRef({
     startY: 0,
@@ -9550,7 +9569,94 @@ function Tabula() {
     onDragStart: function onDragStart(e) {
       return e.preventDefault();
     }
-  }, /*#__PURE__*/React.createElement("style", null, CSS), paramPopup && function (_popupR$current$col, _popupR$current) {
+  }, /*#__PURE__*/React.createElement("style", null, CSS), shareFile && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 9999,
+      display: "flex",
+      justifyContent: "center",
+      pointerEvents: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      margin: "0 0 96px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "10px 12px",
+      borderRadius: 14,
+      background: "rgba(24,22,18,0.97)",
+      border: "1px solid rgba(168,197,160,0.4)",
+      boxShadow: "0 6px 28px rgba(0,0,0,0.6)",
+      pointerEvents: "auto"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      letterSpacing: 1,
+      color: "rgba(210,195,175,0.5)",
+      fontWeight: 600
+    }
+  }, "MP3 READY"), /*#__PURE__*/React.createElement("button", {
+    onClick: /*#__PURE__*/_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee19() {
+      var f, _t19;
+      return _regenerator().w(function (_context19) {
+        while (1) switch (_context19.p = _context19.n) {
+          case 0:
+            f = shareFile;
+            _context19.p = 1;
+            _context19.n = 2;
+            return navigator.share({
+              files: [f],
+              title: "Tabula",
+              text: "Tabula sketch"
+            });
+          case 2:
+            setShareFile(null);
+            _context19.n = 4;
+            break;
+          case 3:
+            _context19.p = 3;
+            _t19 = _context19.v;
+            if (!(_t19 && _t19.name === "AbortError")) {
+              downloadBlob(f, "tabula-song.mp3", "audio/mpeg");
+              setShareFile(null);
+            }
+          case 4:
+            return _context19.a(2);
+        }
+      }, _callee19, null, [[1, 3]]);
+    })),
+    style: {
+      padding: "10px 18px",
+      borderRadius: 10,
+      border: "1px solid #a8c5a0",
+      background: "rgba(168,197,160,0.18)",
+      color: "#cfe3c8",
+      fontSize: 13,
+      fontWeight: 700,
+      letterSpacing: 1,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "\u2197 SHARE"), /*#__PURE__*/React.createElement("button", {
+    onClick: function onClick() {
+      return setShareFile(null);
+    },
+    style: {
+      padding: "10px 12px",
+      borderRadius: 10,
+      border: "1px solid rgba(200,185,165,0.25)",
+      background: "transparent",
+      color: "rgba(210,195,175,0.6)",
+      fontSize: 13,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, "\u2715"))), paramPopup && function (_popupR$current$col, _popupR$current) {
     var vw = window.innerWidth,
       vh = window.innerHeight;
     var W = 260,
@@ -9784,12 +9890,12 @@ function Tabula() {
       });
     }, isOnlyPat, true], ["MUT8", function () {
       return act(mutatePat1);
-    }], ["", null, true]].map(function (_ref36) {
-      var _ref37 = _slicedToArray(_ref36, 4),
-        label = _ref37[0],
-        fn = _ref37[1],
-        disabled = _ref37[2],
-        danger = _ref37[3];
+    }], ["", null, true]].map(function (_ref37) {
+      var _ref38 = _slicedToArray(_ref37, 4),
+        label = _ref38[0],
+        fn = _ref38[1],
+        disabled = _ref38[2],
+        danger = _ref38[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -9895,10 +10001,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref38) {
-    var _ref39 = _slicedToArray(_ref38, 2),
-      k = _ref39[0],
-      v = _ref39[1];
+  }, Object.entries(SCALES).map(function (_ref39) {
+    var _ref40 = _slicedToArray(_ref39, 2),
+      k = _ref40[0],
+      v = _ref40[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -9994,13 +10100,13 @@ function Tabula() {
       flexDirection: "column",
       gap: 4
     }
-  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref40) {
+  }, [["synth", "POLY", "#a8c5a0", "168,197,160"], ["lead", "MONO", "#6c9ad6", "108,154,214"]].map(function (_ref41) {
     var _layerStoreR$current$3, _layerStoreR$current$4;
-    var _ref41 = _slicedToArray(_ref40, 4),
-      layer = _ref41[0],
-      label = _ref41[1],
-      accent = _ref41[2],
-      accentRgb = _ref41[3];
+    var _ref42 = _slicedToArray(_ref41, 4),
+      layer = _ref42[0],
+      label = _ref42[1],
+      accent = _ref42[2],
+      accentRgb = _ref42[3];
     var isActive = activeLayer === layer;
     var layerPats = isActive ? pats : ((_layerStoreR$current$3 = layerStoreR.current[layer]) === null || _layerStoreR$current$3 === void 0 ? void 0 : _layerStoreR$current$3.pats) || [];
     var layerActiveId = isActive ? activeId : (_layerStoreR$current$4 = layerStoreR.current[layer]) === null || _layerStoreR$current$4 === void 0 ? void 0 : _layerStoreR$current$4.activeId;
@@ -10452,11 +10558,11 @@ function Tabula() {
       return randPatId(targetId);
     }, false, false], ["CLR", function () {
       return clearPatId(targetId);
-    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref42) {
-      var _ref43 = _slicedToArray(_ref42, 3),
-        l = _ref43[0],
-        f = _ref43[1],
-        d = _ref43[2];
+    }, false, false], ["MUT8", mutatePat1, false, false]].map(function (_ref43) {
+      var _ref44 = _slicedToArray(_ref43, 3),
+        l = _ref44[0],
+        f = _ref44[1],
+        d = _ref44[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         style: {
@@ -10486,12 +10592,12 @@ function Tabula() {
       return dupPatId(targetId);
     }, pats.length >= 8, false], ["DEL", function () {
       return delPatId(targetId);
-    }, isOnlyPat, true]].map(function (_ref44) {
-      var _ref45 = _slicedToArray(_ref44, 4),
-        l = _ref45[0],
-        f = _ref45[1],
-        d = _ref45[2],
-        danger = _ref45[3];
+    }, isOnlyPat, true]].map(function (_ref45) {
+      var _ref46 = _slicedToArray(_ref45, 4),
+        l = _ref46[0],
+        f = _ref46[1],
+        d = _ref46[2],
+        danger = _ref46[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -10515,9 +10621,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref46) {
-      var label = _ref46.label,
-        mult = _ref46.mult;
+    }, SPEED_OPTS.map(function (_ref47) {
+      var label = _ref47.label,
+        mult = _ref47.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -10544,11 +10650,11 @@ function Tabula() {
         gridTemplateColumns: "repeat(3,1fr)",
         gap: 2
       }
-    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["MUT8", mutateDrumPat1, false, false]].map(function (_ref47) {
-      var _ref48 = _slicedToArray(_ref47, 3),
-        l = _ref48[0],
-        f = _ref48[1],
-        d = _ref48[2];
+    }, [["RAND", randDrumVel, false, false], ["CLR", clearDrums, false, false], ["MUT8", mutateDrumPat1, false, false]].map(function (_ref48) {
+      var _ref49 = _slicedToArray(_ref48, 3),
+        l = _ref49[0],
+        f = _ref49[1],
+        d = _ref49[2];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -10571,12 +10677,12 @@ function Tabula() {
         gridTemplateColumns: "repeat(4,1fr)",
         gap: 2
       }
-    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref49) {
-      var _ref50 = _slicedToArray(_ref49, 4),
-        l = _ref50[0],
-        f = _ref50[1],
-        d = _ref50[2],
-        danger = _ref50[3];
+    }, [["CPY", copyDrumPatFn, false, false], ["PST", pasteDrumPatFn, !drumClipboard, false], ["DUP", dupDrumPat, drumPats.length >= 8, false], ["DEL", delDrumPat, isOnlyDrum, true]].map(function (_ref50) {
+      var _ref51 = _slicedToArray(_ref50, 4),
+        l = _ref51[0],
+        f = _ref51[1],
+        d = _ref51[2],
+        danger = _ref51[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -10600,9 +10706,9 @@ function Tabula() {
         gap: 2,
         marginTop: 2
       }
-    }, SPEED_OPTS.map(function (_ref51) {
-      var label = _ref51.label,
-        mult = _ref51.mult;
+    }, SPEED_OPTS.map(function (_ref52) {
+      var label = _ref52.label,
+        mult = _ref52.mult;
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         style: Object.assign({}, S.speedBtn, {
@@ -11042,10 +11148,10 @@ function Tabula() {
       alignSelf: "center",
       alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref52) {
-    var _ref53 = _slicedToArray(_ref52, 2),
-      val = _ref53[0],
-      lbl = _ref53[1];
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref53) {
+    var _ref54 = _slicedToArray(_ref53, 2),
+      val = _ref54[0],
+      lbl = _ref54[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -11918,11 +12024,11 @@ function Tabula() {
         color: "rgba(210,195,175,0.35)",
         fontWeight: 500
       }
-    }, "MIXER"), [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref55) {
-      var _ref56 = _slicedToArray(_ref55, 3),
-        lbl = _ref56[0],
-        on = _ref56[1],
-        set = _ref56[2];
+    }, "MIXER"), [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref56) {
+      var _ref57 = _slicedToArray(_ref56, 3),
+        lbl = _ref57[0],
+        on = _ref57[1],
+        set = _ref57[2];
       return /*#__PURE__*/React.createElement("button", {
         key: lbl,
         onClick: function onClick() {
@@ -12377,11 +12483,11 @@ function Tabula() {
     }) || drumPats[0];
     var vRhythm = (dPat === null || dPat === void 0 ? void 0 : dPat.vRhythm) || 0;
     var vVelocity = (dPat === null || dPat === void 0 ? void 0 : dPat.vVelocity) || 0;
-    var SliderRow = function SliderRow(_ref57) {
-      var label = _ref57.label,
-        value = _ref57.value,
-        onChange = _ref57.onChange,
-        accent = _ref57.accent;
+    var SliderRow = function SliderRow(_ref58) {
+      var label = _ref58.label,
+        value = _ref58.value,
+        onChange = _ref58.onChange,
+        accent = _ref58.accent;
       return /*#__PURE__*/React.createElement("div", {
         style: {
           marginBottom: 16
@@ -13207,10 +13313,10 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"]].concat(_toConsumableArray(activeLayer === "drums" ? [] : [["step", "STEP"]]), [["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]]).map(function (_ref58) {
-    var _ref59 = _slicedToArray(_ref58, 2),
-      p = _ref59[0],
-      lbl = _ref59[1];
+  }, [["edit", "EDIT"]].concat(_toConsumableArray(activeLayer === "drums" ? [] : [["step", "STEP"]]), [["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]]).map(function (_ref59) {
+    var _ref60 = _slicedToArray(_ref59, 2),
+      p = _ref60[0],
+      lbl = _ref60[1];
     return /*#__PURE__*/React.createElement("button", {
       key: p,
       style: Object.assign({}, S.tab, page === p ? S.tabOn : {}, p === "vary" && activeVary ? {
@@ -13350,12 +13456,12 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref60) {
-    var _ref61 = _slicedToArray(_ref60, 4),
-      lyr = _ref61[0],
-      lbl = _ref61[1],
-      c = _ref61[2],
-      cf = _ref61[3];
+  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref61) {
+    var _ref62 = _slicedToArray(_ref61, 4),
+      lyr = _ref62[0],
+      lbl = _ref62[1],
+      c = _ref62[2],
+      cf = _ref62[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       "data-layer-box": lyr,
@@ -13696,10 +13802,10 @@ function Tabula() {
       alignSelf: "center",
       alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref62) {
-    var _ref63 = _slicedToArray(_ref62, 2),
-      val = _ref63[0],
-      lbl = _ref63[1];
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref63) {
+    var _ref64 = _slicedToArray(_ref63, 2),
+      val = _ref64[0],
+      lbl = _ref64[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -14859,10 +14965,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref65) {
-    var _ref66 = _slicedToArray(_ref65, 2),
-      k = _ref66[0],
-      v = _ref66[1];
+  }, Object.entries(SCALES).map(function (_ref66) {
+    var _ref67 = _slicedToArray(_ref66, 2),
+      k = _ref67[0],
+      v = _ref67[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -14940,12 +15046,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref67) {
-      var _ref68 = _slicedToArray(_ref67, 4),
-        l = _ref68[0],
-        f = _ref68[1],
-        d = _ref68[2],
-        danger = _ref68[3];
+    }, ops.map(function (_ref68) {
+      var _ref69 = _slicedToArray(_ref68, 4),
+        l = _ref69[0],
+        f = _ref69[1],
+        d = _ref69[2],
+        danger = _ref69[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -15459,11 +15565,11 @@ function Tabula() {
         marginBottom: 6,
         flexWrap: "wrap"
       }
-    }, [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref69) {
-      var _ref70 = _slicedToArray(_ref69, 3),
-        lbl = _ref70[0],
-        on = _ref70[1],
-        set = _ref70[2];
+    }, [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref70) {
+      var _ref71 = _slicedToArray(_ref70, 3),
+        lbl = _ref71[0],
+        on = _ref71[1],
+        set = _ref71[2];
       return /*#__PURE__*/React.createElement("button", {
         key: lbl,
         onClick: function onClick() {
@@ -16263,13 +16369,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref71) {
-    var _ref72 = _slicedToArray(_ref71, 5),
-      label = _ref72[0],
-      val = _ref72[1],
-      setter = _ref72[2],
-      max = _ref72[3],
-      unit = _ref72[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref72) {
+    var _ref73 = _slicedToArray(_ref72, 5),
+      label = _ref73[0],
+      val = _ref73[1],
+      setter = _ref73[2],
+      max = _ref73[3],
+      unit = _ref73[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -16354,13 +16460,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref73) {
-    var _ref74 = _slicedToArray(_ref73, 5),
-      label = _ref74[0],
-      val = _ref74[1],
-      setter = _ref74[2],
-      max = _ref74[3],
-      unit = _ref74[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref74) {
+    var _ref75 = _slicedToArray(_ref74, 5),
+      label = _ref75[0],
+      val = _ref75[1],
+      setter = _ref75[2],
+      max = _ref75[3],
+      unit = _ref75[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -16445,11 +16551,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref75) {
-    var _ref76 = _slicedToArray(_ref75, 3),
-      label = _ref76[0],
-      val = _ref76[1],
-      setter = _ref76[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref76) {
+    var _ref77 = _slicedToArray(_ref76, 3),
+      label = _ref77[0],
+      val = _ref77[1],
+      setter = _ref77[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -16605,12 +16711,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref77) {
-      var _ref78 = _slicedToArray(_ref77, 4),
-        label = _ref78[0],
-        fn = _ref78[1],
-        disabled = _ref78[2],
-        danger = _ref78[3];
+    }, isOnlyPat, true]].map(function (_ref78) {
+      var _ref79 = _slicedToArray(_ref78, 4),
+        label = _ref79[0],
+        fn = _ref79[1],
+        disabled = _ref79[2],
+        danger = _ref79[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -16694,12 +16800,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref79) {
-      var _ref80 = _slicedToArray(_ref79, 4),
-        label = _ref80[0],
-        fn = _ref80[1],
-        disabled = _ref80[2],
-        danger = _ref80[3];
+    }, isOnly, true]].map(function (_ref80) {
+      var _ref81 = _slicedToArray(_ref80, 4),
+        label = _ref81[0],
+        fn = _ref81[1],
+        disabled = _ref81[2],
+        danger = _ref81[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
