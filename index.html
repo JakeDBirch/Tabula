@@ -143,6 +143,18 @@ var symPhr = function symPhr(i) {
 var symSec = function symSec(i) {
   return SYM_POOL[(11 + i * 3) % _N];
 };
+// Pick a RANDOM glyph not already used among `usedNames` (uniqueness within a
+// layer). Replaces the old index-based ordering, which both looked prescribed
+// and could collide after a pattern was deleted and another added. Falls back
+// to the full pool only if every glyph is taken (never happens at ≤8 patterns).
+var pickSym = function pickSym(usedNames) {
+  var used = new Set(usedNames || []);
+  var avail = SYM_POOL.filter(function (s) {
+    return !used.has(s);
+  });
+  var pool = avail.length ? avail : SYM_POOL;
+  return pool[Math.floor(Math.random() * pool.length)];
+};
 // Device detection — multiple signals for reliability across browsers and iframe contexts
 var IS_MOBILE = function () {
   try {
@@ -1144,20 +1156,50 @@ function KnobSlider(_ref3) {
     onChange = _ref3.onChange,
     display = _ref3.display,
     accent = _ref3.accent,
-    vertical = _ref3.vertical;
+    vertical = _ref3.vertical,
+    def = _ref3.def;
   var ref = useRef(null);
+  var drag = useRef(null);
   var col = accent || "rgba(255,255,255,0.6)";
   var pct = (value - min) / (max - min) * 100;
-  var compute = useCallback(function (e) {
+  // Absolute mode: the click position sets the value (jump-to). Fine mode
+  // (Ctrl/Cmd held, Pro Tools-style): relative drag, ~5× finer.
+  var absCompute = useCallback(function (e) {
     var rect = ref.current.getBoundingClientRect();
     if (vertical) {
-      var _rect = ref.current.getBoundingClientRect();
-      var v = 1 - Math.max(0, Math.min(1, (e.clientY - _rect.top) / _rect.height));
+      var v = 1 - Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
       onChange(Math.round(min + v * (max - min)));
     } else {
       onChange(Math.round(min + Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * (max - min)));
     }
   }, [min, max, onChange, vertical]);
+  var compute = absCompute;
+  var onDown = useCallback(function (e) {
+    e.stopPropagation();
+    ref.current.setPointerCapture(e.pointerId);
+    var fine = e.ctrlKey || e.metaKey;
+    drag.current = {
+      fine: fine,
+      x: e.clientX,
+      y: e.clientY,
+      v: value
+    };
+    if (!fine) absCompute(e);
+  }, [value, absCompute]);
+  var onMove = useCallback(function (e) {
+    if (!e.buttons || !drag.current) return;
+    e.stopPropagation();
+    if (drag.current.fine) {
+      var d = drag.current,
+        delta = vertical ? d.y - e.clientY : e.clientX - d.x;
+      onChange(Math.round(Math.max(min, Math.min(max, d.v + delta * ((max - min) / 600)))));
+    } else absCompute(e);
+  }, [min, max, onChange, vertical, absCompute]);
+  // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
+  // or the minimum otherwise.
+  var onReset = useCallback(function () {
+    onChange(def != null ? def : min < 0 && max > 0 ? 0 : min);
+  }, [def, min, max, onChange]);
   if (vertical) {
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -1261,17 +1303,9 @@ function KnobSlider(_ref3) {
   }, display)), /*#__PURE__*/React.createElement("div", {
     ref: ref,
     style: S.knobTrackWrap,
-    onPointerDown: function onPointerDown(e) {
-      e.stopPropagation();
-      ref.current.setPointerCapture(e.pointerId);
-      compute(e);
-    },
-    onPointerMove: function onPointerMove(e) {
-      if (e.buttons) {
-        e.stopPropagation();
-        compute(e);
-      }
-    }
+    onPointerDown: onDown,
+    onPointerMove: onMove,
+    onDoubleClick: onReset
   }, /*#__PURE__*/React.createElement("div", {
     style: S.knobTrackBg
   }), /*#__PURE__*/React.createElement("div", {
@@ -3031,6 +3065,11 @@ function Tabula() {
     _useState0 = _slicedToArray(_useState9, 2),
     activeLayer = _useState0[0],
     setActiveLayer = _useState0[1]; // "synth" (POLY) | "lead" (MONO) | "drums"
+  // Drums have no per-step page — never leave the drums layer parked on STEP
+  // (its tab is hidden); fall back to the grid editor.
+  useEffect(function () {
+    if (activeLayer === "drums" && page === "step") setPage("edit");
+  }, [activeLayer, page]);
   var _useState1 = useState(120),
     _useState10 = _slicedToArray(_useState1, 2),
     bpm = _useState10[0],
@@ -6222,7 +6261,9 @@ function Tabula() {
               });
               var newPat = {
                 id: ++_id,
-                name: symPat(patsR.current.length),
+                name: pickSym(patsR.current.map(function (p) {
+                  return p.name;
+                })),
                 grid: rvg,
                 durs: src.durs ? src.durs.map(function (rr) {
                   return _toConsumableArray(rr);
@@ -7069,9 +7110,9 @@ function Tabula() {
     // Start long press timer on an ON note
     if (isOnNote) {
       var gridEl2 = gridRef.current;
-      var _rect2 = gridEl2 ? gridEl2.getBoundingClientRect() : null;
-      var ox = _rect2 ? _rect2.left + _rect2.width / COLS * (c + 0.5) : e.clientX;
-      var oy = _rect2 ? _rect2.top + _rect2.height / ROWS * (r + 0.5) : e.clientY;
+      var _rect = gridEl2 ? gridEl2.getBoundingClientRect() : null;
+      var ox = _rect ? _rect.left + _rect.width / COLS * (c + 0.5) : e.clientX;
+      var oy = _rect ? _rect.top + _rect.height / ROWS * (r + 0.5) : e.clientY;
       var baseVals = Object.assign({}, pat.params && pat.params[c] || defaultStepParams()[0]);
       g.longPressCell = {
         r: r,
@@ -7266,9 +7307,9 @@ function Tabula() {
           // Apply initial extent based on current pointer x
           var _gridEl = gridRef.current;
           if (_gridEl) {
-            var _rect3 = _gridEl.getBoundingClientRect();
-            var cellW = _rect3.width / COLS;
-            var targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - _rect3.left) / cellW)));
+            var _rect2 = _gridEl.getBoundingClientRect();
+            var cellW = _rect2.width / COLS;
+            var targetCol = Math.max(g.durStartCol, Math.min(COLS - 1, Math.floor((e.clientX - _rect2.left) / cellW)));
             g.lastDurTarget = targetCol;
             applyDurEditR.current(targetCol);
           }
@@ -7347,10 +7388,10 @@ function Tabula() {
     if (g.state === "paint") {
       var gridEl = gridRef.current;
       if (!gridEl) return;
-      var _rect4 = gridEl.getBoundingClientRect();
-      if (e.clientX <= _rect4.left || e.clientX >= _rect4.right || e.clientY <= _rect4.top || e.clientY >= _rect4.bottom) return;
-      var cr = Math.floor((e.clientY - _rect4.top) / (_rect4.height / ROWS));
-      var cc = Math.floor((e.clientX - _rect4.left) / (_rect4.width / COLS));
+      var _rect3 = gridEl.getBoundingClientRect();
+      if (e.clientX <= _rect3.left || e.clientX >= _rect3.right || e.clientY <= _rect3.top || e.clientY >= _rect3.bottom) return;
+      var cr = Math.floor((e.clientY - _rect3.top) / (_rect3.height / ROWS));
+      var cc = Math.floor((e.clientX - _rect3.left) / (_rect3.width / COLS));
       if (cr < 0 || cr >= ROWS || cc < 0 || cc >= COLS) return;
       var _key = "".concat(cr, ",").concat(cc);
       if (g.paintedCells.has(_key)) return;
@@ -7431,14 +7472,14 @@ function Tabula() {
       var _activePat$gridLen2;
       var _gridEl2 = gridRef.current;
       if (!_gridEl2) return;
-      var _rect5 = _gridEl2.getBoundingClientRect();
-      var _cellW = _rect5.width / COLS;
+      var _rect4 = _gridEl2.getBoundingClientRect();
+      var _cellW = _rect4.width / COLS;
       // Clamp targetCol to active pat's gridLen-1 (don't extend past the loop end)
       var _activePat = patsR.current.find(function (p) {
         return p.id === activeIdR.current;
       });
       var maxCol = ((_activePat$gridLen2 = _activePat === null || _activePat === void 0 ? void 0 : _activePat.gridLen) !== null && _activePat$gridLen2 !== void 0 ? _activePat$gridLen2 : COLS) - 1;
-      var _targetCol = Math.max(g.durStartCol, Math.min(maxCol, Math.floor((e.clientX - _rect5.left) / _cellW)));
+      var _targetCol = Math.max(g.durStartCol, Math.min(maxCol, Math.floor((e.clientX - _rect4.left) / _cellW)));
       if (g.lastDurTarget === _targetCol) return;
       g.lastDurTarget = _targetCol;
       applyDurEditR.current(_targetCol);
@@ -7447,9 +7488,9 @@ function Tabula() {
     if (g.state === "note-move") {
       var _gridEl3 = gridRef.current;
       if (!_gridEl3) return;
-      var _rect6 = _gridEl3.getBoundingClientRect();
-      var _cellH = _rect6.height / ROWS;
-      var _newRow = Math.max(0, Math.min(ROWS - 1, Math.floor((e.clientY - _rect6.top) / _cellH)));
+      var _rect5 = _gridEl3.getBoundingClientRect();
+      var _cellH = _rect5.height / ROWS;
+      var _newRow = Math.max(0, Math.min(ROWS - 1, Math.floor((e.clientY - _rect5.top) / _cellH)));
       if (_newRow !== g.moveCurrentRow) applyNoteMoveR.current(_newRow);
       return;
     }
@@ -7651,7 +7692,9 @@ function Tabula() {
   var addPat = function addPat() {
     pushHistory();
     if (pats.length >= 8) return;
-    var p = mkPat(symPat(pats.length));
+    var p = mkPat(pickSym(pats.map(function (p) {
+      return p.name;
+    })));
     setPats(function (ps) {
       return [].concat(_toConsumableArray(ps), [p]);
     });
@@ -7664,7 +7707,9 @@ function Tabula() {
       return p.id === activeId;
     });
     if (!src) return;
-    var p = Object.assign({}, mkPat(symPat(pats.length)), {
+    var p = Object.assign({}, mkPat(pickSym(pats.map(function (p) {
+      return p.name;
+    }))), {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
@@ -7743,7 +7788,9 @@ function Tabula() {
       return p.id === id;
     });
     if (!src) return;
-    var p = Object.assign({}, mkPat(symPat(pats.length)), {
+    var p = Object.assign({}, mkPat(pickSym(pats.map(function (p) {
+      return p.name;
+    }))), {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
@@ -8715,7 +8762,9 @@ function Tabula() {
     var src = drumPats.find(function (p) {
       return p.id === activeDrumId;
     }) || drumPats[0];
-    var d = Object.assign({}, mkDrumPat(symPat(drumPats.length)), {
+    var d = Object.assign({}, mkDrumPat(pickSym(drumPats.map(function (p) {
+      return p.name;
+    }))), {
       grid: src.grid.map(function (r) {
         return _toConsumableArray(r);
       }),
@@ -8812,7 +8861,9 @@ function Tabula() {
   var addDrumPat = function addDrumPat() {
     pushHistory();
     if (drumPats.length >= 8) return;
-    var d = mkDrumPat(symPat(drumPats.length));
+    var d = mkDrumPat(pickSym(drumPats.map(function (p) {
+      return p.name;
+    })));
     setDrumPats(function (ps) {
       return [].concat(_toConsumableArray(ps), [d]);
     });
@@ -12941,7 +12992,7 @@ function Tabula() {
       flexShrink: 0,
       paddingTop: 8
     })
-  }, [["edit", "EDIT"], ["step", "STEP"], ["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]].map(function (_ref55) {
+  }, [["edit", "EDIT"]].concat(_toConsumableArray(activeLayer === "drums" ? [] : [["step", "STEP"]]), [["sound", "SOUND"], ["fx", "FX"], ["vary", "VARY"]]).map(function (_ref55) {
     var _ref56 = _slicedToArray(_ref55, 2),
       p = _ref56[0],
       lbl = _ref56[1];

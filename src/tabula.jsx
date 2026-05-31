@@ -38,6 +38,16 @@ const _N=SYM_POOL.length;
 const symPat=i=>SYM_POOL[(0  + i*5)  %_N];
 const symPhr=i=>SYM_POOL[(7  + i*11) %_N];
 const symSec=i=>SYM_POOL[(11 + i*3)  %_N];
+// Pick a RANDOM glyph not already used among `usedNames` (uniqueness within a
+// layer). Replaces the old index-based ordering, which both looked prescribed
+// and could collide after a pattern was deleted and another added. Falls back
+// to the full pool only if every glyph is taken (never happens at ≤8 patterns).
+const pickSym=(usedNames)=>{
+  const used=new Set(usedNames||[]);
+  const avail=SYM_POOL.filter(s=>!used.has(s));
+  const pool=avail.length?avail:SYM_POOL;
+  return pool[Math.floor(Math.random()*pool.length)];
+};
 // Device detection — multiple signals for reliability across browsers and iframe contexts
 const IS_MOBILE = (()=>{
   try {
@@ -542,20 +552,39 @@ const jitterStepParam=(sp,vp)=>{
 };
 
 // ─── KnobSlider with accent color ─────────────────────────────────────────────
-function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
+function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const ref=useRef(null);
+  const drag=useRef(null);
   const col=accent||"rgba(255,255,255,0.6)";
   const pct=((value-min)/(max-min))*100;
-  const compute=useCallback(e=>{
+  // Absolute mode: the click position sets the value (jump-to). Fine mode
+  // (Ctrl/Cmd held, Pro Tools-style): relative drag, ~5× finer.
+  const absCompute=useCallback(e=>{
     const rect=ref.current.getBoundingClientRect();
     if(vertical){
-      const rect=ref.current.getBoundingClientRect();
       const v=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));
       onChange(Math.round(min+v*(max-min)));
     } else {
       onChange(Math.round(min+Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*(max-min)));
     }
   },[min,max,onChange,vertical]);
+  const compute=absCompute;
+  const onDown=useCallback(e=>{
+    e.stopPropagation();ref.current.setPointerCapture(e.pointerId);
+    const fine=e.ctrlKey||e.metaKey;
+    drag.current={fine,x:e.clientX,y:e.clientY,v:value};
+    if(!fine)absCompute(e);
+  },[value,absCompute]);
+  const onMove=useCallback(e=>{
+    if(!e.buttons||!drag.current)return;e.stopPropagation();
+    if(drag.current.fine){
+      const d=drag.current,delta=vertical?(d.y-e.clientY):(e.clientX-d.x);
+      onChange(Math.round(Math.max(min,Math.min(max,d.v+delta*((max-min)/600)))));
+    } else absCompute(e);
+  },[min,max,onChange,vertical,absCompute]);
+  // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
+  // or the minimum otherwise.
+  const onReset=useCallback(()=>{onChange(def!=null?def:((min<0&&max>0)?0:min));},[def,min,max,onChange]);
   if(vertical){
     return(
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
@@ -583,8 +612,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical}){
         <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
       </div>
       <div ref={ref} style={S.knobTrackWrap}
-        onPointerDown={e=>{e.stopPropagation();ref.current.setPointerCapture(e.pointerId);compute(e);}}
-        onPointerMove={e=>{if(e.buttons){e.stopPropagation();compute(e);}}}>
+        onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={onReset}>
         <div style={S.knobTrackBg}/>
         <div style={Object.assign({},S.knobTrackFill,{width:pct+"%",background:col+"88"})}/>
         <div style={Object.assign({},S.knobThumb,{left:pct+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
@@ -1607,6 +1635,9 @@ export default function Tabula(){
   const [chain,     setChain]     = useState([1]);
   const [page,      setPage]      = useState("edit");
   const [activeLayer, setActiveLayer] = useState("synth"); // "synth" (POLY) | "lead" (MONO) | "drums"
+  // Drums have no per-step page — never leave the drums layer parked on STEP
+  // (its tab is hidden); fall back to the grid editor.
+  useEffect(()=>{if(activeLayer==="drums"&&page==="step")setPage("edit");},[activeLayer,page]);
   const [bpm,       setBpm]       = useState(120);
 
   // Drum step editing state
@@ -3248,7 +3279,7 @@ export default function Tabula(){
               const src=patsR.current.find(x=>x.id===recSourceIdR.current)||pat;
               const rvg=genVariation(src.grid,vp);
               const newParams=(src.params||defaultStepParams()).map(p2=>jitterStepParam(p2,vp));
-              const newPat={id:++_id,name:symPat(patsR.current.length),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(),params:newParams,gridLen:src.gridLen??16,speedMult:src.speedMult??1};
+              const newPat={id:++_id,name:pickSym(patsR.current.map(p=>p.name)),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(),params:newParams,gridLen:src.gridLen??16,speedMult:src.speedMult??1};
               setPats(ps=>{if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}return [...ps,newPat];});
               setChain(c=>[...c,newPat.id]);
             }
@@ -4045,15 +4076,15 @@ export default function Tabula(){
 
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
-  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(symPat(pats.length));setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(pickSym(pats.map(p=>p.name)));setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(symPat(pats.length)),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   // Strip the id from songMatrix as well — leaving a dangling ref produces
   // silent gaps in the song timeline. Drag-off-layer delete relies on this.
   const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);setSongMatrix(m=>({...m,synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v)}));};
@@ -4470,7 +4501,7 @@ export default function Tabula(){
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-    const d=Object.assign({},mkDrumPat(symPat(drumPats.length)),{
+    const d=Object.assign({},mkDrumPat(pickSym(drumPats.map(p=>p.name))),{
       grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),rat:toDrumRat2D(src.rat),gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
@@ -4516,7 +4547,7 @@ export default function Tabula(){
   const setDrumVary=(key,val)=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{[key]:val})));
   const addDrumPat=()=>{pushHistory();
     if(drumPats.length>=8)return;
-    const d=mkDrumPat(symPat(drumPats.length));
+    const d=mkDrumPat(pickSym(drumPats.map(p=>p.name)));
     setDrumPats(ps=>[...ps,d]);
     setActiveDrumId(d.id);
   };
@@ -6098,7 +6129,7 @@ export default function Tabula(){
           {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {[["edit","EDIT"],["step","STEP"],["sound","SOUND"],["fx","FX"],["vary","VARY"]].map(([p,lbl])=>(
+            {[["edit","EDIT"],...(activeLayer==="drums"?[]:[["step","STEP"]]),["sound","SOUND"],["fx","FX"],["vary","VARY"]].map(([p,lbl])=>(
               <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
