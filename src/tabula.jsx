@@ -3010,6 +3010,12 @@ export default function Tabula(){
       if(playingR.current)await startStop(); // ensure stopped, start clean from the top
       const ctx=bell.current.ctx; master=bell.current.master;
       if(!ctx||!master){showFlash("AUDIO NOT READY");return;}
+      // The realtime capture needs the audio clock actually running. If the
+      // context is still suspended (autoplay not yet unlocked, or a backgrounded
+      // tab), capturing would stall on a long timeout — bail out with a hint
+      // instead. Playing once unlocks + runs the context.
+      try{if(ctx.state!=="running")await ctx.resume();}catch(e){}
+      if(ctx.state!=="running"){showFlash("TAP ▶ ONCE, THEN MP3");return;}
       const lame=await loadLame();
       if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
       const barCount=Math.max(1,_exportBars().length);

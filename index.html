@@ -5837,7 +5837,7 @@ function Tabula() {
   var exportingR = useRef(false);
   var exportMP3 = /*#__PURE__*/function () {
     var _ref18 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9() {
-      var cap, sink, master, restore, dlyT, ctx, lame, barCount, cycleSec, tailSec, Lc, Rc, capturing, haveSong, firstBar, sm, i, t0, L, R, blob, _t5;
+      var cap, sink, master, restore, dlyT, ctx, lame, barCount, cycleSec, tailSec, Lc, Rc, capturing, haveSong, firstBar, sm, i, t0, L, R, blob, _t5, _t6;
       return _regenerator().w(function (_context9) {
         while (1) switch (_context9.p = _context9.n) {
           case 0:
@@ -5889,17 +5889,38 @@ function Tabula() {
             showFlash("AUDIO NOT READY");
             return _context9.a(2);
           case 8:
+            _context9.p = 8;
+            if (!(ctx.state !== "running")) {
+              _context9.n = 9;
+              break;
+            }
             _context9.n = 9;
-            return loadLame();
+            return ctx.resume();
           case 9:
+            _context9.n = 11;
+            break;
+          case 10:
+            _context9.p = 10;
+            _t5 = _context9.v;
+          case 11:
+            if (!(ctx.state !== "running")) {
+              _context9.n = 12;
+              break;
+            }
+            showFlash("TAP ▶ ONCE, THEN MP3");
+            return _context9.a(2);
+          case 12:
+            _context9.n = 13;
+            return loadLame();
+          case 13:
             lame = _context9.v;
             if (!(!lame || !lame.Mp3Encoder)) {
-              _context9.n = 10;
+              _context9.n = 14;
               break;
             }
             showFlash("MP3 LIB FAILED");
             return _context9.a(2);
-          case 10:
+          case 14:
             barCount = Math.max(1, _exportBars().length);
             cycleSec = barCount * 4 * 60 / Math.max(1, bpm); // sync: 16 abs steps = 4 beats/bar
             tailSec = 2; // Tap the master into a recorder (silent parallel path; no double audio).
@@ -5924,7 +5945,7 @@ function Tabula() {
               return false;
             }();
             if (!haveSong) {
-              _context9.n = 14;
+              _context9.n = 18;
               break;
             }
             restore = {
@@ -5947,68 +5968,68 @@ function Tabula() {
             firstBar = 0;
             sm = songMatrix;
             i = 0;
-          case 11:
-            if (!(i < 64)) {
-              _context9.n = 13;
-              break;
-            }
-            if (!(sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null)) {
-              _context9.n = 12;
-              break;
-            }
-            firstBar = i;
-            return _context9.a(3, 13);
-          case 12:
-            i++;
-            _context9.n = 11;
-            break;
-          case 13:
-            songBarR.current = firstBar;
-            setSongBar(firstBar);
-          case 14:
-            showFlash("BOUNCING…");
-            capturing = true;
-            _context9.n = 15;
-            return _startStop();
           case 15:
-            // start playback from the song top
-            t0 = ctx.currentTime;
-            _context9.n = 16;
-            return _waitAudio(ctx, t0 + cycleSec);
-          case 16:
-            if (!playingR.current) {
+            if (!(i < 64)) {
               _context9.n = 17;
               break;
             }
-            _context9.n = 17;
-            return _startStop();
+            if (!(sm.synth[i] != null || sm.lead[i] != null || sm.drums[i] != null)) {
+              _context9.n = 16;
+              break;
+            }
+            firstBar = i;
+            return _context9.a(3, 17);
+          case 16:
+            i++;
+            _context9.n = 15;
+            break;
           case 17:
-            _context9.n = 18;
-            return _waitAudio(ctx, t0 + cycleSec + tailSec);
+            songBarR.current = firstBar;
+            setSongBar(firstBar);
           case 18:
+            showFlash("BOUNCING…");
+            capturing = true;
+            _context9.n = 19;
+            return _startStop();
+          case 19:
+            // start playback from the song top
+            t0 = ctx.currentTime;
+            _context9.n = 20;
+            return _waitAudio(ctx, t0 + cycleSec);
+          case 20:
+            if (!playingR.current) {
+              _context9.n = 21;
+              break;
+            }
+            _context9.n = 21;
+            return _startStop();
+          case 21:
+            _context9.n = 22;
+            return _waitAudio(ctx, t0 + cycleSec + tailSec);
+          case 22:
             // capture the tail
             capturing = false;
             L = _concatF32(Lc), R = _concatF32(Rc);
             if (L.length) {
-              _context9.n = 19;
+              _context9.n = 23;
               break;
             }
             showFlash("NOTHING TO BOUNCE");
             return _context9.a(2);
-          case 19:
+          case 23:
             showFlash("ENCODING…");
             blob = encodeMP3(lame, L, R, ctx.sampleRate);
             downloadBlob(blob, "tabula-song.mp3", "audio/mpeg");
             showFlash("MP3 EXPORTED");
-            _context9.n = 21;
+            _context9.n = 25;
             break;
-          case 20:
-            _context9.p = 20;
-            _t5 = _context9.v;
-            console.error("MP3 export failed", _t5);
+          case 24:
+            _context9.p = 24;
+            _t6 = _context9.v;
+            console.error("MP3 export failed", _t6);
             showFlash("EXPORT FAILED");
-          case 21:
-            _context9.p = 21;
+          case 25:
+            _context9.p = 25;
             try {
               if (master && cap) master.disconnect(cap);
             } catch (e) {}
@@ -6031,11 +6052,11 @@ function Tabula() {
             }
             exportingR.current = false;
             setExporting(false);
-            return _context9.f(21);
-          case 22:
+            return _context9.f(25);
+          case 26:
             return _context9.a(2);
         }
-      }, _callee9, null, [[2, 20, 21, 22]]);
+      }, _callee9, null, [[8, 10], [2, 24, 25, 26]]);
     }));
     return function exportMP3() {
       return _ref18.apply(this, arguments);
@@ -6547,7 +6568,7 @@ function Tabula() {
 
   var _startStop = /*#__PURE__*/function () {
     var _ref20 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0() {
-      var dlyT, _m, r, t0, _i12, _arr5, layer, sm, layerFirst, _i13, _arr6, _layer2, f, i, firstBar, _i14, _t6;
+      var dlyT, _m, r, t0, _i12, _arr5, layer, sm, layerFirst, _i13, _arr6, _layer2, f, i, firstBar, _i14, _t7;
       return _regenerator().w(function (_context0) {
         while (1) switch (_context0.p = _context0.n) {
           case 0:
@@ -6637,7 +6658,7 @@ function Tabula() {
             break;
           case 8:
             _context0.p = 8;
-            _t6 = _context0.v;
+            _t7 = _context0.v;
           case 9:
             _context0.n = 10;
             return requestWakeLock();
@@ -6767,7 +6788,7 @@ function Tabula() {
     // Resume AudioContext and silent loop when page becomes visible
     var onVisible = /*#__PURE__*/function () {
       var _ref21 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee1() {
-        var _t7, _t8, _t9;
+        var _t8, _t9, _t0;
         return _regenerator().w(function (_context1) {
           while (1) switch (_context1.p = _context1.n) {
             case 0:
@@ -6787,7 +6808,7 @@ function Tabula() {
               break;
             case 3:
               _context1.p = 3;
-              _t7 = _context1.v;
+              _t8 = _context1.v;
             case 4:
               if (!(drumEngine.current.ctx && drumEngine.current.ctx.state === "suspended")) {
                 _context1.n = 8;
@@ -6801,7 +6822,7 @@ function Tabula() {
               break;
             case 7:
               _context1.p = 7;
-              _t8 = _context1.v;
+              _t9 = _context1.v;
             case 8:
               if (!(silentLoopR.current && silentLoopR.current.paused)) {
                 _context1.n = 12;
@@ -6815,7 +6836,7 @@ function Tabula() {
               break;
             case 11:
               _context1.p = 11;
-              _t9 = _context1.v;
+              _t0 = _context1.v;
             case 12:
               // Re-request wake lock if playing
               if (playingR.current) requestWakeLock();
@@ -6831,7 +6852,7 @@ function Tabula() {
     // iOS pageshow fires when returning from bfcache (app switch)
     var onPageShow = /*#__PURE__*/function () {
       var _ref22 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10(e) {
-        var _t0, _t1;
+        var _t1, _t10;
         return _regenerator().w(function (_context10) {
           while (1) switch (_context10.p = _context10.n) {
             case 0:
@@ -6851,7 +6872,7 @@ function Tabula() {
               break;
             case 3:
               _context10.p = 3;
-              _t0 = _context10.v;
+              _t1 = _context10.v;
             case 4:
               if (!(silentLoopR.current && silentLoopR.current.paused)) {
                 _context10.n = 8;
@@ -6865,7 +6886,7 @@ function Tabula() {
               break;
             case 7:
               _context10.p = 7;
-              _t1 = _context10.v;
+              _t10 = _context10.v;
             case 8:
               return _context10.a(2);
           }
@@ -6890,7 +6911,7 @@ function Tabula() {
   }, [playing]);
   var requestWakeLock = /*#__PURE__*/function () {
     var _ref23 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee11() {
-      var _t10;
+      var _t11;
       return _regenerator().w(function (_context11) {
         while (1) switch (_context11.p = _context11.n) {
           case 0:
@@ -6918,7 +6939,7 @@ function Tabula() {
             break;
           case 4:
             _context11.p = 4;
-            _t10 = _context11.v;
+            _t11 = _context11.v;
           case 5:
             return _context11.a(2);
         }
@@ -8546,7 +8567,7 @@ function Tabula() {
             ctx = ((_bell$current = bell.current) === null || _bell$current === void 0 ? void 0 : _bell$current.ctx) || ((_drumEngine$current = drumEngine.current) === null || _drumEngine$current === void 0 ? void 0 : _drumEngine$current.ctx) || new OfflineAudioContext(1, 1, 44100);
             decode = /*#__PURE__*/function () {
               var _ref25 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee12(url) {
-                var res, _t11;
+                var res, _t12;
                 return _regenerator().w(function (_context12) {
                   while (1) switch (_context12.n) {
                     case 0:
@@ -8560,11 +8581,11 @@ function Tabula() {
                       }
                       throw new Error(res.statusText);
                     case 2:
-                      _t11 = ctx;
+                      _t12 = ctx;
                       _context12.n = 3;
                       return res.arrayBuffer();
                     case 3:
-                      return _context12.a(2, _t11.decodeAudioData.call(_t11, _context12.v));
+                      return _context12.a(2, _t12.decodeAudioData.call(_t12, _context12.v));
                   }
                 }, _callee12);
               }));
@@ -8576,7 +8597,7 @@ function Tabula() {
             _context14.n = 3;
             return Promise.all(Object.entries(kit.samples).map(/*#__PURE__*/function () {
               var _ref27 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee13(_ref26) {
-                var _ref28, voiceKey, spec, _t12, _t13, _t14;
+                var _ref28, voiceKey, spec, _t13, _t14, _t15;
                 return _regenerator().w(function (_context13) {
                   while (1) switch (_context13.p = _context13.n) {
                     case 0:
@@ -8600,9 +8621,9 @@ function Tabula() {
                       _context13.n = 4;
                       return Promise.all(spec.rr.map(decode));
                     case 4:
-                      _t12 = _context13.v;
+                      _t13 = _context13.v;
                       newSamples[voiceKey] = {
-                        rr: _t12
+                        rr: _t13
                       };
                       _context13.n = 7;
                       break;
@@ -8614,18 +8635,18 @@ function Tabula() {
                       _context13.n = 6;
                       return Promise.all(spec.vel.map(decode));
                     case 6:
-                      _t13 = _context13.v;
+                      _t14 = _context13.v;
                       newSamples[voiceKey] = {
-                        vel: _t13
+                        vel: _t14
                       };
                     case 7:
                       _context13.n = 9;
                       break;
                     case 8:
                       _context13.p = 8;
-                      _t14 = _context13.v;
+                      _t15 = _context13.v;
                       errors.push(voiceKey);
-                      console.warn("Kit sample load failed:", voiceKey, _t14);
+                      console.warn("Kit sample load failed:", voiceKey, _t15);
                     case 9:
                       return _context13.a(2);
                   }
@@ -8673,7 +8694,7 @@ function Tabula() {
             _context16.n = 1;
             return Promise.all(Object.entries(sj).map(/*#__PURE__*/function () {
               var _ref31 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee15(_ref30) {
-                var _ref32, k, b64, _t15;
+                var _ref32, k, b64, _t16;
                 return _regenerator().w(function (_context15) {
                   while (1) switch (_context15.p = _context15.n) {
                     case 0:
@@ -8687,8 +8708,8 @@ function Tabula() {
                       break;
                     case 3:
                       _context15.p = 3;
-                      _t15 = _context15.v;
-                      console.warn("user sample decode failed", k, _t15);
+                      _t16 = _context15.v;
+                      console.warn("user sample decode failed", k, _t16);
                     case 4:
                       return _context15.a(2);
                   }
@@ -8718,7 +8739,7 @@ function Tabula() {
   // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
   var startRecord = /*#__PURE__*/function () {
     var _ref33 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee18(voiceKey) {
-      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick2, _t17;
+      var ONSET_THRESH, SILENCE_THRESH, SILENCE_HOLD_MS, ARM_TIMEOUT_MS, stream, ctx, source, analyser, buf, recorder, chunks, armed, silentSince, stopped, armedStart, finishWith, _tick2, _t18;
       return _regenerator().w(function (_context18) {
         while (1) switch (_context18.p = _context18.n) {
           case 0:
@@ -8772,7 +8793,7 @@ function Tabula() {
             armedStart = performance.now();
             finishWith = /*#__PURE__*/function () {
               var _ref34 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee17() {
-                var blob, ab, audioBuf, _t16;
+                var blob, ab, audioBuf, _t17;
                 return _regenerator().w(function (_context17) {
                   while (1) switch (_context17.p = _context17.n) {
                     case 0:
@@ -8807,8 +8828,8 @@ function Tabula() {
                       break;
                     case 5:
                       _context17.p = 5;
-                      _t16 = _context17.v;
-                      console.error("Sample decode failed:", _t16);
+                      _t17 = _context17.v;
+                      console.error("Sample decode failed:", _t17);
                       showFlash("DECODE FAIL");
                     case 6:
                       if (recordStreamRef.current) {
@@ -8879,8 +8900,8 @@ function Tabula() {
             break;
           case 6:
             _context18.p = 6;
-            _t17 = _context18.v;
-            console.error("Mic denied:", _t17);
+            _t18 = _context18.v;
+            console.error("Mic denied:", _t18);
             showFlash("MIC DENIED");
             setRecordingVoice(null);
           case 7:
