@@ -11,3 +11,6 @@ node_modules/
 # Build scratch
 .build/
 *.tmp
+
+# Stray nested clone (do not track as a submodule)
+/Tabula/
