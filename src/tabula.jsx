@@ -1871,6 +1871,19 @@ export default function Tabula(){
       return iOS&&!standalone&&!localStorage.getItem("tabula-nohint");
     }catch(e){return false;}
   });
+  // Mobile orientation — drives the landscape rail layout. Recomputed on
+  // resize / orientationchange. Desktop is always treated as "portrait" (the
+  // landscape branch is mobile-only).
+  const [isLandscape, setIsLandscape] = useState(()=>{
+    try{ return IS_MOBILE && window.innerWidth > window.innerHeight; }catch(e){ return false; }
+  });
+  useEffect(()=>{
+    if(!IS_MOBILE) return;
+    const onR=()=>{ try{ setIsLandscape(window.innerWidth>window.innerHeight); }catch(e){} };
+    window.addEventListener("resize",onR);
+    window.addEventListener("orientationchange",onR);
+    return ()=>{ window.removeEventListener("resize",onR); window.removeEventListener("orientationchange",onR); };
+  },[]);
   const recorderRef = useRef(null);
   const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -5539,7 +5552,7 @@ export default function Tabula(){
                     RAND
                   </button>
                 </div>
-                <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
+                <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
                       {["synth","lead","drums"].map(layer=>{
@@ -6309,14 +6322,48 @@ export default function Tabula(){
 
       {/* ══ MOBILE LAYOUT ══ */}
       {IS_MOBILE&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",background:"#1a1814",overflow:"hidden"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:isLandscape?"row":"column",background:"#1a1814",overflow:"hidden"}}>
+
+          {/* ══ LANDSCAPE LEFT RAIL — layer + pattern selection ══ */}
+          {isLandscape&&(
+            <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px 8px",paddingLeft:"calc(6px + env(safe-area-inset-left))",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+                <button key={lyr} data-layer-box={lyr} style={{flexShrink:0,padding:"8px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);if(page==="step"&&lyr==="drums")setPage("edit");} }}>{lbl}</button>
+              ))}
+              <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
+              <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
+                {(activeLayer==="drums"?drumPats:pats).map(p=>{
+                  const isDrums=activeLayer==="drums";const isSynth=!isDrums;
+                  const isA=isDrums?p.id===activeDrumId:p.id===activeId;
+                  const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
+                  return(
+                    <button key={p.id} style={{flexShrink:0,padding:"9px 4px",borderRadius:14,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}
+                      onClick={()=>{
+                        const wasActive=isSynth?activeId===p.id:activeDrumId===p.id;
+                        if(songView){ if(!wasActive)isSynth?setActiveId(p.id):setActiveDrumId(p.id); setSongView(false); setActiveSheet(null); }
+                        else if(wasActive){ setSeqPage("step"); setActiveSheet(s=>s==="pattern"?null:"pattern"); }
+                        else { isSynth?setActiveId(p.id):setActiveDrumId(p.id); setActiveSheet(null); }
+                      }}>{p.name}</button>
+                  );
+                })}
+                {(activeLayer==="drums"?drumPats:pats).length<8&&<button style={{flexShrink:0,padding:"7px 4px",borderRadius:14,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),background:"transparent",color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{activeLayer==="drums"?addDrumPat():addPat();}}>＋</button>}
+              </div>
+            </div>
+          )}
+
+          {/* ══ CENTER COLUMN — the grid lives here in both orientations ══ */}
+          <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
           {/* ── TABULA BRANDING ── */}
+          {!isLandscape&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
             <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:18,fontWeight:300,letterSpacing:6,color:"rgba(210,195,175,0.7)",textTransform:"uppercase"}}>Tabula</span>
           </div>
+          )}
 
-          {/* ── PERSISTENT LAYER BAR — top of screen ── */}
+          {/* ── PERSISTENT LAYER BAR — top of screen (portrait) ── */}
+          {!isLandscape&&(
           <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
             {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
               <button key={lyr} data-layer-box={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF)":activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:patternDrag?.overLayerBox===lyr?cf+"0.18)":activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1.2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
@@ -6333,7 +6380,9 @@ export default function Tabula(){
               </button>
             ))}
           </div>
-          {/* ── PERSISTENT PATTERN PILLS — tap to select, drag to phrase or song-matrix cell ── */}
+          )}
+          {/* ── PERSISTENT PATTERN PILLS — tap to select, drag to phrase or song-matrix cell (portrait) ── */}
+          {!isLandscape&&(
           <div style={{display:"flex",gap:5,flexWrap:"wrap",flexShrink:0,padding:"4px 12px 6px",alignItems:"center",touchAction:"none"}}>
             {(activeLayer==="drums"?drumPats:pats).map(p=>{
               const isDrums=activeLayer==="drums";
@@ -6474,6 +6523,7 @@ export default function Tabula(){
             })}
             {(activeLayer==="drums"?drumPats:pats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="drums"?addDrumPat():addPat();}}>＋</div>}
           </div>
+          )}
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
             <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
@@ -6511,7 +6561,7 @@ export default function Tabula(){
                     RAND
                   </button>
                 </div>
-                <div style={{width:"min(100%,calc(100dvh - 175px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
+                <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
                       {["synth","lead","drums"].map(layer=>{
@@ -6632,7 +6682,7 @@ export default function Tabula(){
             {/* SYNTH EDIT grid */}
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
-              <div style={{width:"min(100%,calc(100dvh - 150px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
@@ -6686,7 +6736,7 @@ export default function Tabula(){
                   // flows right → same direction as synth playback. Voice
                   // labels are transparent overlays on the leftmost portion of
                   // each row so the cells themselves get the full width.
-                  const SIZE=`min(calc(100vw - 20px), calc(100dvh - 150px))`;
+                  const SIZE=isLandscape?`min(calc(100vw - 190px), calc(100dvh - 32px))`:`min(calc(100vw - 20px), calc(100dvh - 150px))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
                       <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
@@ -6795,7 +6845,8 @@ export default function Tabula(){
             })()}
           </div>
 
-          {/* ── BOTTOM CHROME: chips row + persistent transport ── */}
+          {/* ── BOTTOM CHROME: chips row + persistent transport (portrait) ── */}
+          {!isLandscape&&(
           <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.98)"}}>
             {/* Row 1: expandable chips */}
             <div style={{display:"flex",alignItems:"center",padding:"7px 10px 4px",gap:5}}>
@@ -6851,13 +6902,53 @@ export default function Tabula(){
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
             </div>
           </div>
+          )}
+          </div>{/* ══ end CENTER COLUMN ══ */}
+
+          {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
+          {isLandscape&&(
+            <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px 8px",paddingRight:"calc(6px + env(safe-area-inset-right))",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
+                {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
+              </button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:30,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:30,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+              </div>
+              <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
+              <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(200,185,165,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
+                  <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
+                </button>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);} setActiveSheet(null); }}>
+                  <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
+                </button>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
+                </button>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||anyVary?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||anyVary?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
+                </button>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>PROJECT</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* ── BOTTOM SHEET — slides up, one per chip ── */}
           {activeSheet&&(
             <>
               {/* Backdrop — full screen so ANY tap outside the sheet closes it. */}
               <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
-              <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
+              <div style={{position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
                 {/* TEMPO sheet */}
                 {activeSheet==="tempo"&&(
