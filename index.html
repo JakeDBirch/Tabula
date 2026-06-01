@@ -1825,7 +1825,7 @@ var Bell = /*#__PURE__*/function () {
     value: function () {
       var _init = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(dlyT, fbv, sendPct, dlyHpV, dlyLpV) {
         var _this = this;
-        var m, split, aL, aR, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
+        var m, split, aL, aR, meterSink, rvIn, rvPreDelay, rvOut, rvMerger, rvCombs, mkComb, dl, dHp, dLp, fb, ret, dlyToRev, sg;
         return _regenerator().w(function (_context3) {
           while (1) switch (_context3.n) {
             case 0:
@@ -1850,6 +1850,15 @@ var Bell = /*#__PURE__*/function () {
                 m.connect(split);
                 split.connect(aL, 0);
                 split.connect(aR, 1);
+                // Route the analysers through a MUTED sink to the destination. A side-tap
+                // analyser with a dangling output isn't pulled into the render graph on
+                // some browsers (mobile Safari) and reads flat; the silent sink keeps it
+                // active without adding audio.
+                meterSink = this.ctx.createGain();
+                meterSink.gain.value = 0;
+                aL.connect(meterSink);
+                aR.connect(meterSink);
+                meterSink.connect(this.ctx.destination);
                 this.meterL = aL;
                 this.meterR = aR;
               } catch (e) {
@@ -2714,22 +2723,29 @@ var DrumEngine = /*#__PURE__*/function () {
         return _resume2.apply(this, arguments);
       }
       return resume;
-    }() // Current stereo output peak (0..1 linear) for the output meters.
+    }() // Current stereo output peak (0..1 linear) for the output meters. Uses
+    // getByteTimeDomainData (universally supported, incl. older mobile Safari —
+    // getFloatTimeDomainData is missing there and would throw, killing the meter
+    // rAF). Wrapped so a read failure never breaks the loop.
   }, {
     key: "getMeter",
     value: function getMeter() {
-      if (!this.meterL) return [0, 0];
-      var read = function read(an) {
-        var b = new Float32Array(an.fftSize);
-        an.getFloatTimeDomainData(b);
-        var p = 0;
-        for (var i = 0; i < b.length; i++) {
-          var a = Math.abs(b[i]);
-          if (a > p) p = a;
-        }
-        return p;
-      };
-      return [read(this.meterL), read(this.meterR)];
+      try {
+        if (!this.meterL) return [0, 0];
+        var read = function read(an) {
+          var b = new Uint8Array(an.fftSize);
+          an.getByteTimeDomainData(b);
+          var p = 0;
+          for (var i = 0; i < b.length; i++) {
+            var a = Math.abs(b[i] - 128);
+            if (a > p) p = a;
+          }
+          return p / 128;
+        };
+        return [read(this.meterL), read(this.meterR)];
+      } catch (e) {
+        return [0, 0];
+      }
     }
 
     // Exponential envelope — no linear-to-zero artifacts
@@ -14921,10 +14937,7 @@ function Tabula() {
   }, "FOLLOW"))), activeSheet && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
-      top: 120,
-      left: 0,
-      right: 0,
-      bottom: 60,
+      inset: 0,
       zIndex: 199,
       background: "rgba(0,0,0,0.4)"
     },

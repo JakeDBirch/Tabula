@@ -823,6 +823,12 @@ class Bell{
       const aL=this.ctx.createAnalyser();aL.fftSize=256;aL.smoothingTimeConstant=0.5;
       const aR=this.ctx.createAnalyser();aR.fftSize=256;aR.smoothingTimeConstant=0.5;
       m.connect(split);split.connect(aL,0);split.connect(aR,1);
+      // Route the analysers through a MUTED sink to the destination. A side-tap
+      // analyser with a dangling output isn't pulled into the render graph on
+      // some browsers (mobile Safari) and reads flat; the silent sink keeps it
+      // active without adding audio.
+      const meterSink=this.ctx.createGain();meterSink.gain.value=0;
+      aL.connect(meterSink);aR.connect(meterSink);meterSink.connect(this.ctx.destination);
       this.meterL=aL;this.meterR=aR;
     }catch(e){this.meterL=this.meterR=null;}
 
@@ -1387,11 +1393,16 @@ class DrumEngine{
     this.activeOH=null;
   }
   async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
-  // Current stereo output peak (0..1 linear) for the output meters.
+  // Current stereo output peak (0..1 linear) for the output meters. Uses
+  // getByteTimeDomainData (universally supported, incl. older mobile Safari —
+  // getFloatTimeDomainData is missing there and would throw, killing the meter
+  // rAF). Wrapped so a read failure never breaks the loop.
   getMeter(){
-    if(!this.meterL)return [0,0];
-    const read=an=>{const b=new Float32Array(an.fftSize);an.getFloatTimeDomainData(b);let p=0;for(let i=0;i<b.length;i++){const a=Math.abs(b[i]);if(a>p)p=a;}return p;};
-    return [read(this.meterL),read(this.meterR)];
+    try{
+      if(!this.meterL)return [0,0];
+      const read=an=>{const b=new Uint8Array(an.fftSize);an.getByteTimeDomainData(b);let p=0;for(let i=0;i<b.length;i++){const a=Math.abs(b[i]-128);if(a>p)p=a;}return p/128;};
+      return [read(this.meterL),read(this.meterR)];
+    }catch(e){return [0,0];}
   }
 
   // Exponential envelope — no linear-to-zero artifacts
@@ -6799,8 +6810,8 @@ export default function Tabula(){
           {/* ── BOTTOM SHEET — slides up, one per chip ── */}
           {activeSheet&&(
             <>
-              {/* Backdrop */}
-              <div style={{position:"fixed",top:120,left:0,right:0,bottom:60,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
+              {/* Backdrop — full screen so ANY tap outside the sheet closes it. */}
+              <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
               <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
                 {/* TEMPO sheet */}
