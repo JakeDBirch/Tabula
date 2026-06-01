@@ -349,6 +349,23 @@ const normVary=(v)=>{
 const relabelByIndex=(arr,symFn)=>Array.isArray(arr)
   ? arr.map((p,i)=>(p&&SYM_POOL.includes(p.name))?p:{...p,name:symFn(i)})
   : arr;
+// Current project schema version. Bump when a forward-migration on load should
+// refresh older projects to the latest conventions (icons, etc.).
+const PROJ_VER=2;
+// Re-assign per-layer pattern icons. For an OLD/un-versioned project (reroll)
+// every icon is re-rolled to the current random-unique scheme — so old projects
+// stop showing the prescribed-order/duplicate glyphs. For a current project,
+// only invalid or duplicate icons are replaced, keeping the user's icons stable
+// across loads. IDs are untouched (chains/matrix are id-based).
+const reIconize=(arr,reroll)=>{
+  if(!Array.isArray(arr))return arr;
+  const used=new Set();
+  return arr.map(p=>{
+    const nm=p&&p.name;
+    if(!reroll&&nm&&SYM_POOL.includes(nm)&&!used.has(nm)){used.add(nm);return p;}
+    const g=pickSym([...used]);used.add(g);return {...p,name:g};
+  });
+};
 const FILT_MODES=["off","lp","hp","bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
@@ -2453,7 +2470,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -2519,6 +2536,7 @@ export default function Tabula(){
   const doLoad=slot=>{
     let s=slotData[slot];if(!s)return;
     s=migrateLegacyBass(s);
+    const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
     // entries in the save don't leave stale data from a previous load. Lead
     // gets a fresh empty pat (matches init shape so switching to MONO post-
@@ -2532,7 +2550,7 @@ export default function Tabula(){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
           const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if(ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
+          if(ld.pats) ld.pats = reIconize(migratePats(ld.pats, s.speedMult), reroll);
           if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
           layerStoreR.current[layer]=ld;
         }
@@ -2546,7 +2564,7 @@ export default function Tabula(){
     const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
     const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
     const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
+    setPats(reIconize(migratePats(s.pats,s.speedMult),reroll));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
     // Old saves predate some fields (e.g. swing, speedMult); without explicit
     // fallback the previous project's value would leak into this load.
@@ -2595,7 +2613,7 @@ export default function Tabula(){
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
     if(s.drumPats){
-      const _dp=relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat);
+      const _dp=reIconize(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),reroll);
       setDrumPats(_dp);
       // Global mix: use the saved global drumMix; for legacy projects (which
       // stored mix per-pattern) seed it from the first pattern's migrated mix
@@ -2765,6 +2783,7 @@ export default function Tabula(){
   // ON for file export / slot save; OFF for the URL share link (samples would
   // blow past practical URL length).
   const getShareState=(includeSamples=true)=>({
+    ver:PROJ_VER,
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
@@ -2781,6 +2800,7 @@ export default function Tabula(){
   const applyShareState=rawState=>{
     if(!rawState)return;
     const s=migrateLegacyBass(rawState);
+    const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Restore the non-active layers + active layer (mirror doLoad). Without
     // this, importing a project authored on a different layer dropped the other
     // layer's patterns and dumped the active-layer pats into the wrong slot.
@@ -2793,7 +2813,7 @@ export default function Tabula(){
       for(const layer of SYNTH_LAYERS){
         if(s.layerStore[layer]){
           const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if(ld.pats)ld.pats=relabelByIndex(migratePats(ld.pats,s.speedMult),symPat);
+          if(ld.pats)ld.pats=reIconize(migratePats(ld.pats,s.speedMult),reroll);
           if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
           layerStoreR.current[layer]=ld;
         }
@@ -2804,7 +2824,7 @@ export default function Tabula(){
     // pats), else a later-created pattern can collide with an existing id.
     const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
     const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
-    if(s.pats)setPats(relabelByIndex(migratePats(s.pats,s.speedMult),symPat));
+    if(s.pats)setPats(reIconize(migratePats(s.pats,s.speedMult),reroll));
     if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
     // Apply with fallback to defaults — share imports should reset to a clean
     // baseline for anything the link doesn't carry, same rule as doLoad.
@@ -2840,7 +2860,7 @@ export default function Tabula(){
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     if(s.drumPats){
-      const _dp=relabelByIndex(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),symPat);
+      const _dp=reIconize(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),reroll);
       setDrumPats(_dp);
       // Global mix: saved global drumMix, else seed from legacy per-pattern mix.
       setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):fillDrumMix(_dp[0]&&_dp[0].mix));

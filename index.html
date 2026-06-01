@@ -673,6 +673,30 @@ var relabelByIndex = function relabelByIndex(arr, symFn) {
     });
   }) : arr;
 };
+// Current project schema version. Bump when a forward-migration on load should
+// refresh older projects to the latest conventions (icons, etc.).
+var PROJ_VER = 2;
+// Re-assign per-layer pattern icons. For an OLD/un-versioned project (reroll)
+// every icon is re-rolled to the current random-unique scheme — so old projects
+// stop showing the prescribed-order/duplicate glyphs. For a current project,
+// only invalid or duplicate icons are replaced, keeping the user's icons stable
+// across loads. IDs are untouched (chains/matrix are id-based).
+var reIconize = function reIconize(arr, reroll) {
+  if (!Array.isArray(arr)) return arr;
+  var used = new Set();
+  return arr.map(function (p) {
+    var nm = p && p.name;
+    if (!reroll && nm && SYM_POOL.includes(nm) && !used.has(nm)) {
+      used.add(nm);
+      return p;
+    }
+    var g = pickSym(_toConsumableArray(used));
+    used.add(g);
+    return _objectSpread(_objectSpread({}, p), {}, {
+      name: g
+    });
+  });
+};
 var FILT_MODES = ["off", "lp", "hp", "bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 var filtCutHz = function filtCutHz(v) {
@@ -4735,6 +4759,7 @@ function Tabula() {
             // and drum-bus levels never came back on load). Keep this list in sync
             // with captureSnapshotR / getShareState — the 4-site rule.
             snap = {
+              ver: PROJ_VER,
               pats: pats,
               chain: chain,
               bpm: bpm,
@@ -4893,6 +4918,7 @@ function Tabula() {
     var s = slotData[slot];
     if (!s) return;
     s = migrateLegacyBass(s);
+    var reroll = s.ver !== PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
     // entries in the save don't leave stale data from a previous load. Lead
     // gets a fresh empty pat (matches init shape so switching to MONO post-
@@ -4916,7 +4942,7 @@ function Tabula() {
         var layer = _SYNTH_LAYERS2[_i5];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if (ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
+          if (ld.pats) ld.pats = reIconize(migratePats(ld.pats, s.speedMult), reroll);
           if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
           layerStoreR.current[layer] = ld;
         }
@@ -4937,7 +4963,7 @@ function Tabula() {
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(_allIds)));
     if (maxId >= _id) _id = maxId + 1;
     var cleanChain = sanitizeChain(s.chain, s.pats);
-    setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
+    setPats(reIconize(migratePats(s.pats, s.speedMult), reroll));
     setChain(cleanChain.length ? cleanChain : [s.activeId || s.pats[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
     // Old saves predate some fields (e.g. swing, speedMult); without explicit
@@ -5015,12 +5041,12 @@ function Tabula() {
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
     if (s.drumPats) {
-      var _dp = relabelByIndex(s.drumPats.map(function (p) {
+      var _dp = reIconize(s.drumPats.map(function (p) {
         var mp = migrateDrumPatRows(p);
         return Object.assign({}, mp, {
           mix: fillDrumMix(mp.mix)
         });
-      }), symPat);
+      }), reroll);
       setDrumPats(_dp);
       // Global mix: use the saved global drumMix; for legacy projects (which
       // stored mix per-pattern) seed it from the first pattern's migrated mix
@@ -5360,6 +5386,7 @@ function Tabula() {
   var getShareState = function getShareState() {
     var includeSamples = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : true;
     return _objectSpread(_objectSpread({
+      ver: PROJ_VER,
       pats: pats,
       chain: chain,
       bpm: bpm,
@@ -5423,6 +5450,7 @@ function Tabula() {
   var applyShareState = function applyShareState(rawState) {
     if (!rawState) return;
     var s = migrateLegacyBass(rawState);
+    var reroll = s.ver !== PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Restore the non-active layers + active layer (mirror doLoad). Without
     // this, importing a project authored on a different layer dropped the other
     // layer's patterns and dumped the active-layer pats into the wrong slot.
@@ -5445,7 +5473,7 @@ function Tabula() {
         var layer = _SYNTH_LAYERS3[_i7];
         if (s.layerStore[layer]) {
           var ld = JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if (ld.pats) ld.pats = relabelByIndex(migratePats(ld.pats, s.speedMult), symPat);
+          if (ld.pats) ld.pats = reIconize(migratePats(ld.pats, s.speedMult), reroll);
           if (ld.pats && ld.phrases) ld.phrases = sanitizePhrases(ld.phrases, ld.pats);
           layerStoreR.current[layer] = ld;
         }
@@ -5463,7 +5491,7 @@ function Tabula() {
     });
     var maxId = Math.max.apply(Math, [0].concat(_toConsumableArray(_allIds)));
     if (maxId >= _id) _id = maxId + 1;
-    if (s.pats) setPats(relabelByIndex(migratePats(s.pats, s.speedMult), symPat));
+    if (s.pats) setPats(reIconize(migratePats(s.pats, s.speedMult), reroll));
     if (s.chain) {
       var cc = sanitizeChain(s.chain, s.pats || []);
       setChain(cc.length ? cc : [s.activeId || s.pats && s.pats[0] && s.pats[0].id || 1]);
@@ -5530,12 +5558,12 @@ function Tabula() {
       drums: false
     });
     if (s.drumPats) {
-      var _dp = relabelByIndex(s.drumPats.map(function (p) {
+      var _dp = reIconize(s.drumPats.map(function (p) {
         var mp = migrateDrumPatRows(p);
         return Object.assign({}, mp, {
           mix: fillDrumMix(mp.mix)
         });
-      }), symPat);
+      }), reroll);
       setDrumPats(_dp);
       // Global mix: saved global drumMix, else seed from legacy per-pattern mix.
       setDrumMixArr(s.drumMix ? fillDrumMix(s.drumMix) : fillDrumMix(_dp[0] && _dp[0].mix));
