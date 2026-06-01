@@ -1861,6 +1861,16 @@ export default function Tabula(){
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
   const [shareFile, setShareFile] = useState(null);
+  // One-time "Add to Home Screen for fullscreen" nudge — iOS, in-browser only
+  // (hidden once launched as a standalone home-screen app, or once dismissed).
+  const [installHint, setInstallHint] = useState(()=>{
+    try{
+      if(!IS_MOBILE)return false;
+      const iOS=/iphone|ipad|ipod/i.test(navigator.userAgent||"");
+      const standalone=(navigator.standalone===true)||(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches);
+      return iOS&&!standalone&&!localStorage.getItem("tabula-nohint");
+    }catch(e){return false;}
+  });
   const recorderRef = useRef(null);
   const recordStreamRef = useRef(null);
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
@@ -4929,6 +4939,15 @@ export default function Tabula(){
             <button onClick={()=>setShareFile(null)}
               style={{padding:"10px 12px",borderRadius:10,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
           </div>
+        </div>
+      )}
+
+      {/* One-time fullscreen nudge (iOS, in-browser only). */}
+      {installHint&&(
+        <div style={{position:"fixed",left:8,right:8,bottom:8,zIndex:9998,display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:12,background:"rgba(24,22,18,0.98)",border:"1px solid rgba(200,185,165,0.25)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)"}}>
+          <span style={{flex:1,fontSize:11,lineHeight:1.35,color:"rgba(210,195,175,0.8)"}}>For fullscreen: <b style={{color:"#c4a882"}}>Share ▸ Add to Home Screen</b>, then open Tabula from your home screen.</span>
+          <button onClick={()=>{try{localStorage.setItem("tabula-nohint","1");}catch(e){}setInstallHint(false);}}
+            style={{padding:"7px 12px",borderRadius:9,border:"1px solid rgba(200,185,165,0.3)",background:"rgba(200,185,165,0.08)",color:"rgba(220,205,180,0.9)",fontSize:11,fontWeight:600,letterSpacing:0.5,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Got it</button>
         </div>
       )}
 
