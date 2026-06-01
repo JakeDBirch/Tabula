@@ -1771,6 +1771,12 @@ export default function Tabula(){
   // Mixer group linking — defeatable per group. Both default ON.
   const [linkHat,setLinkHat]=useState(true);  // CH+OH move together
   const [linkTom,setLinkTom]=useState(true);  // LT+MT+HT move together (all but pan)
+  // Mobile drum-mixer horizontal scroll — a dedicated drag-scrollbar, since the
+  // strips' own sliders capture touch and block native swipe-scroll.
+  const mixScrollRef=useRef(null);
+  const [mixScrollPct,setMixScrollPct]=useState(0);
+  const mixScrollSync=()=>{const c=mixScrollRef.current;if(!c)return;const mx=c.scrollWidth-c.clientWidth;setMixScrollPct(mx>0?c.scrollLeft/mx:0);};
+  const mixScrollTo=(clientX,track)=>{const c=mixScrollRef.current;if(!c)return;const r=track.getBoundingClientRect();const pct=Math.max(0,Math.min(1,(clientX-r.left)/r.width));c.scrollLeft=pct*(c.scrollWidth-c.clientWidth);};
   const drumMixR=useRef(drumMix); useEffect(()=>{drumMixR.current=drumMix;},[drumMix]);
 
   // Track window width to drive responsive left column layout
@@ -7005,6 +7011,17 @@ export default function Tabula(){
                       // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
                       // vertical level fader → REC) but at a narrower width.
                       return(<div>
+                      {/* KIT selector (mobile) */}
+                      <div style={{marginBottom:6}}>
+                        <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.3)",fontWeight:500,marginBottom:3}}>KIT</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {DRUM_KITS.map(kit=>{const on=activeKit===kit.id;return(
+                            <button key={kit.id} disabled={kitLoading} onClick={()=>loadKit(kit.id)}
+                              style={{padding:"5px 12px",borderRadius:5,border:"1px solid "+(on?"rgba(210,195,175,0.6)":"rgba(210,195,175,0.15)"),background:on?"rgba(210,195,175,0.1)":"transparent",color:on?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.4)",fontSize:10,letterSpacing:1,fontWeight:on?700:500,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                              {kitLoading&&on?"…":kit.label}
+                            </button>);})}
+                        </div>
+                      </div>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
                         {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
                           <button key={lbl} onClick={()=>set(v=>!v)}
@@ -7021,7 +7038,14 @@ export default function Tabula(){
                             style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.45)"}}>CLR</button>
                         )}
                       </div>
-                      <div style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
+                      {/* Drag-scrollbar — reliable horizontal scroll for the strips
+                          (their sliders capture touch, blocking native swipe). */}
+                      <div style={{height:16,marginBottom:5,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:8,touchAction:"none",cursor:"ew-resize",overflow:"hidden"}}
+                        onPointerDown={e=>{try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}const track=e.currentTarget;mixScrollTo(e.clientX,track);const mv=ev=>mixScrollTo(ev.clientX,track);const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
+                        <div style={{position:"absolute",top:2,bottom:2,width:"32%",left:`calc(${mixScrollPct}*(100% - 32%))`,background:"rgba(210,195,175,0.4)",borderRadius:7,pointerEvents:"none"}}/>
+                        <span style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",fontSize:7,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:600,pointerEvents:"none",whiteSpace:"nowrap"}}>◂ DRAG TO SCROLL ▸</span>
+                      </div>
+                      <div ref={mixScrollRef} onScroll={mixScrollSync} style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
                         {DRUM_VOICES.map((voice,r)=>{
                           const stripLabel=voice.full||voice.label;
                           const m=mix[r];
