@@ -938,6 +938,13 @@ class Bell{
     const f=rvLfHz(pct),t=this.ctx.currentTime;
     for(const c of this.rvCombs)if(c.lsh){c.lsh.frequency.setTargetAtTime(f,t,0.02);c.lsh.gain.setTargetAtTime(RV_DAMP_DB,t,0.02);}
   }
+  // Instantly kill ringing tails — zero every reverb comb's feedback and the
+  // delay feedback so circulating energy dies. Used to take the engine to true
+  // silence before an MP3 bounce. Re-arm afterward with setRvSize()/setDlyFb().
+  flushTail(){if(!this.ready)return;const t=this.ctx.currentTime;
+    if(this.rvCombs)for(const c of this.rvCombs)if(c.fb)c.fb.gain.setValueAtTime(0,t);
+    if(this.dlyFb)this.dlyFb.gain.setValueAtTime(0,t);
+  }
   // Pre-delay — delay between input and reverb combs (initial reflection time).
   // 0..500 ms.
   setRvPreDelay(ms){if(!this.ready||!this.rvPreDelay)return;
@@ -1815,6 +1822,7 @@ export default function Tabula(){
   const [activeKit, setActiveKit] = useState(DEFAULT_KIT);
   const [kitLoading, setKitLoading] = useState(false);
   const [exporting, setExporting] = useState(false); // MP3 bounce in progress
+  const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
@@ -3049,10 +3057,24 @@ export default function Tabula(){
       // instead. Playing once unlocks + runs the context.
       try{if(ctx.state!=="running")await ctx.resume();}catch(e){}
       if(ctx.state!=="running"){showFlash("TAP ▶ ONCE, THEN MP3");return;}
+      // ── Take the engine to TRUE silence before bouncing. Stopping the
+      // scheduler above does NOT silence the ~100ms of already-queued look-ahead
+      // voices, nor the reverb/delay tails — that overlap is what doubled up when
+      // exporting mid-play. Mute the master, flush the FX feedback, let it all
+      // drain, then bring the level + FX feedback back for a clean start.
+      const mGain=bell.current.master;
+      if(mGain){mGain.gain.cancelScheduledValues(ctx.currentTime);mGain.gain.setValueAtTime(0,ctx.currentTime);}
+      bell.current.flushTail&&bell.current.flushTail();
+      await _waitAudio(ctx,ctx.currentTime+0.22);
+      bell.current.setRvSize&&bell.current.setRvSize(rvSize);     // re-arm reverb feedback
+      bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100); // re-arm delay feedback
+      if(mGain)mGain.gain.setValueAtTime(0.55,ctx.currentTime);
       const lame=await loadLame();
       if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
       const barCount=Math.max(1,_exportBars().length);
+      const loops=Math.max(1,Math.min(16,exportLoops||1));
       const cycleSec=barCount*4*60/Math.max(1,bpm); // sync: 16 abs steps = 4 beats/bar
+      const totalSec=cycleSec*loops; // bounce `loops` passes of the song (it wraps in sync mode)
       const tailSec=2;
       // Tap the master into a recorder (silent parallel path; no double audio).
       cap=ctx.createScriptProcessor(4096,2,2);
@@ -3082,9 +3104,9 @@ export default function Tabula(){
       capturing=true;
       await startStop();                       // start playback from the song top
       const t0=ctx.currentTime;
-      await _waitAudio(ctx,t0+cycleSec);        // one full cycle
+      await _waitAudio(ctx,t0+totalSec);        // play `loops` passes of the song
       if(playingR.current)await startStop();    // stop notes; FX tail keeps ringing
-      await _waitAudio(ctx,t0+cycleSec+tailSec);// capture the tail
+      await _waitAudio(ctx,t0+totalSec+tailSec);// capture the tail
       capturing=false;
       const L=_concatF32(Lc),R=_concatF32(Rc);
       if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
@@ -3104,6 +3126,9 @@ export default function Tabula(){
       try{if(master&&cap)master.disconnect(cap);}catch(e){}
       try{if(cap)cap.disconnect();cap&&(cap.onaudioprocess=null);}catch(e){}
       try{if(sink)sink.disconnect();}catch(e){}
+      // Safety: never leave the master muted or the FX feedback flushed if the
+      // bounce bailed out between the silence step and its restore.
+      try{const c=bell.current.ctx;if(c&&bell.current.master){bell.current.master.gain.setValueAtTime(0.55,c.currentTime);bell.current.setRvSize&&bell.current.setRvSize(rvSize);bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100);}}catch(e){}
       if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);songSyncR.current=restore.sync;setSongSyncMode(restore.sync);songRandomR.current=restore.rand;setSongRandom(restore.rand);loopR.current=restore.loop;setLoopMode(restore.loop);}
       exportingR.current=false;setExporting(false);
     }
@@ -5514,6 +5539,13 @@ export default function Tabula(){
                   <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportMIDI}>MIDI</button>
                   <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0,opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
                 </div>
+                {/* MP3 bounce length — how many passes through the song. */}
+                <div style={{display:"flex",alignItems:"center",gap:3,marginTop:4}}>
+                  <span style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.35)",flexShrink:0}}>MP3 ×</span>
+                  {[1,2,4,8].map(n=>(
+                    <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"3px 0",fontSize:8,fontWeight:600,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.12)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
+                  ))}
+                </div>
                 <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
             </div>
@@ -7359,6 +7391,13 @@ export default function Tabula(){
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportMIDI}>MIDI</button>
                       <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0",opacity:exporting?0.5:1})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
+                    </div>
+                    {/* MP3 bounce length — how many passes through the song. */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,marginTop:8}}>
+                      <span style={{fontSize:9,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",flexShrink:0}}>MP3 PASSES ×</span>
+                      {[1,2,4,8].map(n=>(
+                        <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:700,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.14)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
+                      ))}
                     </div>
                     <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
                   </div>
