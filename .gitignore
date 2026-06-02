@@ -14,3 +14,8 @@ node_modules/
 
 # Stray nested clone (do not track as a submodule)
 /Tabula/
+
+# Local mobile test harness (never commit)
+test-landscape.html
+test-mobile.html
+_testserver.js

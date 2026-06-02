@@ -3654,7 +3654,7 @@ function Tabula() {
   var phraseDropRef = useRef(null);
   var sectionDropRef = useRef(null);
   var seqDropRef = useRef(null);
-  var pointerCountR = useRef(0); // active pointers on grid
+  var activePtrsR = useRef(new Set()); // active pointer IDs on grid — stateless multi-touch via isPrimary, this set just tracks "all up". Self-heals (cleared on every primary-down) so a missed up/cancel can't permanently lock editing.
   var _useState107 = useState(null),
     _useState108 = _slicedToArray(_useState107, 2),
     chainDrag = _useState108[0],
@@ -7252,7 +7252,11 @@ function Tabula() {
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
     e.preventDefault();
-    pointerCountR.current++;
+    // A primary pointer is the first finger of a fresh interaction — no other
+    // fingers should legitimately be down, so clear any stale IDs left behind
+    // by a missed up/cancel. This is what makes the multi-touch state unleakable.
+    if (e.isPrimary) activePtrsR.current.clear();
+    activePtrsR.current.add(e.pointerId);
     var g = gesture.current;
 
     // Shift+click on desktop = two-finger drag (pattern shift)
@@ -7284,7 +7288,9 @@ function Tabula() {
       g.appliedDY = 0;
       g.shiftPointerID = e.pointerId;
       if (gridRef.current) {
-        gridRef.current.setPointerCapture(e.pointerId);
+        try {
+          gridRef.current.setPointerCapture(e.pointerId);
+        } catch (_) {}
         gesture.current.capturedId = e.pointerId;
       }
       var _pat = patsR.current.find(function (p) {
@@ -7299,8 +7305,9 @@ function Tabula() {
       return;
     }
 
-    // Second finger down → shift mode, dismiss popup
-    if (pointerCountR.current >= 2) {
+    // Second finger down → shift mode, dismiss popup. isPrimary is false for any
+    // finger beyond the first — stateless, so it can never get stuck "on".
+    if (!e.isPrimary) {
       clearTimeout(longPressR.current);
       longPressR.current = null;
       if (popupR.current) {
@@ -7330,7 +7337,9 @@ function Tabula() {
         g.appliedDY = 0;
         g.shiftPointerID = e.pointerId;
         if (gridRef.current) {
-          gridRef.current.setPointerCapture(e.pointerId);
+          try {
+            gridRef.current.setPointerCapture(e.pointerId);
+          } catch (_) {}
           gesture.current.capturedId = e.pointerId;
         }
         var _pat2 = patsR.current.find(function (p) {
@@ -7381,14 +7390,18 @@ function Tabula() {
         g.startX = e.clientX;
         g.startY = e.clientY;
         if (gridRef.current) {
-          gridRef.current.setPointerCapture(e.pointerId);
+          try {
+            gridRef.current.setPointerCapture(e.pointerId);
+          } catch (_) {}
           gesture.current.capturedId = e.pointerId;
         }
         return;
       }
       g.state = "popup";
       if (gridRef.current) {
-        gridRef.current.setPointerCapture(e.pointerId);
+        try {
+          gridRef.current.setPointerCapture(e.pointerId);
+        } catch (_) {}
         gesture.current.capturedId = e.pointerId;
       }
       return;
@@ -7416,7 +7429,9 @@ function Tabula() {
       }
     }
     if (gridRef.current) {
-      gridRef.current.setPointerCapture(e.pointerId);
+      try {
+        gridRef.current.setPointerCapture(e.pointerId);
+      } catch (_) {}
       gesture.current.capturedId = e.pointerId;
     }
 
@@ -7840,7 +7855,7 @@ function Tabula() {
     }
   }, []);
   var handleGridUp = useCallback(function (e) {
-    pointerCountR.current = Math.max(0, pointerCountR.current - 1);
+    activePtrsR.current["delete"](e.pointerId);
     clearTimeout(longPressR.current);
     longPressR.current = null;
     var g = gesture.current;
@@ -7969,7 +7984,7 @@ function Tabula() {
         });
       }
     }
-    if (pointerCountR.current === 0) {
+    if (activePtrsR.current.size === 0) {
       g.state = "idle";
       setShifting(false);
     }

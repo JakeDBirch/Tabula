@@ -1904,7 +1904,7 @@ export default function Tabula(){
   const phraseDropRef= useRef(null);
   const sectionDropRef=useRef(null);
   const seqDropRef   = useRef(null);
-  const pointerCountR= useRef(0);    // active pointers on grid
+  const activePtrsR  = useRef(new Set()); // active pointer IDs on grid — stateless multi-touch via isPrimary, this set just tracks "all up". Self-heals (cleared on every primary-down) so a missed up/cancel can't permanently lock editing.
   const [chainDrag, setChainDrag] = useState(null); // {type,id,fromIdx,x,y}
   const chainStripRef = useRef(null);
   const chainDragR    = useRef(null); // mirror of chainDrag for handlers
@@ -3737,7 +3737,11 @@ export default function Tabula(){
     pushHistory();
     setFollowSeq(false); // any grid edit takes you out of follow mode
     e.preventDefault();
-    pointerCountR.current++;
+    // A primary pointer is the first finger of a fresh interaction — no other
+    // fingers should legitimately be down, so clear any stale IDs left behind
+    // by a missed up/cancel. This is what makes the multi-touch state unleakable.
+    if(e.isPrimary)activePtrsR.current.clear();
+    activePtrsR.current.add(e.pointerId);
     const g=gesture.current;
 
     // Shift+click on desktop = two-finger drag (pattern shift)
@@ -3756,15 +3760,16 @@ export default function Tabula(){
       g.state="shift";setShifting(true);
       g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
       g.shiftPointerID=e.pointerId;
-      if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
+      if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
       const pat=patsR.current.find(p=>p.id===activeIdR.current);
       g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
       g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
       return;
     }
 
-    // Second finger down → shift mode, dismiss popup
-    if(pointerCountR.current>=2){
+    // Second finger down → shift mode, dismiss popup. isPrimary is false for any
+    // finger beyond the first — stateless, so it can never get stuck "on".
+    if(!e.isPrimary){
       clearTimeout(longPressR.current);longPressR.current=null;
       if(popupR.current){
         const {col}=popupR.current;
@@ -3781,7 +3786,7 @@ export default function Tabula(){
         // Anchor shift to this (second) pointer's position and capture it
         g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
         g.shiftPointerID=e.pointerId;
-        if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
+        if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
         const pat=patsR.current.find(p=>p.id===activeIdR.current);
         g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
         g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
@@ -3813,11 +3818,11 @@ export default function Tabula(){
       const distFromOrigin=Math.sqrt((e.clientX-pr.originX)**2+(e.clientY-pr.originY)**2);
       if(!isOnNote&&distFromOrigin>160){
         g.state="pending-dismiss";g.startX=e.clientX;g.startY=e.clientY;
-        if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
+        if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
         return;
       }
       g.state="popup";
-      if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
+      if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
       return;
     }
 
@@ -3830,7 +3835,7 @@ export default function Tabula(){
       const c0=gridRef.current.querySelector('[data-col="0"]'),c1=gridRef.current.querySelector('[data-col="1"]');
       if(c0&&c1){const px=c1.getBoundingClientRect().left-c0.getBoundingClientRect().left;if(px>2)g.cellPx=px;}
     }
-    if(gridRef.current){gridRef.current.setPointerCapture(e.pointerId);gesture.current.capturedId=e.pointerId;}
+    if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
 
     // Start long press timer on an ON note
     if(isOnNote){
@@ -4111,7 +4116,7 @@ export default function Tabula(){
   },[]);
 
   const handleGridUp=useCallback(e=>{
-    pointerCountR.current=Math.max(0,pointerCountR.current-1);
+    activePtrsR.current.delete(e.pointerId);
     clearTimeout(longPressR.current);longPressR.current=null;
     const g=gesture.current;
 
@@ -4202,7 +4207,7 @@ export default function Tabula(){
       }
     }
 
-    if(pointerCountR.current===0){g.state="idle";setShifting(false);}
+    if(activePtrsR.current.size===0){g.state="idle";setShifting(false);}
   },[]);
 
   const paramPopupValuesR = useRef(null);
