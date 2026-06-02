@@ -11,23 +11,34 @@
  *
  * Bump CACHE when the shell/precache list changes to force a clean re-cache.
  */
-const CACHE = "tabula-v1";
+const CACHE = "tabula-v2";
 
 // Must-have, small, same-origin. If any of these fail the install still
 // proceeds (we catch) — the fetch handler will fill gaps on first online use.
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
-// Best-effort: third-party libs + the default kit. Cached individually so one
-// failure (e.g. a flaky CDN) doesn't abort the whole precache.
+// Best-effort: third-party libs + both shipped kits. Cached individually so one
+// failure (e.g. a flaky CDN) doesn't abort the whole precache. ~8MB total — a
+// one-time cost on install of a PWA you deliberately added to the home screen.
 const WARM = [
   "https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js",
   "https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js",
+  // 808 kit
   "samples/808-kit/BD.wav", "samples/808-kit/SD.wav", "samples/808-kit/CP.wav",
   "samples/808-kit/CL.wav", "samples/808-kit/CB.wav", "samples/808-kit/LT.wav",
   "samples/808-kit/MT.wav", "samples/808-kit/HT.wav", "samples/808-kit/CH.wav",
   "samples/808-kit/OH.wav", "samples/808-kit/CY.wav", "samples/808-kit/RM.wav",
   "samples/808-kit/SH.wav",
+  // VP kit (velocity layers + round-robins included)
+  "samples/vp-kit/BDv1.wav", "samples/vp-kit/BDv2.wav",
+  "samples/vp-kit/SDv1.wav", "samples/vp-kit/SDv2.wav", "samples/vp-kit/SDv3.wav",
+  "samples/vp-kit/RM.wav", "samples/vp-kit/CP.wav", "samples/vp-kit/HT.wav",
+  "samples/vp-kit/MT.wav", "samples/vp-kit/LT.wav", "samples/vp-kit/OH.wav",
+  "samples/vp-kit/CY.wav", "samples/vp-kit/CL.wav", "samples/vp-kit/CB.aiff",
+  "samples/vp-kit/CH1.wav", "samples/vp-kit/CH2.wav", "samples/vp-kit/CH3.wav",
+  "samples/vp-kit/CH4.wav", "samples/vp-kit/CH5.wav", "samples/vp-kit/CH6.wav",
+  "samples/vp-kit/SH1.wav", "samples/vp-kit/SH2.wav", "samples/vp-kit/SH3.wav",
 ];
 
 self.addEventListener("install", (e) => {
