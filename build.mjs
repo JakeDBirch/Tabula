@@ -101,6 +101,14 @@ const html = `<!DOCTYPE html>
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    // Register the offline service worker so the installed PWA runs with no network.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script>
