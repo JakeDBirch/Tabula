@@ -802,6 +802,13 @@ class Bell{
     lim.threshold.value=-1.0; lim.knee.value=0; lim.ratio.value=20;
     lim.attack.value=0.002; lim.release.value=0.1;
     m.connect(lim); lim.connect(this.ctx.destination); this.limiter=lim;
+    // Per-layer mute buses. POLY and MONO voices route their DRY through their
+    // own gain (→ master) so mute/solo can cut a layer instantly in the audio
+    // domain (ramped, click-free) — not just by gating note scheduling. Reverb/
+    // delay sends still go direct (the scheduler stops feeding a muted layer, so
+    // its FX tail just rings out naturally, like a real mixer's reverb return).
+    this.synthBus=this.ctx.createGain(); this.synthBus.connect(m);
+    this.monoBus=this.ctx.createGain();  this.monoBus.connect(m);
 
     // Reverb — Schroeder-style 8-comb feedback split into stereo L/R groups
     // (Freeverb-ish: 4 combs per channel with slightly offset delay times for
@@ -921,7 +928,7 @@ class Bell{
   // the entry's flt/vel/oct/glide. Used by the scheduler for tied notes — sub-
   // steps within the held note's duration animate the filter without
   // re-triggering the envelope.
-  play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime,layerP,mods){
+  play(freq,at,sp,noteDur,globalSend,prevFreq,glideTime,layerP,layer,mods){
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=layerP||this.p;
     const hasMods=!!(mods&&mods.length);
@@ -1206,8 +1213,9 @@ class Bell{
       }
     }
     vcf.connect(vca);
-    // Dry: always direct to master at full level
-    vca.connect(this.master);
+    // Dry → the layer's mute bus (→ master). MONO uses monoBus, everything else
+    // (POLY) uses synthBus; falls back to master if buses aren't built yet.
+    vca.connect((layer==="lead"?this.monoBus:this.synthBus)||this.master);
     // Reverb: per-note variable send. Layer's rvSend is the default; per-step
     // sp.rev > 0 overrides it (matching the dly-send convention).
     const stepRev = sp ? (sp.rev??0)/100 : 0;
@@ -1224,6 +1232,8 @@ class Bell{
     }
   }
   setDlyTime(s){if(!this.ready)return;if(this.dly){this.dly.delayTime.cancelScheduledValues(this.ctx.currentTime);this.dly.delayTime.setValueAtTime(s,this.ctx.currentTime);}}
+  // Audio-domain layer mute — ramp the POLY/MONO dry bus 0↔1 (click-free).
+  setLayerGain(layer,v){if(!this.ready)return;const bus=layer==="lead"?this.monoBus:this.synthBus;if(bus)bus.gain.setTargetAtTime(Math.max(0,Math.min(1,v)),this.ctx.currentTime,0.012);}
   setDlyFb(v){if(!this.ready)return;if(this.dlyFb)this.dlyFb.gain.setTargetAtTime(v,this.ctx.currentTime,.02);}
   setDlyHp(v){if(!this.ready)return;if(this.dlyHp)this.dlyHp.frequency.setTargetAtTime(hpHz(v),this.ctx.currentTime,.02);}
   setDlyLp(v){if(!this.ready)return;if(this.dlyLp)this.dlyLp.frequency.setTargetAtTime(lpHz(v),this.ctx.currentTime,.02);}
@@ -1257,7 +1267,10 @@ class DrumEngine{
     // Internal master-input gain — voices connect here, then through to the
     // shared Bell master. Lets the mixer scale the entire drum bus.
     this.masterIn=this.ctx.createGain();this.masterIn.gain.value=0.85;
-    this.masterIn.connect(masterNode);
+    // Mute bus — distinct from the level gain above so audio-domain mute/solo
+    // cuts the whole drum layer instantly without touching the DRUMS level fader.
+    this.muteGain=this.ctx.createGain();
+    this.masterIn.connect(this.muteGain);this.muteGain.connect(masterNode);
     this.master=this.masterIn;
     this.revNode=revNode||null;
     this.dlyNode=dlyNode||null;
@@ -1354,6 +1367,8 @@ class DrumEngine{
   setMasterLevel(pct){
     if(this.ready&&this.masterIn)this.masterIn.gain.setTargetAtTime(Math.max(0,Math.min(150,pct))/100,this.ctx.currentTime,0.02);
   }
+  // Audio-domain mute for the whole drum layer — ramp the mute bus 0↔1.
+  setMute(v){if(this.ready&&this.muteGain)this.muteGain.gain.setTargetAtTime(Math.max(0,Math.min(1,v)),this.ctx.currentTime,0.012);}
   // Fast-fade whatever open-hat is currently sustaining. Used when CH fires so
   // a closed hat properly cuts the open hat (classic choke-group behavior).
   // 8ms time constant keeps the kill audible-but-not-clicky.
@@ -1981,6 +1996,16 @@ export default function Tabula(){
 
   const bell=useRef(new Bell());
   const drumEngine=useRef(new DrumEngine());
+  // Push mute/solo into the audio domain: ramp each layer's bus gain so a muted
+  // (or soloed-out) layer is cut instantly and any ringing note dies — in
+  // addition to the scheduler no longer feeding it. Runs whenever mute/solo
+  // changes; the setters no-op until the engine is built.
+  useEffect(()=>{
+    const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
+    const aud=(l)=>!trackMute[l]&&(!anySolo||trackSolo[l]);
+    if(bell.current.setLayerGain){bell.current.setLayerGain("synth",aud("synth")?1:0);bell.current.setLayerGain("lead",aud("lead")?1:0);}
+    if(drumEngine.current.setMute)drumEngine.current.setMute(aud("drums")?1:0);
+  },[trackMute,trackSolo]);
   const silentLoopR=useRef(null);
   const wakeLockR=useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
@@ -3172,9 +3197,9 @@ export default function Tabula(){
         if(mods.length===0)mods=null;
       }
       if(ratch>1){
-        for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,layerLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,layerLP);
+        for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,layerLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,layerLP,layer);
       } else {
-        bell.current.play(f,at,sp,noteDur,layerLP.dlySend,prevF,glideTime,layerLP,mods);
+        bell.current.play(f,at,sp,noteDur,layerLP.dlySend,prevF,glideTime,layerLP,layer,mods);
       }
       // Mono layer: stop after the first sounded note this column.
       if(monoOne)break;
