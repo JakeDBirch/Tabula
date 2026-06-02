@@ -49,7 +49,10 @@ const runBabel = (args) => execFileSync(
   { stdio: ["ignore", "pipe", "pipe"] }
 );
 try {
-  runBabel([srcStripped, "-o", compiled]);
+  // Force compact output so the bundle size doesn't oscillate around Babel's
+  // 500KB auto-compact threshold (which produced huge, noisy index.html diffs
+  // as the source crossed it). Always-minified = smaller deploy + stable diffs.
+  runBabel([srcStripped, "--compact", "true", "-o", compiled]);
 } catch (err) {
   console.error("Babel compile failed:");
   console.error(err.stderr?.toString() || err.message);

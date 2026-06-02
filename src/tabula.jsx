@@ -3904,9 +3904,6 @@ export default function Tabula(){
     const dx=e.clientX-g.startX,dy=e.clientY-g.startY;
 
     if(g.state==="popup"&&popupR.current){
-      // Mobile uses the bounded slider panel (independent handlers), not this
-      // radial drag — bail so a held-finger drag after long-press does nothing.
-      if(IS_MOBILE)return;
       const pr=popupR.current;
       // For mouse (right-click popup): only update on drag with button held; touch always has buttons>0
       if(e.pointerType==='mouse'&&e.buttons===0)return;
@@ -4162,9 +4159,6 @@ export default function Tabula(){
     }
 
     if(g.state==="popup"){
-      // Mobile: the bounded panel owns editing + commits live. The long-press
-      // release just ends the gesture and leaves the panel open.
-      if(IS_MOBILE){g.state="idle";return;}
       // Sticky — commit current values but keep popup visible
       if(popupR.current){
         const {col}=popupR.current;
@@ -6885,47 +6879,8 @@ export default function Tabula(){
               </div>
             )}
 
-            {/* Param popup */}
-            {paramPopup&&(()=>{
-              // Bounded step-param panel (replaces the old radial wheel). A tap
-              // on the backdrop closes it — the previous radial overlay swallowed
-              // pointerdowns with no handler, so it could never be dismissed and
-              // froze all cell editing. Position is clamped to the viewport so it
-              // never clips off the top.
-              const pp=paramPopup; const col=pp.col;
-              const activePat=pats.find(p=>p.id===activeId);
-              const sp=(activePat&&activePat.params&&activePat.params[col])||defaultStepParams()[0];
-              const defFor=k=>k==="rhy"?1:k==="oct"?2:k==="vel"?100:0;
-              const close=()=>{setParamPopup(null);popupR.current=null;gesture.current.state="idle";};
-              const setP=(key,val)=>{setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{params:(p.params||defaultStepParams()).map((s,i)=>i===col?Object.assign({},s,{[key]:val}):s)})));};
-              const W=236, vw=window.innerWidth, vh=window.innerHeight;
-              const px=Math.max(8,Math.min(vw-W-8,(pp.x||vw/2)-W/2));
-              const py=Math.max(8,Math.min(vh-300,(pp.y||120)+14));
-              return(<>
-                <div style={{position:"fixed",inset:0,zIndex:120}} onPointerDown={close}/>
-                <div style={{position:"fixed",left:px,top:py,width:W,zIndex:121,background:"rgba(24,22,18,0.98)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:12,boxShadow:"0 10px 36px rgba(0,0,0,0.7)",padding:"10px 12px 12px"}} onPointerDown={e=>e.stopPropagation()}>
-                  <div style={{display:"flex",alignItems:"center",marginBottom:8}}>
-                    <span style={{fontSize:9,letterSpacing:1.5,color:"rgba(210,195,175,0.55)",fontWeight:700}}>STEP {col+1}</span>
-                    <button onClick={close} style={{marginLeft:"auto",width:24,height:24,borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit",lineHeight:1,padding:0}}>✕</button>
-                  </div>
-                  {PARAM_ARMS.map(arm=>{
-                    const val=sp[arm.key]!=null?sp[arm.key]:defFor(arm.key);
-                    const frac=Math.max(0,Math.min(1,(val-arm.min)/(arm.max-arm.min)));
-                    return(<div key={arm.key} style={{marginBottom:9}}>
-                      <div style={{display:"flex",alignItems:"baseline",marginBottom:3}}>
-                        <span style={{fontSize:8,letterSpacing:1,color:arm.color,fontWeight:700,width:42}}>{arm.label}</span>
-                        <span style={{fontSize:10,color:"rgba(210,195,175,0.75)",marginLeft:"auto"}}>{val}</span>
-                      </div>
-                      <div style={{height:10,background:"rgba(220,200,180,0.08)",borderRadius:5,position:"relative",touchAction:"none",cursor:"pointer"}}
-                        onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const upd=ev=>{const v=arm.min+Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*(arm.max-arm.min);setP(arm.key,Math.round(v));};upd(e);const up=()=>{document.removeEventListener('pointermove',upd);document.removeEventListener('pointerup',up);};document.addEventListener('pointermove',upd);document.addEventListener('pointerup',up);}}>
-                        <div style={{position:"absolute",left:0,top:0,bottom:0,width:(frac*100)+"%",background:arm.color+"99",borderRadius:5}}/>
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:11,left:`calc(${frac*100}% - 5px)`,background:"rgba(255,255,255,0.9)",borderRadius:3,boxShadow:"0 0 4px "+arm.color}}/>
-                      </div>
-                    </div>);
-                  })}
-                </div>
-              </>);
-            })()}
+            {/* (Step-param popup is rendered once at the root — see {paramPopup&&...}
+                near the top of the return — so it is NOT duplicated here.) */}
           </div>
 
           {/* ── BOTTOM CHROME: chips row + persistent transport (portrait) ── */}
