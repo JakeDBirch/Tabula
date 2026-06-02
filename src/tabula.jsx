@@ -573,31 +573,22 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const drag=useRef(null);
   const col=accent||"rgba(255,255,255,0.6)";
   const pct=((value-min)/(max-min))*100;
-  // Absolute mode: the click position sets the value (jump-to). Fine mode
-  // (Ctrl/Cmd held, Pro Tools-style): relative drag, ~5× finer.
-  const absCompute=useCallback(e=>{
-    const rect=ref.current.getBoundingClientRect();
-    if(vertical){
-      const v=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));
-      onChange(Math.round(min+v*(max-min)));
-    } else {
-      onChange(Math.round(min+Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*(max-min)));
-    }
-  },[min,max,onChange,vertical]);
-  const compute=absCompute;
+  // Drag is RELATIVE at ~0.5x by default: dragging the full length of the control
+  // moves the value half its range — finer than tracking the pointer 1:1, and no
+  // jump-to-position. Ctrl/Cmd held = extra-fine relative (Pro Tools style).
+  // Double-click resets.
   const onDown=useCallback(e=>{
-    e.stopPropagation();ref.current.setPointerCapture(e.pointerId);
-    const fine=e.ctrlKey||e.metaKey;
-    drag.current={fine,x:e.clientX,y:e.clientY,v:value};
-    if(!fine)absCompute(e);
-  },[value,absCompute]);
+    e.stopPropagation();try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
+    drag.current={fine:e.ctrlKey||e.metaKey,x:e.clientX,y:e.clientY,v:value};
+  },[value]);
   const onMove=useCallback(e=>{
     if(!e.buttons||!drag.current)return;e.stopPropagation();
-    if(drag.current.fine){
-      const d=drag.current,delta=vertical?(d.y-e.clientY):(e.clientX-d.x);
-      onChange(Math.round(Math.max(min,Math.min(max,d.v+delta*((max-min)/600)))));
-    } else absCompute(e);
-  },[min,max,onChange,vertical,absCompute]);
+    const d=drag.current,rect=ref.current.getBoundingClientRect();
+    const dim=Math.max(40,vertical?rect.height:rect.width);
+    const delta=vertical?(d.y-e.clientY):(e.clientX-d.x);
+    const gain=d.fine?(max-min)/600:0.5*(max-min)/dim;
+    onChange(Math.round(Math.max(min,Math.min(max,d.v+delta*gain))));
+  },[min,max,onChange,vertical]);
   // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
   // or the minimum otherwise.
   const onReset=useCallback(()=>{onChange(def!=null?def:((min<0&&max>0)?0:min));},[def,min,max,onChange]);
@@ -609,8 +600,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
           <div style={{color:col,letterSpacing:0}}>{display}</div>
         </div>
         <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
-          onPointerDown={e=>{e.stopPropagation();ref.current.setPointerCapture(e.pointerId);compute(e);}}
-          onPointerMove={e=>{if(e.buttons){e.stopPropagation();compute(e);}}}>
+          onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={onReset}>
           {/* Track bg — inset 8px top/bottom for visual padding */}
           <div style={{position:"absolute",top:8,bottom:8,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
           {/* Fill — from bottom up within inset track */}
