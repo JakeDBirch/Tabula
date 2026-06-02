@@ -128,6 +128,19 @@ const DRUM_VOICES=[
   {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
+// When a drum group is linked (linkHat / linkTom), its member channels collapse
+// to one shared color in BOTH the mixer and the sequencer — so e.g. closed+open
+// hat read as a single hi-hat, and the three toms read as one. Defeating a link
+// restores each voice's own color. The shared colors are the blend of the group.
+const HAT_LINK_VOICES=["CH","OH"], TOM_LINK_VOICES=["LT","MT","HT"];
+const HAT_LINK_COLOR="#58b09c"; // blend of CH green + OH cyan
+const TOM_LINK_COLOR="#b8b040"; // blend of LT/MT/HT golds
+const drumColor=(r,linkHat,linkTom)=>{
+  const v=DRUM_VOICES[r]; if(!v)return "#888";
+  if(linkHat&&HAT_LINK_VOICES.includes(v.key))return HAT_LINK_COLOR;
+  if(linkTom&&TOM_LINK_VOICES.includes(v.key))return TOM_LINK_COLOR;
+  return v.color;
+};
 // Voice-order schema version. Saves tag their pats with `vo`; anything not
 // matching the current version is remapped by key on load.
 const DRUM_ORDER_V=2;
@@ -5827,9 +5840,11 @@ export default function Tabula(){
                     set its per-cell velocity (drag up = louder). Brightness of a
                     lit cell reflects its velocity. */}
                 <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
-                  {DRUM_VOICES.map((voice,r)=>(
+                  {DRUM_VOICES.map((voice,r)=>{
+                    const dc=drumColor(r,linkHat,linkTom);
+                    return(
                     <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
-                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
+                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                       {Array.from({length:COLS},(_,c)=>{
                         const on=dPat?.grid[r]?.[c]||false;
                         const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][c]!=null)?dPat.vel[r][c]:100;
@@ -5843,9 +5858,9 @@ export default function Tabula(){
                         const vAdd=vGridD&&varOn&&!on&&c<dLen, vDrop=vGridD&&!varOn&&on;
                         // Velocity → brightness via alpha on the voice color.
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
-                        const onBg=isActive?"rgba(255,255,255,0.9)":voice.color+aHex;
+                        const onBg=isActive?"rgba(255,255,255,0.9)":dc+aHex;
                         return(
-                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?voice.color:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+voice.color:"none",transition:"background .06s"}}
+                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?dc:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
                             onPointerDown={e=>{
                               // Shift+drag → move the whole pattern (grid+vel+rat).
                               if(e.shiftKey){
@@ -5902,7 +5917,7 @@ export default function Tabula(){
                         );
                       })}
                     </div>
-                  ))}
+                  )})}
                 </div>
                 {/* Length slider */}
                 <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
@@ -5975,6 +5990,7 @@ export default function Tabula(){
                     const m=mix[r];
                     const md=effDispMix(dPat,r,m); // motion-aware display values
                     const stripBg="rgba(30,28,24,0.55)";
+                    const dc=drumColor(r,linkHat,linkTom);
                     const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
                     // Horizontal mini-slider builder. Drag routes through onMixDrag
                     // (base edit, or motion override/record), onMixUp on release.
@@ -5995,11 +6011,11 @@ export default function Tabula(){
                         onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                         {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                         {bipolar
-                          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:voice.color+"99",borderRadius:3}}/>
-                          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:voice.color+"99",borderRadius:3}}/>}
+                          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
+                          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
                         <div style={{position:"absolute",top:-3,bottom:-3,width:8,
                           left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,
-                          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+voice.color+"88"}}/>
+                          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+dc+"88"}}/>
                       </div>
                     );
                     const isRec=recordingVoice===voice.key;
@@ -6008,16 +6024,16 @@ export default function Tabula(){
                     const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
                     const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                     return(
-                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
+                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
                         {/* Hit flash — a uniform full-strip glow that pulses on
                             each hit, peak opacity scaling with velocity, then
                             fades. (Intensity, not height — a bottom-anchored
                             gradient read like the level fader moving.) */}
                         {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                          <div key={fv.n} style={{position:"absolute",inset:0,background:voice.color+a,boxShadow:"inset 0 0 8px "+voice.color+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
+                          <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
                         );})()}
                         {/* Voice name */}
-                        <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
+                        <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
                         {/* PITCH (semitones, bipolar) */}
                         <div style={cell}>
                           <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
@@ -6081,9 +6097,9 @@ export default function Tabula(){
                             document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                           }}>
                           {/* Fill from bottom up */}
-                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
                           {/* Thumb */}
-                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+voice.color+"88"}}/>
+                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
                           {/* Center notch */}
                           <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                         </div>
@@ -6092,7 +6108,7 @@ export default function Tabula(){
                             don't expose the sampler). */}
                         {activeKit==="user"&&(
                         <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                             onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
                             {isRec?"STOP":hasSample?"●":"REC"}
                           </button>
@@ -6819,9 +6835,11 @@ export default function Tabula(){
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
                       <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
-                        {DRUM_VOICES.map((voice,r)=>(
+                        {DRUM_VOICES.map((voice,r)=>{
+                          const dc=drumColor(r,linkHat,linkTom);
+                          return(
                           <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
-                            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:voice.color,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
+                            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                             {Array.from({length:COLS},(_,step)=>{
                               const on=dPat?.grid[r]?.[step]||false;
                               const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][step]!=null)?dPat.vel[r][step]:100;
@@ -6832,11 +6850,11 @@ export default function Tabula(){
                               const varOn=vGridD?!!(vGridD[r]&&vGridD[r][step]):on;
                               const vAdd=vGridD&&varOn&&!on&&step<dLen, vDrop=vGridD&&!varOn&&on;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
-                              const onBg=isActive?"rgba(255,255,255,0.88)":voice.color+aHex;
+                              const onBg=isActive?"rgba(255,255,255,0.88)":dc+aHex;
                               return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
                                 background:inactive?"rgba(220,200,180,0.015)":on?onBg:isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
-                                border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?voice.color:"rgba(220,200,180,0.07)"),
-                                boxShadow:on&&isActive?"0 0 4px "+voice.color:"none",
+                                border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?dc:"rgba(220,200,180,0.07)"),
+                                boxShadow:on&&isActive?"0 0 4px "+dc:"none",
                                 boxSizing:"border-box",
                               }} onPointerDown={e=>{
                                 // Shift+drag → move the whole pattern (grid+vel+rat).
@@ -6890,7 +6908,7 @@ export default function Tabula(){
                               </div>);
                             })}
                           </div>
-                        ))}
+                        )})}
                       </div>
                       {/* Horizontal length slider (matches synth grid orientation) */}
                       <div style={{width:SIZE,height:10,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
@@ -7244,25 +7262,26 @@ export default function Tabula(){
                           const isRec=recordingVoice===voice.key;
                           const hasSample=!!voiceSamples[voice.key];
                           const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
+                          const dc=drumColor(r,linkHat,linkTom);
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
                             <div style={{width:"100%",height:7,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
                               onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                               {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                               {bipolar
-                                ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:voice.color+"99",borderRadius:3}}/>
-                                :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:voice.color+"99",borderRadius:3}}/>}
+                                ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
+                                :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
                               <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
                             </div>
                           );
                           const filtMode=m.filt||"off";
                           const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
                           const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+voice.color+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
+                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
                             {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                              <div key={fv.n} style={{position:"absolute",inset:0,background:voice.color+a,boxShadow:"inset 0 0 8px "+voice.color+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
+                              <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
                             );})()}
-                            <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:voice.color,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
+                            <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
                               {miniSlider("pitch",md.pitch||0,-12,12,true)}
@@ -7304,14 +7323,14 @@ export default function Tabula(){
                             </div>
                             <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
-                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
                               <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
                               <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
                             </div>
                             <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
                             {activeKit==="user"&&(
                             <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?voice.color+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?voice.color+"22":"transparent",color:isRec?"#e07060":hasSample?voice.color:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                                 onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
                                 {isRec?"STOP":hasSample?"●":"REC"}
                               </button>
