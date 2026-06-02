@@ -421,19 +421,30 @@ const ms=v=>Math.max(0.001,v/1000);
 // Returns the value change for ONE pointermove of `pixelDelta` px, on a control
 // `dim` px long that spans `range`. Slow drags are finest (~DRAG_SLOW : 1); fast
 // drags scale up toward a cap that itself grows with the control's pixel size —
-// a tiny control never gets coarser than ~DRAG_MINCAP : 1, a big one can reach
-// 1:1. So a small on-screen control stays fine, a large one can move quickly.
-// (Tune these four to taste.)
-const DRAG_SLOW   = 0.22;  // ratio at slow speed — the finest you can get
+// a tiny control floors at ~DRAG_MINCAP : 1, a big one can exceed 1:1 (up to
+// DRAG_MAXCAP) on a fast flick. So a small on-screen control stays fine, a large
+// one can fly. (Tune these to taste — wide range: very fine at slow, very fast
+// at speed.)
+const DRAG_SLOW   = 0.10;  // ratio at slow speed — the finest you can get
 const DRAG_FASTPX = 14;    // px in one move that counts as a "fast" flick
-const DRAG_REFPX  = 170;   // control length (px) at which a fast drag reaches 1:1
-const DRAG_MINCAP = 0.42;  // fast-speed cap for tiny controls (never coarser)
+const DRAG_REFPX  = 120;   // control length (px) at which a fast drag reaches 1:1
+const DRAG_MINCAP = 0.55;  // fast-speed cap floor for tiny controls
+const DRAG_MAXCAP = 2.2;   // fast-speed cap ceiling for large controls (>1:1 = flies)
 const ballisticDelta=(pixelDelta,dim,range)=>{
   const d=Math.max(1,dim);
   const speed=Math.min(1,Math.abs(pixelDelta)/DRAG_FASTPX);
-  const cap=Math.max(DRAG_MINCAP,Math.min(1,d/DRAG_REFPX));
+  const cap=Math.max(DRAG_MINCAP,Math.min(DRAG_MAXCAP,d/DRAG_REFPX));
   const ratio=DRAG_SLOW+(cap-DRAG_SLOW)*speed;
   return pixelDelta*(range/d)*ratio;
+};
+// Velocity-aware nudge for *trackless* scrubbers (bpm / transpose / swing) — a
+// number readout you drag vertically with no on-screen extent to scale against.
+// `base` is the units-per-pixel gearing at medium speed; slow drags get ~0.5×
+// that (finer), fast flicks ~2.5× (coarser). Same ballistic spirit as the
+// sliders, geared to each scrubber's own range instead of a pixel length.
+const ballisticNudge=(pixelDelta,base)=>{
+  const speed=Math.min(1,Math.abs(pixelDelta)/DRAG_FASTPX);
+  return pixelDelta*base*(0.5+2.0*speed);
 };
 
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
@@ -4746,57 +4757,63 @@ export default function Tabula(){
   // BPM drag scrubber
   const [bpmDragging, setBpmDragging] = useState(false);
   const bpmDragRef  = useRef(null);
-  const bpmDragData = useRef({startY:0, startBpm:120});
+  const bpmDragData = useRef({lastY:0, val:120});
 
   const bpmDraggingR = useRef(false);
   const handleBpmDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    bpmDragData.current = {startY: e.clientY, startBpm: bpmR.current};
+    bpmDragData.current = {lastY: e.clientY, val: bpmR.current};
     bpmDraggingR.current=true;setBpmDragging(true);
     bpmDragRef.current.setPointerCapture(e.pointerId);
   },[]);
   const handleBpmMove = useCallback(e=>{
     if(!bpmDraggingR.current)return;
     e.preventDefault();e.stopPropagation();
-    const dy = e.clientY - bpmDragData.current.startY;
-    setBpm(Math.max(40, Math.min(300, Math.round(bpmDragData.current.startBpm - dy/2))));
+    const d=bpmDragData.current;
+    const dy = e.clientY - d.lastY; d.lastY=e.clientY;
+    d.val = Math.max(40, Math.min(300, d.val - ballisticNudge(dy,0.5)));
+    setBpm(Math.round(d.val));
   },[]);
   const handleBpmUp = useCallback(()=>{bpmDraggingR.current=false;setBpmDragging(false);},[]);
 
   const [stDragging, setStDragging] = useState(false);
   const stDragRef  = useRef(null);
-  const stDragData = useRef({startY:0, startSt:0});
+  const stDragData = useRef({lastY:0, val:0});
   const stDraggingR = useRef(false);
 
   const handleStDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    stDragData.current = {startY: e.clientY, startSt: transpR.current};
+    stDragData.current = {lastY: e.clientY, val: transpR.current};
     stDraggingR.current=true;setStDragging(true);
     stDragRef.current.setPointerCapture(e.pointerId);
   },[]);
   const handleStMove = useCallback(e=>{
     if(!stDraggingR.current)return;
     e.preventDefault();e.stopPropagation();
-    const dy = e.clientY - stDragData.current.startY;
-    setTranspose(Math.max(-24, Math.min(24, Math.round(stDragData.current.startSt - dy/6))));
+    const d=stDragData.current;
+    const dy = e.clientY - d.lastY; d.lastY=e.clientY;
+    d.val = Math.max(-24, Math.min(24, d.val - ballisticNudge(dy,1/6)));
+    setTranspose(Math.round(d.val));
   },[]);
   const handleStUp = useCallback(()=>{stDraggingR.current=false;setStDragging(false);},[]);
 
   const [swingDragging, setSwingDragging] = useState(false);
   const swingDragRef  = useRef(null);
-  const swingDragData = useRef({startY:0, startSwing:0});
+  const swingDragData = useRef({lastY:0, val:0});
   const swingDraggingR = useRef(false);
   const handleSwingDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    swingDragData.current = {startY: e.clientY, startSwing: swingR.current};
+    swingDragData.current = {lastY: e.clientY, val: swingR.current};
     swingDraggingR.current=true;setSwingDragging(true);
     swingDragRef.current.setPointerCapture(e.pointerId);
   },[]);
   const handleSwingMove = useCallback(e=>{
     if(!swingDraggingR.current)return;
     e.preventDefault();e.stopPropagation();
-    const dy = e.clientY - swingDragData.current.startY;
-    setSwing(Math.max(0, Math.min(100, Math.round(swingDragData.current.startSwing - dy/3))));
+    const d=swingDragData.current;
+    const dy = e.clientY - d.lastY; d.lastY=e.clientY;
+    d.val = Math.max(0, Math.min(100, d.val - ballisticNudge(dy,1/3)));
+    setSwing(Math.round(d.val));
   },[]);
   const handleSwingUp = useCallback(()=>{swingDraggingR.current=false;setSwingDragging(false);},[]);
 
@@ -5007,23 +5024,23 @@ export default function Tabula(){
                   :arm.key==="rhy"?("×"+Math.max(1,val)):arm.key==="dur"?(val>0?"+"+val+"%":val+"%")
                   :val;
                 return(
-                  <div key={arm.key} style={{marginBottom:8}}
+                  <div key={arm.key} style={{marginBottom:8,touchAction:"none"}}
                     onPointerDown={e=>{
                       e.stopPropagation();
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      const rect=e.currentTarget.getBoundingClientRect();
-                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
-                      const newVal=Math.round(newPct*(arm.max-arm.min)+arm.min);
-                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
-                    }}
-                    onPointerMove={e=>{
-                      if(!(e.buttons&1))return;
-                      const rect=e.currentTarget.getBoundingClientRect();
-                      const newPct=Math.max(0,Math.min(1,(e.clientX-rect.left-8)/(rect.width-16)));
-                      const newVal=Math.round(newPct*(arm.max-arm.min)+arm.min);
-                      setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:newVal}}:p);
-                    }}
-                    onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)}>
+                      const dim=e.currentTarget.getBoundingClientRect().width;
+                      const range=arm.max-arm.min;
+                      let cur=val, lx=e.clientX;
+                      setParamPopup(p=>p?{...p,activeArm:arm.key}:p);
+                      const update=ev=>{
+                        const pd=ev.clientX-lx; lx=ev.clientX;
+                        cur=Math.max(arm.min,Math.min(arm.max,cur+ballisticDelta(pd,dim,range)));
+                        const nv=Math.round(cur);
+                        setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:nv}}:p);
+                      };
+                      const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                      document.addEventListener("pointermove",update);
+                      document.addEventListener("pointerup",up);
+                    }}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
                       <span style={{fontSize:9,fontWeight:500,color:active?arm.color:arm.color+"88",letterSpacing:1}}>{arm.label}</span>
                       <span style={{fontSize:12,fontWeight:500,color:active?arm.color:arm.color+"99"}}>{displayVal}</span>
@@ -5472,8 +5489,9 @@ export default function Tabula(){
               return(
                 <div style={{display:"flex",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
                   <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                  <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
-                    onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                  <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                    onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
+                    onDoubleClick={e=>{e.stopPropagation();onChange(100);}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
                     <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
                   </div>
@@ -6099,12 +6117,12 @@ export default function Tabula(){
                     <span style={{fontSize:9,letterSpacing:2,color:accent||"rgba(210,195,175,0.5)",fontWeight:500}}>{label}</span>
                     <span style={{fontSize:11,color:"rgba(210,195,175,0.7)",fontWeight:300,marginLeft:"auto"}}>{value}<span style={{fontSize:8,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                   </div>
-                  <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                  <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                     onPointerDown={e=>{
                       e.stopPropagation();
                       const rect=e.currentTarget.getBoundingClientRect();
-                      const upd=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};
-                      upd(e);
+                      const dim=rect.width;let cur=value,lx=e.clientX;
+                      const upd=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};
                       const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};
                       document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);
                     }}>
@@ -7351,8 +7369,9 @@ export default function Tabula(){
                         return(
                           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,opacity:dim?0.4:1}}>
                             <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                            <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"pointer"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{onChange(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                            <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
+                              onDoubleClick={e=>{e.stopPropagation();onChange(100);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
                               <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
                             </div>
@@ -7419,7 +7438,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7433,7 +7452,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*max));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7447,7 +7466,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setter(Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7466,7 +7485,7 @@ export default function Tabula(){
                             <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                           </div>
                           <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                            onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setDrumVary(key,Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                            onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setDrumVary(key,Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
                             <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:accent+"99",borderRadius:3}}/>
                             <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                           </div>
