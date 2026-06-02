@@ -369,6 +369,16 @@ const reIconize=(arr,reroll)=>{
 const FILT_MODES=["off","lp","hp","bp"];
 // Map filtCut 0..100 → 20..20000 Hz logarithmically (10 octaves).
 const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
+// Reverb damping expressed as a shelf CORNER frequency so it can read in Hz.
+// HF: a high-shelf whose corner sweeps 20kHz (open, 0%) → 1.2kHz (dark, 100%).
+// LF: a low-shelf whose corner sweeps 20Hz (open) → 800Hz (heavy low-cut).
+// A fixed shelf cut (compounding in the comb feedback) does the actual damping;
+// the corner is what moves. NOTE: this is a behaviour change from the old
+// amount-at-fixed-corner damp — the readout is now the corner, in Hz.
+const RV_DAMP_DB=-12;
+const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
+const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
+const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
 const defaultDrums=()=>({
   grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),
   vel:mkDrumVel(),
@@ -406,6 +416,25 @@ const lpHz=v=>Math.round(400*Math.pow(50,v/100));
 const lpLbl=v=>{const f=lpHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
 const stR=st=>Math.pow(2,st/12);
 const ms=v=>Math.max(0.001,v/1000);
+
+// ── Ballistic, size-proportional drag ───────────────────────────────────────
+// Returns the value change for ONE pointermove of `pixelDelta` px, on a control
+// `dim` px long that spans `range`. Slow drags are finest (~DRAG_SLOW : 1); fast
+// drags scale up toward a cap that itself grows with the control's pixel size —
+// a tiny control never gets coarser than ~DRAG_MINCAP : 1, a big one can reach
+// 1:1. So a small on-screen control stays fine, a large one can move quickly.
+// (Tune these four to taste.)
+const DRAG_SLOW   = 0.22;  // ratio at slow speed — the finest you can get
+const DRAG_FASTPX = 14;    // px in one move that counts as a "fast" flick
+const DRAG_REFPX  = 170;   // control length (px) at which a fast drag reaches 1:1
+const DRAG_MINCAP = 0.42;  // fast-speed cap for tiny controls (never coarser)
+const ballisticDelta=(pixelDelta,dim,range)=>{
+  const d=Math.max(1,dim);
+  const speed=Math.min(1,Math.abs(pixelDelta)/DRAG_FASTPX);
+  const cap=Math.max(DRAG_MINCAP,Math.min(1,d/DRAG_REFPX));
+  const ratio=DRAG_SLOW+(cap-DRAG_SLOW)*speed;
+  return pixelDelta*(range/d)*ratio;
+};
 
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
@@ -579,15 +608,18 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   // Double-click resets.
   const onDown=useCallback(e=>{
     e.stopPropagation();try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
-    drag.current={fine:e.ctrlKey||e.metaKey,x:e.clientX,y:e.clientY,v:value};
+    drag.current={fine:e.ctrlKey||e.metaKey,lx:e.clientX,ly:e.clientY,v:value};
   },[value]);
   const onMove=useCallback(e=>{
     if(!e.buttons||!drag.current)return;e.stopPropagation();
     const d=drag.current,rect=ref.current.getBoundingClientRect();
     const dim=Math.max(40,vertical?rect.height:rect.width);
-    const delta=vertical?(d.y-e.clientY):(e.clientX-d.x);
-    const gain=d.fine?(max-min)/600:0.5*(max-min)/dim;
-    onChange(Math.round(Math.max(min,Math.min(max,d.v+delta*gain))));
+    const pd=vertical?(d.ly-e.clientY):(e.clientX-d.lx);
+    d.lx=e.clientX;d.ly=e.clientY;
+    // Ballistic by default; Ctrl/Cmd = a fixed ultra-fine (1200px = full range).
+    const inc=d.fine?pd*((max-min)/1200):ballisticDelta(pd,dim,max-min);
+    d.v=Math.max(min,Math.min(max,d.v+inc));
+    onChange(Math.round(d.v));
   },[min,max,onChange,vertical]);
   // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
   // or the minimum otherwise.
@@ -895,14 +927,16 @@ class Bell{
   // ~5 reflections is enough to make highs visibly die before mids and lows.
   // Pure shelf — no resonance, no Q peak. Natural freq-dependent decay.
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
-    const gdb=-(Math.max(0,Math.min(100,pct))/100)*12; // 0 → -12 dB
-    for(const c of this.rvCombs)if(c.hsh)c.hsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
+    // Sweep the high-shelf CORNER (20kHz open → 1.2kHz dark) at a fixed cut, so
+    // the control reads as a frequency. The compounding feedback does the rest.
+    const f=rvHfHz(pct),t=this.ctx.currentTime;
+    for(const c of this.rvCombs)if(c.hsh){c.hsh.frequency.setTargetAtTime(f,t,0.02);c.hsh.gain.setTargetAtTime(RV_DAMP_DB,t,0.02);}
   }
-  // LF damping — low-shelf gain (dB cut). Same compounding behaviour applied
-  // to bass below the corner (200 Hz). 0 pct = no damp, 100 pct = ~-12 dB.
+  // LF damping — low-shelf whose corner sweeps 20Hz (open) → 800Hz (heavy
+  // low-cut). Same fixed compounding cut; the corner is the control.
   setRvLfDamp(pct){if(!this.ready||!this.rvCombs)return;
-    const gdb=-(Math.max(0,Math.min(100,pct))/100)*12;
-    for(const c of this.rvCombs)if(c.lsh)c.lsh.gain.setTargetAtTime(gdb,this.ctx.currentTime,0.02);
+    const f=rvLfHz(pct),t=this.ctx.currentTime;
+    for(const c of this.rvCombs)if(c.lsh){c.lsh.frequency.setTargetAtTime(f,t,0.02);c.lsh.gain.setTargetAtTime(RV_DAMP_DB,t,0.02);}
   }
   // Pre-delay — delay between input and reverb combs (initial reflection time).
   // 0..500 ms.
@@ -4887,8 +4921,8 @@ export default function Tabula(){
         <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
         {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
-        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={rvDamp+"%"} accent={C_REV}/>
-        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={rvLfDamp+"%"}    accent={C_REV}/>
+        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={fmtHz(rvHfHz(rvDamp))} accent={C_REV}/>
+        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={fmtHz(rvLfHz(rvLfDamp))} accent={C_REV}/>
       </div>
     </SynthSection>
   </>);
@@ -5895,16 +5929,16 @@ export default function Tabula(){
                     // Horizontal mini-slider builder. Drag routes through onMixDrag
                     // (base edit, or motion override/record), onMixUp on release.
                     const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                      <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer"}}
+                      <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
+                          const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
                           const update=ev=>{
-                            const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));
-                            const v=Math.round(pct*(maxVal-minVal)+minVal);
-                            onMixDrag(r,key,Math.max(minVal,Math.min(maxVal,v)));
+                            const pd=ev.clientX-lx; lx=ev.clientX;
+                            cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
+                            onMixDrag(r,key,Math.round(cur));
                           };
-                          update(e);
                           const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                         }}
@@ -5950,7 +5984,7 @@ export default function Tabula(){
                               background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
                               color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
                           <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.filtCut!=null?md.filtCut:100}</div>
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
                         </div>
                         {/* ENV — sample playback length (full right = whole sample) */}
                         <div style={cell}>
@@ -5983,15 +6017,16 @@ export default function Tabula(){
                           <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
                         </div>
                         {/* Vertical level fader */}
-                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0"}}
+                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0",touchAction:"none"}}
                           onPointerDown={e=>{
                             e.stopPropagation();
                             const rect=e.currentTarget.getBoundingClientRect();
+                            const dim=rect.height; let cur=md.level!=null?md.level:100, ly=e.clientY;
                             const update=ev=>{
-                              const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));
-                              onMixDrag(r,"level",Math.round(pct*100));
+                              const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
+                              cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+                              onMixDrag(r,"level",Math.round(cur));
                             };
-                            update(e);
                             const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
                             document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
                           }}>
@@ -7160,8 +7195,8 @@ export default function Tabula(){
                           const hasSample=!!voiceSamples[voice.key];
                           const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                            <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));const v=Math.round(pct*(maxVal-minVal)+minVal);onMixDrag(r,key,Math.max(minVal,Math.min(maxVal,v)));};u(e);const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
+                            <div style={{width:"100%",height:7,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
                               onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                               {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                               {bipolar
@@ -7190,7 +7225,7 @@ export default function Tabula(){
                                   background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
                                   color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
                               <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.filtCut!=null?md.filtCut:100}</div>
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
@@ -7217,8 +7252,8 @@ export default function Tabula(){
                               {miniSlider("dlySend",md.dlySend,0,100,false)}
                               <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
                             </div>
-                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0"}}
-                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const u=ev=>{const pct=Math.max(0,Math.min(1,1-(ev.clientY-rect.top)/rect.height));onMixDrag(r,"level",Math.round(pct*100));};u(e);const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
+                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
+                              onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
                               <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+voice.color+"cc,"+voice.color+"66)",borderRadius:3}}/>
                               <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
                               <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
