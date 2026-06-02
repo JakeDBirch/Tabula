@@ -13602,7 +13602,15 @@ function Tabula() {
       display: "flex",
       flexDirection: isLandscape ? "row" : "column",
       background: "#1a1814",
-      overflow: "hidden"
+      overflow: "hidden",
+      // Keep all content clear of the notch / Dynamic Island / home indicator
+      // in the installed fullscreen app (viewport-fit=cover). Portrait: inset top;
+      // landscape: inset whichever side the camera sits on. Bottom inset always.
+      paddingTop: isLandscape ? "env(safe-area-inset-top)" : "env(safe-area-inset-top)",
+      paddingBottom: "env(safe-area-inset-bottom)",
+      paddingLeft: isLandscape ? "env(safe-area-inset-left)" : 0,
+      paddingRight: isLandscape ? "env(safe-area-inset-right)" : 0,
+      boxSizing: "border-box"
     }
   }, isLandscape && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -13611,8 +13619,7 @@ function Tabula() {
       display: "flex",
       flexDirection: "column",
       gap: 6,
-      padding: "8px 6px 8px",
-      paddingLeft: "calc(6px + env(safe-area-inset-left))",
+      padding: "8px 6px",
       borderRight: "1px solid rgba(255,255,255,0.07)",
       background: "rgba(24,22,18,0.6)",
       overflow: "hidden",
@@ -13721,7 +13728,45 @@ function Tabula() {
     onClick: function onClick() {
       activeLayer === "drums" ? addDrumPat() : addPat();
     }
-  }, "\uFF0B"))), /*#__PURE__*/React.createElement("div", {
+  }, "\uFF0B")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 1,
+      background: "rgba(255,255,255,0.07)",
+      flexShrink: 0,
+      margin: "1px 0"
+    }
+  }), [["step", "STEP", activeSheet === "pattern"], ["sound", "SOUND", activeSheet === "sound"], ["vary", "VARY", activeSheet === "vary" || activeVary]].map(function (_ref63) {
+    var _ref64 = _slicedToArray(_ref63, 3),
+      key = _ref64[0],
+      lbl = _ref64[1],
+      on = _ref64[2];
+    return /*#__PURE__*/React.createElement("button", {
+      key: key,
+      onClick: function onClick() {
+        if (key === "step") {
+          setSeqPage("step");
+          setActiveSheet(function (s) {
+            return s === "pattern" ? null : "pattern";
+          });
+        } else setActiveSheet(function (s) {
+          return s === key ? null : key;
+        });
+      },
+      style: {
+        flexShrink: 0,
+        padding: "7px 0",
+        borderRadius: 8,
+        fontFamily: "inherit",
+        cursor: "pointer",
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: 1.5,
+        border: "1px solid " + (on ? key === "vary" ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.5)" : "rgba(200,185,165,0.14)"),
+        background: on ? key === "vary" ? "rgba(201,169,110,0.12)" : "rgba(200,185,165,0.1)" : "transparent",
+        color: on ? key === "vary" ? "#c9a96e" : "rgba(232,224,213,0.9)" : "rgba(210,195,175,0.5)"
+      }
+    }, lbl);
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 0,
@@ -13753,12 +13798,12 @@ function Tabula() {
       padding: "8px 12px 6px",
       flexShrink: 0
     }
-  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref63) {
-    var _ref64 = _slicedToArray(_ref63, 4),
-      lyr = _ref64[0],
-      lbl = _ref64[1],
-      c = _ref64[2],
-      cf = _ref64[3];
+  }, [["synth", "POLY", "#a8c5a0", "rgba(168,197,160,"], ["lead", "MONO", "#6c9ad6", "rgba(108,154,214,"], ["drums", "DRUMS", "#c4727a", "rgba(196,114,122,"]].map(function (_ref65) {
+    var _ref66 = _slicedToArray(_ref65, 4),
+      lyr = _ref66[0],
+      lbl = _ref66[1],
+      c = _ref66[2],
+      cf = _ref66[3];
     return /*#__PURE__*/React.createElement("button", {
       key: lyr,
       "data-layer-box": lyr,
@@ -14029,7 +14074,45 @@ function Tabula() {
       e.stopPropagation();
       activeLayer === "drums" ? addDrumPat() : addPat();
     }
-  }, "\uFF0B")), patternDrag && /*#__PURE__*/React.createElement("div", {
+  }, "\uFF0B")), !isLandscape && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexShrink: 0,
+      padding: "2px 12px 8px"
+    }
+  }, [["step", "STEP", activeSheet === "pattern"], ["sound", "SOUND", activeSheet === "sound"], ["vary", "VARY", activeSheet === "vary" || activeVary]].map(function (_ref67) {
+    var _ref68 = _slicedToArray(_ref67, 3),
+      key = _ref68[0],
+      lbl = _ref68[1],
+      on = _ref68[2];
+    return /*#__PURE__*/React.createElement("button", {
+      key: key,
+      onClick: function onClick() {
+        if (key === "step") {
+          setSeqPage("step");
+          setActiveSheet(function (s) {
+            return s === "pattern" ? null : "pattern";
+          });
+        } else setActiveSheet(function (s) {
+          return s === key ? null : key;
+        });
+      },
+      style: {
+        flex: 1,
+        padding: "10px 0",
+        borderRadius: 9,
+        fontFamily: "inherit",
+        cursor: "pointer",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 2,
+        border: "1px solid " + (on ? key === "vary" ? "rgba(201,169,110,0.6)" : "rgba(200,185,165,0.5)" : "rgba(200,185,165,0.14)"),
+        background: on ? key === "vary" ? "rgba(201,169,110,0.12)" : "rgba(200,185,165,0.1)" : "transparent",
+        color: on ? key === "vary" ? "#c9a96e" : "rgba(232,224,213,0.9)" : "rgba(210,195,175,0.5)"
+      }
+    }, lbl);
+  })), patternDrag && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       left: patternDrag.x - 24,
@@ -14099,10 +14182,10 @@ function Tabula() {
       alignSelf: "center",
       alignItems: "center"
     }
-  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref65) {
-    var _ref66 = _slicedToArray(_ref65, 2),
-      val = _ref66[0],
-      lbl = _ref66[1];
+  }, [["sync", "SYNC"], ["free", "FREE"]].map(function (_ref69) {
+    var _ref70 = _slicedToArray(_ref69, 2),
+      val = _ref70[0],
+      lbl = _ref70[1];
     var sel = songSyncMode === val;
     return /*#__PURE__*/React.createElement("button", {
       key: lbl,
@@ -14960,23 +15043,23 @@ function Tabula() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      alignItems: "center",
-      padding: "7px 10px 4px",
-      gap: 5
+      alignItems: "stretch",
+      padding: "9px 12px 5px",
+      gap: 6
     }
   }, /*#__PURE__*/React.createElement("button", {
     style: {
       flex: 1,
-      height: 34,
+      height: 42,
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "tempo" ? "rgba(200,185,165,0.45)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
+      gap: 2,
+      border: "1px solid " + (activeSheet === "tempo" ? "rgba(200,185,165,0.45)" : "rgba(200,185,165,0.12)"),
+      borderRadius: 9,
       background: activeSheet === "tempo" ? "rgba(200,185,165,0.08)" : "transparent",
       cursor: "pointer",
-      gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
@@ -14987,39 +15070,37 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 13,
       fontWeight: 700,
-      color: "rgba(255,255,255,0.8)",
-      lineHeight: 1.1
+      color: "rgba(255,255,255,0.85)",
+      lineHeight: 1
     }
   }, bpm), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 5,
+      fontSize: 8,
       letterSpacing: 1.5,
-      color: "rgba(210,195,175,0.35)"
+      color: "rgba(210,195,175,0.4)"
     }
   }, "TEMPO")), /*#__PURE__*/React.createElement("button", {
     style: {
       flex: 1,
-      height: 34,
+      height: 42,
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (songView ? "rgba(210,195,175,0.5)" : songMode ? "rgba(210,195,175,0.25)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
+      gap: 2,
+      border: "1px solid " + (songView ? "rgba(210,195,175,0.5)" : songMode ? "rgba(210,195,175,0.25)" : "rgba(200,185,165,0.12)"),
+      borderRadius: 9,
       background: songView ? "rgba(210,195,175,0.06)" : "transparent",
       cursor: "pointer",
-      gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
     onClick: function onClick() {
       if (songView) {
-        // exit matrix view; song mode (playback intent) stays on
         setSongView(false);
       } else {
-        // enter matrix view, ensure song mode is on
         setSongMode(true);
         setSongView(true);
       }
@@ -15027,30 +15108,30 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 700,
       color: songView ? "rgba(210,195,175,0.9)" : songMode ? "rgba(210,195,175,0.7)" : "rgba(210,195,175,0.5)",
-      lineHeight: 1.1
+      lineHeight: 1
     }
   }, "\u25A6"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 5,
+      fontSize: 8,
       letterSpacing: 1.5,
-      color: "rgba(210,195,175,0.35)"
+      color: "rgba(210,195,175,0.4)"
     }
   }, "SONG")), /*#__PURE__*/React.createElement("button", {
     style: {
       flex: 1,
-      height: 34,
+      height: 42,
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "fx" ? C_SAT + "99" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
+      gap: 2,
+      border: "1px solid " + (activeSheet === "fx" ? C_SAT + "99" : "rgba(200,185,165,0.12)"),
+      borderRadius: 9,
       background: activeSheet === "fx" ? C_SAT + "1a" : "transparent",
       cursor: "pointer",
-      gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
@@ -15061,62 +15142,29 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
-      lineHeight: 1.1,
+      fontSize: 15,
+      lineHeight: 1,
       color: activeSheet === "fx" ? C_SAT : "rgba(210,195,175,0.5)"
     }
   }, "\u224B"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 5,
+      fontSize: 8,
       letterSpacing: 1.5,
-      color: activeSheet === "fx" ? C_SAT : "rgba(210,195,175,0.35)"
+      color: activeSheet === "fx" ? C_SAT : "rgba(210,195,175,0.4)"
     }
   }, "FX")), /*#__PURE__*/React.createElement("button", {
     style: {
       flex: 1,
-      height: 34,
+      height: 42,
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.55)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
-      background: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.1)" : "transparent",
-      cursor: "pointer",
-      gap: 0,
-      fontFamily: "inherit",
-      padding: 0
-    },
-    onClick: function onClick() {
-      return setActiveSheet(function (s) {
-        return s === "vary" ? null : "vary";
-      });
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      lineHeight: 1.1,
-      color: activeSheet === "vary" || anyVary ? "#c9a96e" : "rgba(210,195,175,0.5)"
-    }
-  }, "\uFF5E"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 5,
-      letterSpacing: 1.5,
-      color: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.7)" : "rgba(210,195,175,0.35)"
-    }
-  }, "VARY")), /*#__PURE__*/React.createElement("button", {
-    style: {
-      flex: 1,
-      height: 34,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      border: "1px solid " + (activeSheet === "project" ? "rgba(200,185,165,0.45)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
+      gap: 2,
+      border: "1px solid " + (activeSheet === "project" ? "rgba(200,185,165,0.45)" : "rgba(200,185,165,0.12)"),
+      borderRadius: 9,
       background: activeSheet === "project" ? "rgba(200,185,165,0.07)" : "transparent",
       cursor: "pointer",
-      gap: 0,
       fontFamily: "inherit",
       padding: 0
     },
@@ -15127,15 +15175,15 @@ function Tabula() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
-      lineHeight: 1.1,
-      color: "rgba(210,195,175,0.45)"
+      fontSize: 15,
+      lineHeight: 1,
+      color: "rgba(210,195,175,0.5)"
     }
   }, "\u22EF"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 5,
+      fontSize: 8,
       letterSpacing: 1.5,
-      color: "rgba(210,195,175,0.35)"
+      color: "rgba(210,195,175,0.4)"
     }
   }, "PROJECT"))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -15222,8 +15270,7 @@ function Tabula() {
       display: "flex",
       flexDirection: "column",
       gap: 5,
-      padding: "8px 6px 8px",
-      paddingRight: "calc(6px + env(safe-area-inset-right))",
+      padding: "8px 6px",
       borderLeft: "1px solid rgba(255,255,255,0.07)",
       background: "rgba(24,22,18,0.6)",
       overflow: "hidden",
@@ -15435,38 +15482,6 @@ function Tabula() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      border: "1px solid " + (activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.55)" : "rgba(200,185,165,0.1)"),
-      borderRadius: 8,
-      background: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.1)" : "transparent",
-      cursor: "pointer",
-      fontFamily: "inherit",
-      padding: 0
-    },
-    onClick: function onClick() {
-      return setActiveSheet(function (s) {
-        return s === "vary" ? null : "vary";
-      });
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      lineHeight: 1.1,
-      color: activeSheet === "vary" || anyVary ? "#c9a96e" : "rgba(210,195,175,0.5)"
-    }
-  }, "\uFF5E"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 5,
-      letterSpacing: 1.5,
-      color: activeSheet === "vary" || anyVary ? "rgba(201,169,110,0.7)" : "rgba(210,195,175,0.35)"
-    }
-  }, "VARY")), /*#__PURE__*/React.createElement("button", {
-    style: {
-      flexShrink: 0,
-      height: 40,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
       border: "1px solid " + (activeSheet === "project" ? "rgba(200,185,165,0.45)" : "rgba(200,185,165,0.1)"),
       borderRadius: 8,
       background: activeSheet === "project" ? "rgba(200,185,165,0.07)" : "transparent",
@@ -15535,10 +15550,10 @@ function Tabula() {
     onChange: function onChange(e) {
       return setScale(e.target.value);
     }
-  }, Object.entries(SCALES).map(function (_ref68) {
-    var _ref69 = _slicedToArray(_ref68, 2),
-      k = _ref69[0],
-      v = _ref69[1];
+  }, Object.entries(SCALES).map(function (_ref72) {
+    var _ref73 = _slicedToArray(_ref72, 2),
+      k = _ref73[0],
+      v = _ref73[1];
     return /*#__PURE__*/React.createElement("option", {
       key: k,
       value: k
@@ -15616,12 +15631,12 @@ function Tabula() {
         gap: 5,
         marginBottom: 12
       }
-    }, ops.map(function (_ref70) {
-      var _ref71 = _slicedToArray(_ref70, 4),
-        l = _ref71[0],
-        f = _ref71[1],
-        d = _ref71[2],
-        danger = _ref71[3];
+    }, ops.map(function (_ref74) {
+      var _ref75 = _slicedToArray(_ref74, 4),
+        l = _ref75[0],
+        f = _ref75[1],
+        d = _ref75[2],
+        danger = _ref75[3];
       return /*#__PURE__*/React.createElement("button", {
         key: l,
         disabled: !!d,
@@ -16174,11 +16189,11 @@ function Tabula() {
         marginBottom: 6,
         flexWrap: "wrap"
       }
-    }, [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref72) {
-      var _ref73 = _slicedToArray(_ref72, 3),
-        lbl = _ref73[0],
-        on = _ref73[1],
-        set = _ref73[2];
+    }, [["HH", linkHat, setLinkHat], ["TOM", linkTom, setLinkTom]].map(function (_ref76) {
+      var _ref77 = _slicedToArray(_ref76, 3),
+        lbl = _ref77[0],
+        on = _ref77[1],
+        set = _ref77[2];
       return /*#__PURE__*/React.createElement("button", {
         key: lbl,
         onClick: function onClick() {
@@ -17033,13 +17048,13 @@ function Tabula() {
       fontWeight: 600,
       marginBottom: 8
     }
-  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref74) {
-    var _ref75 = _slicedToArray(_ref74, 5),
-      label = _ref75[0],
-      val = _ref75[1],
-      setter = _ref75[2],
-      max = _ref75[3],
-      unit = _ref75[4];
+  }, "RHYTHM"), [["DROP", vDropRate, setVDropRate, 60], ["SHIFT", vShiftRate, setVShiftRate, 60], ["RANGE", vShiftRange, setVShiftRange, 8, "st"]].map(function (_ref78) {
+    var _ref79 = _slicedToArray(_ref78, 5),
+      label = _ref79[0],
+      val = _ref79[1],
+      setter = _ref79[2],
+      max = _ref79[3],
+      unit = _ref79[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -17124,13 +17139,13 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref76) {
-    var _ref77 = _slicedToArray(_ref76, 5),
-      label = _ref77[0],
-      val = _ref77[1],
-      setter = _ref77[2],
-      max = _ref77[3],
-      unit = _ref77[4];
+  }, "MELODY"), [["PITCH", vPitchRate, setVPitchRate, 60], ["RANGE", vPitchRange, setVPitchRange, 12, "st"], ["GHOST", vGhostRate, setVGhostRate, 60]].map(function (_ref80) {
+    var _ref81 = _slicedToArray(_ref80, 5),
+      label = _ref81[0],
+      val = _ref81[1],
+      setter = _ref81[2],
+      max = _ref81[3],
+      unit = _ref81[4];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -17215,11 +17230,11 @@ function Tabula() {
       marginBottom: 8,
       marginTop: 14
     }
-  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref78) {
-    var _ref79 = _slicedToArray(_ref78, 3),
-      label = _ref79[0],
-      val = _ref79[1],
-      setter = _ref79[2];
+  }, "STEP"), [["VEL", vVelJitter, setVVelJitter], ["FLT", vFltJitter, setVFltJitter], ["DLY", vDlyJitter, setVDlyJitter], ["RHY", vRhyJitter, setVRhyJitter], ["OCT", vOctJitter, setVOctJitter], ["GLIDE", vGlideJitter, setVGlideJitter], ["DUR", vDurJitter, setVDurJitter]].map(function (_ref82) {
+    var _ref83 = _slicedToArray(_ref82, 3),
+      label = _ref83[0],
+      val = _ref83[1],
+      setter = _ref83[2];
     return /*#__PURE__*/React.createElement("div", {
       key: label,
       style: {
@@ -17375,12 +17390,12 @@ function Tabula() {
       return act(function () {
         return delPatId(targetId);
       });
-    }, isOnlyPat, true]].map(function (_ref80) {
-      var _ref81 = _slicedToArray(_ref80, 4),
-        label = _ref81[0],
-        fn = _ref81[1],
-        disabled = _ref81[2],
-        danger = _ref81[3];
+    }, isOnlyPat, true]].map(function (_ref84) {
+      var _ref85 = _slicedToArray(_ref84, 4),
+        label = _ref85[0],
+        fn = _ref85[1],
+        disabled = _ref85[2],
+        danger = _ref85[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,
@@ -17464,12 +17479,12 @@ function Tabula() {
       return act(dupDrumPat);
     }, drumPats.length >= 8], ["DEL", function () {
       return act(delDrumPat);
-    }, isOnly, true]].map(function (_ref82) {
-      var _ref83 = _slicedToArray(_ref82, 4),
-        label = _ref83[0],
-        fn = _ref83[1],
-        disabled = _ref83[2],
-        danger = _ref83[3];
+    }, isOnly, true]].map(function (_ref86) {
+      var _ref87 = _slicedToArray(_ref86, 4),
+        label = _ref87[0],
+        fn = _ref87[1],
+        disabled = _ref87[2],
+        danger = _ref87[3];
       return /*#__PURE__*/React.createElement("button", {
         key: label,
         disabled: !!disabled,

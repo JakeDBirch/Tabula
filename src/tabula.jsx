@@ -6327,11 +6327,19 @@ export default function Tabula(){
 
       {/* ══ MOBILE LAYOUT ══ */}
       {IS_MOBILE&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:isLandscape?"row":"column",background:"#1a1814",overflow:"hidden"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:isLandscape?"row":"column",background:"#1a1814",overflow:"hidden",
+            // Keep all content clear of the notch / Dynamic Island / home indicator
+            // in the installed fullscreen app (viewport-fit=cover). Portrait: inset top;
+            // landscape: inset whichever side the camera sits on. Bottom inset always.
+            paddingTop:isLandscape?"env(safe-area-inset-top)":"env(safe-area-inset-top)",
+            paddingBottom:"env(safe-area-inset-bottom)",
+            paddingLeft:isLandscape?"env(safe-area-inset-left)":0,
+            paddingRight:isLandscape?"env(safe-area-inset-right)":0,
+            boxSizing:"border-box"}}>
 
           {/* ══ LANDSCAPE LEFT RAIL — layer + pattern selection ══ */}
           {isLandscape&&(
-            <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px 8px",paddingLeft:"calc(6px + env(safe-area-inset-left))",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+            <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} style={{flexShrink:0,padding:"8px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                   onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);if(page==="step"&&lyr==="drums")setPage("edit");} }}>{lbl}</button>
@@ -6354,6 +6362,17 @@ export default function Tabula(){
                 })}
                 {(activeLayer==="drums"?drumPats:pats).length<8&&<button style={{flexShrink:0,padding:"7px 4px",borderRadius:14,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),background:"transparent",color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{activeLayer==="drums"?addDrumPat():addPat();}}>＋</button>}
               </div>
+              {/* per-layer function pills — STEP / SOUND / VARY */}
+              <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
+              {[["step","STEP",activeSheet==="pattern"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+                <button key={key} onClick={()=>{ if(key==="step"){setSeqPage("step");setActiveSheet(s=>s==="pattern"?null:"pattern");} else setActiveSheet(s=>s===key?null:key); }}
+                  style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
+                    border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
+                    background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
+                    color:on?(key==="vary"?"#c9a96e":"rgba(232,224,213,0.9)"):"rgba(210,195,175,0.5)"}}>
+                  {lbl}
+                </button>
+              ))}
             </div>
           )}
 
@@ -6527,6 +6546,23 @@ export default function Tabula(){
                 </div>);
             })}
             {(activeLayer==="drums"?drumPats:pats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="drums"?addDrumPat():addPat();}}>＋</div>}
+          </div>
+          )}
+          {/* ── PER-LAYER FUNCTION PILLS — STEP / SOUND / VARY (portrait) ──
+               First-class home-screen access to the pattern's step drawer, the
+               layer's sound page, and per-layer variation. (These were formerly
+               reached only by tapping the already-active layer/pattern.) */}
+          {!isLandscape&&(
+          <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
+            {[["step","STEP",activeSheet==="pattern"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+              <button key={key} onClick={()=>{ if(key==="step"){setSeqPage("step");setActiveSheet(s=>s==="pattern"?null:"pattern");} else setActiveSheet(s=>s===key?null:key); }}
+                style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
+                  border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
+                  background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
+                  color:on?(key==="vary"?"#c9a96e":"rgba(232,224,213,0.9)"):"rgba(210,195,175,0.5)"}}>
+                {lbl}
+              </button>
+            ))}
           </div>
           )}
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
@@ -6853,47 +6889,38 @@ export default function Tabula(){
           {/* ── BOTTOM CHROME: chips row + persistent transport (portrait) ── */}
           {!isLandscape&&(
           <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.98)"}}>
-            {/* Row 1: expandable chips */}
-            <div style={{display:"flex",alignItems:"center",padding:"7px 10px 4px",gap:5}}>
+            {/* Row 1: global chips — TEMPO / SONG / FX / PROJECT.
+                 (VARY moved up to the per-layer pill row; four chips here gives
+                 each more width and lets the labels be legible.) */}
+            <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(200,185,165,0.08)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(200,185,165,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
-                <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
+                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{bpm}</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>TEMPO</span>
               </button>
               {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
                    stays on once enabled — only loop mode in transport overrides it. */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),borderRadius:9,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>{
-                  if(songView){
-                    // exit matrix view; song mode (playback intent) stays on
-                    setSongView(false);
-                  }else{
-                    // enter matrix view, ensure song mode is on
-                    setSongMode(true);setSongView(true);
-                  }
+                  if(songView){ setSongView(false); }
+                  else{ setSongMode(true);setSongView(true); }
                   setActiveSheet(null);
                 }}>
-                <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
+                <span style={{fontSize:16,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1}}>▦</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>SONG</span>
               </button>
               {/* FX chip — global reverb/delay design */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
-              </button>
-              {/* VARY chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||anyVary?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
-                <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||anyVary?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
+                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.4)"}}>FX</span>
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",gap:0,fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
-                <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>PROJECT</span>
+                <span style={{fontSize:15,lineHeight:1,color:"rgba(210,195,175,0.5)"}}>⋯</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>PROJECT</span>
               </button>
             </div>
             {/* Row 2: persistent transport */}
@@ -6912,7 +6939,7 @@ export default function Tabula(){
 
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
-            <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px 8px",paddingRight:"calc(6px + env(safe-area-inset-right))",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+            <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
@@ -6935,10 +6962,6 @@ export default function Tabula(){
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
                   <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
-                </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="vary"||anyVary?"rgba(201,169,110,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.1)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="vary"?null:"vary")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="vary"||anyVary?"#c9a96e":"rgba(210,195,175,0.5)"}}>～</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="vary"||anyVary?"rgba(201,169,110,0.7)":"rgba(210,195,175,0.35)"}}>VARY</span>
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
                   <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
