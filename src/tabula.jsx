@@ -5289,9 +5289,12 @@ export default function Tabula(){
                   // workspace). The mixer / kit live on the SOUND tab; global FX
                   // on the FX tab. (POLY/MONO keep layer→sound since "sound" is
                   // their per-layer instrument; drums "sound" is the shared kit.)
-                  if(songView)setSongView(false);
                   if(activeLayer!=="drums")switchLayer("drums");
-                  setPage("edit");
+                  // Persist the current view (SOUND / VARY / EDIT) on layer select,
+                  // exactly like POLY/MONO — only snap to the grid when coming from
+                  // song view. STEP is hidden for drums, so the effect below falls
+                  // a parked STEP page back to EDIT; every other page is kept.
+                  if(songView){setSongView(false);setPage("edit");}
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
@@ -5989,18 +5992,17 @@ export default function Tabula(){
                           {miniSlider("pitch",md.pitch||0,-12,12,true)}
                           <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                         </div>
-                        {/* FILTER — mode chip + cutoff slider */}
+                        {/* FILTER — type chip on its own row above, then a
+                            full-width cutoff slider + numeric readout (matches the
+                            PITCH/ENV cells; the chip no longer steals slider width). */}
                         <div style={cell}>
-                          <div style={{display:"flex",width:"100%",alignItems:"center",gap:2}}>
-                            <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                              style={{flex:"0 0 22px",height:11,fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",padding:0,
-                                border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
-                                background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                                color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
-                            <div style={{flex:1,opacity:filtMode==="off"?0.35:1}}>
-                              {miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}
-                            </div>
-                          </div>
+                          <button onClick={e=>{e.stopPropagation();cycleFilt();}}
+                            style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
+                              border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
+                              background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
+                              color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
+                          <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
+                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.filtCut!=null?md.filtCut:100}</div>
                         </div>
                         {/* ENV — sample playback length (full right = whole sample) */}
                         <div style={cell}>
@@ -6346,7 +6348,7 @@ export default function Tabula(){
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} style={{flexShrink:0,padding:"8px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);if(page==="step"&&lyr==="drums")setPage("edit");} }}>{lbl}</button>
+                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}>{lbl}</button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
@@ -6401,7 +6403,6 @@ export default function Tabula(){
                     setActiveSheet(s=>s==="sound"?null:"sound");
                   }else{
                     switchLayer(lyr);
-                    if(page==="step"&&lyr==="drums")setPage("edit");
                   }
                 }}>
                 {lbl}
@@ -7240,16 +7241,13 @@ export default function Tabula(){
                               <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{display:"flex",width:"100%",alignItems:"center",gap:2}}>
-                                <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                                  style={{flex:"0 0 22px",height:11,fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",padding:0,
-                                    border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
-                                    background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                                    color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
-                                <div style={{flex:1,opacity:filtMode==="off"?0.35:1}}>
-                                  {miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}
-                                </div>
-                              </div>
+                              <button onClick={e=>{e.stopPropagation();cycleFilt();}}
+                                style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
+                                  border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
+                                  background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
+                                  color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
+                              <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
+                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.filtCut!=null?md.filtCut:100}</div>
                             </div>
                             <div style={cell}>
                               <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
