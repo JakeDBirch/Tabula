@@ -1686,33 +1686,9 @@ export default function Tabula(){
   const drumStepR=useRef(-1);
   const [drumStep,setDrumStep]=useState(-1);
   useEffect(()=>{drumStepR.current=drumStep;},[drumStep]);
-  // Drive the drum-mixer hit flashes off the playhead. On each new drum step,
-  // any voice that sounds in the active pat pulses its channel, scaled by the
-  // cell's velocity. (Reads the vary grid/vel when drum vary is on.)
-  useEffect(()=>{
-    if(!playing||drumStep<0)return;
-    // Read the CURRENT pattern via refs (not a render-stale closure) so a note
-    // deleted between steps doesn't keep flashing its channel — the orphan
-    // "ghost hit" the mixer used to show after edits.
-    const dPat=drumPatsR.current.find(p=>p.id===activeDrumIdR.current);
-    if(!dPat)return;
-    const dv=varyModeR.current.drums;
-    const grid=dv?(variedDrumGrids.current.get(dPat.id)||dPat.grid):dPat.grid;
-    const vel=dv?(variedDrumVels.current.get(dPat.id)||dPat.vel):dPat.vel;
-    setDrumFlash(prev=>{
-      let next=prev,changed=false;
-      for(let r=0;r<DRUM_ROWS;r++){
-        if(grid[r]&&grid[r][drumStep]){
-          const vr=vel&&vel[r];
-          const v=(Array.isArray(vr)?vr[drumStep]:vel?.[drumStep])??100;
-          if(!changed){next={...prev};changed=true;}
-          next[r]={vel:v,n:((prev[r]&&prev[r].n)||0)+1};
-        }
-      }
-      return changed?next:prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[drumStep,playing]);
+  // (Drum-mixer hit flashes are now fired from playDrumStep at each hit's actual
+  // audio-onset time — see `flashes` there — so they match what you hear instead
+  // of leading by the look-ahead. This effect just clears them on stop.)
   // Clear all channel flashes when playback stops so none linger lit.
   useEffect(()=>{if(!playing)setDrumFlash({});},[playing]);
 
@@ -3222,6 +3198,11 @@ export default function Tabula(){
     // Base mix is GLOBAL/static (drumMixR). Motion (per-pattern) overlays it
     // only while MOTION is on — see the motionEnabledR path below.
     const baseMixArr = drumMixR.current||defaultDrumMix();
+    // Channel-flash collection — fired at the ACTUAL audio onset (below), so the
+    // mixer pulse matches what you hear: the playing pattern (correct in song
+    // mode), the swung onset, and past the look-ahead. Only while drums is the
+    // visible layer, to avoid needless state churn.
+    const flashes = activeLayerR.current==="drums" ? [] : null;
     for(let r=0;r<DRUM_ROWS;r++){
       if(useGrid[r]&&useGrid[r][s]){
         // Per-cell velocity: useVel[r][s]. Tolerate legacy 1D arrays mid-load.
@@ -3260,7 +3241,13 @@ export default function Tabula(){
         }else{
           drumEngine.current.play(voiceKey,at,dVel,dMix,voiceSamplesR.current[voiceKey],pat.id);
         }
+        if(flashes)flashes.push({r,vel:dVel});
       }
+    }
+    if(flashes&&flashes.length){
+      const ctx=bell.current.ctx;
+      const delayMs=ctx?Math.max(0,(at-ctx.currentTime)*1000):0;
+      setTimeout(()=>{ setDrumFlash(prev=>{const nx={...prev};flashes.forEach(f=>{nx[f.r]={vel:f.vel,n:((prev[f.r]&&prev[f.r].n)||0)+1};});return nx;}); }, delayMs);
     }
   };
 
