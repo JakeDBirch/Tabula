@@ -71,7 +71,7 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
-const C_SAT="#d8a050"; // global master saturation accent
+const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 const C_VARY="#c9a96e";
@@ -388,7 +388,6 @@ const SESSION_DEFAULTS = Object.freeze({
   bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
-  satAmt:0,
   drumLevel:85, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
@@ -2013,7 +2012,6 @@ export default function Tabula(){
   const [rvLfDamp,   setRvLfDamp]   = useState(0);  // LF damp shelf cut (0=none, 100=full)
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
-  const [satAmt,     setSatAmt]     = useState(0);  // global master saturation (0..100)
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -2379,7 +2377,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     varyMode,loopMode,
@@ -2427,7 +2425,7 @@ export default function Tabula(){
     setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],
-     ["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
+     ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2493,7 +2491,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -2623,7 +2621,7 @@ export default function Tabula(){
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2737,7 +2735,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setSatAmt(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -2809,7 +2807,7 @@ export default function Tabula(){
     ver:PROJ_VER,
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,satAmt,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -2896,7 +2894,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["satAmt",setSatAmt],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3426,9 +3424,15 @@ export default function Tabula(){
         // Mute / solo gate — silence the play call but keep advancing the
         // scheduler clock so the layer stays in sync if it gets un-muted
         // mid-bar.
+        // Swing — push the off-beat (odd) steps late toward a triplet feel. We
+        // only shift the scheduled ONSET, never lf.nextAt, so the clock stays
+        // straight and nothing drifts. swing=100 ⇒ the 2nd of each pair lands
+        // 1/3 of a step late (full triplet); swing=0 ⇒ dead straight.
+        const sw=swingR.current||0;
+        const playAt=(sw>0&&(s%2===1))?at+(sw/100)*(layerStepDur/3):at;
         if(isLayerAudibleR.current(layer)){
-          if(layer==="drums")playDrumStep(pat,s,at,layerStepDur);
-          else playSynthLayerStep(layer,pat,s,at,layerStepDur);
+          if(layer==="drums")playDrumStep(pat,s,playAt,layerStepDur);
+          else playSynthLayerStep(layer,pat,s,playAt,layerStepDur);
         }
         // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
@@ -4917,7 +4921,7 @@ export default function Tabula(){
   const activeVary = !!varyMode[activeLayer];
 
   // ── GLOBAL FX panel ──────────────────────────────────────────────────────
-  // The reverb, delay and master-saturation *design* params. These are global
+  // The reverb and delay *design* params. These are global
   // (shared by every layer); each layer's SOUND page only carries its own SEND
   // amount into the reverb/delay buses. Rendered identically on the desktop FX
   // tab and the mobile FX sheet.
@@ -6286,7 +6290,7 @@ export default function Tabula(){
                 </div>
               </div>
             )}
-            {/* Global FX page — reverb / delay / master saturation design. Same
+            {/* Global FX page — reverb / delay design. Same
                 for every layer (these buses are shared), drums included. */}
             {page==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
@@ -7295,7 +7299,7 @@ export default function Tabula(){
                     })()}
                   </div>
                 )}
-                {/* FX sheet — global reverb / delay / master saturation design */}
+                {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="fx"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
@@ -7355,7 +7359,8 @@ export default function Tabula(){
                           {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
                           {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
                           {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
-                          <OutputMeter bellRef={bell} playing={playing}/>
+                          {/* Output meters intentionally desktop-only (they were
+                              unreliable on mobile WebKit; removed here per design). */}
                         </div>
                       );
                     })()}
@@ -7435,6 +7440,34 @@ export default function Tabula(){
                         ))}
                       </div>
                     )}
+                    {/* DRUMS VARY — enable + RHYTHM/VELOCITY (mobile parity with desktop). */}
+                    {activeLayer==="drums"&&(()=>{
+                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+                      const vRhythm=dPat?.vRhythm||0, vVelocity=dPat?.vVelocity||0;
+                      const Row=(label,val,key,accent)=>(
+                        <div key={label} style={{marginBottom:12}}>
+                          <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
+                            <span style={{fontSize:8,letterSpacing:1.5,color:accent,fontWeight:600,width:70}}>{label}</span>
+                            <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                          </div>
+                          <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                            onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const update=ev=>{setDrumVary(key,Math.round(Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width))*100));};update(e);const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                            <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:accent+"99",borderRadius:3}}/>
+                            <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
+                          </div>
+                        </div>
+                      );
+                      return(
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                            <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode.drums?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode.drums?"rgba(201,169,110,0.12)":"transparent",color:varyMode.drums?C_VARY:"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}>{"DRUMS VARY "+(varyMode.drums?"ON":"OFF")}</button>
+                          </div>
+                          <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
+                          {Row("RHYTHM",vRhythm,"vRhythm","#c8a840")}
+                          {Row("VELOCITY",vVelocity,"vVelocity","#7888d0")}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
