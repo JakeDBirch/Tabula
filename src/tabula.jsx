@@ -7030,7 +7030,10 @@ export default function Tabula(){
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
                     {activeLayer!=="drums"&&(
                       <div style={{overflowY:"auto"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        {/* Portrait is too narrow for two columns (knobs shrink and
+                            labels like DETUNE clip) — stack full-width there; keep
+                            two columns in the roomier landscape sheet. */}
+                        <div style={{display:"grid",gridTemplateColumns:isLandscape?"1fr 1fr":"1fr",gap:8}}>
                           <SynthSection title="OSCILLATOR" accent={C_OSC}>
                             <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
