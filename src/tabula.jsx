@@ -755,27 +755,56 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
     );
   }
 
+  const getCol=useCallback(e=>{
+    const rect=ref.current.getBoundingClientRect();
+    return Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/rect.width*COLS)));
+  },[]);
   const getCV=useCallback(e=>{
     const rect=ref.current.getBoundingClientRect();
     const col=Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/rect.width*COLS)));
     const pct=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));
     return{col,val:Math.round(lane.min+pct*(lane.max-lane.min))};
   },[lane]);
+  // Gesture-split (mirrors the drum grid): horizontal-dominant drag = draw values
+  // across steps (absolute Y → value, X → which step); vertical-dominant drag =
+  // fine BALLISTIC adjust of the step you started on; a pure tap sets that step
+  // to the tapped height. So you keep the draw-a-curve gesture AND get fine
+  // per-step control. `cur` is seeded with the start step's value for relative work.
   const onDown=useCallback(e=>{
-    e.stopPropagation();ref.current.setPointerCapture(e.pointerId);
-    drag.current.active=true;
-    const{col,val}=getCV(e);
-    if(colHasNote&&!colHasNote[col])return;
-    onDragStart&&onDragStart();
-    onChange(col,val);
-  },[getCV,onChange,lane,values,colHasNote,onDragStart]);
+    e.stopPropagation();try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
+    const col=getCol(e);
+    if(colHasNote&&!colHasNote[col]){drag.current={active:false};return;} // locked step
+    drag.current={active:true,mode:null,col,cur:(values[col]??lane.def),ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false};
+  },[getCol,colHasNote,values,lane]);
   const onMove=useCallback(e=>{
-    if(!drag.current.active)return;e.stopPropagation();
-    const{col,val}=getCV(e);
-    if(colHasNote&&!colHasNote[col])return; // locked
-    onChange(col,val);
-  },[getCV,onChange,colHasNote]);
-  const onUp=useCallback(()=>{drag.current.active=false;},[]);
+    const d=drag.current; if(!d||!d.active)return; e.stopPropagation();
+    if(d.mode===null){
+      const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
+      if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6) d.mode="draw";
+      else if(Math.abs(dy)>4) d.mode="fine";
+      else return;
+      if(!d.didStart){onDragStart&&onDragStart();d.didStart=true;}
+    }
+    if(d.mode==="draw"){
+      const{col,val}=getCV(e);
+      if(colHasNote&&!colHasNote[col])return; // locked
+      onChange(col,val);
+    }else{
+      const pd=d.ly-e.clientY; d.ly=e.clientY; // drag up = increase
+      const h=ref.current.getBoundingClientRect().height;
+      d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,h,lane.max-lane.min)));
+      onChange(d.col,Math.round(d.cur));
+    }
+  },[getCV,onChange,colHasNote,lane,onDragStart]);
+  const onUp=useCallback(e=>{
+    const d=drag.current;
+    if(d&&d.active&&d.mode===null&&e&&e.type==="pointerup"){
+      // Pure tap → set the tapped step to the tapped height (familiar bar-graph set).
+      const{col,val}=getCV(e);
+      if(!(colHasNote&&!colHasNote[col])){onDragStart&&onDragStart();onChange(col,val);}
+    }
+    drag.current={active:false};
+  },[getCV,onChange,colHasNote,onDragStart]);
   return(
     <div style={Object.assign({},S.laneRow,tall?{height:52}:{})}>
       {!tall&&<div style={Object.assign({},S.laneLabel,{color:lane.color+"99"})}>{lane.label}</div>}
@@ -3170,11 +3199,33 @@ export default function Tabula(){
     e.target.value="";
   };
 
-  // Load from URL hash on mount
+  // Auto-save the working project (debounced) and restore it on mount, so an
+  // accidental reload or browser close returns you to the most recent state.
+  // A shared-link URL hash takes precedence when present.
+  const autosaveTmrR = useRef(null);
+  const autosaveReadyR = useRef(false);
   useEffect(()=>{
     const hash=window.location.hash.slice(1);
-    if(hash){const s=decodeState(hash);if(s){applyShareState(s);window.location.hash="";}}
+    if(hash){const s=decodeState(hash);if(s){applyShareState(s);window.location.hash="";}autosaveReadyR.current=true;return;}
+    (async()=>{
+      try{const raw=await storageGet("autosave");if(raw){const s=JSON.parse(raw);if(s)applyShareState(s);}}catch(e){}
+      autosaveReadyR.current=true;
+    })();
   },[]);
+  // Debounced persist of the full state (samples included; lean fallback if the
+  // browser's localStorage quota is exceeded). Holds off until the mount restore
+  // has run so it never clobbers the saved session with the empty initial state.
+  useEffect(()=>{
+    if(!autosaveReadyR.current)return;
+    if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);
+    autosaveTmrR.current=setTimeout(async()=>{
+      try{
+        const ok=await storageSet("autosave",JSON.stringify(getShareState(true)));
+        if(!ok)await storageSet("autosave",JSON.stringify(getShareState(false)));
+      }catch(e){}
+    },1200);
+    return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
+  },[pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,trackMute,trackSolo,activeKit,userSamples,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
 
   // Lookahead scheduler — runs every 25ms, schedules notes 100ms ahead.
   // Decouples JS timer jitter from audio precision so delay stays locked to grid.
@@ -4964,19 +5015,19 @@ export default function Tabula(){
   const globalFxSections = (<>
     <SynthSection title="DELAY" accent={C_DLY}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
-        <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 onChange={setDlyFbPct}  display={dlyFbPct+"%"}            accent={C_DLY}/>
-        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}         accent={C_DLY}/>
-        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}         accent={C_DLY}/>
+        <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} def={3} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
+        <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 def={45} onChange={setDlyFbPct}  display={dlyFbPct+"%"}            accent={C_DLY}/>
+        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                def={8} onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}         accent={C_DLY}/>
+        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                def={78} onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}         accent={C_DLY}/>
         <KnobSlider label="→ REV"  value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}            accent={C_DLY}/>
       </div>
     </SynthSection>
     <SynthSection title="REVERB" accent={C_REV}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
+        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} def={50} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
         {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
-        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} onChange={v=>setRvDamp(100-v)} display={fmtHz(rvHfHz(rvDamp))} accent={C_REV}/>
+        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} def={60} onChange={v=>setRvDamp(100-v)} display={fmtHz(rvHfHz(rvDamp))} accent={C_REV}/>
         <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={fmtHz(rvLfHz(rvLfDamp))} accent={C_REV}/>
       </div>
     </SynthSection>
@@ -5504,7 +5555,7 @@ export default function Tabula(){
                   <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
                   <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                     onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
-                    onDoubleClick={e=>{e.stopPropagation();onChange(100);}}>
+                    onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
                     <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
                   </div>
@@ -6229,8 +6280,8 @@ export default function Tabula(){
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="RHYTHM VARY / MUT8" accent={C_VARY}>
                       <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} onChange={setVDropRate}  display={vDropRate+"%"}    accent={C_VARY}/>
-                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} onChange={setVShiftRate} display={vShiftRate+"%"}   accent={C_VARY}/>
+                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} def={13} onChange={setVDropRate}  display={vDropRate+"%"}    accent={C_VARY}/>
+                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} def={17} onChange={setVShiftRate} display={vShiftRate+"%"}   accent={C_VARY}/>
                         <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent={C_VARY}/>
                       </div>
                     </SynthSection>
@@ -6262,20 +6313,20 @@ export default function Tabula(){
                       <div style={{display:"flex",gap:10,padding:"8px 10px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
                         {activeLayer==="synth"&&(
-                          <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                          <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} def={8} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                         )}
                         {activeLayer==="synth"&&(
-                          <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
+                          <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} def={50} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                         )}
                         {activeLayer==="lead"&&(
-                          <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
+                          <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} def={50} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
                         )}
                         {activeLayer==="lead"&&(
                           <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                         )}
                         {/* OSC velocity knob = global VCA velocity sensitivity. */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
+                          <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                           <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                         </div>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
@@ -6302,9 +6353,9 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="ENV" accent={C_ENV}>
                       <div style={{display:"flex",gap:10,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
-                        <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
-                        <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
-                        <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
+                        <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                         {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
@@ -6314,12 +6365,12 @@ export default function Tabula(){
                     </SynthSection>
                     <SynthSection title="FILTER" accent={C_FILT}>
                       <div style={{display:"flex",gap:10,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
-                        <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
-                        <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
+                        <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} def={80} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
+                        <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                         <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                         {/* FILTER velocity = scales filter envelope amount with velocity. */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
+                          <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                           <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                         </div>
                       </div>
@@ -6328,13 +6379,13 @@ export default function Tabula(){
                         buses. The bus design lives on the global FX tab. */}
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SEND"   value={dlySend}   min={0} max={100} onChange={setDlySend}   display={dlySend+"%"} accent={C_DLY}/>
+                        <KnobSlider label="SEND"   value={dlySend}   min={0} max={100} def={50} onChange={setDlySend}   display={dlySend+"%"} accent={C_DLY}/>
                         <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="SEND"   value={rvSend}    min={0} max={100} onChange={setRvSend}    display={rvSend+"%"}  accent={C_REV}/>
+                        <KnobSlider label="SEND"   value={rvSend}    min={0} max={100} def={30} onChange={setRvSend}    display={rvSend+"%"}  accent={C_REV}/>
                         <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
@@ -7141,19 +7192,19 @@ export default function Tabula(){
                             <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
                               {activeLayer==="synth"&&(
-                                <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
+                                <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} def={8} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                               )}
                               {activeLayer==="synth"&&(
-                                <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
+                                <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} def={50} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                               )}
                               {activeLayer==="lead"&&(
-                                <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
+                                <KnobSlider vertical label="SUB" value={subLvl} min={0} max={100} def={50} onChange={setSubLvl} display={subLvl+"%"} accent={C_OSC}/>
                               )}
                               {activeLayer==="lead"&&(
                                 <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                               )}
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
+                                <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                                 <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                               </div>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
@@ -7177,9 +7228,9 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="ENV" accent={C_ENV}>
                             <div style={{display:"flex",gap:6,padding:"6px 8px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
-                              <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
-                              <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
-                              <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                              <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
+                              <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
+                              <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                                 <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
@@ -7188,11 +7239,11 @@ export default function Tabula(){
                           </SynthSection>
                           <SynthSection title="FILTER" accent={C_FILT}>
                             <div style={{display:"flex",gap:6,padding:"6px 8px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
-                              <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
-                              <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
+                              <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} def={80} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
+                              <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                               <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
+                                <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                                 <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                               </div>
                             </div>
@@ -7200,13 +7251,13 @@ export default function Tabula(){
                           {/* Per-layer FX = SEND only; design lives on the FX sheet. */}
                           <SynthSection title="DELAY" accent={C_DLY}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SEND" value={dlySend} min={0} max={100} onChange={setDlySend} display={dlySend+"%"} accent={C_DLY}/>
+                              <KnobSlider label="SEND" value={dlySend} min={0} max={100} def={50} onChange={setDlySend} display={dlySend+"%"} accent={C_DLY}/>
                               <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
-                              <KnobSlider label="SEND" value={rvSend} min={0} max={100} onChange={setRvSend} display={rvSend+"%"} accent={C_REV}/>
+                              <KnobSlider label="SEND" value={rvSend} min={0} max={100} def={30} onChange={setRvSend} display={rvSend+"%"} accent={C_REV}/>
                               <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
@@ -7390,7 +7441,7 @@ export default function Tabula(){
                             <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
                             <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
-                              onDoubleClick={e=>{e.stopPropagation();onChange(100);}}>
+                              onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
                               <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
                             </div>
