@@ -3220,31 +3220,53 @@ export default function Tabula(){
 
   // Auto-save the working project (debounced) and restore it on mount, so an
   // accidental reload or browser close returns you to the most recent state.
-  // A shared-link URL hash takes precedence when present.
+  // A shared-link URL hash takes precedence. Two rules keep this off the audio
+  // thread: (1) the per-edit save is a LEAN getShareState(false) — recorded USER
+  // samples (multi-MB base64) are persisted SEPARATELY and only when they change,
+  // not re-encoded on every edit; (2) NOTHING auto-saves while playing, and
+  // `playing` is a dependency so starting playback cancels any pending write.
+  // (A debounced full+samples stringify firing mid-play was freezing playback.)
   const autosaveTmrR = useRef(null);
   const autosaveReadyR = useRef(false);
   useEffect(()=>{
     const hash=window.location.hash.slice(1);
     if(hash){const s=decodeState(hash);if(s){applyShareState(s);window.location.hash="";}autosaveReadyR.current=true;return;}
     (async()=>{
-      try{const raw=await storageGet("autosave");if(raw){const s=JSON.parse(raw);if(s)applyShareState(s);}}catch(e){}
+      try{
+        const raw=await storageGet("autosave");
+        if(raw){
+          const s=JSON.parse(raw);
+          if(s){
+            // Re-attach the separately-stored samples so the USER kit returns too.
+            try{const sr=await storageGet("autosave_smp");if(sr){const smp=JSON.parse(sr);if(smp&&Object.keys(smp).length)s.userSamples=smp;}}catch(e){}
+            applyShareState(s);
+          }
+        }
+      }catch(e){}
       autosaveReadyR.current=true;
     })();
   },[]);
-  // Debounced persist of the full state (samples included; lean fallback if the
-  // browser's localStorage quota is exceeded). Holds off until the mount restore
-  // has run so it never clobbers the saved session with the empty initial state.
+  // Debounced LEAN persist (no samples → cheap, never janks). Skipped while
+  // playing; the `playing` dep means play-start clears the pending timer and
+  // play-stop schedules a catch-up save.
   useEffect(()=>{
-    if(!autosaveReadyR.current)return;
+    if(!autosaveReadyR.current||playing)return;
     if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);
-    autosaveTmrR.current=setTimeout(async()=>{
-      try{
-        const ok=await storageSet("autosave",JSON.stringify(getShareState(true)));
-        if(!ok)await storageSet("autosave",JSON.stringify(getShareState(false)));
-      }catch(e){}
+    autosaveTmrR.current=setTimeout(()=>{
+      try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,trackMute,trackSolo,activeKit,userSamples,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+  // Recorded USER samples persist on their own key, only when they actually
+  // change (record / clear) and never during playback — keeps the heavy base64
+  // encode off the per-edit path and out of the audio thread.
+  useEffect(()=>{
+    if(!autosaveReadyR.current||playing)return;
+    const id=setTimeout(()=>{
+      try{const smp=serializeSamples(userSamples);storageSet("autosave_smp",(smp&&Object.keys(smp).length)?JSON.stringify(smp):"");}catch(e){}
+    },500);
+    return ()=>clearTimeout(id);
+  },[userSamples,playing]);
 
   // Lookahead scheduler — runs every 25ms, schedules notes 100ms ahead.
   // Decouples JS timer jitter from audio precision so delay stays locked to grid.
