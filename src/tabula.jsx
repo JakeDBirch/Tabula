@@ -1894,6 +1894,8 @@ export default function Tabula(){
   const [activeKit, setActiveKit] = useState(DEFAULT_KIT);
   const [kitLoading, setKitLoading] = useState(false);
   const [exporting, setExporting] = useState(false); // MP3 bounce in progress
+  const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
+  const [exportProgress, setExportProgress] = useState(0); // 0..1 realtime-capture progress
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
@@ -3110,8 +3112,8 @@ export default function Tabula(){
   const exportingR=useRef(false);
   const exportMP3=async()=>{
     if(exportingR.current)return;
-    exportingR.current=true;setExporting(true);
-    let cap=null,sink=null,master=null,restore=null;
+    exportingR.current=true;setExporting(true);setExportPhase("Preparing");setExportProgress(0);
+    let cap=null,sink=null,master=null,restore=null,progTmr=null;
     try{
       // Engine must exist for the master tap. Init silently if it never played.
       if(!bell.current.ready){
@@ -3172,17 +3174,20 @@ export default function Tabula(){
         let firstBar=0;{const sm=songMatrix;for(let i=0;i<64;i++){if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}}}
         songBarR.current=firstBar;setSongBar(firstBar);
       }
-      showFlash("BOUNCING…");
+      showFlash("BOUNCING…");setExportPhase("Bouncing");
       capturing=true;
       await startStop();                       // start playback from the song top
       const t0=ctx.currentTime;
+      progTmr=setInterval(()=>setExportProgress(Math.min(0.999,(ctx.currentTime-t0)/(totalSec+tailSec))),100);
       await _waitAudio(ctx,t0+totalSec);        // play `loops` passes of the song
       if(playingR.current)await startStop();    // stop notes; FX tail keeps ringing
       await _waitAudio(ctx,t0+totalSec+tailSec);// capture the tail
       capturing=false;
+      if(progTmr){clearInterval(progTmr);progTmr=null;}
       const L=_concatF32(Lc),R=_concatF32(Rc);
       if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
-      showFlash("ENCODING…");
+      showFlash("ENCODING…");setExportPhase("Encoding");setExportProgress(1);
+      await new Promise(r=>setTimeout(r,40)); // let the overlay paint "Encoding" before the synchronous encode blocks
       const blob=encodeMP3(lame,L,R,ctx.sampleRate);
       // On mobile (where the OS share sheet is the point — text/email the
       // sketch), stash the file and surface a SHARE button instead of forcing a
@@ -3195,6 +3200,8 @@ export default function Tabula(){
       }
     }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
     finally{
+      if(progTmr){clearInterval(progTmr);progTmr=null;}
+      setExportPhase("");setExportProgress(0);
       try{if(master&&cap)master.disconnect(cap);}catch(e){}
       try{if(cap)cap.disconnect();cap&&(cap.onaudioprocess=null);}catch(e){}
       try{if(sink)sink.disconnect();}catch(e){}
@@ -5083,6 +5090,31 @@ export default function Tabula(){
 
       {/* MP3 share prompt (mobile) — appears after a bounce so the SHARE tap is a
           fresh user gesture (required by navigator.share). */}
+      {/* MP3 bounce lock — a dimmed (not opaque) scrim that captures every pointer
+          event so controls can't be touched mid-bounce, with a centered status
+          card + realtime progress. The app stays visible behind it so it's clear
+          what's happening. */}
+      {exporting&&(
+        <div
+          style={{position:"fixed",inset:0,zIndex:10001,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(12,10,8,0.62)",backdropFilter:"blur(2px)",WebkitBackdropFilter:"blur(2px)",touchAction:"none"}}
+          onPointerDown={e=>{e.preventDefault();e.stopPropagation();}}
+          onPointerMove={e=>{e.preventDefault();e.stopPropagation();}}
+          onClick={e=>{e.preventDefault();e.stopPropagation();}}
+          onWheel={e=>e.preventDefault()}>
+          <div style={{width:"min(86vw,340px)",background:"rgba(26,24,20,0.98)",border:"1px solid rgba(196,168,130,0.45)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.7)",padding:"22px 22px 20px",textAlign:"center"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:9,marginBottom:6}}>
+              <span style={{width:11,height:11,borderRadius:"50%",background:"#e0705f",boxShadow:"0 0 10px #e0705f"}}/>
+              <span style={{fontSize:13,letterSpacing:3,fontWeight:700,color:"rgba(232,224,213,0.95)"}}>BOUNCING MP3</span>
+            </div>
+            <div style={{fontSize:10,letterSpacing:1.5,color:"rgba(210,195,175,0.55)",marginBottom:16}}>{(exportPhase||"Preparing")+(exportLoops>1?" · "+exportLoops+" passes":"")}</div>
+            <div style={{height:7,background:"rgba(220,200,180,0.1)",borderRadius:4,overflow:"hidden",marginBottom:14}}>
+              <div style={{height:"100%",width:Math.round(exportProgress*100)+"%",background:"linear-gradient(90deg,#c4a070,#e0a050)",borderRadius:4,transition:"width .15s linear"}}/>
+            </div>
+            <div style={{fontSize:9,letterSpacing:0.5,color:"rgba(210,195,175,0.4)",lineHeight:1.5}}>Recording in real time — keep this screen open.<br/>Controls are locked until it finishes.</div>
+          </div>
+        </div>
+      )}
+
       {shareFile&&(
         <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:9999,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           <div style={{margin:"0 0 96px",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:14,background:"rgba(24,22,18,0.97)",border:"1px solid rgba(168,197,160,0.4)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)",pointerEvents:"auto"}}>
