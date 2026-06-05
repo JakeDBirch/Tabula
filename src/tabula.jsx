@@ -743,6 +743,15 @@ const PARAM_ARMS=[
 // its session default; anything not listed (the STEP jitters) defaults to 0.
 const VDEF={DROP:13,SHIFT:17,RANGE:1,PITCH:0,GHOST:0};
 
+// Compact per-step value label for the tall STEP lanes (rhy → ×N, oct → signed
+// octave, dur → signed %, else the raw number).
+const fmtStepVal=(lane,v)=>{
+  if(lane.key==="rhy")return "×"+Math.max(1,v);
+  if(lane.key==="oct"){const o=v-2;return (o>0?"+":"")+o;}
+  if(lane.key==="dur")return (v>0?"+":"")+v;
+  return ""+v;
+};
+
 function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,onResetCol}){
   const ref=useRef(null);
   const drag=useRef({active:false});
@@ -843,10 +852,11 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
           return(
             <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}
               onDoubleClick={e=>{e.stopPropagation();if(locked)return;onResetCol&&onResetCol(c);}}>
+              {/* Always-visible per-step value — shown on programmed (non-default)
+                  or currently-playing steps so you can read values without dragging. */}
+              {tall&&!locked&&(isAct||v!==lane.def)&&<span style={{position:"absolute",top:0,left:0,right:0,textAlign:"center",fontSize:7,fontWeight:700,lineHeight:1.3,color:isAct?"#1a1814":"rgba(240,235,226,0.9)",textShadow:isAct?"none":"0 0 3px rgba(0,0,0,0.95)",pointerEvents:"none",zIndex:1}}>{fmtStepVal(lane,v)}</span>}
               {lane.center!=null&&<div style={Object.assign({},S.laneCenterLine,{bottom:(cp*100)+"%",borderColor:lane.color+"22"})}/>}
-              <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none",position:"relative",display:"flex",alignItems:"flex-start",justifyContent:"center"})}>
-                {tall&&isRhy&&<span style={{fontSize:7,fontWeight:700,color:isAct?"#000":"rgba(0,0,0,0.8)",lineHeight:1,paddingTop:1,pointerEvents:"none"}}>{"×"+rhyVal}</span>}
-              </div>
+              <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none"})}/>
             </div>
           );
         })}
@@ -6125,7 +6135,7 @@ export default function Tabula(){
                     // Horizontal mini-slider builder. Drag routes through onMixDrag
                     // (base edit, or motion override/record), onMixUp on release.
                     const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                      <div style={{width:"100%",height:5,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                      <div style={{width:"100%",height:8,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
@@ -7397,7 +7407,7 @@ export default function Tabula(){
                           const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
                           const dc=drumColor(r,linkHat,linkTom);
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                            <div style={{width:"100%",height:7,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
+                            <div style={{width:"100%",height:10,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onMixDrag(r,key,0);onMixUp(r,key);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
                               onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
                               {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
