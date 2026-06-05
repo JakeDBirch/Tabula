@@ -464,13 +464,15 @@ const ballisticNudge=(pixelDelta,base)=>{
 // touch-action:none — so detect it ourselves: two quick pointerdowns near the
 // same spot. Works identically for mouse and touch. Call at the top of a
 // control's onPointerDown; if it returns true, run the reset and bail out of the
-// drag. Shared singleton (only one finger/cursor taps at a time).
-const _lastTap={t:-1e9,x:0,y:0};
+// drag. Both taps must land on the SAME element (`e.currentTarget`) — otherwise
+// two quick single taps on adjacent controls (e.g. neighbouring drum-strip
+// sliders, ~15px apart) would false-positive and reset the second one.
+const _lastTap={t:-1e9,x:0,y:0,el:null};
 const isDoubleTap=e=>{
-  const t=e.timeStamp;
-  const dbl=(t-_lastTap.t)<350 && Math.abs(e.clientX-_lastTap.x)<30 && Math.abs(e.clientY-_lastTap.y)<30;
-  if(dbl){_lastTap.t=-1e9;return true;}        // consume so a 3rd tap starts fresh
-  _lastTap.t=t;_lastTap.x=e.clientX;_lastTap.y=e.clientY;return false;
+  const t=e.timeStamp, el=e.currentTarget;
+  const dbl=el===_lastTap.el && (t-_lastTap.t)<350 && Math.abs(e.clientX-_lastTap.x)<30 && Math.abs(e.clientY-_lastTap.y)<30;
+  if(dbl){_lastTap.t=-1e9;_lastTap.el=null;return true;} // consume so a 3rd tap starts fresh
+  _lastTap.el=el;_lastTap.t=t;_lastTap.x=e.clientX;_lastTap.y=e.clientY;return false;
 };
 
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
