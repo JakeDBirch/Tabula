@@ -84,6 +84,94 @@ const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
 const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
+
+// ── Musical RAND ───────────────────────────────────────────────────────────
+// The rows are already scale degrees (fromBot = ROWS-1-row; the tonic sits at
+// fromBot % SCALE_SPAN === 0, and the triad chord-tones 1/3/5 at
+// fromBot % SCALE_SPAN in {0,2,4}). So RAND only has to add *rhythm* and
+// *contour* logic to stop sounding like static noise. Two generators:
+//   MONO → a metric-weighted rhythm skeleton + a chord-anchored stepwise walk.
+//   POLY → a rotating arpeggio of one implied triad, with light dyads.
+// Both pick one implied chord per press (I 60% / IV 20% / V 20%) so the bar
+// has a single harmonic identity, and clamp density so every press is usable.
+const _clsBeat=c=>c%4===0?"down":(c%2===0?"off":"16th");           // metric class
+const _isChordTone=(fb,root)=>{const d=(((fb-root)%SCALE_SPAN)+SCALE_SPAN)%SCALE_SPAN;return d===0||d===2||d===4;};
+const _pickRoot=()=>{const r=Math.random();return r<0.60?0:(r<0.80?3:4);};
+
+const randMonoGrid=()=>{
+  const g=mkGrid();
+  const root=_pickRoot();
+  // 1) Rhythm skeleton — metric-weighted trigger probability (monophonic: ≤1/col).
+  const P={down:0.92,off:0.55,"16th":0.24};                        // E[hits] ≈ 7.6
+  let cols=[];
+  for(let c=0;c<COLS;c++)if(Math.random()<P[_clsBeat(c)])cols.push(c);
+  if(!cols.includes(0))cols.unshift(0);                            // anchor the downbeat
+  // 2) Density clamp to [6,11] — drop weakest cols first, add strongest empty cols.
+  const STR={down:3,off:2,"16th":1},score=c=>STR[_clsBeat(c)]+Math.random();
+  while(cols.length>11){const v=cols.filter(c=>c!==0).reduce((a,b)=>score(a)<score(b)?a:b);cols=cols.filter(c=>c!==v);}
+  while(cols.length<6){const e=[];for(let c=0;c<COLS;c++)if(!cols.includes(c))e.push(c);cols.push(e.reduce((a,b)=>score(a)>score(b)?a:b));}
+  cols.sort((a,b)=>a-b);
+  // 3) Contour — chord-anchored stepwise walk inside a comfortable register.
+  const LO=3,HI=12,clamp=fb=>Math.max(LO,Math.min(HI,fb));
+  // nearest in-range chord tone to fb (guarantees strong beats land on 1/3/5)
+  const snapChord=fb=>{let best=fb,bd=99;for(let x=LO;x<=HI;x++)if(_isChordTone(x,root)){const d=Math.abs(x-fb);if(d<bd){bd=d;best=x;}}return best;};
+  let cur=snapChord(clamp([7,9,11,4][Math.floor(Math.random()*4)]));
+  for(let k=0;k<cols.length;k++){
+    const c=cols[k];
+    if(k>0){
+      const t=Math.random();
+      const step=t<0.62?(Math.random()<0.5?1:-1)                   // 62% stepwise
+        :t<0.82?0                                                  // 20% repeat
+        :(Math.random()<0.5?1:-1)*(Math.random()<0.5?2:3);         // 18% small leap
+      let next=cur+step;
+      if(next<LO||next>HI)next=cur-step;                           // bounce off the walls
+      cur=clamp(next);
+    }
+    let fb=cur;
+    // strong beats (and the final note) resolve to a chord tone; weak 16ths may
+    // stay on a passing tone for color.
+    if(_clsBeat(c)!=="16th"||k===cols.length-1)fb=snapChord(fb);
+    cur=fb;
+    g[ROWS-1-fb][c]=true;                                          // ≤1 note per column
+  }
+  return g;
+};
+
+const randPolyGrid=()=>{
+  const g=mkGrid();
+  const root=_pickRoot();
+  // 1) Chord-tone ladder over ~1.75 octaves of the chosen triad.
+  const lo=2+Math.floor(Math.random()*3),hi=Math.min(ROWS-1,lo+11),ladder=[];
+  for(let fb=lo;fb<=hi;fb++)if(_isChordTone(fb,root))ladder.push(fb);
+  if(!ladder.length)ladder.push(root);                            // defensive (never empty in practice)
+  // 2) Arp — random direction + starting rotation each press.
+  const dir=Math.random()<0.5?1:-1;
+  let idx=Math.floor(Math.random()*ladder.length);
+  // 3) Rhythm — metric-weighted, a touch denser than MONO; col 0 forced.
+  const W={down:0.85,off:0.55,"16th":0.30};
+  for(let c=0;c<COLS;c++){
+    if(!(c===0||Math.random()<W[_clsBeat(c)]))continue;
+    const fb=ladder[idx];
+    g[ROWS-1-fb][c]=true;                                          // primary arp note
+    if(Math.random()<(_clsBeat(c)==="down"?0.35:0.18)){           // sometimes a dyad
+      const up=ladder[idx+1]!=null?ladder[idx+1]:ladder[idx-1];
+      if(up!=null&&up!==fb)g[ROWS-1-up][c]=true;
+    }
+    idx=(idx+dir+ladder.length)%ladder.length;                    // advance the arp
+  }
+  // 4) Clutter cap — keep it denser than MONO but never a wall (≤22 hits).
+  const STR={down:3,off:2,"16th":1};
+  const colHits=()=>{const h=[];for(let c=0;c<COLS;c++){let n=0;for(let r=0;r<ROWS;r++)if(g[r][c])n++;h.push(n);}return h;};
+  let total=colHits().reduce((a,b)=>a+b,0);
+  while(total>22){
+    const h=colHits(),cands=[];for(let c=1;c<COLS;c++)if(h[c]>0)cands.push(c);
+    if(!cands.length)break;
+    const v=cands.reduce((a,b)=>(STR[_clsBeat(a)]+Math.random())<(STR[_clsBeat(b)]+Math.random())?a:b);
+    for(let r=0;r<ROWS;r++)g[r][v]=false;
+    total=colHits().reduce((a,b)=>a+b,0);
+  }
+  return g;
+};
 // durs[r][c] = how many cols this note extends to the right (1 = single cell). Only
 // meaningful where grid[r][c] is true. Per-row durations enable true polyphony —
 // extending one note's duration doesn't affect notes in other rows. Within a row,
@@ -4454,19 +4542,7 @@ export default function Tabula(){
   const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;
     const isMono=activeLayerR.current==="lead";
-    let grid;
-    if(isMono){
-      // One note per column at most, ~50% column-fill density
-      grid=Array.from({length:ROWS},()=>new Array(COLS).fill(false));
-      for(let c=0;c<COLS;c++){
-        if(Math.random()<0.5){
-          const r=Math.floor(Math.random()*ROWS);
-          grid[r][c]=true;
-        }
-      }
-    } else {
-      grid=Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));
-    }
+    const grid=isMono?randMonoGrid():randPolyGrid();
     return Object.assign({},p,{grid});
   }));};
   const randPat=()=>mutatePat(()=>{
