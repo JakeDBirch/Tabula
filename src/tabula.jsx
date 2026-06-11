@@ -2533,7 +2533,12 @@ export default function Tabula(){
     if(historyR.current.length>MAX_HISTORY)historyR.current.shift();
     redoR.current=[];
   };
-  const pushHistory = ()=>pushHistoryR.current();
+  // Every substantive edit snapshots history — and the first such edit of a
+  // share-loaded "preview" session adopts it: clearing loadedFromShareR resumes
+  // autosave so continued work is crash-recoverable. (Safe to reference here: the
+  // body runs only when called, long after the ref is initialized, and the share
+  // restore sets the flag true AFTER applyShareState's own history push.)
+  const pushHistory = ()=>{loadedFromShareR.current=false;pushHistoryR.current();};
   const undo = ()=>{
     if(!historyR.current.length){showFlash("NOTHING TO UNDO");return;}
     redoR.current.push(captureSnapshotR.current());
@@ -3273,9 +3278,11 @@ export default function Tabula(){
   // (A debounced full+samples stringify firing mid-play was freezing playback.)
   const autosaveTmrR = useRef(null);
   const autosaveReadyR = useRef(false);
-  // A session loaded FROM a share-link hash is a "preview": it must NOT silently
-  // overwrite the user's own stored autosave + recorded samples. Persistence
-  // stays suppressed for such a session (save to a slot to keep it).
+  // A session loaded FROM a share-link hash starts as a "preview": it must NOT
+  // silently overwrite the user's own stored autosave + recorded samples just by
+  // being opened. Persistence stays suppressed until the first real edit
+  // (pushHistory clears this flag), at which point the user has adopted the
+  // shared project and autosave resumes for crash-recovery.
   const loadedFromShareR = useRef(false);
   // Recorded samples are heavy to encode, so persist them only when they
   // actually change — record/clear sets this; a restore or a stop never does.
