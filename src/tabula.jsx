@@ -460,19 +460,39 @@ const ballisticNudge=(pixelDelta,base)=>{
   return pixelDelta*base*(0.5+2.0*speed);
 };
 // Double-tap / double-click → reset to default. The dblclick DOM event is
-// unreliable on touch — especially on controls that capture the pointer and set
-// touch-action:none — so detect it ourselves: two quick pointerdowns near the
-// same spot. Works identically for mouse and touch. Call at the top of a
-// control's onPointerDown; if it returns true, run the reset and bail out of the
-// drag. Both taps must land on the SAME element (`e.currentTarget`) — otherwise
-// two quick single taps on adjacent controls (e.g. neighbouring drum-strip
-// sliders, ~15px apart) would false-positive and reset the second one.
-const _lastTap={t:-1e9,x:0,y:0,el:null};
-const isDoubleTap=e=>{
+// unreliable on touch (controls capture the pointer + touch-action:none), so we
+// detect it ourselves: a clean TAP (press+release that DIDN'T move) on a
+// control, followed within 350ms by a press on the SAME element near the same
+// spot. The "clean tap" requirement — tracked by document-level capture-phase
+// listeners installed once — is what stops two quick nudge-DRAGS (or a
+// drag-then-grab) from false-firing a reset mid-adjustment. The optional `key`
+// (e.g. a step column) lets one element host several reset targets: only taps
+// sharing a key pair up, so taps on adjacent steps of one lane don't collide.
+const _lastTap={t:-1e9,x:0,y:0,el:null,key:null};
+let _tapPress=null; // the in-flight press that called isDoubleTap (for move/up tracking)
+const _tapInstall=()=>{
+  if(_tapInstall.done||typeof document==="undefined")return; _tapInstall.done=true;
+  // Capture phase → these run before React's bubble-phase pointer handlers.
+  document.addEventListener("pointerdown",()=>{_tapPress=null;},true);
+  document.addEventListener("pointermove",e=>{
+    if(_tapPress&&(Math.abs(e.clientX-_tapPress.x)>8||Math.abs(e.clientY-_tapPress.y)>8))_tapPress.moved=true;
+  },true);
+  const finish=(e,cancelled)=>{
+    if(_tapPress&&!_tapPress.moved&&!cancelled){ // a clean tap → arm it as a double-tap candidate
+      _lastTap.el=_tapPress.el;_lastTap.key=_tapPress.key;_lastTap.t=e.timeStamp;_lastTap.x=_tapPress.x;_lastTap.y=_tapPress.y;
+    }
+    _tapPress=null;
+  };
+  document.addEventListener("pointerup",e=>finish(e,false),true);
+  document.addEventListener("pointercancel",e=>finish(e,true),true);
+};
+const isDoubleTap=(e,key=null)=>{
+  _tapInstall();
   const t=e.timeStamp, el=e.currentTarget;
-  const dbl=el===_lastTap.el && (t-_lastTap.t)<350 && Math.abs(e.clientX-_lastTap.x)<30 && Math.abs(e.clientY-_lastTap.y)<30;
-  if(dbl){_lastTap.t=-1e9;_lastTap.el=null;return true;} // consume so a 3rd tap starts fresh
-  _lastTap.el=el;_lastTap.t=t;_lastTap.x=e.clientX;_lastTap.y=e.clientY;return false;
+  _tapPress={el,key,x:e.clientX,y:e.clientY,moved:false};
+  const dbl=el===_lastTap.el && key===_lastTap.key && (t-_lastTap.t)<350 && Math.abs(e.clientX-_lastTap.x)<30 && Math.abs(e.clientY-_lastTap.y)<30;
+  if(dbl){_lastTap.t=-1e9;_lastTap.el=null;_lastTap.key=null;_tapPress=null;return true;} // consume; don't arm this press
+  return false;
 };
 
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
@@ -647,7 +667,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   // Double-click resets.
   const onDown=useCallback(e=>{
     e.stopPropagation();
-    if(isDoubleTap(e)){onChange(def!=null?def:((min<0&&max>0)?0:min));return;}
+    if(isDoubleTap(e)){drag.current=null;onChange(def!=null?def:((min<0&&max>0)?0:min));return;} // clear so the held 2nd tap can't resume a stale drag
     try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
     drag.current={fine:e.ctrlKey||e.metaKey,lx:e.clientX,ly:e.clientY,v:value};
   },[value,def,min,max,onChange]);
@@ -665,6 +685,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
   // or the minimum otherwise.
   const onReset=useCallback(()=>{onChange(def!=null?def:((min<0&&max>0)?0:min));},[def,min,max,onChange]);
+  const onUp=useCallback(()=>{drag.current=null;},[]); // end the drag on release so it can't linger
   if(vertical){
     return(
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
@@ -673,7 +694,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
           <div style={{color:col,letterSpacing:0}}>{display}</div>
         </div>
         <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
-          onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={onReset}>
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onDoubleClick={onReset}>
           {/* Track bg — inset 8px top/bottom for visual padding */}
           <div style={{position:"absolute",top:8,bottom:8,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
           {/* Fill — from bottom up within inset track */}
@@ -691,7 +712,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
         <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
       </div>
       <div ref={ref} style={S.knobTrackWrap}
-        onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={onReset}>
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onDoubleClick={onReset}>
         <div style={S.knobTrackBg}/>
         <div style={Object.assign({},S.knobTrackFill,{width:pct+"%",background:col+"88"})}/>
         <div style={Object.assign({},S.knobThumb,{left:pct+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
@@ -802,15 +823,20 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
   const onDown=useCallback(e=>{
     e.stopPropagation();try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
     const col=getCol(e);
-    if(colHasNote&&!colHasNote[col]){drag.current={active:false};return;} // locked step
-    if(isDoubleTap(e)){drag.current={active:false};onDragStart&&onDragStart();onChange(col,lane.def);return;}
-    drag.current={active:true,mode:null,col,cur:(values[col]??lane.def),ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false};
-  },[getCol,colHasNote,values,lane,onChange,onDragStart]);
+    const startLocked=!!(colHasNote&&!colHasNote[col]);
+    // Double-tap an unlocked step → reset it. Keyed by column so taps on ADJACENT
+    // steps don't pair. No extra history push here: the single tap that armed
+    // this already snapshotted the pre-gesture state, so one undo restores it.
+    if(!startLocked&&isDoubleTap(e,col)){drag.current={active:false};onChange(col,lane.def);return;}
+    drag.current={active:true,mode:null,col,startLocked,cur:(values[col]??lane.def),ly:e.clientY,sx:e.clientX,sy:e.clientY,hgt:ref.current.getBoundingClientRect().height,didStart:false};
+  },[getCol,colHasNote,values,lane,onChange]);
   const onMove=useCallback(e=>{
     const d=drag.current; if(!d||!d.active)return; e.stopPropagation();
     if(d.mode===null){
       const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
-      if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6) d.mode="draw";
+      if(d.startLocked){ // a sweep that started on a note-less step can only DRAW across the others
+        if(Math.abs(dx)>6||Math.abs(dy)>6) d.mode="draw"; else return;
+      }else if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6) d.mode="draw";
       else if(Math.abs(dy)>4) d.mode="fine";
       else return;
       if(!d.didStart){onDragStart&&onDragStart();d.didStart=true;}
@@ -821,14 +847,13 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
       onChange(col,val);
     }else{
       const pd=d.ly-e.clientY; d.ly=e.clientY; // drag up = increase
-      const h=ref.current.getBoundingClientRect().height;
-      d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,h,lane.max-lane.min)));
+      d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,d.hgt,lane.max-lane.min)));
       onChange(d.col,Math.round(d.cur));
     }
   },[getCV,onChange,colHasNote,lane,onDragStart]);
   const onUp=useCallback(e=>{
     const d=drag.current;
-    if(d&&d.active&&d.mode===null&&e&&e.type==="pointerup"){
+    if(d&&d.active&&d.mode===null&&!d.startLocked&&e&&e.type==="pointerup"){
       // Pure tap → set the tapped step to the tapped height (familiar bar-graph set).
       const{col,val}=getCV(e);
       if(!(colHasNote&&!colHasNote[col])){onDragStart&&onDragStart();onChange(col,val);}
@@ -854,7 +879,7 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
               onDoubleClick={e=>{e.stopPropagation();if(locked)return;onResetCol&&onResetCol(c);}}>
               {/* Always-visible per-step value — shown on programmed (non-default)
                   or currently-playing steps so you can read values without dragging. */}
-              {tall&&!locked&&(isAct||v!==lane.def)&&<span style={{position:"absolute",top:0,left:0,right:0,textAlign:"center",fontSize:7,fontWeight:700,lineHeight:1.3,color:isAct?"#1a1814":"rgba(240,235,226,0.9)",textShadow:isAct?"none":"0 0 3px rgba(0,0,0,0.95)",pointerEvents:"none",zIndex:1}}>{fmtStepVal(lane,v)}</span>}
+              {tall&&!locked&&(isAct||v!==lane.def)&&<span style={{position:"absolute",top:0,left:0,right:0,textAlign:"center",fontSize:7,fontWeight:700,lineHeight:1.3,color:"rgba(245,240,232,0.95)",textShadow:"0 0 3px #000,0 1px 2px #000",pointerEvents:"none",zIndex:1}}>{fmtStepVal(lane,v)}</span>}
               {lane.center!=null&&<div style={Object.assign({},S.laneCenterLine,{bottom:(cp*100)+"%",borderColor:lane.color+"22"})}/>}
               <div style={Object.assign({},S.laneBar,{height:(pct*100)+"%",background:isAct?lane.color:lane.color+"55",boxShadow:isAct?"0 0 5px "+lane.color:"none"})}/>
             </div>
@@ -1907,7 +1932,7 @@ export default function Tabula(){
   const [kitLoading, setKitLoading] = useState(false);
   const [exporting, setExporting] = useState(false); // MP3 bounce in progress
   const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
-  const [exportProgress, setExportProgress] = useState(0); // 0..1 realtime-capture progress
+  const exportBarR = useRef(null); // progress-bar DOM node — width driven directly (no re-render) during capture
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
@@ -2528,6 +2553,7 @@ export default function Tabula(){
   // ── Undo/Redo keyboard shortcuts ─────────────────────────────────────────
   useEffect(()=>{
     const onKey=(e)=>{
+      if(exportingR.current)return; // UI is locked while an MP3 bounce is capturing
       const tag=(e.target?.tagName||"").toLowerCase();
       const isEditable=tag==="input"||tag==="textarea"||e.target?.isContentEditable;
       // Spacebar toggles play/stop globally (skip when typing in a text field).
@@ -3124,7 +3150,7 @@ export default function Tabula(){
   const exportingR=useRef(false);
   const exportMP3=async()=>{
     if(exportingR.current)return;
-    exportingR.current=true;setExporting(true);setExportPhase("Preparing");setExportProgress(0);
+    exportingR.current=true;setExporting(true);setExportPhase("Preparing");
     let cap=null,sink=null,master=null,restore=null,progTmr=null;
     try{
       // Engine must exist for the master tap. Init silently if it never played.
@@ -3190,7 +3216,7 @@ export default function Tabula(){
       capturing=true;
       await startStop();                       // start playback from the song top
       const t0=ctx.currentTime;
-      progTmr=setInterval(()=>setExportProgress(Math.min(0.999,(ctx.currentTime-t0)/(totalSec+tailSec))),100);
+      progTmr=setInterval(()=>{if(exportBarR.current)exportBarR.current.style.width=Math.min(99.9,(ctx.currentTime-t0)/(totalSec+tailSec)*100)+"%";},100);
       await _waitAudio(ctx,t0+totalSec);        // play `loops` passes of the song
       if(playingR.current)await startStop();    // stop notes; FX tail keeps ringing
       await _waitAudio(ctx,t0+totalSec+tailSec);// capture the tail
@@ -3198,7 +3224,7 @@ export default function Tabula(){
       if(progTmr){clearInterval(progTmr);progTmr=null;}
       const L=_concatF32(Lc),R=_concatF32(Rc);
       if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
-      showFlash("ENCODING…");setExportPhase("Encoding");setExportProgress(1);
+      showFlash("ENCODING…");setExportPhase("Encoding");if(exportBarR.current)exportBarR.current.style.width="100%";
       await new Promise(r=>setTimeout(r,40)); // let the overlay paint "Encoding" before the synchronous encode blocks
       const blob=encodeMP3(lame,L,R,ctx.sampleRate);
       // On mobile (where the OS share sheet is the point — text/email the
@@ -3213,7 +3239,7 @@ export default function Tabula(){
     }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
     finally{
       if(progTmr){clearInterval(progTmr);progTmr=null;}
-      setExportPhase("");setExportProgress(0);
+      setExportPhase("");
       try{if(master&&cap)master.disconnect(cap);}catch(e){}
       try{if(cap)cap.disconnect();cap&&(cap.onaudioprocess=null);}catch(e){}
       try{if(sink)sink.disconnect();}catch(e){}
@@ -3247,9 +3273,21 @@ export default function Tabula(){
   // (A debounced full+samples stringify firing mid-play was freezing playback.)
   const autosaveTmrR = useRef(null);
   const autosaveReadyR = useRef(false);
+  // A session loaded FROM a share-link hash is a "preview": it must NOT silently
+  // overwrite the user's own stored autosave + recorded samples. Persistence
+  // stays suppressed for such a session (save to a slot to keep it).
+  const loadedFromShareR = useRef(false);
+  // Recorded samples are heavy to encode, so persist them only when they
+  // actually change — record/clear sets this; a restore or a stop never does.
+  const samplesDirtyR = useRef(false);
   useEffect(()=>{
     const hash=window.location.hash.slice(1);
-    if(hash){const s=decodeState(hash);if(s){applyShareState(s);window.location.hash="";}autosaveReadyR.current=true;return;}
+    if(hash){
+      window.location.hash="";                          // clear regardless of validity
+      const s=decodeState(hash);
+      if(s){applyShareState(s);loadedFromShareR.current=true;autosaveReadyR.current=true;return;}
+      // corrupt/unreadable hash → ignore it and restore the user's autosave below
+    }
     (async()=>{
       try{
         const raw=await storageGet("autosave");
@@ -3266,23 +3304,27 @@ export default function Tabula(){
     })();
   },[]);
   // Debounced LEAN persist (no samples → cheap, never janks). Skipped while
-  // playing; the `playing` dep means play-start clears the pending timer and
-  // play-stop schedules a catch-up save.
+  // playing (a write must never block the audio thread mid-play), while
+  // exporting (so the bounce's forced transport state can't leak in), and for a
+  // share-loaded preview. `playing` is a dep so play-start clears the pending
+  // timer and play-stop schedules a catch-up save.
   useEffect(()=>{
-    if(!autosaveReadyR.current||playing)return;
+    if(!autosaveReadyR.current||playing||exportingR.current||loadedFromShareR.current)return;
     if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);
     autosaveTmrR.current=setTimeout(()=>{
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
   },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
-  // Recorded USER samples persist on their own key, only when they actually
-  // change (record / clear) and never during playback — keeps the heavy base64
-  // encode off the per-edit path and out of the audio thread.
+  // Recorded USER samples persist on their own key, ONLY when they actually
+  // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
+  // a stop, and never during playback / export / a share preview. A restore
+  // therefore can't erase the stored samples with an empty re-write.
   useEffect(()=>{
-    if(!autosaveReadyR.current||playing)return;
+    if(!autosaveReadyR.current||playing||exportingR.current||loadedFromShareR.current||!samplesDirtyR.current)return;
     const id=setTimeout(()=>{
-      try{const smp=serializeSamples(userSamples);storageSet("autosave_smp",(smp&&Object.keys(smp).length)?JSON.stringify(smp):"");}catch(e){}
+      samplesDirtyR.current=false;
+      try{const smp=serializeSamples(userSamplesR.current);storageSet("autosave_smp",(smp&&Object.keys(smp).length)?JSON.stringify(smp):"");}catch(e){}
     },500);
     return ()=>clearTimeout(id);
   },[userSamples,playing]);
@@ -3700,9 +3742,9 @@ export default function Tabula(){
           artwork:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%231a1814'/%3E%3Ctext x='48' y='64' text-anchor='middle' font-size='44' fill='%23c4a882' font-family='Georgia%2Cserif' font-weight='bold'%3ET%3C/text%3E%3C/svg%3E",sizes:"96x96",type:"image/svg+xml"}]
         });
         navigator.mediaSession.playbackState="playing";
-        navigator.mediaSession.setActionHandler("play",()=>{if(!playingR.current)startStop();});
-        navigator.mediaSession.setActionHandler("pause",()=>{if(playingR.current)startStop();});
-        navigator.mediaSession.setActionHandler("stop",()=>{if(playingR.current)startStop();});
+        navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)startStop();});
+        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)startStop();});
+        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&playingR.current)startStop();});
       }catch(e){}
     }
     stepR.current=0;
@@ -4723,6 +4765,7 @@ export default function Tabula(){
             // recording survives kit switches and is saved with the project.
             setVoiceSamples(prev=>({...prev,[voiceKey]:audioBuf}));
             setUserSamples(prev=>({...prev,[voiceKey]:audioBuf}));
+            samplesDirtyR.current=true; // user recorded → persist to autosave_smp
             showFlash("REC OK "+voiceKey);
           }
         }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
@@ -4786,6 +4829,7 @@ export default function Tabula(){
   const clearVoiceSample=(voiceKey)=>{
     setVoiceSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
     setUserSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
+    samplesDirtyR.current=true; // user cleared → persist the new sample set
   };
   const dupDrumPat=()=>{
     if(drumPats.length>=8)return;
@@ -5120,7 +5164,7 @@ export default function Tabula(){
             </div>
             <div style={{fontSize:10,letterSpacing:1.5,color:"rgba(210,195,175,0.55)",marginBottom:16}}>{(exportPhase||"Preparing")+(exportLoops>1?" · "+exportLoops+" passes":"")}</div>
             <div style={{height:7,background:"rgba(220,200,180,0.1)",borderRadius:4,overflow:"hidden",marginBottom:14}}>
-              <div style={{height:"100%",width:Math.round(exportProgress*100)+"%",background:"linear-gradient(90deg,#c4a070,#e0a050)",borderRadius:4,transition:"width .15s linear"}}/>
+              <div ref={exportBarR} style={{height:"100%",width:"0%",background:"linear-gradient(90deg,#c4a070,#e0a050)",borderRadius:4,transition:"width .15s linear"}}/>
             </div>
             <div style={{fontSize:9,letterSpacing:0.5,color:"rgba(210,195,175,0.4)",lineHeight:1.5}}>Recording in real time — keep this screen open.<br/>Controls are locked until it finishes.</div>
           </div>
@@ -5190,9 +5234,9 @@ export default function Tabula(){
                         const nv=Math.round(cur);
                         setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:nv}}:p);
                       };
-                      const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
+                      const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
                       document.addEventListener("pointermove",update);
-                      document.addEventListener("pointerup",up);
+                      document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                     }}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
                       <span style={{fontSize:9,fontWeight:500,color:active?arm.color:arm.color+"88",letterSpacing:1}}>{arm.label}</span>
@@ -5643,7 +5687,7 @@ export default function Tabula(){
                 <div style={{display:"flex",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
                   <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
                   <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
-                    onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
+                    onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
                     onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
                     <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
@@ -6139,17 +6183,17 @@ export default function Tabula(){
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
-                          if(isDoubleTap(e)){onMixDrag(r,key,0);onMixUp(r,key);return;}
+                          if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}
                           const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
                           const update=ev=>{
                             const pd=ev.clientX-lx; lx=ev.clientX;
                             cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
                             onMixDrag(r,key,Math.round(cur));
                           };
-                          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                         }}
-                        onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
+                        onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
                         {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                         {bipolar
                           ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
@@ -6228,15 +6272,15 @@ export default function Tabula(){
                           onPointerDown={e=>{
                             e.stopPropagation();
                             const rect=e.currentTarget.getBoundingClientRect();
-                            if(isDoubleTap(e)){onMixDrag(r,"level",100);onMixUp(r,"level");return;}
+                            if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}
                             const dim=rect.height; let cur=md.level!=null?md.level:100, ly=e.clientY;
                             const update=ev=>{
                               const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
                               cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
                               onMixDrag(r,"level",Math.round(cur));
                             };
-                            const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                            document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                            const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                            document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                           }}>
                           {/* Fill from bottom up */}
                           <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
@@ -6282,8 +6326,8 @@ export default function Tabula(){
                       if(isDoubleTap(e)){onChange(0);return;}
                       const dim=rect.width;let cur=value,lx=e.clientX;
                       const upd=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};
-                      const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);};
-                      document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);
+                      const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                      document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                     }}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(210,195,175,0.4)")+"99",borderRadius:3}}/>
                     <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(210,195,175,0.5)")}}/>
@@ -6302,8 +6346,8 @@ export default function Tabula(){
                   <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
                   <div style={{padding:"14px 16px",background:"rgba(220,200,180,0.04)",borderRadius:8,border:"1px solid rgba(220,200,180,0.08)",marginBottom:8}}>
                     <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
-                    <SliderRow label="RHYTHM" value={vRhythm} onChange={v=>setDrumVary("vRhythm",v)} accent="#c8a840"/>
-                    <SliderRow label="VELOCITY" value={vVelocity} onChange={v=>setDrumVary("vVelocity",v)} accent="#7888d0"/>
+                    {SliderRow({label:"RHYTHM",value:vRhythm,onChange:v=>setDrumVary("vRhythm",v),accent:"#c8a840"})}
+                    {SliderRow({label:"VELOCITY",value:vVelocity,onChange:v=>setDrumVary("vVelocity",v),accent:"#7888d0"})}
                   </div>
                   <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.2)",lineHeight:1.6,marginTop:10}}>
                     RHYTHM randomly drops existing hits and adds ghosts each loop cycle. VELOCITY jitters hit strengths around their set values.
@@ -7060,8 +7104,8 @@ export default function Tabula(){
                           const rect=e.currentTarget.getBoundingClientRect();
                           const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
                           update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);
+                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                         }}>
                         <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 0 0 5px"}}/>
                         <div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${(dLen/COLS)*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
@@ -7408,8 +7452,8 @@ export default function Tabula(){
                           const dc=drumColor(r,linkHat,linkTom);
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
                             <div style={{width:"100%",height:10,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onMixDrag(r,key,0);onMixUp(r,key);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}
-                              onDoubleClick={()=>{onMixDrag(r,key,0);onMixUp(r,key);}}>
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
+                              onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
                               {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
                               {bipolar
                                 ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
@@ -7465,7 +7509,7 @@ export default function Tabula(){
                               <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
                             </div>
                             <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onMixDrag(r,"level",100);onMixUp(r,"level");return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                               <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
                               <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
                               <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
@@ -7532,7 +7576,7 @@ export default function Tabula(){
                           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,opacity:dim?0.4:1}}>
                             <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
                             <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
                               onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
                               <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
@@ -7600,7 +7644,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7614,7 +7658,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7628,7 +7672,7 @@ export default function Tabula(){
                               <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                             </div>
                             <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
@@ -7647,7 +7691,7 @@ export default function Tabula(){
                             <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
                           </div>
                           <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                            onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumVary(key,0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setDrumVary(key,Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);}}>
+                            onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumVary(key,0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setDrumVary(key,Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                             <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:accent+"99",borderRadius:3}}/>
                             <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                           </div>
