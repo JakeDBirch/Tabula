@@ -59,11 +59,14 @@ const IS_MOBILE = (()=>{
 })();
 const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#c9a96e","#6c9ad6","#7aaa96","#c4b07a","#a09ec4"];
 const SLOTS=["S1","S2","S3","S4"];
+// Per-pattern playback speed (the label is the speed FACTOR; `mult` scales step
+// duration, so faster = smaller mult). Ordered fastest → slowest.
 const SPEED_OPTS=[
   {label:"2×",  mult:0.5},
   {label:"1×",  mult:1},
-  {label:"½×",  mult:2},
   {label:"⅔×",  mult:1.5},
+  {label:"½×",  mult:2},
+  {label:"⅓×",  mult:3},
   {label:"¼×",  mult:4},
 ];
 const SHIFT_THRESHOLD=10;
@@ -4413,14 +4416,14 @@ export default function Tabula(){
   const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
   const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(pickSym(pats.map(p=>p.name)));setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
   const clearPat=()=>mutatePat(()=>mkGrid());
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   // Strip the id from songMatrix as well — leaving a dangling ref produces
   // silent gaps in the song timeline. Drag-off-layer delete relies on this.
   const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);setSongMatrix(m=>({...m,synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v)}));};
@@ -4845,7 +4848,7 @@ export default function Tabula(){
       grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),rat:toDrumRat2D(src.rat),gridLen:src.gridLen,
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
-      vRhythm:src.vRhythm,vVelocity:src.vVelocity
+      vRhythm:src.vRhythm,vVelocity:src.vVelocity,speedMult:src.speedMult??1
     });
     setDrumPats(ps=>[...ps,d]);setActiveDrumId(d.id);
     setDrumChain(c=>[...c,d.id]);
