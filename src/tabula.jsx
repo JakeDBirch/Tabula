@@ -832,15 +832,27 @@ function RangeSlider({label,accent,lo,hi}){
   const f2p=f=>(Math.log(Math.max(20,Math.min(20000,f)))-A0)/AW*100;
   const p2f=p=>Math.exp(A0+(Math.max(0,Math.min(100,p))/100)*AW);
   const loPos=f2p(lo.toFreq(lo.val)), hiPos=f2p(hi.toFreq(hi.val));
+  // Each thumb's allowed span on the shared axis (its own param's freq range).
+  const loAxis={aMin:Math.min(f2p(lo.toFreq(lo.min)),f2p(lo.toFreq(lo.max))),aMax:Math.max(f2p(lo.toFreq(lo.min)),f2p(lo.toFreq(lo.max)))};
+  const hiAxis={aMin:Math.min(f2p(hi.toFreq(hi.min)),f2p(hi.toFreq(hi.max))),aMax:Math.max(f2p(hi.toFreq(hi.min)),f2p(hi.toFreq(hi.max)))};
   const GAP=3;
+  const setLo=p=>lo.onChange(Math.round(Math.max(lo.min,Math.min(lo.max,lo.fromFreq(p2f(p))))));
+  const setHi=p=>hi.onChange(Math.round(Math.max(hi.min,Math.min(hi.max,hi.fromFreq(p2f(p))))));
   const onDown=useCallback(e=>{
     e.stopPropagation();
     const rect=ref.current.getBoundingClientRect();
     const xPos=Math.max(0,Math.min(100,(e.clientX-rect.left)/Math.max(1,rect.width)*100));
-    const which=Math.abs(xPos-loPos)<=Math.abs(xPos-hiPos)?"lo":"hi";
-    if(isDoubleTap(e,which)){drag.current=null;const t=which==="lo"?lo:hi;t.onChange(t.def);return;}
+    const grabPct=16/Math.max(1,rect.width)*100;            // ~one thumb radius
+    const loD=Math.abs(xPos-loPos), hiD=Math.abs(xPos-hiPos);
+    let which;
+    if(Math.min(loD,hiD)<=grabPct) which=loD<=hiD?"lo":"hi"; // grabbed a thumb (point)
+    else if(xPos>loPos&&xPos<hiPos) which="band";           // grabbed the line → move both
+    else which=loD<=hiD?"lo":"hi";                          // outside the band → nearer thumb
+    if(which!=="band"&&isDoubleTap(e,which)){drag.current=null;const t=which==="lo"?lo:hi;t.onChange(t.def);return;}
     try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
-    drag.current={which,fine:e.ctrlKey||e.metaKey,lx:e.clientX,pos:which==="lo"?loPos:hiPos};
+    drag.current=which==="band"
+      ?{which,fine:e.ctrlKey||e.metaKey,lx:e.clientX,loPos,hiPos}
+      :{which,fine:e.ctrlKey||e.metaKey,lx:e.clientX,pos:which==="lo"?loPos:hiPos};
   },[lo,hi,loPos,hiPos]);
   const onMove=useCallback(e=>{
     if(!e.buttons||!drag.current)return;e.stopPropagation();
@@ -848,13 +860,20 @@ function RangeSlider({label,accent,lo,hi}){
     const dim=Math.max(40,rect.width);
     const pd=e.clientX-d.lx; d.lx=e.clientX;
     const inc=d.fine?pd*(100/1200):ballisticDelta(pd,dim,100); // axis-position units
-    d.pos=d.pos+inc;
-    if(d.which==="lo"){
-      const np=Math.max(0,Math.min(hiPos-GAP,d.pos)); d.pos=np;
-      lo.onChange(Math.round(Math.max(lo.min,Math.min(lo.max,lo.fromFreq(p2f(np))))));
+    if(d.which==="band"){
+      // Shift both thumbs by one delta (constant gap), clamped so each stays in
+      // its own range — the band slides without changing its width.
+      let delta=inc;
+      delta=Math.max(loAxis.aMin-d.loPos, hiAxis.aMin-d.hiPos, delta);
+      delta=Math.min(loAxis.aMax-d.loPos, hiAxis.aMax-d.hiPos, delta);
+      d.loPos+=delta; d.hiPos+=delta;
+      setLo(d.loPos); setHi(d.hiPos);
+    }else if(d.which==="lo"){
+      let np=d.pos+inc; np=Math.max(loAxis.aMin,np); np=Math.min(loAxis.aMax,hiPos-GAP,np); d.pos=np;
+      setLo(np);
     }else{
-      const np=Math.max(loPos+GAP,Math.min(100,d.pos)); d.pos=np;
-      hi.onChange(Math.round(Math.max(hi.min,Math.min(hi.max,hi.fromFreq(p2f(np))))));
+      let np=d.pos+inc; np=Math.max(hiAxis.aMin,loPos+GAP,np); np=Math.min(hiAxis.aMax,np); d.pos=np;
+      setHi(np);
     }
   },[lo,hi,loPos,hiPos]);
   const onUp=useCallback(()=>{drag.current=null;},[]);
@@ -5374,15 +5393,14 @@ export default function Tabula(){
     </SynthSection>
     <SynthSection title="REVERB" accent={C_REV}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} def={50} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
-        <KnobSlider label="MOD"     value={rvMod}      min={0} max={100} def={0}  onChange={setRvMod}      display={rvMod+"%"}       accent={C_REV}/>
         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
-        {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
+        <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} def={50} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
         {/* DAMP range: left thumb = LF damp corner, right thumb = HF damp corner.
             The band between is what stays bright in the tail. */}
         <RangeSlider label="DAMP" accent={C_REV}
           lo={{val:rvLfDamp,min:0,max:100,def:0, toFreq:rvLfHz,fromFreq:rvLfInv,onChange:setRvLfDamp,disp:fmtHz(rvLfHz(rvLfDamp))}}
           hi={{val:rvDamp,  min:0,max:100,def:40,toFreq:rvHfHz,fromFreq:rvHfInv,onChange:setRvDamp,  disp:fmtHz(rvHfHz(rvDamp))}}/>
+        <KnobSlider label="MOD"     value={rvMod}      min={0} max={100} def={0}  onChange={setRvMod}      display={rvMod+"%"}       accent={C_REV}/>
       </div>
     </SynthSection>
   </>);
