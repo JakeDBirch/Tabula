@@ -3437,8 +3437,16 @@ export default function Tabula(){
         if(dp){const d=Math.max(1,Math.round((dp.gridLen??16)*(dp.speedMult??1)));if(d<minDur)minDur=d;}
         return minDur===Infinity?16:minDur;
       };
-      const cycleSec=_exportBars().reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
-      const totalSec=cycleSec*loops; // bounce `loops` passes of the song (it wraps in sync mode)
+      const _bars=_exportBars();
+      // Sync/free linear bounces play the whole first→last span (gaps included).
+      // RANDOM never visits gap bars, so one of its cycles is just the total
+      // duration of the AVAILABLE (populated) patterns.
+      const isRandom=songRandomR.current;
+      const spanSec =_bars.reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
+      const availSec=_bars.filter(b=>b.synth!=null||b.lead!=null||b.drums!=null)
+                          .reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
+      const cycleSec=isRandom?(availSec||spanSec):spanSec;
+      const totalSec=cycleSec*loops; // `loops` cycles in whatever mode the user is in
       const tailSec=2;
       // Tap the master into a recorder (silent parallel path; no double audio).
       cap=ctx.createScriptProcessor(4096,2,2);
@@ -3450,17 +3458,18 @@ export default function Tabula(){
       };
       sink=ctx.createGain();sink.gain.value=0;
       master.connect(cap);cap.connect(sink);sink.connect(ctx.destination);
-      // Force a clean linear song pass from the top (restore after).
+      // Start the song cleanly from the top, in the user's CURRENT mode (restore
+      // after). Sync/free and random are left exactly as set, so the bounce
+      // captures the arrangement they were working on — only LOOP is forced off
+      // (it solos one pattern, which would not play the song).
       const haveSong=(()=>{const sm=songMatrix;for(let i=0;i<64;i++)if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)return true;return false;})();
       if(haveSong){
         restore={mode:songModeR.current,sync:songSyncR.current,rand:songRandomR.current,loop:loopR.current};
         songModeR.current=true;setSongMode(true);
-        songSyncR.current="sync";setSongSyncMode("sync");
-        songRandomR.current=false;setSongRandom(false);
-        loopR.current=false;setLoopMode(false); // LOOP would solo one pattern, not play the song
-        // Start the song at its first populated bar. startStop only does this
-        // when its `songMode` state closure is true; we force it via the ref so
-        // the bounce starts from the top even if the user wasn't in song mode.
+        loopR.current=false;setLoopMode(false);
+        // Start at the first populated bar (startStop only does this when its
+        // `songMode` state closure is true; force via the ref so the bounce
+        // starts from the top even if the user wasn't viewing song mode).
         let firstBar=0;{const sm=songMatrix;for(let i=0;i<64;i++){if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}}}
         songBarR.current=firstBar;setSongBar(firstBar);
       }
