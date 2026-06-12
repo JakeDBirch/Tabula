@@ -479,7 +479,9 @@ const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 // A fixed shelf cut (compounding in the comb feedback) does the actual damping;
 // the corner is what moves. NOTE: this is a behaviour change from the old
 // amount-at-fixed-corner damp — the readout is now the corner, in Hz.
-const RV_DAMP_DB=-12;
+const RV_DAMP_DB=-7;  // per-pass shelf cut; compounds over recirculations. Gentler
+                      // than the old -12 so the damping eases in around the corner
+                      // instead of clamping hard just past it.
 const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
 const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
 const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
@@ -1222,10 +1224,12 @@ class Bell{
     //    a room twice as large as before (which also roughly doubles the tail
     //    again at the same feedback, since T60 ∝ delay length). This is what
     //    actually makes a big space feel big rather than just ring longer.
-    const p=Math.max(0,Math.min(100,pct));
-    const fb=0.40+(p/100)*0.56;            // 0.40..0.96 decay
-    const sizeFactor=1+(p/100);            // 1×..2× room — 100% twice as big
-    this.rvSizeFactor=sizeFactor;          // exposed so modulation can scale depth
+    const p=Math.max(0,Math.min(100,pct)), n=p/100;
+    const fb=0.50+Math.pow(n,0.7)*0.46;      // 0.50..0.96 decay (concave — raised
+                                             // floor so even small sizes have body)
+    const sizeFactor=1+Math.pow(n,0.75)*1.6; // 1×..2.6× room (concave — most of the
+                                             // range feels big, 100% noticeably larger)
+    this.rvSizeFactor=sizeFactor;            // exposed so modulation can scale depth
     const t=this.ctx.currentTime;
     for(const c of this.rvCombs){
       c.fb.gain.setTargetAtTime(fb,t,0.02);
@@ -1242,10 +1246,10 @@ class Bell{
     for(const g of this.rvModGains)g.gain.setTargetAtTime(depth,t,0.03);
   }
   // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
-  // damp (0 dB), 100 pct = max damp (~-12 dB). The cut compounds: each comb
+  // damp (0 dB), 100 pct = max damp (RV_DAMP_DB). The cut compounds: each comb
   // recirculation applies it once more, so the cumulative HF attenuation
-  // over a tail with N reflections is N × shelfGain. -12 dB per pass over
-  // ~5 reflections is enough to make highs visibly die before mids and lows.
+  // over a tail with N reflections is N × shelfGain. -7 dB per pass over
+  // ~5 reflections still makes highs die before mids/lows, but eases in gently.
   // Pure shelf — no resonance, no Q peak. Natural freq-dependent decay.
   setRvDamp(pct){if(!this.ready||!this.rvCombs)return;
     // Sweep the high-shelf CORNER (20kHz open → 1.2kHz dark) at a fixed cut, so

@@ -206,7 +206,10 @@ var filtCutHz=function filtCutHz(v){return 20*Math.pow(1000,Math.max(0,Math.min(
 // A fixed shelf cut (compounding in the comb feedback) does the actual damping;
 // the corner is what moves. NOTE: this is a behaviour change from the old
 // amount-at-fixed-corner damp — the readout is now the corner, in Hz.
-var RV_DAMP_DB=-12;var rvHfHz=function rvHfHz(pct){return 20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);};var rvLfHz=function rvLfHz(pct){return 20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);};var fmtHz=function fmtHz(f){return f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";};var defaultDrums=function defaultDrums(){return{grid:Array.from({length:DRUM_ROWS},function(){return new Array(COLS).fill(false);}),vel:mkDrumVel(),rat:mkDrumRat(),gridLen:16,mix:defaultDrumMix()};};// ─── Session defaults ────────────────────────────────────────────────────────
+var RV_DAMP_DB=-7;// per-pass shelf cut; compounds over recirculations. Gentler
+// than the old -12 so the damping eases in around the corner
+// instead of clamping hard just past it.
+var rvHfHz=function rvHfHz(pct){return 20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);};var rvLfHz=function rvLfHz(pct){return 20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);};var fmtHz=function fmtHz(f){return f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";};var defaultDrums=function defaultDrums(){return{grid:Array.from({length:DRUM_ROWS},function(){return new Array(COLS).fill(false);}),vel:mkDrumVel(),rat:mkDrumRat(),gridLen:16,mix:defaultDrumMix()};};// ─── Session defaults ────────────────────────────────────────────────────────
 // Single source of truth for every loadable top-level param. Used by:
 //   doLoad / applyShareState / applySnapshot — fall back to default when a
 //   saved project is missing a field. Without this, loading a project that
@@ -399,18 +402,20 @@ sg=this.ctx.createGain();sg.gain.value=sendPct/100;sg.connect(dl);this.dlySend=s
 //    a room twice as large as before (which also roughly doubles the tail
 //    again at the same feedback, since T60 ∝ delay length). This is what
 //    actually makes a big space feel big rather than just ring longer.
-var p=Math.max(0,Math.min(100,pct));var fb=0.40+p/100*0.56;// 0.40..0.96 decay
-var sizeFactor=1+p/100;// 1×..2× room — 100% twice as big
+var p=Math.max(0,Math.min(100,pct)),n=p/100;var fb=0.50+Math.pow(n,0.7)*0.46;// 0.50..0.96 decay (concave — raised
+// floor so even small sizes have body)
+var sizeFactor=1+Math.pow(n,0.75)*1.6;// 1×..2.6× room (concave — most of the
+// range feels big, 100% noticeably larger)
 this.rvSizeFactor=sizeFactor;// exposed so modulation can scale depth
 var t=this.ctx.currentTime;var _iterator4=_createForOfIteratorHelper(this.rvCombs),_step4;try{for(_iterator4.s();!(_step4=_iterator4.n()).done;){var c=_step4.value;c.fb.gain.setTargetAtTime(fb,t,0.02);// Slew the delay slowly so resizing the room doesn't click/pitch-glitch.
 if(c.base)c.delay.delayTime.setTargetAtTime(c.base*sizeFactor,t,0.06);}}catch(err){_iterator4.e(err);}finally{_iterator4.f();}}// Reverb tail modulation depth — 0..100 maps to 0..~4 ms of delay-line swing
 // per comb. Low values add subtle movement/shimmer; high values push toward a
 // pronounced chorused tail. Independent of room size (rides on top of it).
 },{key:"setRvMod",value:function setRvMod(pct){if(!this.ready||!this.rvModGains)return;var depth=Math.max(0,Math.min(100,pct))/100*0.004;var t=this.ctx.currentTime;var _iterator5=_createForOfIteratorHelper(this.rvModGains),_step5;try{for(_iterator5.s();!(_step5=_iterator5.n()).done;){var g=_step5.value;g.gain.setTargetAtTime(depth,t,0.03);}}catch(err){_iterator5.e(err);}finally{_iterator5.f();}}// HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
-// damp (0 dB), 100 pct = max damp (~-12 dB). The cut compounds: each comb
+// damp (0 dB), 100 pct = max damp (RV_DAMP_DB). The cut compounds: each comb
 // recirculation applies it once more, so the cumulative HF attenuation
-// over a tail with N reflections is N × shelfGain. -12 dB per pass over
-// ~5 reflections is enough to make highs visibly die before mids and lows.
+// over a tail with N reflections is N × shelfGain. -7 dB per pass over
+// ~5 reflections still makes highs die before mids/lows, but eases in gently.
 // Pure shelf — no resonance, no Q peak. Natural freq-dependent decay.
 },{key:"setRvDamp",value:function setRvDamp(pct){if(!this.ready||!this.rvCombs)return;// Sweep the high-shelf CORNER (20kHz open → 1.2kHz dark) at a fixed cut, so
 // the control reads as a frequency. The compounding feedback does the rest.
