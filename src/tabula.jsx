@@ -843,13 +843,18 @@ const LANES=[
 // dur: -100 to +100 — percentage modifier on note gate length (0=default)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
 
+// angle is only used by the radial long-press drag; the rendered popup is a
+// slider list (render order = array order). Angles are spread evenly at 30° so
+// the radial picker can't confuse adjacent params (the old 10°/30° cluster let
+// an OCT drag bleed into RTCH/DLY).
 const PARAM_ARMS=[
-  {key:"rhy", label:"RTCH", color:"#c9a96e", angle:150, min:1,    max:4,   discrete:true,  def:1},
-  {key:"dly", label:"DLY",  color:"#7aaa96", angle:120, min:0,    max:100, discrete:false, def:0},
+  {key:"rhy", label:"RTCH", color:"#c9a96e", angle:180, min:1,    max:4,   discrete:true,  def:1},
+  {key:"dly", label:"DLY",  color:"#7aaa96", angle:150, min:0,    max:100, discrete:false, def:0},
   {key:"vel", label:"VEL",  color:"#c8bfb0", angle:90,  min:0,    max:127, discrete:false, def:100},
-  {key:"dur", label:"DUR",  color:"#9fb4c7", angle:60,  min:-100, max:100, discrete:false, def:0},
-  {key:"flt", label:"FLT",  color:"#c97b8a", angle:30,  min:0,    max:100, discrete:false, def:50},
-  {key:"oct", label:"OCT",  color:"#6c9ad6", angle:10,  min:0,    max:4,   discrete:true,  def:2},
+  {key:"dur", label:"DUR",  color:"#9fb4c7", angle:120, min:-100, max:100, discrete:false, def:0},
+  {key:"flt", label:"FLT",  color:"#c97b8a", angle:60,  min:0,    max:100, discrete:false, def:50},
+  {key:"oct", label:"OCT",  color:"#6c9ad6", angle:30,  min:0,    max:4,   discrete:true,  def:2},
+  {key:"rev", label:"REV",  color:"#a98fd0", angle:0,   min:0,    max:100, discrete:false, def:0},
 ];
 // Defaults for the mobile VARY sliders (by label) so double-tap returns each to
 // its session default; anything not listed (the STEP jitters) defaults to 0.
@@ -2062,6 +2067,7 @@ export default function Tabula(){
   const [showMenu,  setShowMenu]  = useState(false);
   const [topTrayOpen,   setTopTrayOpen]   = useState(false);
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
+  const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
@@ -4228,13 +4234,21 @@ export default function Tabula(){
 
     if(g.state==="popup"&&popupR.current){
       const pr=popupR.current;
+      // A slider in the popup panel is being dragged directly — let it own the
+      // gesture. Without this the radial picker also runs (the overlay's
+      // onPointerMove) and sets a DIFFERENT arm by angle, so e.g. dragging the
+      // OCT slider also nudged RTCH/DLY. (#per-step popup bleed)
+      if(sliderDragR.current)return;
       // For mouse (right-click popup): only update on drag with button held; touch always has buttons>0
       if(e.pointerType==='mouse'&&e.buttons===0)return;
       const fdx=e.clientX-pr.originX, fdy=e.clientY-pr.originY;
       const dist=Math.sqrt(fdx*fdx+fdy*fdy);
       if(dist<14){
-        pr.lockedArm=null; // return to deadzone — unlock so user can re-select arm
-        setParamPopup(p=>p?{...p,activeArm:null}:p);
+        // Inside the deadzone: keep the arm locked for this drag (pin its value
+        // to the minimum) instead of unlocking. Unlocking here let a wobble
+        // through center silently re-lock onto an adjacent arm mid-drag.
+        if(pr.lockedArm){const a=pr.lockedArm;setParamPopup(p=>p?{...p,activeArm:a.key,values:{...p.values,[a.key]:a.min}}:p);}
+        else setParamPopup(p=>p?{...p,activeArm:null}:p);
         return;
       }
       // Use the locked arm if already engaged, otherwise pick by angle and lock it
@@ -5352,6 +5366,7 @@ export default function Tabula(){
                     onPointerDown={e=>{
                       e.stopPropagation();
                       if(isDoubleTap(e)){setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:arm.def}}:p);return;}
+                      sliderDragR.current=true; // own the gesture — suppress the radial picker
                       const dim=e.currentTarget.getBoundingClientRect().width;
                       const range=arm.max-arm.min;
                       let cur=val, lx=e.clientX;
@@ -5362,7 +5377,7 @@ export default function Tabula(){
                         const nv=Math.round(cur);
                         setParamPopup(p=>p?{...p,activeArm:arm.key,values:{...p.values,[arm.key]:nv}}:p);
                       };
-                      const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                      const up=()=>{sliderDragR.current=false;document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
                       document.addEventListener("pointermove",update);
                       document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                     }}>
