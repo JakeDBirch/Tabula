@@ -2884,6 +2884,20 @@ export default function Tabula(){
     if(hasContent){setConfirmAction({type:"load",slot,label:"LOAD "+slot+"? UNSAVED WORK LOST"});return;}
     doLoad(slot);
   };
+  // ── Clear a saved slot back to empty ────────────────────────────────────
+  // Frees the slot so it shows as available again (unlike NEW, which resets the
+  // live working state but leaves slots untouched). Destructive → confirm first.
+  const clearSlot=slot=>{
+    if(!slotData[slot])return; // already empty
+    setConfirmAction({type:"clear",slot,label:"CLEAR "+slot+"?"});
+  };
+  const doClear=async slot=>{
+    const next=Object.assign({},slotData,{[slot]:null});
+    setSlotData(next);
+    if(activeSlot===slot)setActiveSlot(null); // drop the highlight — slot is empty now
+    const ok=await storageSet("slots",JSON.stringify(next));
+    showFlash(ok?"CLEARED "+slot:"CLEAR FAILED");
+  };
   // ── New project ─────────────────────────────────────────────────────────
   // Reset everything to default initial state. Save slots are NOT cleared
   // (that's persistent storage outside the session). Confirms before
@@ -2961,6 +2975,7 @@ export default function Tabula(){
     if(!confirmAction)return;
     if(confirmAction.type==="save")doSave(confirmAction.slot);
     else if(confirmAction.type==="load")doLoad(confirmAction.slot);
+    else if(confirmAction.type==="clear")doClear(confirmAction.slot);
     else if(confirmAction.type==="new")doNew();
     setConfirmAction(null);
   };
@@ -3279,9 +3294,22 @@ export default function Tabula(){
       if(mGain)mGain.gain.setValueAtTime(0.55,ctx.currentTime);
       const lame=await loadLame();
       if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
-      const barCount=Math.max(1,_exportBars().length);
       const loops=Math.max(1,Math.min(16,exportLoops||1));
-      const cycleSec=barCount*4*60/Math.max(1,bpm); // sync: 16 abs steps = 4 beats/bar
+      // Each song cell lasts as long as its SHORTEST pattern (gridLen × speedMult,
+      // in absolute 16th steps), mirroring the live sync scheduler — so a song
+      // with 1/2-speed patterns bounces at its true (longer) length, not 16/bar.
+      const absStepSec=60/Math.max(1,bpm)/4;
+      const _cellSteps=bar=>{
+        let minDur=Infinity;
+        for(const layer of ["synth","lead"]){
+          const pat=_layerPats(layer).find(p=>p.id===bar[layer]);
+          if(pat){const d=Math.max(1,Math.round((pat.gridLen??16)*(pat.speedMult??1)));if(d<minDur)minDur=d;}
+        }
+        const dp=drumPats.find(p=>p.id===bar.drums);
+        if(dp){const d=Math.max(1,Math.round((dp.gridLen??16)*(dp.speedMult??1)));if(d<minDur)minDur=d;}
+        return minDur===Infinity?16:minDur;
+      };
+      const cycleSec=_exportBars().reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
       const totalSec=cycleSec*loops; // bounce `loops` passes of the song (it wraps in sync mode)
       const tailSec=2;
       // Tap the master into a recorder (silent parallel path; no double audio).
@@ -3749,13 +3777,27 @@ export default function Tabula(){
     if(cursorChanged)setSongBarLayer(newCursor);
 
     // ── MASTER CLOCK — drives songBar (sync/random only) + visual bar position.
-    // Master advances at absStepDur regardless of any pat's speedMult, so a
-    // shared bar boundary lands at 16 absolute steps. Free mode's bars are
+    // The master advances at absStepDur; the shared bar boundary lands after the
+    // SHORTEST pattern in the current song cell completes one loop, measured in
+    // absolute steps as gridLen × speedMult. So a lone 1/2-speed pattern holds
+    // the cell twice as long (cycles half as often), matching how FREE mode
+    // already advances each layer by its own real duration. Free mode's bars are
     // per-layer above; sync/random share songBar advanced here.
     while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){
       const masterAt=nextNoteR.current;
       void masterAt;
-      const ns=(stepR.current+1)%16;
+      // Shortest real duration across the cell's populated layers (fallback 16).
+      // Non-song modes keep the plain 16-step master bar.
+      let cycleLen=16;
+      if(inSong&&!isFree){
+        let minDur=Infinity;
+        for(const l of ["synth","lead","drums"]){
+          const pat=resolveLayerPat(l,songBarR.current);
+          if(pat){const d=Math.max(1,Math.round((pat.gridLen??16)*(pat.speedMult??1)));if(d<minDur)minDur=d;}
+        }
+        if(minDur!==Infinity)cycleLen=minDur;
+      }
+      const ns=(stepR.current+1)%cycleLen;
       if(inSong&&!isFree&&ns===0){
         // Shared bar boundary — advance songBar and snap all per-layer cursors.
         let nextBar;
@@ -5825,6 +5867,7 @@ export default function Tabula(){
                         <div style={{fontSize:9,letterSpacing:2,fontWeight:600,color:isActive?"#c9a96e":"rgba(210,195,175,0.55)",textAlign:"center",marginBottom:1}}>{slot}{has&&<span style={{...S.menuSlotDot,marginLeft:2}}>●</span>}</div>
                         <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
                         <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600,color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
                       </div>
                     );
                   })}
@@ -7691,6 +7734,7 @@ export default function Tabula(){
                           <span style={Object.assign({},S.menuSlotName,isActive?{color:"#c9a96e"}:{})}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
                           <button style={Object.assign({},S.menuSlotBtn,activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
                           <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
+                          <button style={Object.assign({},S.menuSlotBtn,{color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
                         </div>
                       );})}
                     </div>
