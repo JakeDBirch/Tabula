@@ -501,7 +501,7 @@ const defaultDrums=()=>({
 const SESSION_DEFAULTS = Object.freeze({
   bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
-  rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, dlyToRev:0,
+  rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
@@ -1081,11 +1081,26 @@ class Bell{
       // Feedback chain: delay → shelves → gain → back to delay input. Each
       // recirculation applies the shelf cut once, accumulating over time.
       cd.connect(hsh); hsh.connect(lsh); lsh.connect(cfb); cfb.connect(cd);
-      rvCombs.push({delay:cd, fb:cfb, hsh, lsh});
+      rvCombs.push({delay:cd, fb:cfb, hsh, lsh, base:delaySec});
     };
     [0.0297, 0.0371, 0.0411, 0.0437].forEach(ct=>mkComb(ct, 0)); // left
     [0.0306, 0.0383, 0.0421, 0.0451].forEach(ct=>mkComb(ct, 1)); // right (offset)
     this.rvCombs = rvCombs;
+    // Tail modulation — a slow, slightly-detuned LFO per comb jitters that
+    // comb's delay length, chorusing the tail so it shimmers instead of ringing
+    // static/metallic. The LFOs always run; depth (rvModGains) is 0 until the
+    // MOD control opens it. Connected as an a-rate input, the LFO offset SUMS
+    // with the size-set base delay, so the swing rides on top of the room size.
+    const rvModRates=[0.21,0.27,0.33,0.39,0.24,0.30,0.36,0.42];
+    const rvModGains=[];
+    rvCombs.forEach((c,i)=>{
+      const lfo=this.ctx.createOscillator(); lfo.type="sine"; lfo.frequency.value=rvModRates[i%rvModRates.length];
+      const dep=this.ctx.createGain(); dep.gain.value=0; // seconds of delay swing
+      lfo.connect(dep); dep.connect(c.delay.delayTime);
+      try{lfo.start();}catch(e){}
+      rvModGains.push(dep);
+    });
+    this.rvModGains=rvModGains;
 
     // Delay line with filters in both the feedback loop and the output tap.
     // dl → dHp → dLp branches to: fb (recirculation) and ret (output).
@@ -1118,12 +1133,31 @@ class Bell{
   }
   // Reverb param setters — analogous to setDly* helpers above
   setRvSize(pct){if(!this.ready||!this.rvCombs)return;
-    // Feedback gain → exponential decay rate. fb=0.96 roughly doubles the
-    // max tail length vs the old 0.92 cap. Damping prevents HF runaway even
-    // at the top of the range — shelf cuts accumulate per pass, so nothing
-    // builds up unbounded.
-    const fb=0.40+(Math.max(0,Math.min(100,pct))/100)*0.56; // 0.40..0.96
-    for(const c of this.rvCombs)c.fb.gain.setTargetAtTime(fb,this.ctx.currentTime,0.02);
+    // Two coupled effects of "size":
+    //  • Feedback gain → exponential decay rate (0.40..0.96). Damping prevents
+    //    HF runaway even at the top — shelf cuts accumulate per pass.
+    //  • Comb DELAY times → physical room dimension. Scaled 1×..2× so 100% is
+    //    a room twice as large as before (which also roughly doubles the tail
+    //    again at the same feedback, since T60 ∝ delay length). This is what
+    //    actually makes a big space feel big rather than just ring longer.
+    const p=Math.max(0,Math.min(100,pct));
+    const fb=0.40+(p/100)*0.56;            // 0.40..0.96 decay
+    const sizeFactor=1+(p/100);            // 1×..2× room — 100% twice as big
+    this.rvSizeFactor=sizeFactor;          // exposed so modulation can scale depth
+    const t=this.ctx.currentTime;
+    for(const c of this.rvCombs){
+      c.fb.gain.setTargetAtTime(fb,t,0.02);
+      // Slew the delay slowly so resizing the room doesn't click/pitch-glitch.
+      if(c.base)c.delay.delayTime.setTargetAtTime(c.base*sizeFactor,t,0.06);
+    }
+  }
+  // Reverb tail modulation depth — 0..100 maps to 0..~4 ms of delay-line swing
+  // per comb. Low values add subtle movement/shimmer; high values push toward a
+  // pronounced chorused tail. Independent of room size (rides on top of it).
+  setRvMod(pct){if(!this.ready||!this.rvModGains)return;
+    const depth=(Math.max(0,Math.min(100,pct))/100)*0.004;
+    const t=this.ctx.currentTime;
+    for(const g of this.rvModGains)g.gain.setTargetAtTime(depth,t,0.03);
   }
   // HF damping — high-shelf gain (dB cut) in the feedback path. 0 pct = no
   // damp (0 dB), 100 pct = max damp (~-12 dB). The cut compounds: each comb
@@ -2186,6 +2220,7 @@ export default function Tabula(){
   const [rvDamp,     setRvDamp]     = useState(40); // HF damp shelf cut (0=none, 100=full)
   const [rvLfDamp,   setRvLfDamp]   = useState(0);  // LF damp shelf cut (0=none, 100=full)
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
+  const [rvMod,      setRvMod]      = useState(0);  // tail modulation depth (0..100 → chorused tail)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
@@ -2507,6 +2542,7 @@ export default function Tabula(){
   useEffect(()=>{bell.current.setRvDamp(rvDamp);},[rvDamp]);
   useEffect(()=>{bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);},[rvLfDamp]);
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
+  useEffect(()=>{bell.current.setRvMod&&bell.current.setRvMod(rvMod);},[rvMod]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
@@ -2562,7 +2598,7 @@ export default function Tabula(){
     layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     varyMode,loopMode,
@@ -2609,7 +2645,7 @@ export default function Tabula(){
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
     setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
-     ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],
+     ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
@@ -2682,7 +2718,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:snap});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -2812,7 +2848,7 @@ export default function Tabula(){
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -2940,7 +2976,7 @@ export default function Tabula(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setDlyToRev(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -3013,7 +3049,7 @@ export default function Tabula(){
     ver:PROJ_VER,
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -3100,7 +3136,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3447,7 +3483,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -3870,6 +3906,7 @@ export default function Tabula(){
     bell.current.setRvDamp&&bell.current.setRvDamp(rvDamp);
     bell.current.setRvLfDamp&&bell.current.setRvLfDamp(rvLfDamp);
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
+    bell.current.setRvMod&&bell.current.setRvMod(rvMod);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -5274,6 +5311,7 @@ export default function Tabula(){
     <SynthSection title="REVERB" accent={C_REV}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
         <KnobSlider label="SIZE"    value={rvSize}     min={0} max={100} def={50} onChange={setRvSize}     display={rvSize+"%"}      accent={C_REV}/>
+        <KnobSlider label="MOD"     value={rvMod}      min={0} max={100} def={0}  onChange={setRvMod}      display={rvMod+"%"}       accent={C_REV}/>
         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
         {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
         <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} def={60} onChange={v=>setRvDamp(100-v)} display={fmtHz(rvHfHz(rvDamp))} accent={C_REV}/>
