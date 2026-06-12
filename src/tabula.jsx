@@ -518,6 +518,12 @@ const hpHz=v=>Math.round(20*Math.pow(100,v/100));
 const hpLbl=v=>{const f=hpHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
 const lpHz=v=>Math.round(400*Math.pow(50,v/100));
 const lpLbl=v=>{const f=lpHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
+// Inverses (Hz → 0..100 param) for the dual-thumb RangeSlider, which drags on a
+// shared frequency axis and converts back to each param's own scale.
+const hpInv  =f=>100*Math.log(f/20)/Math.log(100);
+const lpInv  =f=>100*Math.log(f/400)/Math.log(50);
+const rvLfInv=f=>100*Math.log(f/20)/Math.log(800/20);
+const rvHfInv=f=>100*Math.log(f/20000)/Math.log(1200/20000);
 const stR=st=>Math.pow(2,st/12);
 const ms=v=>Math.max(0.001,v/1000);
 
@@ -807,6 +813,63 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
         <div style={S.knobTrackBg}/>
         <div style={Object.assign({},S.knobTrackFill,{width:pct+"%",background:col+"88"})}/>
         <div style={Object.assign({},S.knobThumb,{left:pct+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
+      </div>
+    </div>
+  );
+}
+// Dual-thumb range slider on a shared log-frequency axis (20Hz..20kHz). Each
+// thumb owns one param (the low/high corner of a band) and reads/writes it via
+// toFreq/fromFreq; the fill between the thumbs is the passband. Used so the
+// delay HP+LP and the reverb LF+HF damp each read as one "range" control rather
+// than two separate sliders. Each thumb drags ballistically in axis space,
+// double-taps to its default, and a small gap stops the corners from crossing.
+//   lo / hi = {val,min,max,toFreq,fromFreq,onChange,def,disp}
+function RangeSlider({label,accent,lo,hi}){
+  const ref=useRef(null);
+  const drag=useRef(null);
+  const col=accent||"rgba(255,255,255,0.6)";
+  const A0=Math.log(20), AW=Math.log(20000)-A0;
+  const f2p=f=>(Math.log(Math.max(20,Math.min(20000,f)))-A0)/AW*100;
+  const p2f=p=>Math.exp(A0+(Math.max(0,Math.min(100,p))/100)*AW);
+  const loPos=f2p(lo.toFreq(lo.val)), hiPos=f2p(hi.toFreq(hi.val));
+  const GAP=3;
+  const onDown=useCallback(e=>{
+    e.stopPropagation();
+    const rect=ref.current.getBoundingClientRect();
+    const xPos=Math.max(0,Math.min(100,(e.clientX-rect.left)/Math.max(1,rect.width)*100));
+    const which=Math.abs(xPos-loPos)<=Math.abs(xPos-hiPos)?"lo":"hi";
+    if(isDoubleTap(e,which)){drag.current=null;const t=which==="lo"?lo:hi;t.onChange(t.def);return;}
+    try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
+    drag.current={which,fine:e.ctrlKey||e.metaKey,lx:e.clientX,pos:which==="lo"?loPos:hiPos};
+  },[lo,hi,loPos,hiPos]);
+  const onMove=useCallback(e=>{
+    if(!e.buttons||!drag.current)return;e.stopPropagation();
+    const d=drag.current,rect=ref.current.getBoundingClientRect();
+    const dim=Math.max(40,rect.width);
+    const pd=e.clientX-d.lx; d.lx=e.clientX;
+    const inc=d.fine?pd*(100/1200):ballisticDelta(pd,dim,100); // axis-position units
+    d.pos=d.pos+inc;
+    if(d.which==="lo"){
+      const np=Math.max(0,Math.min(hiPos-GAP,d.pos)); d.pos=np;
+      lo.onChange(Math.round(Math.max(lo.min,Math.min(lo.max,lo.fromFreq(p2f(np))))));
+    }else{
+      const np=Math.max(loPos+GAP,Math.min(100,d.pos)); d.pos=np;
+      hi.onChange(Math.round(Math.max(hi.min,Math.min(hi.max,hi.fromFreq(p2f(np))))));
+    }
+  },[lo,hi,loPos,hiPos]);
+  const onUp=useCallback(()=>{drag.current=null;},[]);
+  return(
+    <div style={S.knobWrap}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+        <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
+        <div style={Object.assign({},S.knobValue,{color:col})}>{lo.disp} – {hi.disp}</div>
+      </div>
+      <div ref={ref} style={S.knobTrackWrap}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+        <div style={S.knobTrackBg}/>
+        <div style={Object.assign({},S.knobTrackFill,{left:loPos+"%",width:Math.max(0,hiPos-loPos)+"%",background:col+"88"})}/>
+        <div style={Object.assign({},S.knobThumb,{left:loPos+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
+        <div style={Object.assign({},S.knobThumb,{left:hiPos+"%",background:col,boxShadow:"0 0 8px "+col+"99"})}/>
       </div>
     </div>
   );
@@ -5303,8 +5366,9 @@ export default function Tabula(){
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
         <KnobSlider label="TIME"   value={dlyIdx}    min={0} max={DLY_NOTES.length-1} def={3} onChange={setDlyIdx}    display={DLY_NOTES[dlyIdx].label} accent={C_DLY}/>
         <KnobSlider label="FDBK"   value={dlyFbPct}  min={0} max={95}                 def={45} onChange={setDlyFbPct}  display={dlyFbPct+"%"}            accent={C_DLY}/>
-        <KnobSlider label="HP"     value={dlyHpVal}  min={0} max={100}                def={8} onChange={setDlyHpVal}  display={hpLbl(dlyHpVal)}         accent={C_DLY}/>
-        <KnobSlider label="LP"     value={dlyLpVal}  min={0} max={100}                def={78} onChange={setDlyLpVal}  display={lpLbl(dlyLpVal)}         accent={C_DLY}/>
+        <RangeSlider label="FILTER" accent={C_DLY}
+          lo={{val:dlyHpVal,min:0,max:100,def:8, toFreq:hpHz,fromFreq:hpInv,onChange:setDlyHpVal,disp:hpLbl(dlyHpVal)}}
+          hi={{val:dlyLpVal,min:0,max:100,def:78,toFreq:lpHz,fromFreq:lpInv,onChange:setDlyLpVal,disp:lpLbl(dlyLpVal)}}/>
         <KnobSlider label="→ REV"  value={dlyToRev}  min={0} max={100}                onChange={setDlyToRev}  display={dlyToRev+"%"}            accent={C_DLY}/>
       </div>
     </SynthSection>
@@ -5314,8 +5378,11 @@ export default function Tabula(){
         <KnobSlider label="MOD"     value={rvMod}      min={0} max={100} def={0}  onChange={setRvMod}      display={rvMod+"%"}       accent={C_REV}/>
         <KnobSlider label="PRE"     value={rvPreDelay} min={0} max={250} onChange={setRvPreDelay} display={rvPreDelay+"ms"} accent={C_REV}/>
         {/* HF DAMP: slider position is openness (right=bright=0 damp, left=dark=100 damp). */}
-        <KnobSlider label="HF DAMP" value={100-rvDamp} min={0} max={100} def={60} onChange={v=>setRvDamp(100-v)} display={fmtHz(rvHfHz(rvDamp))} accent={C_REV}/>
-        <KnobSlider label="LF DAMP" value={rvLfDamp}   min={0} max={100} onChange={setRvLfDamp}   display={fmtHz(rvLfHz(rvLfDamp))} accent={C_REV}/>
+        {/* DAMP range: left thumb = LF damp corner, right thumb = HF damp corner.
+            The band between is what stays bright in the tail. */}
+        <RangeSlider label="DAMP" accent={C_REV}
+          lo={{val:rvLfDamp,min:0,max:100,def:0, toFreq:rvLfHz,fromFreq:rvLfInv,onChange:setRvLfDamp,disp:fmtHz(rvLfHz(rvLfDamp))}}
+          hi={{val:rvDamp,  min:0,max:100,def:40,toFreq:rvHfHz,fromFreq:rvHfInv,onChange:setRvDamp,  disp:fmtHz(rvHfHz(rvDamp))}}/>
       </div>
     </SynthSection>
   </>);
