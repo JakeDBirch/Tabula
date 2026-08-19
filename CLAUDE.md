@@ -71,7 +71,7 @@ The scheduler is a per-layer lookahead loop (~25 ms tick, ~100 ms ahead). `layer
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
 - **Ballistic drag helper** = `ballisticDelta(pd, dim, range)`. Double-tap detection = `isDoubleTap(e, key?)` (custom, because DOM `dblclick` is unreliable on touch).
-- **STEP lanes**, **autosave**, **MP3/MIDI export**, **A/B/C/D save slots** (with SAVE/LOAD/CLEAR, `tnori-slots` localStorage) all exist.
+- **STEP lanes**, **autosave**, **MP3/MIDI export**, and **S1–S4 save slots** (SAVE/LOAD/CLEAR, persisted via `storageSet("slots", …)`) all exist.
 
 ### FX
 
@@ -90,7 +90,7 @@ When you add saved state, add it to EVERY site or saves/undo silently lose it:
 5. The **play-start re-apply** block that pushes FX values to the engine on every play.
 6. For engine params also: state + `useEffect(()=>bell.current.setX(x),[x])` + the engine method + the UI control.
 
-Autosave is separate (`tnori-autosave` localStorage): a lean snapshot (no samples) written on a debounce, samples on a dirty flag, **never during playback or export**. Restored on mount; a loaded share link is a "preview" that adopts on first edit.
+Autosave is separate (`storageSet("autosave", …)` — `window.storage`, falling back to `tnori-`-prefixed localStorage): a lean snapshot (no samples) written on a debounce, samples on a dirty flag, **never during playback or export**. Restored on mount; a loaded share link is a "preview" that adopts on first edit.
 
 User samples serialize as base64 in saves (`serializeSamples`); kits load via `loadKit`. Samples ARE wired up now (older doc said otherwise).
 
