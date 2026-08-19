@@ -8,6 +8,9 @@ node_modules/
 .vscode/
 .idea/
 
+# Claude Code — commit launch.json + settings.json (shared), ignore local overrides
+.claude/settings.local.json
+
 # Build scratch
 .build/
 *.tmp
