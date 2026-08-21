@@ -58,6 +58,10 @@ self.addEventListener("activate", (e) => {
   })());
 });
 
+// Third-party hosts whose bytes are part of the app shell. Anything not here
+// and not same-origin is treated as live data, never cached.
+const STATIC_HOSTS = new Set(["cdnjs.cloudflare.com", "cdn.jsdelivr.net"]);
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
@@ -80,7 +84,21 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Cache-first for static assets (libs, samples, fonts, icon).
+  // Cache-first applies to STATIC ASSETS ONLY — same-origin files plus the two
+  // known CDNs. Everything else falls through to the network untouched.
+  //
+  // This whitelist is load-bearing for cloud sync. The handler used to be
+  // cache-first for every non-navigation GET, which swallowed the Supabase REST
+  // calls: the first sync's project listing got cached, and every later sync
+  // was served that same stale body without ever reaching the server. The app
+  // concluded the server was empty, re-pushed everything, pulled nothing, and
+  // reported success — a silent, permanent sync failure on exactly the
+  // installed-PWA path this file exists to serve. A whitelist (rather than
+  // blacklisting /rest/ and /auth/) also keeps any future API out of the cache
+  // by default.
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin && !STATIC_HOSTS.has(url.host)) return;
+
   e.respondWith((async () => {
     const hit = await caches.match(req);
     if (hit) return hit;

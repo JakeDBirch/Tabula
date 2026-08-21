@@ -597,6 +597,180 @@ const isDoubleTap=(e,key=null)=>{
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
 
+// ── Project library storage (IndexedDB) ──────────────────────────────────────
+// The old model was four fixed slots (S1..S4) serialized as ONE JSON blob under
+// the "slots" key. That capped the library at four, gave projects no names, and
+// pushed base64 sample audio through a ~5MB localStorage origin quota — which is
+// what the old "SAVE FAILED — TOO LARGE" path was apologising for. IndexedDB has
+// a far larger budget and stores structured clones without a JSON round-trip, so
+// the library is now unbounded and sample-heavy projects are no longer a risk.
+//
+// TWO stores on purpose: `proj_meta` is tiny and read in full on every boot to
+// paint the project list; `proj_data` holds the heavy snapshot (samples and all)
+// and is read ONLY when a project is actually loaded. IDB cannot project a
+// subset of fields out of a record, so splitting them is the only way to keep
+// boot cheap once the library holds dozens of sampled projects.
+const PDB_NAME="tabula", PDB_VER=1, PDB_META="proj_meta", PDB_DATA="proj_data";
+let _pdbP=null;
+const pdbOpen=()=>{
+  if(_pdbP)return _pdbP;
+  _pdbP=new Promise((res,rej)=>{
+    let rq;
+    try{ rq=indexedDB.open(PDB_NAME,PDB_VER); }catch(e){ rej(e); return; }
+    rq.onupgradeneeded=()=>{
+      const db=rq.result;
+      if(!db.objectStoreNames.contains(PDB_META))db.createObjectStore(PDB_META,{keyPath:"id"});
+      if(!db.objectStoreNames.contains(PDB_DATA))db.createObjectStore(PDB_DATA,{keyPath:"id"});
+    };
+    rq.onsuccess=()=>res(rq.result);
+    rq.onerror=()=>rej(rq.error);
+    rq.onblocked=()=>rej(new Error("indexedDB blocked"));
+  });
+  _pdbP.catch(()=>{_pdbP=null;}); // a transient open failure shouldn't poison every later call
+  return _pdbP;
+};
+const pdbReq=rq=>new Promise((res,rej)=>{rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);});
+// Only ever await IDB requests inside `fn` — awaiting anything else lets the
+// transaction auto-commit out from under us (a long-standing WebKit behaviour).
+const pdbTx=async(stores,mode,fn)=>{
+  const db=await pdbOpen();
+  return new Promise((res,rej)=>{
+    let tx;
+    try{ tx=db.transaction(stores,mode); }catch(e){ rej(e); return; }
+    let out;
+    tx.oncomplete=()=>res(out);
+    tx.onerror=()=>rej(tx.error);
+    tx.onabort=()=>rej(tx.error||new Error("transaction aborted"));
+    Promise.resolve(fn(tx)).then(v=>{out=v;},e=>{try{tx.abort();}catch(_e){}rej(e);});
+  });
+};
+const projListAll=async()=>(await pdbTx([PDB_META],"readonly",tx=>pdbReq(tx.objectStore(PDB_META).getAll())))||[];
+const projGetData=async id=>{
+  const rec=await pdbTx([PDB_DATA],"readonly",tx=>pdbReq(tx.objectStore(PDB_DATA).get(id)));
+  return rec?rec.data:null;
+};
+const projPut=(meta,data)=>pdbTx([PDB_META,PDB_DATA],"readwrite",tx=>{
+  tx.objectStore(PDB_META).put(meta);
+  if(data!==undefined)tx.objectStore(PDB_DATA).put({id:meta.id,data});
+});
+const projPutMeta=meta=>pdbTx([PDB_META],"readwrite",tx=>{tx.objectStore(PDB_META).put(meta);});
+// Tombstone rather than erase: a hard delete on one device is indistinguishable
+// from "never synced yet" on another, so the next pull would resurrect it.
+// `deleted:true` propagates the intent; the data row goes immediately (it's the
+// bulky half and nothing reads it again).
+const projTombstone=(meta)=>pdbTx([PDB_META,PDB_DATA],"readwrite",tx=>{
+  tx.objectStore(PDB_META).put(meta);
+  tx.objectStore(PDB_DATA).delete(meta.id);
+});
+const projPurge=id=>pdbTx([PDB_META,PDB_DATA],"readwrite",tx=>{
+  tx.objectStore(PDB_META).delete(id);
+  tx.objectStore(PDB_DATA).delete(id);
+});
+const projNewId=()=>{
+  try{ if(self.crypto&&crypto.randomUUID)return crypto.randomUUID(); }catch(e){}
+  return "p-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
+};
+const TOMB_TTL=30*24*3600*1000; // drop tombstones after 30 days — every device has long since seen them
+// "Untitled 3" style default, skipping names already taken.
+const projAutoName=(list,base="UNTITLED")=>{
+  const taken=new Set(list.filter(p=>!p.deleted).map(p=>String(p.name||"").toUpperCase()));
+  // Compare uppercased on BOTH sides — `taken` is folded, so testing a raw-cased
+  // base (which DUPE passes straight from the source name) missed every clash
+  // and handed out the same "… COPY" twice.
+  const U=String(base).toUpperCase();
+  if(!taken.has(U))return base;
+  for(let i=2;i<9999;i++){ const n=base+" "+i; if(!taken.has(n.toUpperCase()))return n; }
+  return base+" "+Date.now();
+};
+const projFmtDate=ts=>{
+  if(!ts)return "";
+  const d=new Date(ts), now=Date.now(), age=now-ts;
+  if(age<60000)return "just now";
+  if(age<3600000)return Math.floor(age/60000)+"m ago";
+  if(age<86400000)return Math.floor(age/3600000)+"h ago";
+  if(age<7*86400000)return Math.floor(age/86400000)+"d ago";
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"});
+};
+
+// ── Supabase cloud sync (plain REST — no SDK) ────────────────────────────────
+// Tabula ships as one static HTML file, so pulling in the supabase-js bundle is
+// off the table. Everything below is fetch() against the two public HTTP APIs
+// Supabase already exposes: GoTrue (/auth/v1) for email-OTP auth and PostgREST
+// (/rest/v1) for the projects table. The anon key is designed to be public —
+// row-level security is what actually protects the rows — so it lives in local
+// storage next to the URL rather than being baked into the build, which also
+// means anyone forking Tabula points it at their own project.
+const SB_CFG_KEY="supabase_cfg", SB_SESS_KEY="supabase_session";
+const sbNormUrl=u=>String(u||"").trim().replace(/\/+$/,"");
+const sbHeaders=(cfg,token,extra)=>Object.assign({
+  "apikey":cfg.anonKey,
+  "Authorization":"Bearer "+(token||cfg.anonKey),
+  "Content-Type":"application/json"
+},extra||{});
+// cache:"no-store" is hygiene, not decoration: PostgREST sends no Cache-Control
+// and the sync listing is the SAME URL every run, so a heuristically-cached GET
+// would feed the syncer a stale library. (The service worker was doing exactly
+// that until sw.js was taught to leave non-asset requests alone — see the
+// whitelist there; no-store covers the plain-browser path.)
+const sbFetch=async(cfg,path,opts)=>{
+  let r;
+  try{ r=await fetch(sbNormUrl(cfg.url)+path,Object.assign({cache:"no-store"},opts)); }
+  catch(e){ const err=new Error("NETWORK UNREACHABLE"); err.offline=true; throw err; }
+  const txt=await r.text();
+  let body=null; try{ body=txt?JSON.parse(txt):null; }catch(e){ body=txt; }
+  if(!r.ok){
+    const msg=(body&&(body.msg||body.message||body.error_description||body.error_code||body.error||body.hint))||("HTTP "+r.status);
+    const err=new Error(String(msg).toUpperCase()); err.status=r.status; err.body=body; throw err;
+  }
+  return body;
+};
+const sbSendOtp=(cfg,email)=>sbFetch(cfg,"/auth/v1/otp",{method:"POST",headers:sbHeaders(cfg),body:JSON.stringify({email,create_user:true})});
+const sbVerifyOtp=(cfg,email,token)=>sbFetch(cfg,"/auth/v1/verify",{method:"POST",headers:sbHeaders(cfg),body:JSON.stringify({email,token,type:"email"})});
+const sbRefreshSession=(cfg,refresh_token)=>sbFetch(cfg,"/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:sbHeaders(cfg),body:JSON.stringify({refresh_token})});
+// GoTrue returns expires_in (seconds) and usually expires_at (epoch seconds).
+// Normalise to an absolute epoch-ms so the freshness check is a plain compare.
+const sbNormSession=s=>{
+  if(!s||!s.access_token)return null;
+  const expMs=s.expires_at?s.expires_at*1000:(Date.now()+((s.expires_in||3600)*1000));
+  return {access_token:s.access_token,refresh_token:s.refresh_token,expMs,user:{id:s.user&&s.user.id,email:s.user&&s.user.email}};
+};
+const sbFresh=s=>!!(s&&s.access_token&&s.expMs-60000>Date.now()); // 60s skew guard
+// Cheap listing first: `data` is the heavy column and most rows won't need
+// pulling, so meta drives the diff and bodies are fetched one at a time.
+const sbListMeta=(cfg,tok)=>sbFetch(cfg,"/rest/v1/projects?select=client_id,name,updated_at,deleted",{headers:sbHeaders(cfg,tok)});
+const sbGetOne=(cfg,tok,clientId)=>sbFetch(cfg,"/rest/v1/projects?select=client_id,name,data,updated_at,deleted&client_id=eq."+encodeURIComponent(clientId),{headers:sbHeaders(cfg,tok)});
+const sbUpsert=(cfg,tok,rows)=>sbFetch(cfg,"/rest/v1/projects?on_conflict=user_id,client_id",{
+  method:"POST",
+  headers:sbHeaders(cfg,tok,{Prefer:"resolution=merge-duplicates,return=minimal"}),
+  body:JSON.stringify(rows)
+});
+// Recorded samples are multi-MB base64 and would dominate every sync payload,
+// so they never leave the device — a pulled project keeps whatever samples that
+// device already had rather than arriving with an empty sampler.
+const sbStripSamples=data=>{
+  if(!data||typeof data!=="object")return data;
+  const out=Object.assign({},data);
+  delete out.userSamples;
+  return out;
+};
+const SB_SQL=`-- Run once in the Supabase SQL editor (Dashboard -> SQL Editor -> New query).
+create table if not exists public.projects (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  client_id   text not null,
+  name        text not null,
+  data        jsonb,
+  deleted     boolean not null default false,
+  updated_at  timestamptz not null default now(),
+  unique (user_id, client_id)
+);
+alter table public.projects enable row level security;
+drop policy if exists "own projects" on public.projects;
+create policy "own projects" on public.projects
+  for all to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);`;
+
 // ── User-sample (de)serialization ────────────────────────────────────────────
 // Recorded drum samples are AudioBuffers (binary). To save/export them with a
 // project they're encoded to 16-bit PCM WAV → base64. Short one-shots, so the
@@ -2108,11 +2282,39 @@ export default function Tabula(){
   const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
-  const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
-  // Most recently loaded/saved slot — shown highlighted so the user can see
-  // which slot's project is currently in memory and avoid overwriting the
-  // wrong one. Resets to null on page reload (not persisted).
-  const [activeSlot, setActiveSlot] = useState(null);
+  // ── Project library ──────────────────────────────────────────────────────
+  // `projects` is the meta list only (id/name/dates/sync state) — the heavy
+  // snapshots stay in IDB until a project is actually opened. curProjId is the
+  // project the live session belongs to; null means "unsaved scratch".
+  const [projects,   setProjects]   = useState([]);
+  const [curProjId,  setCurProjId]  = useState(null);
+  const [curProjName,setCurProjName]= useState("");
+  const [projDirty,  setProjDirty]  = useState(false);
+  const [projQuery,  setProjQuery]  = useState("");   // library filter box
+  const [nameEntry,  setNameEntry]  = useState(null); // {mode:"saveas"|"rename",id,value}
+  const [projMenu,   setProjMenu]   = useState(null); // id of the row showing its action row
+  const projectsR = useRef([]);
+  const curProjIdR = useRef(null);
+  // IndexedDB can be flat-out unavailable (locked-down privacy settings, some
+  // embedded webviews). Better to say so than to show an empty library that
+  // silently refuses every save.
+  const [projStoreOk,setProjStoreOk] = useState(true);
+  // ── Cloud sync (Supabase) ────────────────────────────────────────────────
+  const [sbCfg,      setSbCfg]      = useState(null); // {url,anonKey} — user-entered, persisted locally
+  const [sbSession,  setSbSession]  = useState(null); // normalised GoTrue session
+  const [sbEmail,    setSbEmail]    = useState("");
+  const [sbCode,     setSbCode]     = useState("");
+  const [sbStage,    setSbStage]    = useState("idle"); // "idle"|"code" — OTP entry step
+  const [sbBusy,     setSbBusy]     = useState(false);
+  const [sbMsg,      setSbMsg]      = useState("");
+  const [sbLastSync, setSbLastSync] = useState(0);
+  const [cloudPanel, setCloudPanel] = useState(false); // setup/auth panel expanded
+  const [sbCfgUrl,   setSbCfgUrl]   = useState("");
+  const [sbCfgKey,   setSbCfgKey]   = useState("");
+  const [sbShowSql,  setSbShowSql]  = useState(false);
+  const sbCfgR = useRef(null);
+  const sbSessionR = useRef(null);
+  const sbSyncingR = useRef(false);
   const [flash,     setFlash]     = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
@@ -2642,9 +2844,57 @@ export default function Tabula(){
     }
   },[drumMix]);
 
+  // Boot the project library: fold any legacy S1..S4 slots into it first, then
+  // read the meta list. Also rehydrates the stored Supabase config + session so
+  // sync is live on load without a re-login. Runs after the component body, so
+  // referencing the helpers declared further down is safe.
   useEffect(()=>{
-    (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
+    // Read the hash NOW: the autosave effect below clears it, and a share-link
+    // session must not adopt the user's own last-open project — SAVE would then
+    // overwrite an unrelated project with the shared one. (Same reasoning as
+    // loadedFromShareR guarding the autosave.)
+    const fromShare=!!window.location.hash.slice(1);
+    (async()=>{
+      try{ await migrateSlots(); }catch(e){}
+      const all=await refreshProjects();
+      // The autosave restores the working session; this restores which stored
+      // project that session belongs to, so SAVE after a reload still means
+      // "overwrite the project I had open" rather than silently going new.
+      try{
+        const cid=fromShare?null:await storageGet("cur_proj");
+        const m=cid&&all.find(x=>x.id===cid&&!x.deleted);
+        if(m){
+          setCurProjId(m.id); setCurProjName(m.name);
+          // Restore the unsaved-changes baseline too, so the dot survives a
+          // reload. Without it the watcher adopts the restored autosave as
+          // "clean" and real unsaved work looks saved.
+          const sig=await storageGet("proj_sig");
+          if(sig){ savedSigR.current=sig; dirtyAdoptR.current=false; }
+        }
+      }catch(e){}
+      try{
+        const raw=await storageGet(SB_CFG_KEY);
+        if(raw){
+          const cfg=JSON.parse(raw);
+          if(cfg&&cfg.url&&cfg.anonKey){ setSbCfg(cfg); setSbCfgUrl(cfg.url); setSbCfgKey(cfg.anonKey); }
+        }
+        const sraw=await storageGet(SB_SESS_KEY);
+        if(sraw){ const sess=JSON.parse(sraw); if(sess&&sess.access_token)setSbSession(sess); }
+      }catch(e){}
+    })();
   },[]);
+  useEffect(()=>{projectsR.current=projects;},[projects]);
+  // Persist which project the session belongs to — but NOT on the mount pass:
+  // curProjId is still null then, and writing it would blank the stored id
+  // before the boot effect's async read has had a chance to restore it.
+  const curProjWroteR = useRef(false);
+  useEffect(()=>{
+    curProjIdR.current=curProjId;
+    if(!curProjWroteR.current){ curProjWroteR.current=true; if(curProjId==null)return; }
+    storageSet("cur_proj",curProjId||"");
+  },[curProjId]);
+  useEffect(()=>{sbCfgR.current=sbCfg;},[sbCfg]);
+  useEffect(()=>{sbSessionR.current=sbSession;},[sbSession]);
 
   // Pre-load the default kit's samples on first mount so the bundled sound is
   // ready before the user presses play. loadKit falls back to an
@@ -2795,7 +3045,12 @@ export default function Tabula(){
     return()=>document.removeEventListener("keydown",onKey);
   });
 
-  const doSave=async slot=>{
+  // Build the full project snapshot from live state. Extracted from the old
+  // per-slot doSave so the project library, the cloud pusher and any future
+  // consumer all serialize through exactly one definition — a second copy of
+  // this field list is how the reverb knobs and drumLevel went missing from
+  // saves the first time round.
+  const buildProjectSnapshot=()=>{
     const liveLayerStore={...layerStoreR.current};
     if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
       liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
@@ -2805,11 +3060,7 @@ export default function Tabula(){
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
     const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
-    const next=Object.assign({},slotData,{[slot]:snap});
-    setSlotData(next);
-    const ok=await storageSet("slots",JSON.stringify(next));
-    if(ok){setActiveSlot(slot);showFlash("SAVED "+slot);}
-    else showFlash("SAVE FAILED — TOO LARGE"); // storage quota (recorded samples can be big)
+    return snap;
   };
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   // Saved projects can contain stale chain entries: legacy name strings ("A","B")
@@ -2867,9 +3118,12 @@ export default function Tabula(){
     if(!Array.isArray(phrases))return phrases;
     return phrases.map(ph=>Object.assign({},ph,{chain:sanitizeChain(ph.chain||[],pats)}));
   };
-  const doLoad=slot=>{
-    let s=slotData[slot];if(!s)return;
-    s=migrateLegacyBass(s);
+  // Apply a saved snapshot to live state. Was the body of doLoad(slot); the
+  // slot lookup and the "which slot is lit" bookkeeping moved out to the
+  // callers so the project library and file import share one apply path.
+  const applyProjectSnapshot=raw=>{
+    if(!raw)return false;
+    const s=migrateLegacyBass(raw);
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
     // entries in the save don't leave stale data from a previous load. Lead
@@ -2992,44 +3246,551 @@ export default function Tabula(){
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
     setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
     setSongRandom(_songRandomFromSave(s));
-    setActiveSlot(slot);
-    showFlash("LOADED "+slot);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
-    // doLoad so the previous kit's samples are cleared before the new fetch.
+    // the apply so the previous kit's samples are cleared before the new fetch.
     // Legacy saves carry activeKit:"synth" (or nothing) which is no longer a
     // valid kit, so resolve any unknown id to DEFAULT_KIT.
     const savedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
+    // Set the id up front rather than waiting on loadKit's sample fetch to do
+    // it at the end. Sampled kits take hundreds of ms to decode, and until
+    // activeKit lands the session doesn't match the project it just opened —
+    // which the unsaved-changes watcher below would read as an edit.
+    setActiveKit(savedKit);
     loadKit(savedKit).catch(()=>{});
     restoreUserSamples(s);
+    return true;
   };
-  const saveSlot=slot=>{
-    if(slotData[slot]){setConfirmAction({type:"save",slot,label:"OVERWRITE "+slot+"?"});return;}
-    doSave(slot);
+  // ── Project library ───────────────────────────────────────────────────────
+  // Replaces the old four-slot grid. A project is {meta, data}: meta is the row
+  // in the list (name/dates/sync state), data is a buildProjectSnapshot(). Every
+  // mutation writes IDB first and only then updates React state, so a failed
+  // write surfaces as an error instead of a list that lies about what's stored.
+  const refreshProjects=async()=>{
+    try{
+      const all=await projListAll();
+      setProjStoreOk(true);
+      // Expired tombstones are dead weight — every device has long since pulled
+      // the deletion. Purge on read rather than on a timer.
+      const now=Date.now();
+      // Only forget a deletion once it can't come back: either the server has
+      // it, or there's no server to hear about it. Purging on age alone meant a
+      // device offline past the TTL dropped its tombstone and then happily
+      // pulled the deleted project down again.
+      const cloudOn=!!sbCfgR.current;
+      const stale=all.filter(m=>m.deleted&&(now-(m.updated||0))>TOMB_TTL
+        &&(!cloudOn||(m.syncedAt&&m.syncedAt>=(m.updated||0))));
+      for(const m of stale){ try{ await projPurge(m.id); }catch(e){} }
+      const live=all.filter(m=>!m.deleted&&!stale.includes(m));
+      live.sort((a,b)=>(b.updated||0)-(a.updated||0));
+      setProjects(live);
+      return all;
+    }catch(e){ setProjects([]); setProjStoreOk(false); return []; }
   };
-  const loadSlot=slot=>{
-    if(!slotData[slot])return;
-    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
-    if(hasContent){setConfirmAction({type:"load",slot,label:"LOAD "+slot+"? UNSAVED WORK LOST"});return;}
-    doLoad(slot);
+  const projMetaById=id=>projectsR.current.find(p=>p.id===id)||null;
+  // Persist the live session under `id` (creating the row if it's new).
+  const writeProject=async(id,name)=>{
+    const now=Date.now();
+    const prev=projMetaById(id);
+    const meta={
+      id,
+      name:name||(prev&&prev.name)||"UNTITLED",
+      created:(prev&&prev.created)||now,
+      updated:now,
+      deleted:false,
+      // Cleared so the syncer sees local-newer and pushes on the next run.
+      syncedAt:0,
+      remoteUpdated:(prev&&prev.remoteUpdated)||0
+    };
+    await projPut(meta,buildProjectSnapshot());
+    await refreshProjects();
+    setCurProjId(id); setCurProjName(meta.name);
+    // Re-baseline the unsaved dot against exactly what was just written. Note
+    // this can't go through dirtyAdoptR: saving changes no watched state, so
+    // the watcher wouldn't run again until the user's NEXT edit — which would
+    // then be adopted as the baseline and silently swallowed.
+    try{ savedSigR.current=JSON.stringify(getShareState(false)); dirtyAdoptR.current=false; storageSet("proj_sig",savedSigR.current); }
+    catch(e){ dirtyAdoptR.current=true; }
+    setProjDirty(false);
+    return meta;
   };
-  // ── Clear a saved slot back to empty ────────────────────────────────────
-  // Frees the slot so it shows as available again (unlike NEW, which resets the
-  // live working state but leaves slots untouched). Destructive → confirm first.
-  const clearSlot=slot=>{
-    if(!slotData[slot])return; // already empty
-    setConfirmAction({type:"clear",slot,label:"CLEAR "+slot+"?"});
+  // SAVE: overwrite the project already open. With nothing open it becomes a
+  // SAVE AS so the button is never a no-op.
+  const saveProject=async()=>{
+    if(!curProjId){ startNameEntry("saveas"); return; }
+    try{ await writeProject(curProjId,curProjName); showFlash("SAVED"); }
+    catch(e){ showFlash("SAVE FAILED"); }
   };
-  const doClear=async slot=>{
-    const next=Object.assign({},slotData,{[slot]:null});
-    setSlotData(next);
-    if(activeSlot===slot)setActiveSlot(null); // drop the highlight — slot is empty now
-    const ok=await storageSet("slots",JSON.stringify(next));
-    showFlash(ok?"CLEARED "+slot:"CLEAR FAILED");
+  const saveProjectAs=async rawName=>{
+    const name=String(rawName||"").trim().slice(0,40)||projAutoName(projectsR.current);
+    try{ await writeProject(projNewId(),name); showFlash("SAVED "+name.toUpperCase()); }
+    catch(e){ showFlash("SAVE FAILED"); }
   };
+  const doLoadProject=async id=>{
+    const meta=projMetaById(id); if(!meta)return;
+    let data=null;
+    try{ data=await projGetData(id); }catch(e){}
+    if(!data){ showFlash("LOAD FAILED"); return; }
+    if(!applyProjectSnapshot(data)){ showFlash("LOAD FAILED"); return; }
+    setCurProjId(id); setCurProjName(meta.name);
+    // Whatever the session settles into after the apply IS this project.
+    dirtyAdoptR.current=true; setProjDirty(false);
+    showFlash("LOADED "+String(meta.name).toUpperCase());
+  };
+  const loadProject=id=>{
+    const meta=projMetaById(id); if(!meta)return;
+    if(id===curProjId&&!projDirty){ showFlash("ALREADY OPEN"); return; }
+    // Confirm only when something is genuinely at stake: unsaved edits, or a
+    // scratch session (no project behind it) that has notes in it. A clean
+    // session that matches its saved project loses nothing by switching, and
+    // making that a two-tap for no reason just trains you to hit YES.
+    if(unsavedWorkAtRisk()){ setConfirmAction({type:"loadProj",id,label:(id===curProjId?"REVERT ":"LOAD ")+String(meta.name).toUpperCase()+"? UNSAVED WORK LOST"}); return; }
+    doLoadProject(id);
+  };
+  const renameProject=async(id,rawName)=>{
+    const meta=projMetaById(id); if(!meta)return;
+    const name=String(rawName||"").trim().slice(0,40); if(!name)return;
+    try{
+      await projPutMeta(Object.assign({},meta,{name,updated:Date.now(),syncedAt:0}));
+      await refreshProjects();
+      if(id===curProjId)setCurProjName(name);
+      showFlash("RENAMED");
+    }catch(e){ showFlash("RENAME FAILED"); }
+  };
+  const duplicateProject=async id=>{
+    const meta=projMetaById(id); if(!meta)return;
+    try{
+      const data=await projGetData(id); if(!data){ showFlash("DUPLICATE FAILED"); return; }
+      const now=Date.now();
+      const name=projAutoName(projectsR.current,String(meta.name).slice(0,34)+" COPY");
+      await projPut({id:projNewId(),name,created:now,updated:now,deleted:false,syncedAt:0,remoteUpdated:0},data);
+      await refreshProjects();
+      showFlash("DUPLICATED");
+    }catch(e){ showFlash("DUPLICATE FAILED"); }
+  };
+  const doDeleteProject=async id=>{
+    const meta=projMetaById(id); if(!meta)return;
+    try{
+      await projTombstone(Object.assign({},meta,{deleted:true,updated:Date.now(),syncedAt:0}));
+      await refreshProjects();
+      // Deleting the open project doesn't wipe the session — the work stays in
+      // memory, it just no longer belongs to a stored project.
+      if(id===curProjId){ setCurProjId(null); setProjDirty(true); }
+      showFlash("DELETED");
+    }catch(e){ showFlash("DELETE FAILED"); }
+  };
+  const deleteProject=id=>{
+    const meta=projMetaById(id); if(!meta)return;
+    setConfirmAction({type:"delProj",id,label:"DELETE "+String(meta.name).toUpperCase()+"?"});
+  };
+  // Inline name entry — a text field in the panel rather than window.prompt(),
+  // which on an iOS home-screen PWA yanks you out of the app chrome.
+  const startNameEntry=(mode,id)=>{
+    if(mode==="rename"){
+      const meta=projMetaById(id); if(!meta)return;
+      setNameEntry({mode,id,value:meta.name});
+    }else{
+      setNameEntry({mode:"saveas",id:null,value:curProjName||projAutoName(projectsR.current)});
+    }
+  };
+  const commitNameEntry=()=>{
+    const ne=nameEntry; if(!ne)return;
+    setNameEntry(null);
+    if(ne.mode==="rename")renameProject(ne.id,ne.value);
+    else saveProjectAs(ne.value);
+  };
+  const hasLiveContent=()=>pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
+  // Is there work a destructive action would destroy? Either the session has
+  // drifted from the project it was saved as, or it belongs to no project at
+  // all and has something in it.
+  const unsavedWorkAtRisk=()=>projDirty||(!curProjId&&hasLiveContent());
+
+  // ── Cloud sync (Supabase) ─────────────────────────────────────────────────
+  // Manual, last-write-wins sync of the project library. Deliberately NOT
+  // continuous: a sequencer shouldn't be firing network writes while you're
+  // playing, and LWW on an autosync would let a stale phone quietly clobber a
+  // desktop session. You press SYNC; it reconciles; it tells you what it did.
+  const saveSbCfg=async(url,anonKey)=>{
+    const cfg={url:sbNormUrl(url),anonKey:String(anonKey||"").trim()};
+    if(!/^https?:\/\/.+/i.test(cfg.url)||!cfg.anonKey){ setSbMsg("NEED A PROJECT URL AND ANON KEY"); return; }
+    setSbCfg(cfg);
+    await storageSet(SB_CFG_KEY,JSON.stringify(cfg));
+    setSbMsg("SAVED — NOW SIGN IN");
+  };
+  const clearSbCfg=async()=>{
+    setSbCfg(null); setSbSession(null); setSbStage("idle"); setSbMsg("");
+    await storageSet(SB_CFG_KEY,""); await storageSet(SB_SESS_KEY,"");
+  };
+  const persistSession=async sess=>{
+    setSbSession(sess); sbSessionR.current=sess;
+    await storageSet(SB_SESS_KEY,sess?JSON.stringify(sess):"");
+  };
+  // Returns a usable access token, refreshing transparently when the stored one
+  // has aged out. Throws when there's no way back to a signed-in state, so
+  // every caller can just try/catch rather than branch on session shape.
+  const sbToken=async()=>{
+    const cfg=sbCfgR.current; if(!cfg)throw new Error("NOT CONFIGURED");
+    let sess=sbSessionR.current;
+    if(sbFresh(sess))return sess.access_token;
+    if(!sess||!sess.refresh_token){ await persistSession(null); throw new Error("SIGNED OUT — SIGN IN AGAIN"); }
+    try{
+      const fresh=sbNormSession(await sbRefreshSession(cfg,sess.refresh_token));
+      if(!fresh)throw new Error("REFRESH FAILED");
+      await persistSession(fresh);
+      return fresh.access_token;
+    }catch(e){
+      // A rejected refresh token is terminal — drop it so the UI offers sign-in
+      // rather than retrying a token the server has already revoked.
+      if(!e.offline)await persistSession(null);
+      throw new Error(e.offline?"NETWORK UNREACHABLE":"SIGNED OUT — SIGN IN AGAIN");
+    }
+  };
+  const sbSignInStart=async()=>{
+    const cfg=sbCfgR.current; if(!cfg){ setSbMsg("ADD YOUR SUPABASE URL + KEY FIRST"); return; }
+    const email=String(sbEmail||"").trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ setSbMsg("ENTER A VALID EMAIL"); return; }
+    setSbBusy(true); setSbMsg("SENDING CODE…");
+    try{ await sbSendOtp(cfg,email); setSbStage("code"); setSbMsg("CODE SENT — CHECK YOUR EMAIL"); }
+    catch(e){ setSbMsg(e.message||"COULD NOT SEND CODE"); }
+    finally{ setSbBusy(false); }
+  };
+  const sbSignInVerify=async()=>{
+    const cfg=sbCfgR.current; if(!cfg)return;
+    const code=String(sbCode||"").replace(/\s+/g,"");
+    if(!code){ setSbMsg("ENTER THE CODE FROM THE EMAIL"); return; }
+    setSbBusy(true); setSbMsg("VERIFYING…");
+    try{
+      const sess=sbNormSession(await sbVerifyOtp(cfg,String(sbEmail).trim(),code));
+      if(!sess)throw new Error("NO SESSION RETURNED");
+      await persistSession(sess);
+      setSbStage("idle"); setSbCode(""); setSbMsg("SIGNED IN");
+      // Awaited: the finally below clears sbBusy, so firing this un-awaited
+      // re-enabled the SYNC button while the first sync was still running —
+      // and the re-entrancy guard then swallowed the press without a word.
+      await syncCloud(); // first sync immediately — the point of signing in
+    }catch(e){ setSbMsg(e.message||"CODE REJECTED"); }
+    finally{ setSbBusy(false); }
+  };
+  const sbSignOut=async()=>{
+    await persistSession(null);
+    setSbStage("idle"); setSbCode(""); setSbMsg("SIGNED OUT");
+  };
+  // Reconcile local ⇄ remote. Last-write-wins per project on the `updated`
+  // stamp, with deletions carried as tombstones so a delete on one device isn't
+  // undone by the other device's copy still existing. Samples are stripped on
+  // the way out (they're device-local by design) and preserved on the way in.
+  const syncCloud=async()=>{
+    if(sbSyncingR.current)return;
+    const cfg=sbCfgR.current;
+    if(!cfg){ setSbMsg("ADD YOUR SUPABASE URL + KEY FIRST"); setCloudPanel(true); return; }
+    if(!sbSessionR.current){ setSbMsg("SIGN IN FIRST"); setCloudPanel(true); return; }
+    sbSyncingR.current=true; setSbBusy(true); setSbMsg("SYNCING…");
+    let pushed=0,pulled=0;
+    try{
+      const tok=await sbToken();
+      const uid=sbSessionR.current.user&&sbSessionR.current.user.id;
+      if(!uid)throw new Error("SIGNED OUT — SIGN IN AGAIN");
+      const local=await projListAll();
+      const localById=new Map(local.map(m=>[m.id,m]));
+      const remote=await sbListMeta(cfg,tok)||[];
+      const remoteById=new Map(remote.map(r=>[r.client_id,r]));
+      // A row with an unparseable stamp sorts as oldest for the comparison, but
+      // must never be WRITTEN as 0 — a 1970 tombstone is instantly TTL-purged.
+      const rTime=r=>{ const t=Date.parse(r.updated_at||""); return isNaN(t)?0:t; };
+
+      // 1. Local → remote: anything the server has never seen, or that we've
+      //    edited since the server's copy was written.
+      const toPush=[];
+      for(const m of local){
+        const r=remoteById.get(m.id);
+        if(r&&rTime(r)>=(m.updated||0))continue;      // remote is same-or-newer; step 2 handles it
+        const row={user_id:uid,client_id:m.id,name:m.name,deleted:!!m.deleted,updated_at:new Date(m.updated||Date.now()).toISOString()};
+        row.data=m.deleted?null:sbStripSamples(await projGetData(m.id));
+        // A live project whose body vanished would push a null over a good
+        // remote copy — skip it and let the remote win instead.
+        if(!m.deleted&&!row.data)continue;
+        toPush.push(row);
+      }
+      // Chunked so one oversized request can't fail the whole sync.
+      for(let i=0;i<toPush.length;i+=10){
+        await sbUpsert(cfg,tok,toPush.slice(i,i+10));
+        pushed+=Math.min(10,toPush.length-i);
+      }
+      const now=Date.now();
+      // Compare-and-set. `localById` is a snapshot from the top of the sync, so
+      // writing it back wholesale would revert a SAVE the user made while the
+      // upload was in flight — the save would lose its newer `updated`, never
+      // push, and get overwritten by the next pull. Re-read, and only stamp the
+      // sync bookkeeping if the row still holds the version we actually sent.
+      const afterPush=new Map((await projListAll()).map(m=>[m.id,m]));
+      for(const row of toPush){
+        const cur=afterPush.get(row.client_id);
+        if(!cur)continue;
+        const sent=Date.parse(row.updated_at);
+        if((cur.updated||0)!==sent)continue; // changed mid-flight — leave it unsynced so the next run pushes it
+        await projPutMeta(Object.assign({},cur,{syncedAt:now,remoteUpdated:sent}));
+      }
+
+      // 2. Remote → local: rows we don't have, or rows the server has a newer
+      //    version of. Only these pull a `data` body over the wire.
+      for(const r of remote){
+        const m=localById.get(r.client_id);
+        const rt=rTime(r);
+        if(m&&rt<=(m.updated||0))continue;             // ours is same-or-newer
+        if(r.deleted){
+          const rts=rt||now;
+          if(m&&!m.deleted){ await projTombstone(Object.assign({},m,{deleted:true,updated:rts,syncedAt:now,remoteUpdated:rts})); pulled++; }
+          else if(!m){ await projPutMeta({id:r.client_id,name:r.name||"UNTITLED",created:rts,updated:rts,deleted:true,syncedAt:now,remoteUpdated:rts}); }
+          continue;
+        }
+        const rows=await sbGetOne(cfg,tok,r.client_id);
+        const full=rows&&rows[0];
+        if(!full||!full.data)continue;
+        // Same mid-flight hazard on the way in: re-check against the CURRENT
+        // local row, not the snapshot taken at the top of the sync. A save made
+        // while the body was downloading is newer than what we're about to
+        // write, and overwriting it would silently discard the user's work.
+        const live=(await projListAll()).find(x=>x.id===r.client_id);
+        if(live&&!live.deleted&&(live.updated||0)>rt)continue;
+        // Samples never travel, so keep whatever this device already had for
+        // this project rather than blanking its sampler on every pull.
+        let data=full.data;
+        if(m&&!m.deleted){
+          try{ const prev=await projGetData(m.id); if(prev&&prev.userSamples)data=Object.assign({},data,{userSamples:prev.userSamples}); }catch(e){}
+        }
+        const rtl=rt||now;
+        await projPut({id:r.client_id,name:full.name||"UNTITLED",created:(m&&m.created)||rtl,updated:rtl,deleted:false,syncedAt:now,remoteUpdated:rtl},data);
+        pulled++;
+      }
+
+      await refreshProjects();
+      // The open project may have been rewritten by a pull; keep its displayed
+      // name honest without yanking the session out from under the user.
+      const cur=(await projListAll()).find(m=>m.id===curProjIdR.current);
+      if(cur&&!cur.deleted)setCurProjName(cur.name);
+      setSbLastSync(now);
+      setSbMsg(pushed||pulled?("SYNCED — "+pushed+" UP / "+pulled+" DOWN"):"UP TO DATE");
+    }catch(e){
+      setSbMsg(e.message||"SYNC FAILED");
+    }finally{
+      sbSyncingR.current=false; setSbBusy(false);
+    }
+  };
+
+  // ── PROJECT panel ─────────────────────────────────────────────────────────
+  // One definition, rendered in both the desktop left column and the mobile
+  // PROJECT sheet — `big` just scales the touch targets. Kept inside the
+  // component: a module-level arrow returning JSX is the CJS-transform footgun
+  // the build audit greps for.
+  const renderProjectPanel=(big)=>{
+    const q=projQuery.trim().toUpperCase();
+    const visible=q?projects.filter(p=>String(p.name).toUpperCase().includes(q)):projects;
+    const btnPad=big?"9px 0":"6px 0";
+    const fs=big?10:9;
+    const cloudState=!sbCfg?"setup":(!sbSession?"signin":"ready");
+    const inputStyle={width:"100%",boxSizing:"border-box",padding:big?"9px 10px":"6px 8px",background:"rgba(0,0,0,0.25)",border:"1px solid rgba(200,185,165,0.22)",borderRadius:5,color:"rgba(232,224,213,0.95)",fontSize:big?12:10,letterSpacing:1,fontFamily:"inherit",outline:"none"};
+    const miniBtn=(label,onClick,tint,disabled)=>(
+      <button key={label} disabled={disabled} onClick={onClick}
+        style={{flex:1,padding:big?"7px 0":"5px 0",fontSize:big?9:8,letterSpacing:1,fontWeight:600,fontFamily:"inherit",borderRadius:4,cursor:disabled?"default":"pointer",
+          border:"1px solid "+(disabled?"rgba(200,185,165,0.1)":(tint?tint+"66":"rgba(200,185,165,0.22)")),
+          background:"transparent",color:disabled?"rgba(200,185,165,0.2)":(tint||"rgba(210,195,175,0.6)")}}>{label}</button>
+    );
+    return(
+      <div>
+        {/* ── Current project header: what SAVE will overwrite ── */}
+        <div style={{padding:big?"10px 12px":"8px 10px",border:"1px solid rgba(200,185,165,0.14)",borderRadius:6,background:"rgba(220,200,180,0.03)",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+            <span style={{fontSize:big?13:11,fontWeight:600,letterSpacing:1.5,color:curProjId?"rgba(232,224,213,0.95)":"rgba(210,195,175,0.4)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
+              {curProjId?String(curProjName).toUpperCase():"UNSAVED SESSION"}
+            </span>
+            {projDirty&&<span title="unsaved changes" style={{fontSize:big?11:9,color:"#c9a96e",flexShrink:0}}>●</span>}
+          </div>
+          <div style={{display:"flex",gap:5}}>
+            {miniBtn(curProjId?"SAVE":"SAVE…",()=>saveProject(),"#7aaa96")}
+            {miniBtn("SAVE AS",()=>startNameEntry("saveas"))}
+            {miniBtn("＋ NEW",()=>newProject())}
+          </div>
+        </div>
+
+        {/* ── Inline name entry (SAVE AS / RENAME) — window.prompt() drops an
+             iOS home-screen PWA out of its own chrome, so it's a field here. ── */}
+        {nameEntry&&(
+          <div style={{marginBottom:8,padding:big?"10px":"8px",border:"1px solid rgba(201,169,110,0.35)",borderRadius:6,background:"rgba(201,169,110,0.06)"}}>
+            <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,190,140,0.7)",marginBottom:6,fontWeight:600}}>{nameEntry.mode==="rename"?"RENAME PROJECT":"NAME THIS PROJECT"}</div>
+            <input autoFocus value={nameEntry.value} maxLength={40} placeholder="UNTITLED" style={inputStyle}
+              onChange={e=>{const v=e.target.value;setNameEntry(ne=>ne?Object.assign({},ne,{value:v}):ne);}}
+              onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();commitNameEntry();}else if(e.key==="Escape"){e.preventDefault();setNameEntry(null);}}}/>
+            <div style={{display:"flex",gap:5,marginTop:6}}>
+              {miniBtn(nameEntry.mode==="rename"?"RENAME":"SAVE",()=>commitNameEntry(),"#7aaa96")}
+              {miniBtn("CANCEL",()=>setNameEntry(null))}
+            </div>
+          </div>
+        )}
+
+        {!projStoreOk&&(
+          <div style={{marginBottom:8,padding:"7px 9px",border:"1px solid rgba(196,120,120,0.35)",borderRadius:6,background:"rgba(196,120,120,0.08)",fontSize:big?9:8,letterSpacing:0.5,color:"rgba(220,160,160,0.9)",lineHeight:1.5}}>
+            STORAGE UNAVAILABLE — this browser is blocking IndexedDB, so projects can't be saved. EXPORT still works.
+          </div>
+        )}
+
+        {/* ── Library ── */}
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+          <span style={{fontSize:big?9:8,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>LIBRARY</span>
+          <span style={{fontSize:big?9:8,color:"rgba(210,195,175,0.25)"}}>{projects.length}</span>
+          <div style={{flex:1}}/>
+          {(projects.length>5||projQuery)&&(
+            <input value={projQuery} placeholder="FILTER" onChange={e=>setProjQuery(e.target.value)}
+              style={Object.assign({},inputStyle,{width:big?110:88,padding:big?"5px 8px":"3px 6px",fontSize:big?10:8})}/>
+          )}
+        </div>
+        <div style={{maxHeight:big?300:190,overflowY:"auto",WebkitOverflowScrolling:"touch",border:"1px solid rgba(200,185,165,0.1)",borderRadius:6,marginBottom:10}}>
+          {visible.length===0&&(
+            <div style={{padding:big?"20px 12px":"14px 10px",fontSize:big?10:9,letterSpacing:1,color:"rgba(210,195,175,0.28)",textAlign:"center"}}>
+              {projects.length?"NO MATCH":"NO SAVED PROJECTS YET"}
+            </div>
+          )}
+          {visible.map(p=>{
+            const isCur=p.id===curProjId;
+            const open=projMenu===p.id;
+            const synced=!!p.syncedAt&&p.syncedAt>=(p.updated||0);
+            return(
+              <div key={p.id} style={{borderBottom:"1px solid rgba(200,185,165,0.07)",background:isCur?"rgba(201,169,110,0.07)":"transparent"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,padding:big?"9px 10px":"6px 8px"}}>
+                  <button onClick={()=>loadProject(p.id)}
+                    style={{flex:1,minWidth:0,textAlign:"left",background:"transparent",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit"}}>
+                    <div style={{fontSize:big?12:10,fontWeight:600,letterSpacing:1,color:isCur?"#c9a96e":"rgba(232,224,213,0.85)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{String(p.name).toUpperCase()}</div>
+                    <div style={{fontSize:big?9:7.5,color:"rgba(210,195,175,0.3)",letterSpacing:0.5,marginTop:1}}>{projFmtDate(p.updated)}</div>
+                  </button>
+                  {/* Cloud tick: this row's current bytes are on the server. */}
+                  {sbSession&&<span title={synced?"synced":"not yet synced"} style={{fontSize:big?10:8,color:synced?"rgba(122,170,150,0.75)":"rgba(210,195,175,0.18)",flexShrink:0}}>☁</span>}
+                  <button onClick={()=>setProjMenu(open?null:p.id)}
+                    style={{width:big?26:20,height:big?26:20,flexShrink:0,border:"1px solid "+(open?"rgba(200,185,165,0.35)":"rgba(200,185,165,0.14)"),background:"transparent",borderRadius:4,color:"rgba(210,195,175,0.5)",fontSize:big?12:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
+                </div>
+                {open&&(
+                  <div style={{display:"flex",gap:4,padding:big?"0 10px 9px":"0 8px 6px"}}>
+                    {miniBtn("LOAD",()=>{setProjMenu(null);loadProject(p.id);})}
+                    {miniBtn("RENAME",()=>{setProjMenu(null);startNameEntry("rename",p.id);})}
+                    {miniBtn("DUPE",()=>{setProjMenu(null);duplicateProject(p.id);})}
+                    {miniBtn("DELETE",()=>{setProjMenu(null);deleteProject(p.id);},"#c98a8a")}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Cloud ── */}
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+          <span style={{fontSize:big?9:8,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>CLOUD</span>
+          <div style={{flex:1}}/>
+          <button onClick={()=>setCloudPanel(v=>!v)}
+            style={{padding:big?"4px 10px":"3px 8px",fontSize:big?9:8,letterSpacing:1,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(210,195,175,0.5)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+            {cloudPanel?"HIDE":(cloudState==="ready"?"ACCOUNT":"SET UP")}
+          </button>
+          <button onClick={()=>syncCloud()} disabled={sbBusy||cloudState!=="ready"}
+            style={{padding:big?"4px 14px":"3px 12px",fontSize:big?9:8,letterSpacing:1.5,fontWeight:600,fontFamily:"inherit",borderRadius:4,cursor:(sbBusy||cloudState!=="ready")?"default":"pointer",
+              border:"1px solid "+(cloudState==="ready"?"rgba(122,170,150,0.5)":"rgba(200,185,165,0.12)"),
+              background:cloudState==="ready"?"rgba(122,170,150,0.08)":"transparent",
+              color:cloudState==="ready"?"#7aaa96":"rgba(210,195,175,0.22)"}}>{sbBusy?"…":"SYNC"}</button>
+        </div>
+        <div style={{fontSize:big?9:7.5,letterSpacing:0.5,color:"rgba(210,195,175,0.3)",marginBottom:cloudPanel?8:10,lineHeight:1.5}}>
+          {cloudState==="setup"&&"NOT CONNECTED — ADD A SUPABASE PROJECT TO SYNC ACROSS DEVICES"}
+          {cloudState==="signin"&&"CONNECTED — SIGN IN TO SYNC"}
+          {cloudState==="ready"&&((sbSession.user&&sbSession.user.email)||"SIGNED IN")+(sbLastSync?" · SYNCED "+projFmtDate(sbLastSync):" · NOT SYNCED YET")}
+        </div>
+        {sbMsg&&<div style={{fontSize:big?9:8,letterSpacing:1,color:"rgba(210,190,140,0.8)",marginBottom:8,padding:"5px 8px",background:"rgba(196,150,80,0.08)",border:"1px solid rgba(196,150,80,0.2)",borderRadius:5}}>{sbMsg}</div>}
+
+        {cloudPanel&&(
+          <div style={{padding:big?"10px":"8px",border:"1px solid rgba(200,185,165,0.14)",borderRadius:6,marginBottom:10,display:"flex",flexDirection:"column",gap:7}}>
+            {/* Step 1 — point the app at a Supabase project. The anon key is a
+                public client key (RLS is the actual protection), which is why it
+                can live in local storage instead of being baked into the build. */}
+            <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",fontWeight:600}}>1 · SUPABASE PROJECT</div>
+            <input value={sbCfgUrl} placeholder="https://xxxx.supabase.co" autoComplete="off" autoCapitalize="off" spellCheck={false}
+              onChange={e=>setSbCfgUrl(e.target.value)} style={inputStyle}/>
+            <input value={sbCfgKey} placeholder="anon public key" autoComplete="off" autoCapitalize="off" spellCheck={false}
+              onChange={e=>setSbCfgKey(e.target.value)} style={inputStyle}/>
+            <div style={{display:"flex",gap:5}}>
+              {miniBtn("SAVE KEYS",()=>saveSbCfg(sbCfgUrl,sbCfgKey),"#7aaa96")}
+              {miniBtn(sbShowSql?"HIDE SQL":"TABLE SQL",()=>setSbShowSql(v=>!v))}
+              {sbCfg?miniBtn("DISCONNECT",()=>clearSbCfg(),"#c98a8a"):null}
+            </div>
+            {sbShowSql&&(
+              <div>
+                <div style={{fontSize:8,letterSpacing:0.5,color:"rgba(210,195,175,0.35)",marginBottom:4,lineHeight:1.5}}>
+                  Run this once in the Supabase SQL editor, then set Authentication → Email Templates → Magic Link to include <code style={{color:"rgba(210,190,140,0.8)"}}>{"{{ .Token }}"}</code> so the mail carries a code.
+                </div>
+                <textarea readOnly value={SB_SQL} rows={10} onFocus={e=>e.target.select()}
+                  style={Object.assign({},inputStyle,{fontSize:8,lineHeight:1.45,resize:"vertical",whiteSpace:"pre"})}/>
+              </div>
+            )}
+
+            {/* Step 2 — email OTP. No password to remember, no OAuth redirect
+                (a redirect would bounce an installed PWA out to Safari). */}
+            <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",fontWeight:600,marginTop:2}}>2 · SIGN IN</div>
+            {sbSession?(
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <span style={{flex:1,fontSize:big?10:9,color:"rgba(122,170,150,0.85)",letterSpacing:0.5,overflow:"hidden",textOverflow:"ellipsis"}}>{(sbSession.user&&sbSession.user.email)||"SIGNED IN"}</span>
+                {miniBtn("SIGN OUT",()=>sbSignOut())}
+              </div>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <input value={sbEmail} placeholder="you@example.com" type="email" autoComplete="email" autoCapitalize="off" spellCheck={false}
+                  onChange={e=>setSbEmail(e.target.value)} style={inputStyle}/>
+                {sbStage==="code"&&(
+                  <input value={sbCode} placeholder="6-digit code from the email" inputMode="numeric" autoComplete="one-time-code"
+                    onChange={e=>setSbCode(e.target.value)} style={inputStyle}/>
+                )}
+                <div style={{display:"flex",gap:5}}>
+                  {sbStage==="code"
+                    ?miniBtn(sbBusy?"…":"VERIFY",()=>sbSignInVerify(),"#7aaa96",sbBusy)
+                    :miniBtn(sbBusy?"…":"EMAIL ME A CODE",()=>sbSignInStart(),"#7aaa96",sbBusy)}
+                  {sbStage==="code"?miniBtn("RESEND",()=>sbSignInStart(),null,sbBusy):null}
+                </div>
+              </div>
+            )}
+            <div style={{fontSize:7.5,letterSpacing:0.3,color:"rgba(210,195,175,0.25)",lineHeight:1.5,marginTop:2}}>
+              Recorded samples stay on this device — they're too large to sync and never leave local storage.
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── One-time migration off the old four-slot store ────────────────────────
+  // S1..S4 were the whole library, so silently dropping them would look like
+  // data loss. Each populated slot becomes a named project keeping its slot
+  // label; the legacy "slots" key is left in place untouched as a safety net.
+  const migrateSlots=async()=>{
+    const done=await storageGet("slots_migrated");
+    if(done)return false;
+    let legacy=null;
+    try{ const raw=await storageGet("slots"); if(raw)legacy=JSON.parse(raw); }catch(e){}
+    let n=0,failed=0;
+    if(legacy&&typeof legacy==="object"){
+      const now=Date.now();
+      for(const slot of SLOTS){
+        const snap=legacy[slot];
+        if(!snap)continue;
+        // Spread the timestamps so the imported order in the list matches S1..S4.
+        const t=now-(SLOTS.length-SLOTS.indexOf(slot))*1000;
+        try{
+          await projPut({id:projNewId(),name:slot,created:t,updated:t,deleted:false,syncedAt:0,remoteUpdated:0},snap);
+          n++;
+        }catch(e){ failed++; }
+      }
+    }
+    // Only latch "done" if nothing was dropped. If IDB was blocked or full on
+    // this launch, latching would strand the user's four legacy slots forever —
+    // they'd still be sitting in the old key with nothing left to read them.
+    if(!failed)await storageSet("slots_migrated","1");
+    return n;
+  };
+
   // ── New project ─────────────────────────────────────────────────────────
-  // Reset everything to default initial state. Save slots are NOT cleared
-  // (that's persistent storage outside the session). Confirms before
-  // discarding any in-memory work, mirroring loadSlot's hasContent guard.
+  // Reset everything to default initial state. The stored library is NOT
+  // touched — this only clears the live session. Confirms before discarding
+  // in-memory work, mirroring loadProject's guard.
   const doNew=()=>{
     // Stop playback if running — discarding work mid-play would otherwise leave
     // the scheduler ticking against fresh state.
@@ -3081,7 +3842,9 @@ export default function Tabula(){
       }
     }
     setPatternDrag(null);
-    setActiveSlot(null);
+    // The new session belongs to no stored project yet — the library is
+    // untouched, but SAVE now means SAVE AS until it's named.
+    setCurProjId(null);setCurProjName("");setProjDirty(false);dirtyAdoptR.current=true;
     setPage("edit");
     // Stop any in-flight sample recording + clear stored samples.
     if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}
@@ -3095,15 +3858,13 @@ export default function Tabula(){
     showFlash("NEW PROJECT");
   };
   const newProject=()=>{
-    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
-    if(hasContent){setConfirmAction({type:"new",label:"NEW PROJECT? UNSAVED WORK LOST"});return;}
+    if(unsavedWorkAtRisk()){setConfirmAction({type:"new",label:"NEW PROJECT? UNSAVED WORK LOST"});return;}
     doNew();
   };
   const confirmYes=()=>{
     if(!confirmAction)return;
-    if(confirmAction.type==="save")doSave(confirmAction.slot);
-    else if(confirmAction.type==="load")doLoad(confirmAction.slot);
-    else if(confirmAction.type==="clear")doClear(confirmAction.slot);
+    if(confirmAction.type==="loadProj")doLoadProject(confirmAction.id);
+    else if(confirmAction.type==="delProj")doDeleteProject(confirmAction.id);
     else if(confirmAction.type==="new")doNew();
     setConfirmAction(null);
   };
@@ -3579,6 +4340,27 @@ export default function Tabula(){
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
   },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+  // Unsaved-changes dot for the project library. Compares a signature of the
+  // live project against the one captured at the last save/load rather than
+  // flagging on any state change: `playing` is in the dependency list (it has
+  // to be, it's the autosave's list) but transport is not project content, and
+  // a load fires a cascade of setStates that would otherwise read as an edit.
+  // Comparing content means neither can produce a false dot.
+  //
+  // Debounced and lean (getShareState(false) — no base64 samples) so the
+  // stringify never lands on top of a grid drag. dirtyAdoptR means "whatever
+  // the session settles into is the new baseline" — set by save, load and NEW.
+  const savedSigR = useRef(null);
+  const dirtyAdoptR = useRef(true); // first settle after boot establishes the baseline
+  useEffect(()=>{
+    const id=setTimeout(()=>{
+      let sig; try{ sig=JSON.stringify(getShareState(false)); }catch(e){ return; }
+      if(dirtyAdoptR.current){ dirtyAdoptR.current=false; savedSigR.current=sig; storageSet("proj_sig",sig); setProjDirty(false); return; }
+      setProjDirty(savedSigR.current!==sig);
+    },500);
+    return ()=>clearTimeout(id);
+  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -5995,7 +6777,7 @@ export default function Tabula(){
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginTop:4}}>
               <div style={{marginBottom:6}}>
-                <div style={{...S.menuSaveLabel,marginBottom:4}}>SAVE / LOAD</div>
+                <div style={{...S.menuSaveLabel,marginBottom:4}}>PROJECT</div>
                 {flash&&<div style={S.menuFlash}>{flash}</div>}
               {confirmAction&&(
                 <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:5}}>
@@ -6005,24 +6787,7 @@ export default function Tabula(){
                 </div>
               )}
 
-                {/* NEW PROJECT — discards in-memory work and resets to defaults */}
-                <button style={{width:"100%",padding:"7px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:5,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:6,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
-                {/* Slot grid: each slot is a column with label, SAVE, LOAD stacked */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-                  {SLOTS.map(slot=>{
-                    const has=!!slotData[slot];
-                    const isActive=activeSlot===slot;
-                    const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};
-                    return(
-                      <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"stretch"}}>
-                        <div style={{fontSize:9,letterSpacing:2,fontWeight:600,color:isActive?"#c9a96e":"rgba(210,195,175,0.55)",textAlign:"center",marginBottom:1}}>{slot}{has&&<span style={{...S.menuSlotDot,marginLeft:2}}>●</span>}</div>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600,color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
-                      </div>
-                    );
-                  })}
-                </div>
+                {renderProjectPanel(false)}
               </div>
               <div style={{marginBottom:6}}>
                 <div style={S.menuSaveLabel}>SHARE</div>
@@ -7877,18 +8642,7 @@ export default function Tabula(){
                         </div>
                       );
                     })()}
-                    {/* NEW PROJECT — discards in-memory work and resets to defaults */}
-                    <button style={{width:"100%",padding:"10px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:6,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:14,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                      {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};return(
-                        <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                          <span style={Object.assign({},S.menuSlotName,isActive?{color:"#c9a96e"}:{})}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                          <button style={Object.assign({},S.menuSlotBtn,activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
-                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                          <button style={Object.assign({},S.menuSlotBtn,{color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
-                        </div>
-                      );})}
-                    </div>
+                    <div style={{marginBottom:16}}>{renderProjectPanel(true)}</div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>SHARE</div>
                     {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
@@ -8155,10 +8909,7 @@ const S={
   menuFlash:    {padding:"6px 10px",background:"rgba(122,170,150,0.12)",border:"1px solid rgba(105,240,174,0.25)",borderRadius:5,fontSize:9,color:"#7aaa96",letterSpacing:1,textAlign:"center",marginBottom:10},
   menuSlots:    {display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8},
   menuSlot:     {display:"flex",flexDirection:"column",gap:5,alignItems:"center"},
-  menuSlotName: {fontSize:11,fontWeight:700,color:"rgba(210,195,175,0.5)",letterSpacing:2,position:"relative"},
-  menuSlotDot:  {color:"#7aaa96",fontSize:IS_MOBILE?8:10,marginLeft:2},
   menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
-  menuSlotBtnLit:{border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"},
   // STEP page
   stepPage:     {paddingTop:4,display:"flex",flexDirection:"column",gap:14},
   stepPageHdr:  {display:"flex",alignItems:"center",gap:10},

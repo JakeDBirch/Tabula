@@ -71,7 +71,25 @@ The scheduler is a per-layer lookahead loop (~25 ms tick, ~100 ms ahead). `layer
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
 - **Ballistic drag helper** = `ballisticDelta(pd, dim, range)`. Double-tap detection = `isDoubleTap(e, key?)` (custom, because DOM `dblclick` is unreliable on touch).
-- **STEP lanes**, **autosave**, **MP3/MIDI export**, and **S1–S4 save slots** (SAVE/LOAD/CLEAR, persisted via `storageSet("slots", …)`) all exist.
+- **STEP lanes**, **autosave**, and **MP3/MIDI export** all exist.
+
+### Project library (replaced the S1–S4 slots)
+
+Named, unlimited projects in **IndexedDB** (db `tabula`), with optional Supabase sync. The old four-slot blob under `storageSet("slots", …)` is gone; `migrateSlots()` folds any legacy slots in once on boot (named S1..S4, flag `slots_migrated`, old key left in place) and only latches the flag if nothing failed.
+
+- **Two object stores on purpose.** `proj_meta` = `{id,name,created,updated,deleted,syncedAt,remoteUpdated}` — small, read in full on boot to paint the list. `proj_data` = `{id,data}` — the heavy snapshot (samples included), read only when a project is actually opened. IDB can't project a subset of fields out of a record, so this split is what keeps boot cheap.
+- **`buildProjectSnapshot()` / `applyProjectSnapshot()`** are the single serialize/apply pair (extracted from the old per-slot doSave/doLoad). The multi-site persistence rule below still applies to both.
+- **Deletes are tombstones**, not erasures (`deleted:true`, data row dropped). A hard delete is indistinguishable from "never synced" on the other device, so the next pull would resurrect it. Purged after `TOMB_TTL` (30d) *and* only once synced (or cloud is off).
+- **Unsaved dot** = signature compare (`savedSigR` vs a debounced `getShareState(false)`), persisted as `proj_sig` so it survives a reload. Not a "did any state change" flag: `playing` is in the watcher's dep list and a load fires a whole setState cascade, so both would produce false dots.
+- **`cur_proj`** remembers which project the session belongs to across reloads. Not restored for a share-link session (SAVE would overwrite an unrelated project).
+
+### Cloud sync (Supabase, plain REST)
+
+No SDK — Tabula is one static file, so it's `fetch` against GoTrue (`/auth/v1`, email OTP) and PostgREST (`/rest/v1/projects`). URL + anon key are entered **in the app** (PROJECT ▸ CLOUD ▸ SET UP) and stored locally; the anon key is public by design, RLS is the protection. `SB_SQL` in the source is the table + policy to paste into the Supabase SQL editor.
+
+- Manual, **last-write-wins on `updated`**, never automatic — a sequencer shouldn't fire network writes mid-play, and an autosync would let a stale phone clobber a desktop session.
+- **Recorded samples never leave the device** (`sbStripSamples`); a pull preserves whatever samples that device already had.
+- Both sync directions re-read local state before writing, so a SAVE made while a sync is in flight isn't reverted or clobbered.
 
 ### FX
 
@@ -104,6 +122,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 - **iOS gesture interception**: parent `touch-action: pan-x` / `overflow-x: auto` makes Safari swallow gestures at the OS level — vertical drags don't propagate. If a drag feels "stuck horizontally," check the parent's `touch-action`.
 - **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building.
 - **Cross-layer audio**: always resolve pattern data through `resolveLayerPat` / `layerStoreR.current[layer]`, never assume `patsR.current` (only valid for the active layer).
+- **The service worker will eat your API calls.** `sw.js` was cache-first for *every* non-navigation GET, which silently swallowed cloud sync: the first listing got cached and every later sync was served that same stale body without reaching the server — so the app thought the server was empty, re-pushed everything, pulled nothing, and reported success every time. It now whitelists same-origin + the two CDN hosts and lets everything else through uncached. Any new network call must stay outside that whitelist. Symptom to recognise: it only reproduces on the *second* call, and the request shows in devtools with a response.
 
 ---
 
@@ -116,5 +135,5 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 ## Open threads
 
-- **Cloud sync (task #87)**: chose **Supabase** for cross-device project sync (start on desktop, continue on phone). v1 = manual Save/Load to cloud (like the slots, synced), email-OTP auth. Blocked on Jake providing the Supabase **project URL + anon key** (and running the given SQL / adding `{{ .Token }}` to the magic-link email template). Reuse `getShareState(true)` to serialize. Don't create his account or enter credentials.
+- **Cloud sync setup is on Jake.** The code is done and shipped; it needs a Supabase project to point at: create one, run the SQL shown under PROJECT ▸ CLOUD ▸ SET UP ▸ TABLE SQL, add `{{ .Token }}` to Authentication ▸ Email Templates ▸ Magic Link (so the mail carries a 6-digit code rather than only a link), then paste the project URL + anon key into the app. Don't create his account or enter credentials for him.
 - Long-form content beyond 64 bars is not planned.
