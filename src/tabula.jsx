@@ -27,6 +27,17 @@ const DLY_NOTES = [
   {label:"1/2",  mult:2},  {label:"1/2·", mult:3},   {label:"1/1",  mult:4},
 ];
 const ROWS=16,COLS=16;
+// COLS is STEPS PER BAR — and also the width of the visible grid page. A
+// pattern may now be several bars long: its arrays are patW(p)=bars*COLS wide
+// and the editor shows one bar at a time (see barPage). Keeping COLS meaning
+// "steps per bar" is what lets every bit of layout math (ci/COLS, rect.width/
+// COLS, the step bar) stay exactly as it was — the grid just draws a window
+// into a wider pattern.
+const MAX_BARS=32;
+const patBars=p=>Math.max(1,Math.min(MAX_BARS,(p&&p.bars)||1));
+const patW=p=>patBars(p)*COLS;
+// Width actually allocated in a pattern's arrays (may lag `bars` mid-migration).
+const gridW=g=>(g&&g[0]&&g[0].length)||COLS;
 // Single shared pool of 16 abstract, structurally-distinct glyphs.
 // Each field type picks from the pool with its own start offset and stride
 // (strides 5, 11, 3 are all coprime with 16, so each field visits every
@@ -83,7 +94,7 @@ const rowHue=r=>Math.round(195-(r/(ROWS-1))*135);
 const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
 const patCol=i=>PAT_COLORS[i%PAT_COLORS.length];
 let _id=0;
-const mkGrid=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(false));
+const mkGrid=(w=COLS)=>Array.from({length:ROWS},()=>new Array(w).fill(false));
 
 // ── Musical RAND ───────────────────────────────────────────────────────────
 // The rows are already scale degrees (fromBot = ROWS-1-row; the tonic sits at
@@ -176,9 +187,9 @@ const randPolyGrid=()=>{
 // meaningful where grid[r][c] is true. Per-row durations enable true polyphony —
 // extending one note's duration doesn't affect notes in other rows. Within a row,
 // only one note plays at any moment (per-row monophony).
-const mkDurs=()=>Array.from({length:ROWS},()=>new Array(COLS).fill(1));
-const defaultStepParams=()=>Array.from({length:COLS},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0}));
-const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,speedMult:1});
+const mkDurs=(w=COLS)=>Array.from({length:ROWS},()=>new Array(w).fill(1));
+const defaultStepParams=(w=COLS)=>Array.from({length:w},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0}));
+const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,bars:1,speedMult:1});
 // Cull a pattern down to monophonic — at most one active note per column.
 // Used when copying a POLY (multi-row-per-col) pattern onto the MONO layer:
 // without this, dragging a chord onto MONO would still try to play every
@@ -187,8 +198,9 @@ const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStep
 // mutate inputs.
 const cullPatToMono=(grid,durs)=>{
   const g=grid.map(row=>[...row]);
-  const d=durs?durs.map(row=>[...row]):mkDurs();
-  for(let c=0;c<COLS;c++){
+  const W=gridW(grid);
+  const d=durs?durs.map(row=>[...row]):mkDurs(W);
+  for(let c=0;c<W;c++){
     let kept=false;
     for(let r=0;r<ROWS;r++){
       if(!g[r][c])continue;
@@ -241,36 +253,267 @@ const DRUM_ORDER_11=["BD","SD","LT","MT","HT","CH","OH","CY","CP","CL","CB"];   
 const DRUM_ORDER_13_OLD=["BD","SD","LT","MT","HT","CH","OH","CY","CP","CL","CB","RM","SH"]; // v1 (pre-reorder)
 // Drum velocity is PER-CELL: vel[row][col]. (Was per-column vel[col].) This
 // lets two voices on the same step play at different velocities.
-const mkDrumVel=()=>Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(100));
+const mkDrumVel=(w=COLS)=>Array.from({length:DRUM_ROWS},()=>new Array(w).fill(100));
 // Normalize any saved vel into the per-cell 2D shape. Legacy saves stored a
 // 1D per-column array — broadcast each column value across all rows. A 2D
 // array (current shape) is copied cell-by-cell into a fresh full-size grid.
-const toDrumVel2D=(vel)=>{
-  const out=mkDrumVel();
+// `w` is the pattern's column count. Without it these normalizers would clip a
+// multi-bar pattern's velocity/ratchet lanes back to one bar on every call —
+// and they're called from the cell editors, so the damage would be silent.
+const toDrumVel2D=(vel,w)=>{
+  const W=w||(Array.isArray(vel)&&Array.isArray(vel[0])?gridW(vel):COLS);
+  const out=mkDrumVel(W);
   if(!Array.isArray(vel))return out;
   if(Array.isArray(vel[0])){ // already per-cell
-    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
+    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<W;c++)
       if(vel[r]&&vel[r][c]!=null)out[r][c]=vel[r][c];
   } else { // legacy per-column → broadcast down each column
-    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
-      if(vel[c]!=null)out[r][c]=vel[c];
+    for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<W;c++)
+      if(vel[c%vel.length]!=null)out[r][c]=vel[c%vel.length];
   }
   return out;
 };
 // Per-cell ratchet: rat[row][col] = how many evenly-spaced retriggers fire
 // within that step (1 = a single normal hit). Ctrl/Cmd+click a cell cycles it.
-const mkDrumRat=()=>Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(1));
+const mkDrumRat=(w=COLS)=>Array.from({length:DRUM_ROWS},()=>new Array(w).fill(1));
 // Normalize a saved ratchet grid into the 2D shape. No legacy 1D form exists
 // (the field is new), so anything non-2D just yields all-1s.
-const toDrumRat2D=(rat)=>{
-  const out=mkDrumRat();
+const toDrumRat2D=(rat,w)=>{
+  const W=w||(Array.isArray(rat)&&Array.isArray(rat[0])?gridW(rat):COLS);
+  const out=mkDrumRat(W);
   if(!Array.isArray(rat)||!Array.isArray(rat[0]))return out;
-  for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<COLS;c++)
+  for(let r=0;r<DRUM_ROWS;r++)for(let c=0;c<W;c++)
     if(rat[r]&&rat[r][c]!=null)out[r][c]=Math.max(1,Math.min(8,rat[r][c]));
   return out;
 };
-const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),rat:mkDrumRat(),gridLen:16,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1,vo:DRUM_ORDER_V});
-// Continuous drum-mix params that support motion automation (the slider ones;
+const mkDrumPat=name=>({id:++_id,name,grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),rat:mkDrumRat(),gridLen:16,bars:1,mix:defaultDrumMix(),vRhythm:0,vVelocity:0,speedMult:1,vo:DRUM_ORDER_V});
+
+
+// ── Sparse pattern codec ─────────────────────────────────────────────────
+// A pattern's grid is ROWS × (bars*COLS) cells that are overwhelmingly false,
+// and JSON writes every one of them out longhand: a single 1-bar pattern costs
+// ~3.3KB, so a project of 32-bar patterns would serialize to megabytes. That
+// breaks in two places at once — share links carry the whole project base64'd
+// in the URL, and autosave writes the same blob into localStorage's ~5MB quota
+// — and it would put 50 dense undo snapshots in memory on a phone.
+//
+// So everything that leaves live state (share link, file export, save slot,
+// undo snapshot) stores only the cells that are ON and the values that differ
+// from their default. A 32-bar pattern with 60 notes costs single-digit KB,
+// which is smaller than today's dense 1-bar encoding.
+//
+// Decoding is tolerant: anything without the `_pk` marker is a pre-codec dense
+// save and passes through untouched, so old projects still load.
+const _packBool=(rows,W)=>{
+  const on=[];
+  for(let r=0;r<(rows||[]).length;r++){
+    const row=rows[r]; if(!row)continue;
+    for(let c=0;c<W;c++)if(row[c])on.push(r*W+c);
+  }
+  return on;
+};
+const _unpackBool=(on,H,W)=>{
+  const g=Array.from({length:H},()=>new Array(W).fill(false));
+  for(const k of (on||[])){const r=Math.floor(k/W),c=k%W;if(g[r]&&c<W)g[r][c]=true;}
+  return g;
+};
+// Numeric lanes ride as a flat [index,value,index,value,…] pair list — half the
+// JSON of an array of 2-element arrays.
+const _packNum=(rows,W,def)=>{
+  const out=[];
+  for(let r=0;r<(rows||[]).length;r++){
+    const row=rows[r]; if(!row)continue;
+    for(let c=0;c<W;c++){const v=row[c];if(v!==undefined&&v!==def)out.push(r*W+c,v);}
+  }
+  return out;
+};
+const _unpackNum=(flat,H,W,def)=>{
+  const g=Array.from({length:H},()=>new Array(W).fill(def));
+  for(let i=0;i+1<(flat||[]).length;i+=2){
+    const k=flat[i],r=Math.floor(k/W),c=k%W;
+    if(g[r]&&c<W)g[r][c]=flat[i+1];
+  }
+  return g;
+};
+const _packParams=(arr,W)=>{
+  const D=defaultStepParams(1)[0],out=[];
+  for(let i=0;i<W;i++){
+    const sp=arr&&arr[i]; if(!sp)continue;
+    const d={};let any=false;
+    for(const k of Object.keys(sp)){
+      if(!(k in D)||sp[k]!==D[k]){d[k]=sp[k];any=true;}   // keeps unknown keys too
+    }
+    if(any)out.push([i,d]);
+  }
+  return out;
+};
+const _unpackParams=(list,W)=>{
+  const a=defaultStepParams(W);
+  for(const e of (list||[])){if(Array.isArray(e)&&a[e[0]])Object.assign(a[e[0]],e[1]);}
+  return a;
+};
+// packPat also serves as the deep copy for undo snapshots — every heavy lane
+// comes back as a fresh array, so callers don't need a JSON round-trip first.
+const packPat=(p)=>{
+  if(!p||!Array.isArray(p.grid)||p._pk)return p;
+  const W=gridW(p.grid),H=p.grid.length;
+  const o=Object.assign({},p,{_pk:1,_w:W,_h:H});
+  o.grid=_packBool(p.grid,W);
+  if(p.durs)  o.durs  =_packNum(p.durs,W,1);
+  if(p.params)o.params=_packParams(p.params,W);
+  if(p.vel)   o.vel   =_packNum(Array.isArray(p.vel[0])?p.vel:toDrumVel2D(p.vel,W),W,100);
+  if(p.rat)   o.rat   =_packNum(Array.isArray(p.rat[0])?p.rat:toDrumRat2D(p.rat,W),W,1);
+  if(Array.isArray(p.mix))o.mix=p.mix.map(m=>Object.assign({},m));
+  if(p.motion&&typeof p.motion==="object"){
+    const m={};
+    for(const k of Object.keys(p.motion)){
+      const lane=p.motion[k];
+      if(Array.isArray(lane))m[k]=_packNum(lane,W,null);
+    }
+    o.motion=m;
+  }
+  return o;
+};
+const unpackPat=(p)=>{
+  if(!p||!p._pk)return p;                       // pre-codec dense save
+  const W=p._w||COLS, H=p._h||(p.durs!==undefined?ROWS:DRUM_ROWS);
+  const o=Object.assign({},p);
+  delete o._pk;delete o._w;delete o._h;
+  o.grid=_unpackBool(p.grid,H,W);
+  if(p.durs!==undefined)  o.durs  =_unpackNum(p.durs,H,W,1);
+  if(p.params!==undefined)o.params=_unpackParams(p.params,W);
+  if(p.vel!==undefined)   o.vel   =_unpackNum(p.vel,H,W,100);
+  if(p.rat!==undefined)   o.rat   =_unpackNum(p.rat,H,W,1);
+  if(p.motion&&typeof p.motion==="object"){
+    const m={};
+    for(const k of Object.keys(p.motion))m[k]=_unpackNum(p.motion[k],H,W,null);
+    o.motion=m;
+  }
+  return normalizePatBars(o);
+};
+// Patterns live in three places in a project: the active layer's `pats`, the
+// drum `drumPats`, and each parked layer inside `layerStore`. Miss one and that
+// layer silently loses its notes on the next save — the layer-store split is
+// exactly the trap the architecture notes warn about.
+const _mapProjectPats=(st,fn)=>{
+  if(!st)return st;
+  const o=Object.assign({},st);
+  if(Array.isArray(st.pats))o.pats=st.pats.map(fn);
+  if(Array.isArray(st.drumPats))o.drumPats=st.drumPats.map(fn);
+  if(st.layerStore&&typeof st.layerStore==="object"){
+    const ls={};
+    for(const k of Object.keys(st.layerStore)){
+      const v=st.layerStore[k];
+      ls[k]=(v&&Array.isArray(v.pats))?Object.assign({},v,{pats:v.pats.map(fn)}):v;
+    }
+    o.layerStore=ls;
+  }
+  return o;
+};
+const packProject  =(st)=>_mapProjectPats(st,packPat);
+const unpackProject=(st)=>_mapProjectPats(st,unpackPat);
+
+// ── Bar-scoped column helpers ────────────────────────────────────────────
+// The editor works one bar at a time, so RAND / CLR / CPY / PST / MUT8 all act
+// on a COLS-wide column window rather than the whole pattern. These move those
+// windows around: `sliceCols` lifts one out, `spliceCols` drops one in.
+const sliceCols=(rows,off,w=COLS,fill=()=>false)=>(rows||[]).map(row=>{
+  const o=new Array(w);
+  for(let i=0;i<w;i++)o[i]=(row&&row[off+i]!==undefined)?row[off+i]:fill();
+  return o;
+});
+const spliceCols=(dst,src,dstOff,srcOff=0,w=COLS,fill=()=>false)=>(dst||[]).map((row,ri)=>{
+  const o=[...row];
+  for(let i=0;i<w;i++){
+    const d=dstOff+i; if(d>=o.length)break;
+    const sv=(src&&src[ri])?src[ri][srcOff+i]:undefined;
+    o[d]=sv!==undefined?sv:fill();
+  }
+  return o;
+});
+// Flat per-column arrays (a pattern's `params`). Values are objects, so both
+// directions copy rather than alias — otherwise editing a pasted step's
+// velocity would reach back into the clipboard.
+const sliceFlat=(arr,off,w=COLS,mk=()=>defaultStepParams(1)[0])=>{
+  const o=new Array(w);
+  for(let i=0;i<w;i++)o[i]=(arr&&arr[off+i])?Object.assign({},arr[off+i]):mk();
+  return o;
+};
+// Open a COLS-wide hole at column `at` by sliding everything from there to the
+// right — the pattern must already have been grown by one bar. Used by
+// duplicate-bar, which INSERTS after the visible bar rather than overwriting
+// whatever came next.
+const openBarGap=(rows,at,W)=>(rows||[]).map(row=>{
+  const o=[...row];
+  for(let c=W-1;c>=at+COLS;c--)o[c]=o[c-COLS];
+  return o;
+});
+const openBarGapFlat=(arr,at,W)=>{
+  const o=[...(arr||[])];
+  for(let c=W-1;c>=at+COLS;c--)o[c]=o[c-COLS];
+  return o;
+};
+const spliceFlat=(dst,src,dstOff,srcOff=0,w=COLS,mk=()=>defaultStepParams(1)[0])=>{
+  const o=[...(dst||[])];
+  for(let i=0;i<w;i++){
+    const d=dstOff+i; if(d>=o.length)break;
+    o[d]=(src&&src[srcOff+i])?Object.assign({},src[srcOff+i]):mk();
+  }
+  return o;
+};
+
+// ── Bar resizing ─────────────────────────────────────────────────────────
+// Patterns are 1..MAX_BARS bars long. Every per-column structure (grid, durs,
+// params, drum vel/rat, drum motion lanes) is bars*COLS wide and has to grow
+// and shrink together — a half-resized pattern reads as undefined at playback
+// time, which Babel compiles happily and only explodes when you press play.
+const _resizeRows=(rows,w,fill)=>(rows||[]).map(r=>{
+  const o=new Array(w);
+  for(let i=0;i<w;i++)o[i]=(r&&r[i]!==undefined&&r[i]!==null)?r[i]:fill();
+  return o;
+});
+// Returns a NEW pattern resized to `bars`. Growing sets gridLen to the new full
+// width (adding a bar means the pattern is a bar longer — you can still trim it
+// back with the length slider); shrinking clamps gridLen into what is left.
+const resizePatBars=(p,bars)=>{
+  if(!p)return p;
+  const nb=Math.max(1,Math.min(MAX_BARS,Math.round(bars)));
+  const w=nb*COLS, oldW=gridW(p.grid), grew=w>oldW;
+  const out=Object.assign({},p,{bars:nb});
+  const isDrum=Array.isArray(p.grid)&&p.grid.length===DRUM_ROWS&&!p.durs;
+  out.grid=_resizeRows(p.grid,w,()=>false);
+  if(p.durs)  out.durs=_resizeRows(p.durs,w,()=>1);
+  if(p.params){
+    const np=new Array(w);
+    for(let i=0;i<w;i++)np[i]=p.params[i]?Object.assign({},p.params[i]):defaultStepParams(1)[0];
+    out.params=np;
+  }
+  if(p.vel) out.vel=_resizeRows(Array.isArray(p.vel[0])?p.vel:toDrumVel2D(p.vel,oldW),w,()=>100);
+  if(p.rat) out.rat=_resizeRows(Array.isArray(p.rat[0])?p.rat:toDrumRat2D(p.rat,oldW),w,()=>1);
+  if(p.motion&&typeof p.motion==="object"){
+    const m={};
+    for(const k of Object.keys(p.motion)){
+      const lane=p.motion[k];
+      // motion cells are number|null and null is MEANINGFUL ("inherit the base
+      // mix here"), so this lane can't go through _resizeRows' null-as-missing.
+      if(Array.isArray(lane))m[k]=lane.map(r=>{const o=new Array(w);for(let i=0;i<w;i++)o[i]=(r&&i<r.length)?r[i]:null;return o;});
+    }
+    out.motion=m;
+  }
+  void isDrum;
+  out.gridLen=grew?w:Math.max(1,Math.min(w,p.gridLen||w));
+  return out;
+};
+// Normalize a pattern loaded from disk: derive `bars` from whatever its arrays
+// actually carry, then re-run the resize so every lane agrees on the width.
+const normalizePatBars=(p)=>{
+  if(!p||!Array.isArray(p.grid))return p;
+  const declared=p.bars!=null?Math.max(1,Math.min(MAX_BARS,p.bars)):null;
+  const fromArr=Math.max(1,Math.min(MAX_BARS,Math.ceil(gridW(p.grid)/COLS)));
+  const bars=declared||fromArr;
+  if(p.bars===bars&&gridW(p.grid)===bars*COLS)return p;
+  return resizePatBars(p,bars);
+};// Continuous drum-mix params that support motion automation (the slider ones;
 // the FILT mode chip is excluded). pat.motion[param] is a lazily-created
 // ROWS×COLS grid of number|null — null = "use the base mix value at this step".
 // Drum-mix params that MOTION can automate per step. level/pan/rvSend/dlySend/
@@ -398,8 +641,9 @@ const migrateDrumPatRows=(pat)=>{
   if(!pat||!Array.isArray(pat.grid))return pat;
   // Already current order + current row count → just ensure vel + rat are 2D.
   if(pat.vo===DRUM_ORDER_V&&pat.grid.length===DRUM_ROWS){
-    const v=(Array.isArray(pat.vel)&&Array.isArray(pat.vel[0]))?pat.vel:toDrumVel2D(pat.vel);
-    return Object.assign({},pat,{vel:v,rat:toDrumRat2D(pat.rat)});
+    const _w=gridW(pat.grid);
+    const v=(Array.isArray(pat.vel)&&Array.isArray(pat.vel[0]))?pat.vel:toDrumVel2D(pat.vel,_w);
+    return normalizePatBars(Object.assign({},pat,{vel:v,rat:toDrumRat2D(pat.rat,_w)}));
   }
   // Determine the source order. vo===1 (or any 13-len untagged) is the
   // pre-reorder 13 order; 10/11 lengths are the older layouts.
@@ -414,7 +658,7 @@ const migrateDrumPatRows=(pat)=>{
   const out={...pat,grid,vo:DRUM_ORDER_V};
   if(Array.isArray(pat.mix))out.mix=remap(pat.mix.map(m=>({...m})),_drumDefMix);
   // vel: normalize to 2D in the SOURCE order first, then remap rows by key.
-  const vel2=toDrumVel2D(pat.vel); // full DRUM_ROWS in *current* order if 2D, else broadcast
+  const vel2=toDrumVel2D(pat.vel,gridW(pat.grid)); // full DRUM_ROWS in *current* order if 2D, else broadcast
   // toDrumVel2D assumes current row count; for legacy 1D it broadcasts columns
   // (row-order-independent), so remap is a no-op there. For an old 2D vel we
   // remap by key from fromKeys.
@@ -490,6 +734,7 @@ const defaultDrums=()=>({
   vel:mkDrumVel(),
   rat:mkDrumRat(),
   gridLen:16,
+  bars:1,
   mix:defaultDrumMix()
 });
 
@@ -653,7 +898,14 @@ const downloadBlob=(data,filename,type)=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 };
 
-const genVariation=(grid,vp={})=>{
+// c0/w bound the column WINDOW this variation touches; shifts and ghost notes
+// wrap inside it. Defaults to the whole grid, which for a 1-bar pattern is
+// exactly the old behaviour. Multi-bar patterns pass one bar at a time so VARY
+// keeps meaning what it always meant: a fresh roll every bar.
+const genVariation=(grid,vp={},c0=0,w=null)=>{
+  const W=w!=null?w:gridW(grid);
+  const C0=c0|0, C1=Math.min(gridW(grid),C0+W);
+  const wrap=c=>C0+(((c-C0)%(C1-C0))+(C1-C0))%(C1-C0);
   const g=grid.map(r=>[...r]);
   const drop=(vp.dropRate??13)/100;
   const shift=(vp.shiftRate??17)/100;
@@ -663,12 +915,12 @@ const genVariation=(grid,vp={})=>{
   const ghost=(vp.ghostRate??0)/100;
   const on=[];
   let droppedCount=0;
-  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+  for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++){
     if(!grid[r][c])continue;
     const roll=Math.random();
     if(roll<drop){ g[r][c]=false; droppedCount++; }
     else if(roll<drop+shift){
-      const nc=(c+(Math.floor(Math.random()*sRange*2+1)-sRange)+COLS)%COLS;
+      const nc=wrap(c+(Math.floor(Math.random()*sRange*2+1)-sRange));
       if(!g[r][nc]){g[r][c]=false;g[r][nc]=true;}
     } else if(Math.random()<pitch){
       const nr=Math.max(0,Math.min(ROWS-1,r+(Math.floor(Math.random()*pRange*2+1)-pRange)));
@@ -682,7 +934,7 @@ const genVariation=(grid,vp={})=>{
   // note count stays roughly stable rather than drifting toward empty.
   if(droppedCount>0){
     const empties=[];
-    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++){
       if(!g[r][c])empties.push([r,c]);
     }
     const adds=Math.min(droppedCount,empties.length);
@@ -697,7 +949,7 @@ const genVariation=(grid,vp={})=>{
     for(const[br,bc]of on){
       if(Math.random()<ghost){
         const nr=Math.max(0,Math.min(ROWS-1,br+Math.floor(Math.random()*3)-1));
-        const nc=(bc+Math.floor(Math.random()*5)-2+COLS)%COLS;
+        const nc=wrap(bc+Math.floor(Math.random()*5)-2);
         g[nr][nc]=true;
       }
     }
@@ -708,13 +960,13 @@ const genVariation=(grid,vp={})=>{
   // one note from the input so the pattern doesn't go fully silent on the
   // user. They can still toggle VARY off if they want the original.
   let hadInput=false,hasOut=false;
-  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+  for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++){
     if(grid[r][c])hadInput=true;
     if(g[r][c])hasOut=true;
     if(hadInput&&hasOut)break;
   }
   if(hadInput&&!hasOut){
-    outer:for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    outer:for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++){
       if(grid[r][c]){g[r][c]=true;break outer;}
     }
   }
@@ -726,14 +978,21 @@ const genVariation=(grid,vp={})=>{
 // within the active gridLen (the playable window) — when that happens we
 // fall back to the original grid for this cycle rather than play silence.
 // This is the fix for the "VARY on kills sound" bug.
-const safeVaryGrid=(grid,vp,gridLen)=>{
-  const len=Math.max(1,Math.min(COLS,gridLen||COLS));
+// c0/w scope the roll to one bar (see genVariation). The anti-silence guard is
+// scoped the same way — it asks "did THIS bar lose all its notes", not "did the
+// whole pattern", so a 32-bar pattern with an intentionally empty bar 7 doesn't
+// get a note forced into it.
+const safeVaryGrid=(grid,vp,gridLen,c0=0,w=null)=>{
+  const W=gridW(grid);
+  const len=Math.max(1,Math.min(W,gridLen||W));
+  const C0=c0|0, C1=Math.min(W,len,C0+(w!=null?w:W));
   const hasInWindow=(g)=>{
-    for(let r=0;r<ROWS;r++)for(let c=0;c<len;c++)if(g[r]&&g[r][c])return true;
+    for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++)if(g[r]&&g[r][c])return true;
     return false;
   };
+  if(C1<=C0)return grid.map(r=>[...r]);
   const origHas=hasInWindow(grid);
-  const varied=genVariation(grid,vp);
+  const varied=genVariation(grid,vp,C0,C1-C0);
   if(origHas&&!hasInWindow(varied))return grid.map(r=>[...r]);
   return varied;
 };
@@ -2182,6 +2441,27 @@ export default function Tabula(){
   const [swing,     setSwing]     = useState(0);  // 0–100, 0=straight, 100=full triplet swing
   const swingR = useRef(0);
   const gridLenR   = useRef(16);
+  // ── BAR PAGING ─────────────────────────────────────────────────────────
+  // Patterns can be up to MAX_BARS bars long, but the editor only ever shows
+  // ONE bar at a time (COLS cells wide). barPage is which bar you're looking
+  // at. It's shared across layers on purpose — "I'm editing bar 3" should mean
+  // the same thing whichever layer you flip to — and clamped per-pattern on
+  // read, since layers can hold patterns of different lengths.
+  // NOTE: paged, not scrolled. A scrolling grid needs a parent with overflow-x,
+  // and that makes iOS Safari swallow vertical drags at the OS level (see the
+  // gesture-interception lesson) — which would break note entry on the phone.
+  const [barPage, setBarPage] = useState(0);
+  const barPageR   = useRef(0);
+  useEffect(()=>{barPageR.current=barPage;},[barPage]);
+  // Visible bar index / column offset, clamped into a specific pattern.
+  const barIdxIn = p2=>Math.max(0,Math.min(patBars(p2)-1,barPageR.current));
+  const barOffIn = p2=>barIdxIn(p2)*COLS;
+  // The grid renders a COLS-wide WINDOW, so every pointer hit-test yields a
+  // VIEW column (0..COLS-1) that has to be offset into the pattern before it
+  // touches data. These read live refs, so the stable []-dep useCallbacks can
+  // call them without baking in a first-render page (the useCallback trap).
+  const synthBarOffR = ()=>barOffIn(patsR.current.find(p2=>p2.id===activeIdR.current));
+  const drumBarOffR  = ()=>barOffIn(drumPatsR.current.find(p2=>p2.id===activeDrumIdR.current));
   const [speedMult, setSpeedMult] = useState(1);
   const speedMultR = useRef(1);
   const [showMenu,  setShowMenu]  = useState(false);
@@ -2580,7 +2860,7 @@ export default function Tabula(){
           if(!dp||!dp.grid)continue;
           const vRhythm=(dp.vRhythm||0)/100;
           const vVelocity=(dp.vVelocity||0)/100;
-          const len=Math.max(1,Math.min(COLS,dp.gridLen||COLS));
+          const len=Math.max(1,Math.min(patW(dp),dp.gridLen||patW(dp)));
           let vGrid=dp.grid.map(row=>row.map(on=>{
             if(on&&Math.random()<vRhythm*0.45)return false;
             if(!on&&Math.random()<vRhythm*0.18)return true;
@@ -2593,7 +2873,7 @@ export default function Tabula(){
           const got=vGrid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
           if(had&&!got)vGrid=dp.grid.map(row=>[...row]);
           // Per-cell velocity jitter (vel is 2D now).
-          const baseVel=toDrumVel2D(dp.vel);
+          const baseVel=toDrumVel2D(dp.vel,gridW(dp.grid));
           const vVel=baseVel.map(row=>row.map(vv=>Math.max(1,Math.min(127,Math.round(vv+(Math.random()*2-1)*vVelocity*50)))));
           variedDrumGrids.current.set(dp.id,vGrid);
           variedDrumVels.current.set(dp.id,vVel);
@@ -2670,9 +2950,12 @@ export default function Tabula(){
     if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
       liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
     }
+    // packPat produces fresh arrays for every heavy lane, so it doubles as the
+    // deep copy this snapshot needs — and keeps MAX_HISTORY snapshots of 32-bar
+    // patterns from running the phone out of memory.
     return ({
-    pats:JSON.parse(JSON.stringify(pats)),
-    drumPats:JSON.parse(JSON.stringify(drumPats)),
+    pats:pats.map(packPat),
+    drumPats:drumPats.map(packPat),
     chain:[...chain],drumChain:[...drumChain],
     synthPhrases:JSON.parse(JSON.stringify(synthPhrases)),
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
@@ -2681,7 +2964,7 @@ export default function Tabula(){
     songMode,songView,songSyncMode,songRandom,
     activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
-    layerStore:JSON.parse(JSON.stringify(liveLayerStore)),
+    layerStore:_mapProjectPats({layerStore:JSON.parse(JSON.stringify(liveLayerStore))},packPat).layerStore,
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
@@ -2691,8 +2974,10 @@ export default function Tabula(){
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
-  const applySnapshot = s=>{
-    if(!s)return;
+  const applySnapshot = rawSnap=>{
+    if(!rawSnap)return;
+    const s=unpackProject(rawSnap);
+    setBarPage(0);
     // Reset layerStoreR to fresh defaults BEFORE restoring — undo/redo
     // snapshots from previous projects shouldn't bleed through stale lead/
     // synth data if the new snapshot doesn't define them.
@@ -2805,7 +3090,7 @@ export default function Tabula(){
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
     const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
-    const next=Object.assign({},slotData,{[slot]:snap});
+    const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
     if(ok){setActiveSlot(slot);showFlash("SAVED "+slot);}
@@ -2822,9 +3107,13 @@ export default function Tabula(){
   // speed they were saved at, not 1×.
   const migratePats = (pats, defaultSpeed=1)=>(pats||[]).map(p=>{
     const updates={};
-    if(!p.durs) updates.durs=mkDurs();
+    if(!p.durs) updates.durs=mkDurs(gridW(p.grid));
     if(p.speedMult==null) updates.speedMult=defaultSpeed!=null?defaultSpeed:1;
-    return Object.keys(updates).length ? Object.assign({},p,updates) : p;
+    const out = Object.keys(updates).length ? Object.assign({},p,updates) : p;
+    // Pre-multi-bar saves have no `bars` and 16-wide arrays → bars:1, which is
+    // exactly what they were. normalizePatBars also repairs any pattern whose
+    // lanes disagree on width.
+    return normalizePatBars(out);
   });
   // 3-layer pare-down: collapse legacy "bass" layer into "lead". Active
   // layer "bass" becomes "lead"; bass pats append to lead pats (capped at
@@ -2869,7 +3158,8 @@ export default function Tabula(){
   };
   const doLoad=slot=>{
     let s=slotData[slot];if(!s)return;
-    s=migrateLegacyBass(s);
+    setBarPage(0);setBarFollow(true);
+    s=migrateLegacyBass(unpackProject(s));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
     // entries in the save don't leave stale data from a previous load. Lead
@@ -3041,6 +3331,7 @@ export default function Tabula(){
     }
     const p0=mkPat(symPat(0));
     const dp0=mkDrumPat(symPat(0));
+    setBarPage(0);setBarFollow(true);
     setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
     setDrumPats([dp0]);setActiveDrumId(dp0.id);setDrumChain([dp0.id]);
     // Seed the lead store with a fresh empty pat so switching to MONO after
@@ -3113,6 +3404,162 @@ export default function Tabula(){
   const gridLen=activePat?.gridLen??16;
   useEffect(()=>{gridLenR.current=gridLen;},[gridLen]);
 
+  // ── Visible bar (render side) ──────────────────────────────────────────
+  // barPage is shared across layers; each layer clamps it into its own active
+  // pattern, so flipping from a 4-bar synth pattern to a 1-bar drum pattern
+  // shows drum bar 1 without losing your place in the synth pattern.
+  const activeDrumPat = drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+  const editPat       = activeLayer==="drums"?activeDrumPat:activePat;
+  const barCount      = patBars(editPat);
+  const curBar        = Math.max(0,Math.min(barCount-1,barPage));
+  const barOff        = curBar*COLS;
+  // Which bar the playhead is in right now (-1 when stopped). `step`/`drumStep`
+  // are absolute pattern steps, so this is just their bar.
+  // How much of THIS page is inside the playable length (drives the one-bar-wide
+  // length slider): 1 on bars before the loop end, 0 past it, partial on the bar
+  // the end lands in.
+  const _lenFrac      = Math.max(0,Math.min(1,((editPat?.gridLen??COLS)-barOff)/COLS));
+  const liveStep      = activeLayer==="drums"?drumStep:step;
+  const playingBar    = playing&&liveStep>=0?Math.floor(liveStep/COLS):-1;
+
+  // FOLLOW: while playing, page along with the music. Tapping a bar pins it
+  // (turns follow off) so you can edit bar 1 while bar 7 plays; the ◎ button
+  // and pressing stop both re-arm it.
+  const [barFollow, setBarFollow] = useState(true);
+  useEffect(()=>{
+    if(!barFollow||!playing)return;
+    if(playingBar>=0&&playingBar!==barPage&&playingBar<barCount)setBarPage(playingBar);
+  },[barFollow,playing,playingBar,barPage,barCount]);
+  useEffect(()=>{ if(!playing)setBarFollow(true); },[playing]);
+  // Never leave the page pointing past the end of a pattern (switching pattern,
+  // switching layer, or removing bars can all strand it).
+  useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
+
+  // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
+  // Resizing invalidates the cached VARY grids for that pattern (they're keyed
+  // by pat id and sized to the old width), so drop them and let the scheduler
+  // re-roll at the next bar boundary.
+  const _dropVaryCache=(id)=>{
+    try{variedGrids.current.delete(id);variedDrumGrids.current.delete(id);variedDrumVels.current.delete(id);}catch(e){}
+  };
+  const setEditPatBars=(n)=>{
+    const target=Math.max(1,Math.min(MAX_BARS,n));
+    if(!editPat||target===patBars(editPat))return;
+    pushHistory();
+    _dropVaryCache(editPat.id);
+    if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
+    else setPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
+    setBarPage(bp=>Math.min(bp,target-1));
+  };
+  const addBar    = ()=>setEditPatBars(patBars(editPat)+1);
+  const removeBar = ()=>setEditPatBars(patBars(editPat)-1);
+  // Copy the visible bar into a NEW bar appended right after it — the fastest
+  // way to build a long pattern (lay down bar 1, extend, vary).
+  const duplicateBar=()=>{
+    if(!editPat)return;
+    const n=patBars(editPat);
+    if(n>=MAX_BARS)return;
+    pushHistory();
+    _dropVaryCache(editPat.id);
+    const off=curBar*COLS, dst=(curBar+1)*COLS;
+    const grow=p=>{
+      const oldW=gridW(p.grid), newW=(n+1)*COLS;
+      const g=resizePatBars(p,n+1);
+      // Slide bars after the current one right, THEN drop the copy into the gap.
+      // Without the slide this overwrote the following bar instead of inserting.
+      const out=Object.assign({},g,{
+        grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCols(p.grid,off),dst)});
+      if(g.durs)  out.durs  = spliceCols(openBarGap(g.durs,dst,newW),  sliceCols(p.durs||[],off,COLS,()=>1),dst,0,COLS,()=>1);
+      if(g.params)out.params= spliceFlat(openBarGapFlat(g.params,dst,newW),sliceFlat(p.params||[],off),dst);
+      if(g.vel)   out.vel   = spliceCols(openBarGap(g.vel,dst,newW),   sliceCols(toDrumVel2D(p.vel,oldW),off,COLS,()=>100),dst,0,COLS,()=>100);
+      if(g.rat)   out.rat   = spliceCols(openBarGap(g.rat,dst,newW),   sliceCols(toDrumRat2D(p.rat,oldW),off,COLS,()=>1),  dst,0,COLS,()=>1);
+      if(out.motion&&typeof out.motion==="object"){
+        const m={};
+        for(const k of Object.keys(out.motion))m[k]=openBarGap(out.motion[k],dst,newW);
+        out.motion=m;
+      }
+      // Inserting a bar inside the loop extends the loop by exactly that bar,
+      // rather than snapping the length out to the full allocated width.
+      const oldLen=Math.max(1,Math.min(oldW,p.gridLen||oldW));
+      out.gridLen=Math.min(newW,oldLen+COLS);
+      return out;
+    };
+    if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
+    else setPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
+    setBarPage(curBar+1);
+    setBarFollow(false);
+  };
+
+  // ── BAR STRIP ──────────────────────────────────────────────────────────
+  // Kept as a JSX VALUE rather than a function returning JSX — module-level
+  // arrows returning JSX are the CJS-transform footgun the build audit guards
+  // against, and a plain const sidesteps the question entirely while still
+  // letting all four editor layouts (synth/drums × portrait/landscape) share
+  // one strip.
+  //
+  // Reads as a minimap: each segment is a bar, filled if it contains notes, so
+  // you can see the shape of a long pattern and where you are in it at a glance.
+  const _barHasNotes=(bi)=>{
+    if(!editPat||!editPat.grid)return false;
+    const a=bi*COLS,b=a+COLS;
+    for(let r=0;r<editPat.grid.length;r++){
+      const row=editPat.grid[r]; if(!row)continue;
+      for(let c=a;c<b;c++)if(row[c])return true;
+    }
+    return false;
+  };
+  const _barBtn={display:"flex",alignItems:"center",justifyContent:"center",
+    width:IS_MOBILE?22:24,minWidth:IS_MOBILE?22:24,height:IS_MOBILE?18:20,
+    borderRadius:3,background:"rgba(220,200,180,0.07)",color:"rgba(220,205,185,0.75)",
+    fontSize:IS_MOBILE?9:11,lineHeight:1,cursor:"pointer",userSelect:"none",touchAction:"none"};
+  const _scrubTo=(clientX,el)=>{
+    const rect=el.getBoundingClientRect();
+    const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
+    const bi=Math.max(0,Math.min(barCount-1,i));
+    setBarFollow(false);
+    setBarPage(bi);
+  };
+  const barStrip=(
+    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?3:4,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+      <div style={Object.assign({},_barBtn,{opacity:curBar<=0?0.3:1})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();if(curBar>0){setBarFollow(false);setBarPage(curBar-1);}}}>‹</div>
+      <div style={{position:"relative",flex:1,display:"flex",gap:2,height:IS_MOBILE?18:20,touchAction:"none",cursor:"pointer"}}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);_scrubTo(e.clientX,e.currentTarget);}}
+           onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
+        {Array.from({length:barCount},(_,bi)=>{
+          const isCur=bi===curBar, isPlaying=bi===playingBar;
+          const has=_barHasNotes(bi);
+          // Bars past the loop end are allocated but never sounded — show them
+          // recessed so a trimmed pattern reads honestly.
+          const past=bi*COLS>=(editPat?.gridLen??COLS);
+          return(
+            <div key={bi} style={{flex:1,minWidth:2,borderRadius:2,position:"relative",
+              background:isCur?"rgba(232,220,205,0.55)":past?"rgba(220,200,180,0.03)":has?"rgba(220,200,180,0.17)":"rgba(220,200,180,0.07)",
+              boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
+              transition:"background .08s"}}/>
+          );
+        })}
+      </div>
+      <div style={Object.assign({},_barBtn,{opacity:curBar>=barCount-1?0.3:1})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();if(curBar<barCount-1){setBarFollow(false);setBarPage(curBar+1);}}}>›</div>
+      <span style={{fontSize:IS_MOBILE?7:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:IS_MOBILE?26:34,textAlign:"center",pointerEvents:"none"}}>
+        {curBar+1}/{barCount}
+      </span>
+      <div title="Follow the playhead"
+           style={Object.assign({},_barBtn,{background:barFollow?"rgba(201,169,110,0.28)":"rgba(220,200,180,0.07)",color:barFollow?C_VARY:"rgba(220,205,185,0.55)"})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();setBarFollow(f=>!f);}}>◎</div>
+      <div title="Duplicate this bar"
+           style={Object.assign({},_barBtn,{opacity:barCount>=MAX_BARS?0.3:1})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();duplicateBar();}}>⧉</div>
+      <div title="Add a bar"
+           style={Object.assign({},_barBtn,{opacity:barCount>=MAX_BARS?0.3:1})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();addBar();}}>+</div>
+      <div title="Remove the last bar"
+           style={Object.assign({},_barBtn,{opacity:barCount<=1?0.3:1})}
+           onPointerDown={e=>{e.stopPropagation();e.preventDefault();removeBar();}}>–</div>
+    </div>
+  );
+
   // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
   const [gridPx, setGridPx] = useState(null);
   const [editOuter, setEditOuter] = useState(null);
@@ -3131,7 +3578,10 @@ export default function Tabula(){
   // includeSamples: encode recorded USER samples (base64 WAV) into the state.
   // ON for file export / slot save; OFF for the URL share link (samples would
   // blow past practical URL length).
-  const getShareState=(includeSamples=true)=>({
+  // Sparse-packed on the way out (see the codec): share links live in a URL and
+  // autosave lives in localStorage, neither of which can hold dense multi-bar
+  // grids. applyShareState unpacks, and pre-codec saves pass through untouched.
+  const getShareState=(includeSamples=true)=>packProject({
     ver:PROJ_VER,
     pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
     layerParams,
@@ -3148,7 +3598,8 @@ export default function Tabula(){
 
   const applyShareState=rawState=>{
     if(!rawState)return;
-    const s=migrateLegacyBass(rawState);
+    setBarPage(0);setBarFollow(true);
+    const s=migrateLegacyBass(unpackProject(rawState));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Restore the non-active layers + active layer (mirror doLoad). Without
     // this, importing a project authored on a different layer dropped the other
@@ -3289,8 +3740,10 @@ export default function Tabula(){
     return [{synth:_activeIdFor("synth"),lead:_activeIdFor("lead"),drums:activeDrumId}];
   };
 
-  // Export the song arrangement as a Standard MIDI File. Each bar = 16 sixteenth
-  // steps; a pattern shorter than 16 loops within the bar (mirrors playback).
+  // Export the song arrangement as a Standard MIDI File. Each song cell runs for
+  // as long as its SHORTEST pattern's loop (gridLen, which is now up to
+  // MAX_BARS*COLS steps), mirroring how the sync scheduler advances the song
+  // bar; shorter patterns in the same cell repeat to fill it.
   // POLY/MONO are pitched (row→scale freq→nearest MIDI note, + per-step octave,
   // + layer octave, + transpose); DRUMS map to GM percussion on channel 10.
   // Performance layers (VARY/MOTION/per-pattern speed) are NOT baked in — this
@@ -3303,15 +3756,32 @@ export default function Tabula(){
                 {tick:0,data:[0xFF,0x58,0x04,4,2,24,8]}];
     const tName=(n)=>({tick:0,data:[0xFF,0x03,n.length,..._str(n)]});
     const synthEv=[],leadEv=[],drumEv=[];
-    bars.forEach((bar,bi)=>{
-      const barTick=bi*16*TICKS_16;
+    // Cell length in 16th steps = the shortest populated pattern's loop, which
+    // is what the sync scheduler uses as the song-bar boundary. speedMult is
+    // deliberately NOT applied here — per-pattern speed is a performance layer,
+    // and this export is the underlying composition.
+    const _midiCellSteps=(bar)=>{
+      let m=Infinity;
+      for(const layer of ["synth","lead"]){
+        const pt=_layerPats(layer).find(x=>x.id===bar[layer]);
+        if(pt)m=Math.min(m,Math.max(1,pt.gridLen??16));
+      }
+      const dpt=drumPats.find(x=>x.id===bar.drums);
+      if(dpt)m=Math.min(m,Math.max(1,dpt.gridLen??16));
+      return m===Infinity?16:m;
+    };
+    let _runTick=0;
+    bars.forEach((bar)=>{
+      const barTick=_runTick;
+      const cellSteps=_midiCellSteps(bar);
+      _runTick+=cellSteps*TICKS_16;
       [["synth",synthEv,0],["lead",leadEv,1]].forEach(([layer,ev,ch])=>{
         const pat=_layerPats(layer).find(p=>p.id===bar[layer]);
         if(!pat||!pat.grid)return;
         const len=pat.gridLen||16;
         const layerOct=(layerParams[layer]&&layerParams[layer].octave)||0;
         const mono=!!(layerParams[layer]&&layerParams[layer].monoSingle);
-        for(let s=0;s<16;s++){
+        for(let s=0;s<cellSteps;s++){
           const ps=s%len;
           const sp=(pat.params&&pat.params[ps])||null;
           const vel=Math.max(1,Math.min(127,Math.round(sp?(sp.vel??100):100)));
@@ -3339,7 +3809,7 @@ export default function Tabula(){
       const dp=drumPats.find(p=>p.id===bar.drums);
       if(dp&&dp.grid){
         const len=dp.gridLen||16;
-        for(let s=0;s<16;s++){
+        for(let s=0;s<cellSteps;s++){
           const ps=s%len;
           for(let r=0;r<DRUM_ROWS;r++){
             if(!(dp.grid[r]&&dp.grid[r][ps]))continue;
@@ -3832,35 +4302,52 @@ export default function Tabula(){
         const layerStepDur=absStepDur*(pat.speedMult??1);
         const s=lf.step%len;
         const at=lf.nextAt;
-        // Variation grid generation at this layer's step 0 (pat-keyed, cached).
-        if(s===0&&varyModeR.current[layer]){
+        // Variation regenerates at every BAR boundary (s%COLS===0), not just at
+        // the top of the pattern. On a 1-bar pattern that IS step 0, so this is
+        // unchanged from before multi-bar patterns; on a 32-bar pattern it keeps
+        // VARY meaning "a fresh roll each bar" instead of once every 32 bars.
+        const _barC0=Math.floor(s/COLS)*COLS;
+        if(s%COLS===0&&varyModeR.current[layer]){
           if(layer==="drums"){
             const vRhythm=(pat.vRhythm||0)/100;
             const vVelocity=(pat.vVelocity||0)/100;
-            let vGrid=pat.grid.map(row=>row.map((on,ci)=>{
-              if(ci>=len)return false;
+            const _bC1=Math.min(len,_barC0+COLS);
+            // Keep the bars we're NOT rerolling as they already were, so a long
+            // pattern varies bar-by-bar instead of the whole thing at once.
+            const prevG=variedDrumGrids.current.get(pat.id);
+            const inBar=ci=>ci>=_barC0&&ci<_bC1;
+            let vGrid=pat.grid.map((row,ri)=>row.map((on,ci)=>{
+              if(!inBar(ci))return (prevG&&prevG[ri]&&prevG[ri][ci]!==undefined)?prevG[ri][ci]:(ci<len&&on);
               if(on&&Math.random()<vRhythm*0.45)return false;
               if(!on&&Math.random()<vRhythm*0.18)return true;
               return on;
             }));
             // Anti-silence guard (matches the toggle regen): if the variation
-            // cleared every hit inside the playable window, keep the original.
-            const had=pat.grid.some(row=>row.some((on,ci)=>on&&ci<len));
-            const got=vGrid.some(row=>row.some((on,ci)=>on&&ci<len));
-            if(had&&!got)vGrid=pat.grid.map(row=>[...row]);
-            const baseVel=toDrumVel2D(pat.vel);
+            // cleared every hit inside THIS BAR, keep the bar's original hits.
+            const had=pat.grid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
+            const got=vGrid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
+            if(had&&!got)vGrid=vGrid.map((row,ri)=>row.map((v,ci)=>inBar(ci)?!!(pat.grid[ri]&&pat.grid[ri][ci]):v));
+            const baseVel=toDrumVel2D(pat.vel,gridW(pat.grid));
             const vVel=baseVel.map(row=>row.map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50)))));
             variedDrumGrids.current.set(pat.id,vGrid);
             variedDrumVels.current.set(pat.id,vVel);
           } else {
-            variedGrids.current.set(pat.id,safeVaryGrid(pat.grid,varyParamsR.current,len));
+            // Only this bar rerolls; earlier bars keep the roll they got.
+            const prevS=variedGrids.current.get(pat.id);
+            const rolled=safeVaryGrid(pat.grid,varyParamsR.current,len,_barC0,COLS);
+            if(prevS&&prevS.length===rolled.length){
+              for(let ri=0;ri<rolled.length;ri++)
+                for(let ci=0;ci<rolled[ri].length;ci++)
+                  if(ci<_barC0||ci>=_barC0+COLS)rolled[ri][ci]=prevS[ri][ci];
+            }
+            variedGrids.current.set(pat.id,rolled);
             // Self-record (synth-only) — vary the source pat and append.
             if(layer==="synth"&&recModeR.current&&patsR.current.length<8){
               const vp=varyParamsR.current;
               const src=patsR.current.find(x=>x.id===recSourceIdR.current)||pat;
               const rvg=genVariation(src.grid,vp);
               const newParams=(src.params||defaultStepParams()).map(p2=>jitterStepParam(p2,vp));
-              const newPat={id:++_id,name:pickSym(patsR.current.map(p=>p.name)),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(),params:newParams,gridLen:src.gridLen??16,speedMult:src.speedMult??1};
+              const newPat={id:++_id,name:pickSym(patsR.current.map(p=>p.name)),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(gridW(src.grid)),params:newParams,gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1};
               setPats(ps=>{if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}return [...ps,newPat];});
               setChain(c=>[...c,newPat.id]);
             }
@@ -4171,20 +4658,23 @@ export default function Tabula(){
   // notes into a chord.
   const cullMonoGrid=(grid)=>{
     const g=grid.map(r=>[...r]);
-    for(let c=0;c<COLS;c++){let found=false;for(let r=0;r<ROWS;r++){if(g[r][c]){if(found)g[r][c]=false;else found=true;}}}
+    const W=gridW(grid);
+    for(let c=0;c<W;c++){let found=false;for(let r=0;r<ROWS;r++){if(g[r][c]){if(found)g[r][c]=false;else found=true;}}}
     return g;
   };
+  // fn receives (grid, pat) so bar-scoped mutations can read the pattern's width.
   const mutatePat=fn=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
-    let grid=fn(p.grid);
+    let grid=fn(p.grid,p);
     if(activeLayer==="lead")grid=cullMonoGrid(grid); // MONO never goes polyphonic
     return Object.assign({},p,{grid});
   }));
 
   // Collapse a grid to at most one note per column (keep a random one)
   const collapseToMono=g=>{
-    const out=mkGrid();
-    for(let c=0;c<COLS;c++){
+    const W=gridW(g);
+    const out=mkGrid(W);
+    for(let c=0;c<W;c++){
       const hits=[];
       for(let r=0;r<ROWS;r++)if(g[r][c])hits.push(r);
       if(hits.length)out[hits[Math.floor(Math.random()*hits.length)]][c]=true;
@@ -4192,9 +4682,10 @@ export default function Tabula(){
     return out;
   };
 
-  const mutatePat1=()=>{pushHistory();return mutatePat(g=>{
-    const varied=genVariation(g,varyParamsR.current);
-    return varied;
+  // MUT8 mutates the BAR you're looking at, not the whole pattern — same as
+  // RAND/CLR/CPY/PST. On a 1-bar pattern that's the entire thing, as before.
+  const mutatePat1=()=>{pushHistory();return mutatePat((g,p2)=>{
+    return genVariation(g,varyParamsR.current,barOffIn(p2),COLS);
   });};
 
   const handleGridDown=useCallback(e=>{
@@ -4262,14 +4753,16 @@ export default function Tabula(){
     // Compute cell from physical coordinates — most reliable on mobile
     // (elementFromPoint and e.target both fail when note rects intercept)
     const gridEl=gridRef.current;
-    let r=null,c=null,hasCell=false,cellFracX=0.5;
+    // vc = view column (what's on screen, 0..COLS-1) — used for geometry.
+    // c  = absolute pattern column (vc + the visible bar's offset) — used for data.
+    let r=null,c=null,vc=null,hasCell=false,cellFracX=0.5;
     if(gridEl){
       const rect=gridEl.getBoundingClientRect();
       const relY=e.clientY-rect.top, relX=e.clientX-rect.left;
       const ri=Math.floor(relY/(rect.height/ROWS));
       const ci=Math.floor(relX/(rect.width/COLS));
       if(ri>=0&&ri<ROWS&&ci>=0&&ci<COLS){
-        r=ri;c=ci;hasCell=true;
+        r=ri;vc=ci;c=ci+synthBarOffR();hasCell=true;
         cellFracX=(relX-ci*(rect.width/COLS))/(rect.width/COLS);
       }
     }
@@ -4306,7 +4799,7 @@ export default function Tabula(){
     if(isOnNote){
       const gridEl2=gridRef.current;
       const rect=gridEl2?gridEl2.getBoundingClientRect():null;
-      const ox=rect?rect.left+rect.width/COLS*(c+0.5):e.clientX;
+      const ox=rect?rect.left+rect.width/COLS*(vc+0.5):e.clientX;
       const oy=rect?rect.top+rect.height/ROWS*(r+0.5):e.clientY;
       const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
       g.longPressCell={r,c,ox,oy,baseVals};
@@ -4348,11 +4841,12 @@ export default function Tabula(){
     const rect=gridEl.getBoundingClientRect();
     if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)return;
     const r=Math.floor((e.clientY-rect.top)/(rect.height/ROWS));
-    const c=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
-    if(r<0||r>=ROWS||c<0||c>=COLS)return;
+    const vc=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
+    if(r<0||r>=ROWS||vc<0||vc>=COLS)return;
+    const c=vc+synthBarOffR();
     const pat=patsR.current.find(p=>p.id===activeIdR.current);
     if(!pat||!pat.grid[r]||!pat.grid[r][c])return;
-    const ox=rect.left+rect.width/COLS*(c+0.5);
+    const ox=rect.left+rect.width/COLS*(vc+0.5);
     const oy=rect.top+rect.height/ROWS*(r+0.5);
     const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
     clearTimeout(longPressR.current);
@@ -4457,7 +4951,8 @@ export default function Tabula(){
           if(gridEl2){
             const rect=gridEl2.getBoundingClientRect();
             const cellW=rect.width/COLS;
-            const targetCol=Math.max(g.durStartCol,Math.min(COLS-1,Math.floor((e.clientX-rect.left)/cellW)));
+            const _off=synthBarOffR();
+            const targetCol=Math.max(g.durStartCol,Math.min(_off+COLS-1,_off+Math.floor((e.clientX-rect.left)/cellW)));
             g.lastDurTarget=targetCol;
             applyDurEditR.current(targetCol);
           }
@@ -4513,8 +5008,9 @@ export default function Tabula(){
       const rect=gridEl.getBoundingClientRect();
       if(e.clientX<=rect.left||e.clientX>=rect.right||e.clientY<=rect.top||e.clientY>=rect.bottom)return;
       const cr=Math.floor((e.clientY-rect.top)/(rect.height/ROWS));
-      const cc=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
-      if(cr<0||cr>=ROWS||cc<0||cc>=COLS)return;
+      const cvc=Math.floor((e.clientX-rect.left)/(rect.width/COLS));
+      if(cr<0||cr>=ROWS||cvc<0||cvc>=COLS)return;
+      const cc=cvc+synthBarOffR();
       const key=`${cr},${cc}`;
       if(g.paintedCells.has(key))return;
       g.paintedCells.add(key);
@@ -4557,10 +5053,13 @@ export default function Tabula(){
       const gridEl=gridRef.current;if(!gridEl)return;
       const rect=gridEl.getBoundingClientRect();
       const cellW=rect.width/COLS;
-      // Clamp targetCol to active pat's gridLen-1 (don't extend past the loop end)
+      // Clamp targetCol to the loop end AND to the visible bar — you can only
+      // drag a tie as far as the page you can see. (Longer ties are still
+      // reachable via the step popup's DUR.)
       const activePat=patsR.current.find(p=>p.id===activeIdR.current);
-      const maxCol = (activePat?.gridLen??COLS) - 1;
-      const targetCol=Math.max(g.durStartCol,Math.min(maxCol,Math.floor((e.clientX-rect.left)/cellW)));
+      const _off=synthBarOffR();
+      const maxCol = Math.min((activePat?.gridLen??patW(activePat))-1, _off+COLS-1);
+      const targetCol=Math.max(g.durStartCol,Math.min(maxCol,_off+Math.floor((e.clientX-rect.left)/cellW)));
       if(g.lastDurTarget===targetCol)return;
       g.lastDurTarget=targetCol;
       applyDurEditR.current(targetCol);
@@ -4581,8 +5080,12 @@ export default function Tabula(){
       const ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);
       if(ndx!==g.appliedDX||ndy!==g.appliedDY){
         g.appliedDX=ndx;g.appliedDY=ndy;
-        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:COLS},(_,c)=>g.baseGrid[(r-ndy+ROWS)%ROWS][(c-ndx+COLS)%COLS]));
-        const sp=Array.from({length:COLS},(_,c)=>g.baseParams[(c-ndx+COLS)%COLS]);
+        // Rotation wraps around the whole pattern (all bars), not the visible
+        // page — shifting a 4-bar pattern right by one step should carry the
+        // last step of bar 4 around to the first step of bar 1.
+        const _W=gridW(g.baseGrid);
+        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>g.baseGrid[(r-ndy+ROWS)%ROWS][(c-ndx+_W)%_W]));
+        const sp=Array.from({length:_W},(_,c)=>g.baseParams[(c-ndx+_W)%_W]);
         setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp})));
       }
     }
@@ -4689,17 +5192,31 @@ export default function Tabula(){
     else paramPopupValuesR.current=null;
   },[paramPopup]);
 
-  const clearRow=r=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map((row,ri)=>ri===r?new Array(COLS).fill(false):row)})));
+  // Clears the row within the VISIBLE bar (other bars keep their notes).
+  const clearRow=r=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeIdR.current)return p;
+    const off=barOffIn(p);
+    return Object.assign({},p,{grid:p.grid.map((row,ri)=>ri!==r?row:row.map((v,ci)=>(ci>=off&&ci<off+COLS)?false:v))});
+  }));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
   const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(pickSym(pats.map(p=>p.name)));setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(gridW(src.grid)),params:(src.params||defaultStepParams(gridW(src.grid))).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
-  const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
-  const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
-  const clearPat=()=>mutatePat(()=>mkGrid());
+  // CPY / PST move ONE BAR. That's what makes a long pattern workable: build a
+  // bar, copy it forward, vary it. The clipboard is a COLS-wide slice.
+  const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(!src)return;const off=barOffIn(src);
+    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off)});};
+  const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;const off=barOffIn(p);
+    return Object.assign({},p,{
+      grid:spliceCols(p.grid,clipboard.grid,off),
+      durs:spliceCols(p.durs||mkDurs(gridW(p.grid)),clipboard.durs,off,0,COLS,()=>1),
+      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off)});
+  }));};
+  const clearPat=()=>mutatePat((g,p2)=>spliceCols(g,null,barOffIn(p2)));
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(gridW(src.grid)),params:(src.params||defaultStepParams(gridW(src.grid))).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
   // Strip the id from songMatrix as well — leaving a dangling ref produces
   // silent gaps in the song timeline. Drag-off-layer delete relies on this.
   const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);setSongMatrix(m=>({...m,synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v)}));};
@@ -4724,18 +5241,26 @@ export default function Tabula(){
     };
     setSongMatrix(m=>({...m,[layer]:m[layer].map(v=>v===id?null:v)}));
   };
-  const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(src)setClipboard({grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(),params:(src.params||defaultStepParams()).map(s=>Object.assign({},s))});};
-  const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:clipboard.grid.map(r=>[...r]),durs:clipboard.durs?clipboard.durs.map(r=>[...r]):mkDurs(),params:clipboard.params.map(s=>Object.assign({},s))})));};
-  const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:mkGrid()})));};
+  const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(!src)return;const off=barOffIn(src);
+    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off)});};
+  const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>{
+    if(p.id!==id)return p;const off=barOffIn(p);
+    return Object.assign({},p,{
+      grid:spliceCols(p.grid,clipboard.grid,off),
+      durs:spliceCols(p.durs||mkDurs(gridW(p.grid)),clipboard.durs,off,0,COLS,()=>1),
+      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off)});
+  }));};
+  const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:spliceCols(p.grid,null,barOffIn(p))})));};
+  // RAND generates one bar (randMonoGrid/randPolyGrid are COLS-wide by
+  // construction) and drops it into the bar you're looking at.
   const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;
     const isMono=activeLayerR.current==="lead";
-    const grid=isMono?randMonoGrid():randPolyGrid();
-    return Object.assign({},p,{grid});
+    const bar=isMono?randMonoGrid():randPolyGrid();
+    return Object.assign({},p,{grid:spliceCols(p.grid,bar,barOffIn(p))});
   }));};
-  const randPat=()=>mutatePat(()=>{
-    return Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12));
-  });
+  const randPat=()=>mutatePat((g,p2)=>
+    spliceCols(g,Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Math.random()<.12)),barOffIn(p2)));
   const setDrumCell=(row,col,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     const grid=p.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
@@ -4745,13 +5270,15 @@ export default function Tabula(){
   // legacy 1D saves edited in-session upgrade cleanly.
   const setDrumVelCell=(row,col,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const v2=toDrumVel2D(p.vel);
+    const v2=toDrumVel2D(p.vel,gridW(p.grid));
     const vel=v2.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
     return Object.assign({},p,{vel});
   }));
+  // `len` arrives as a 1..COLS position within the VISIBLE bar; offset it.
   const setDrumLen=(len)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    return Object.assign({},p,{gridLen:len});
+    const off=barOffIn(p);
+    return Object.assign({},p,{gridLen:Math.max(1,Math.min(patW(p),off+len))});
   }));
   // Ctrl/Cmd+click a drum cell: cycle its ratchet count. An empty cell turns
   // on at 2 (start ratcheting); a lit cell cycles 1→2→3→4→1 (4 = max, wraps
@@ -4759,7 +5286,7 @@ export default function Tabula(){
   // many evenly-spaced times within the step — see playDrumStep.
   const cycleDrumRat=(row,col)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const rat=toDrumRat2D(p.rat);
+    const rat=toDrumRat2D(p.rat,gridW(p.grid));
     const grid=p.grid.map(r=>[...r]);
     const cur=rat[row][col]||1;
     let nx;
@@ -4773,13 +5300,14 @@ export default function Tabula(){
   // active length (gridLen); vertical wraps across all voices. Moves grid, vel
   // and rat together so a hit keeps its velocity + ratchet as it travels.
   const shiftDrumActive=(dCols,dRows,base)=>{
-    const L=Math.max(1,base.gridLen||16);
+    const W=gridW(base.grid);
+    const L=Math.max(1,Math.min(W,base.gridLen||W));
     const mod=(n,m)=>((n%m)+m)%m;
-    const ng=Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false));
-    const nv=mkDrumVel(),nr=mkDrumRat();
+    const ng=Array.from({length:DRUM_ROWS},()=>new Array(W).fill(false));
+    const nv=mkDrumVel(W),nr=mkDrumRat(W);
     for(let r=0;r<DRUM_ROWS;r++){
       const sr=mod(r-dRows,DRUM_ROWS);
-      for(let c=0;c<COLS;c++){
+      for(let c=0;c<W;c++){
         const sc=c<L?mod(c-dCols,L):c;
         ng[r][c]=!!(base.grid[sr]&&base.grid[sr][sc]);
         nv[r][c]=(base.vel[sr]&&base.vel[sr][sc]!=null)?base.vel[sr][sc]:100;
@@ -4794,7 +5322,11 @@ export default function Tabula(){
   };
   const clearDrums=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    return Object.assign({},p,{grid:Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(false)),vel:mkDrumVel(),rat:mkDrumRat()});
+    const off=barOffIn(p);
+    return Object.assign({},p,{
+      grid:spliceCols(p.grid,null,off),
+      vel:spliceCols(toDrumVel2D(p.vel,gridW(p.grid)),null,off,0,COLS,()=>100),
+      rat:spliceCols(toDrumRat2D(p.rat,gridW(p.grid)),null,off,0,COLS,()=>1)});
   }));}
   // Mixer link groups.
   //  • Hi-hats (CH+OH): every mix param is linked — they model one physical
@@ -4830,8 +5362,9 @@ export default function Tabula(){
     if(p.id!==activeDrumId)return p;
     const targets=_linkedRows(row,key);
     const motion={...(p.motion||{})};
-    const lane=motion[key]?motion[key].map(r=>r?[...r]:new Array(COLS).fill(null))
-                          :Array.from({length:DRUM_ROWS},()=>new Array(COLS).fill(null));
+    const _mw=gridW(p.grid);
+    const lane=motion[key]?motion[key].map(r=>r?[...r]:new Array(_mw).fill(null))
+                          :Array.from({length:DRUM_ROWS},()=>new Array(_mw).fill(null));
     targets.forEach(rr=>{if(lane[rr])lane[rr][step]=val;});
     motion[key]=lane;
     return Object.assign({},p,{motion});
@@ -4904,12 +5437,16 @@ export default function Tabula(){
   };
   const randDrumVel=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    // Per-cell velocity now.
-    const vel=mkDrumVel().map(row=>row.map(()=>Math.round(80+Math.random()*Math.random()*47)));
+    // Per-cell velocity now — and only across the bar you're looking at, so
+    // RAND on bar 3 of a long pattern doesn't wipe bars 1, 2 and 4.
+    const off=barOffIn(p);
+    const barVel=mkDrumVel().map(row=>row.map(()=>Math.round(80+Math.random()*Math.random()*47)));
     // Also randomize the rhythm grid. ~22% density per cell gives a sparse-
     // but-populated rhythm — repeat RAND to keep generating variations.
-    const grid=p.grid.map(row=>row.map(()=>Math.random()<0.22));
-    return Object.assign({},p,{vel,grid});
+    const barGrid=Array.from({length:DRUM_ROWS},()=>Array.from({length:COLS},()=>Math.random()<0.22));
+    return Object.assign({},p,{
+      vel:spliceCols(toDrumVel2D(p.vel,gridW(p.grid)),barVel,off,0,COLS,()=>100),
+      grid:spliceCols(p.grid,barGrid,off)});
   }));}
   // MUT8 for drums — nudge the active pattern: drop some existing hits, sprinkle
   // a few new ones, all within the active length. Anti-silence guard keeps the
@@ -4917,15 +5454,18 @@ export default function Tabula(){
   // progressive variations (like the synth MUT8).
   const mutateDrumPat1=()=>{pushHistory();return setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const len=Math.max(1,Math.min(COLS,p.gridLen||16));
+    const W=gridW(p.grid);
+    const len=Math.max(1,Math.min(W,p.gridLen||W));
+    const off=barOffIn(p), hi=Math.min(len,off+COLS);
+    const inBar=ci=>ci>=off&&ci<hi;
     let grid=p.grid.map(row=>row.map((on,ci)=>{
-      if(ci>=len)return on;
+      if(!inBar(ci))return on;
       if(on&&Math.random()<0.30)return false;
       if(!on&&Math.random()<0.10)return true;
       return on;
     }));
-    const had=p.grid.some(row=>row.some((on,ci)=>on&&ci<len));
-    const got=grid.some(row=>row.some((on,ci)=>on&&ci<len));
+    const had=p.grid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
+    const got=grid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
     if(had&&!got)grid=p.grid.map(row=>[...row]);
     return Object.assign({},p,{grid});
   }));}
@@ -5109,7 +5649,8 @@ export default function Tabula(){
     if(drumPats.length>=8)return;
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
     const d=Object.assign({},mkDrumPat(pickSym(drumPats.map(p=>p.name))),{
-      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel),rat:toDrumRat2D(src.rat),gridLen:src.gridLen,
+      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel,gridW(src.grid)),rat:toDrumRat2D(src.rat,gridW(src.grid)),gridLen:src.gridLen,
+      bars:patBars(src),
       mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
       motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
       vRhythm:src.vRhythm,vVelocity:src.vVelocity,speedMult:src.speedMult??1
@@ -5135,19 +5676,28 @@ export default function Tabula(){
     setActiveDrumId(a=>a===id?rem[0].id:a);
     setSongMatrix(m=>({...m,drums:m.drums.map(v=>v===id?null:v)}));
   };
+  // One bar, like the synth clipboard. mix/motion stay pattern-level (they're
+  // not per-column state you'd want to smear across a paste).
   const copyDrumPatFn=()=>{
     const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-    setDrumClipboard(JSON.parse(JSON.stringify(src)));
+    if(!src)return;
+    const off=barOffIn(src);
+    setDrumClipboard({
+      grid:sliceCols(src.grid,off),
+      vel:sliceCols(toDrumVel2D(src.vel,gridW(src.grid)),off,COLS,()=>100),
+      rat:sliceCols(toDrumRat2D(src.rat,gridW(src.grid)),off,COLS,()=>1),
+      mix:(src.mix||defaultDrumMix()).map(m=>({...m}))
+    });
   };
   const pasteDrumPatFn=()=>{
     if(!drumClipboard)return;
     setDrumPats(ps=>ps.map(p=>{
       if(p.id!==activeDrumId)return p;
+      const off=barOffIn(p);
       return Object.assign({},p,{
-        grid:drumClipboard.grid.map(r=>[...r]),
-        vel:toDrumVel2D(drumClipboard.vel),rat:toDrumRat2D(drumClipboard.rat),gridLen:drumClipboard.gridLen,
-        mix:(drumClipboard.mix||defaultDrumMix()).map(m=>({...m})),
-        motion:drumClipboard.motion?JSON.parse(JSON.stringify(drumClipboard.motion)):undefined
+        grid:spliceCols(p.grid,drumClipboard.grid,off),
+        vel:spliceCols(toDrumVel2D(p.vel,gridW(p.grid)),drumClipboard.vel,off,0,COLS,()=>100),
+        rat:spliceCols(toDrumRat2D(p.rat,gridW(p.grid)),drumClipboard.rat,off,0,COLS,()=>1)
       });
     }));
   };
@@ -5158,16 +5708,19 @@ export default function Tabula(){
     setDrumPats(ps=>[...ps,d]);
     setActiveDrumId(d.id);
   };
+    // `col` is an ABSOLUTE pattern column (the STEP page maps its view columns
+    // through barOff before calling in).
     const setStepParam=(col,key,val)=>{setFollowSeq(false);setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
-    const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
+    const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
     return Object.assign({},p,{params});
   }));};
   const randStepLane=(key)=>{pushHistory();setFollowSeq(false);
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
-      const params=(p.params||defaultStepParams()).map(sp=>Object.assign({},sp,{[key]:Math.round(lane.min+Math.random()*(lane.max-lane.min))}));
+      const off=barOffIn(p);
+      const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>(i<off||i>=off+COLS)?sp:Object.assign({},sp,{[key]:Math.round(lane.min+Math.random()*(lane.max-lane.min))}));
       return Object.assign({},p,{params});
     }));
   };
@@ -5176,11 +5729,16 @@ export default function Tabula(){
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
-      const params=(p.params||defaultStepParams()).map(sp=>Object.assign({},sp,{[key]:lane.def}));
+      const off=barOffIn(p);
+      const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>(i<off||i>=off+COLS)?sp:Object.assign({},sp,{[key]:lane.def}));
       return Object.assign({},p,{params});
     }));
   };
-  const resetStepAll=()=>setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{params:defaultStepParams()})));
+  const resetStepAll=()=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    const off=barOffIn(p);
+    return Object.assign({},p,{params:spliceFlat(p.params||defaultStepParams(patW(p)),null,off)});
+  }));
   // Double-click on any lane cell at column c resets ALL lane values for that
   // step back to their defaults (one row of defaultStepParams). Faster than
   // pulling each lane down individually when a step has accumulated edits.
@@ -5188,8 +5746,8 @@ export default function Tabula(){
     pushHistory();setFollowSeq(false);
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeId)return p;
-      const dflt=defaultStepParams()[0];
-      const params=(p.params||defaultStepParams()).map((sp,i)=>i===col?Object.assign({},dflt):sp);
+      const dflt=defaultStepParams(1)[0];
+      const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>i===col?Object.assign({},dflt):sp);
       return Object.assign({},p,{params});
     }));
   };
@@ -5269,8 +5827,14 @@ export default function Tabula(){
     const el=lenSliderRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
     const pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
-    const len=Math.max(1,Math.round(pct*COLS));
-    setPats(ps=>ps.map(p=>p.id===activeIdR.current?Object.assign({},p,{gridLen:len}):p));
+    // The slider spans ONE bar, so it sets the loop end within the visible bar:
+    // drag it on bar 3 of a 4-bar pattern and you get a length of 32..48.
+    const off=synthBarOffR();
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeIdR.current)return p;
+      const len=Math.max(1,Math.min(patW(p),off+Math.round(pct*COLS)));
+      return Object.assign({},p,{gridLen:len});
+    }));
   },[]);
   const handleLenDown = useCallback(e=>{
     e.stopPropagation();e.preventDefault();
@@ -5747,13 +6311,14 @@ export default function Tabula(){
                                     if(targetPats.length<8){
                                       pushHistory();
                                       const srcGrid=p.grid.map(r=>[...r]);
-                                      const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs();
+                                      const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs(gridW(p.grid));
                                       const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
                                       const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
                                         grid:culled.grid,
                                         durs:culled.durs,
-                                        params:(p.params||defaultStepParams()).map(s=>Object.assign({},s)),
-                                        gridLen:p.gridLen??16
+                                        params:(p.params||defaultStepParams(gridW(p.grid))).map(s=>Object.assign({},s)),
+                                        gridLen:p.gridLen??16,
+                                        bars:patBars(p)
                                       });
                                       layerStoreR.current[tl]={...targetData,pats:[...targetPats,newPat],activeId:newPat.id};
                                       switchLayer(tl);
@@ -6194,6 +6759,7 @@ export default function Tabula(){
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
+              {barStrip}
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
@@ -6208,30 +6774,39 @@ export default function Tabula(){
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
-                      const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
-                      const on=activePat?activePat.grid[r][c]:false;
-                      const inactive=c>=gridLen;
+                      // c is the VIEW column; ac is the absolute pattern column.
+                      const ac=barOff+c;
+                      const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
+                      const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
+                      const inactive=ac>=gridLen;
                       return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{
                         background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                         outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px",
                       })}/>);
                     })}
                     {(()=>{
-                      const rects=[];let ci=0;
-                      while(ci<COLS){
-                        const on=activePat?activePat.grid[r][ci]:false;
+                      const rects=[];
+                      const A0=barOff, A1=barOff+COLS;
+                      // Scan starts a bar EARLY so a note tied across the bar
+                      // line still draws its tail on this page (clipped below).
+                      let ci=Math.max(0,A0-COLS);
+                      while(ci<A1){
+                        const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;
                         if(on){
                           const p=activePat?.params?.[ci];
                           const rhy=p?Math.round(p.rhy??1):1;
                           const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);
+                          if(ci+span<=A0){ci+=span;continue;}   // ends before this page
+                          const vs=Math.max(ci,A0)-A0;           // visible start, in view cols
+                          const vw=Math.min(ci+span,A1)-A0-vs;   // visible width
                           const vel=p?(p.vel??100):100;
                           const b=0.35+(vel/127)*0.65;
                           const inactive=ci>=gridLen;
                           const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;
                           const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
-                          const L=`calc(${ci/COLS}*(100% + 2px))`;
-                          const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;
+                          const L=`calc(${vs/COLS}*(100% + 2px))`;
+                          const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,
@@ -6251,9 +6826,10 @@ export default function Tabula(){
                       return rects;
                     })()}
                     {vSGrid&&Array.from({length:COLS},(_,c)=>{
-                      if(c>=gridLen)return null;
-                      const baseOn=activePat?activePat.grid[r][c]:false;
-                      const vOn=!!(vSGrid[r]&&vSGrid[r][c]);
+                      const ac=barOff+c;
+                      if(ac>=gridLen)return null;
+                      const baseOn=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
+                      const vOn=!!(vSGrid[r]&&vSGrid[r][ac]);
                       if(vOn===baseOn)return null;
                       const L=`calc(${c/COLS}*(100% + 2px))`;
                       const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
@@ -6266,7 +6842,8 @@ export default function Tabula(){
               </div>
               <div style={S.stepBar}>
                 {Array.from({length:COLS},(_,c)=>{
-                  const isA=playing&&c===step,isQ=c%4===0,inactive=c>=gridLen;
+                  const ac=barOff+c;
+                  const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;
                   return(
                   <div key={c} style={S.stepColWrap}>
                     <div style={Object.assign({},S.stepDot,{
@@ -6278,9 +6855,12 @@ export default function Tabula(){
               <div ref={lenSliderRef} style={S.lenSlider}
                 onPointerDown={handleLenDown} onPointerMove={handleLenMove}
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
-                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                <div style={{position:"absolute",top:IS_MOBILE?-3:-3,bottom:IS_MOBILE?-3:-3,width:IS_MOBILE?3:12,left:`calc(${(gridLen/COLS)*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                {/* The slider is one BAR wide, so it shows this page's slice of
+                    the playable length: full on bars before the loop end, empty
+                    on bars past it, partial on the bar the end falls in. */}
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
+                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:IS_MOBILE?-3:-3,bottom:IS_MOBILE?-3:-3,width:IS_MOBILE?3:12,left:`calc(${_lenFrac*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
                 <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
@@ -6303,6 +6883,7 @@ export default function Tabula(){
                     Tap a cell to toggle; click-and-drag vertically on a cell to
                     set its per-cell velocity (drag up = louder). Brightness of a
                     lit cell reflects its velocity. */}
+                <div style={{width:dw||"80%",flexShrink:0}}>{barStrip}</div>
                 <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
                   {DRUM_VOICES.map((voice,r)=>{
                     const dc=drumColor(r,linkHat,linkTom);
@@ -6310,16 +6891,18 @@ export default function Tabula(){
                     <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
                       <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                       {Array.from({length:COLS},(_,c)=>{
-                        const on=dPat?.grid[r]?.[c]||false;
-                        const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][c]!=null)?dPat.vel[r][c]:100;
-                        const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][c]!=null)?dPat.rat[r][c]:1;
-                        const isActive=playing&&c===drumStep;
-                        const inactive=c>=dLen;
+                        // c = view column on this bar page; ac = absolute column.
+                        const ac=barOff+c;
+                        const on=dPat?.grid[r]?.[ac]||false;
+                        const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][ac]!=null)?dPat.vel[r][ac]:100;
+                        const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][ac]!=null)?dPat.rat[r][ac]:1;
+                        const isActive=playing&&ac===drumStep;
+                        const inactive=ac>=dLen;
                         const isQ=c%4===0;
                         // VARY overlay: gold ring where the live variation ADDED a
                         // hit, dim where it DROPPED one. Base grid stays editable.
-                        const varOn=vGridD?!!(vGridD[r]&&vGridD[r][c]):on;
-                        const vAdd=vGridD&&varOn&&!on&&c<dLen, vDrop=vGridD&&!varOn&&on;
+                        const varOn=vGridD?!!(vGridD[r]&&vGridD[r][ac]):on;
+                        const vAdd=vGridD&&varOn&&!on&&ac<dLen, vDrop=vGridD&&!varOn&&on;
                         // Velocity → brightness via alpha on the voice color.
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":dc+aHex;
@@ -6331,7 +6914,7 @@ export default function Tabula(){
                                 e.preventDefault();e.stopPropagation();
                                 const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
                                 const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
-                                const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
+                                const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                                 pushHistory();
                                 const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
                                 const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
@@ -6340,7 +6923,7 @@ export default function Tabula(){
                               }
                               e.stopPropagation();if(inactive)return;
                               // Ctrl/Cmd+click → cycle this cell's ratchet count.
-                              if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,c);return;}
+                              if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,ac);return;}
                               e.preventDefault();
                               // Gesture: horizontal drag = paint/erase a run of notes
                               // (like POLY/MONO); vertical drag = per-cell velocity;
@@ -6352,23 +6935,23 @@ export default function Tabula(){
                               let mode=null;const painted=new Set();
                               const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
                               pushHistory();
-                              if(!wasOn){setDrumCell(r,c,true);painted.add(r+":"+c);}
+                              if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
                               const onMove=ev=>{
                                 const dx=ev.clientX-startX,dy=startY-ev.clientY;
                                 if(mode===null){
-                                  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,c);}
+                                  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                   else if(Math.abs(dy)>5){mode="vel";}
                                 }
-                                if(mode==="vel")setDrumVelCell(r,c,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                 else if(mode==="paint"){
-                                  const cc=Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
+                                  const cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
                                   const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
                                   paint(rr,cc);
                                 }
                               };
                               const onUp=()=>{
                                 document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
-                                if(mode===null&&wasOn)setDrumCell(r,c,false); // pure tap on existing note → clear
+                                if(mode===null&&wasOn)setDrumCell(r,ac,false); // pure tap on existing note → clear
                               };
                               document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                             }}>
@@ -6387,9 +6970,9 @@ export default function Tabula(){
                 <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
                   onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
                   onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
-                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-dLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                  <div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${(dLen/COLS)*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                  {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${_lenFrac*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
                   <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
                 </div>
               </div>
@@ -6643,28 +7226,32 @@ export default function Tabula(){
                   <div style={S.stepPagePat}>{activePat?.name||""}</div>
                   <div style={{flex:1}}/>
                 </div>
+                {barStrip}
                   {LANES.map(lane=>{
-                    const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
+                    // StepLane is COLS-wide, so it gets THIS BAR's slice of the lane and its
+                    // column indices are mapped back to absolute on the way out.
+                    const vals=(activePat?(activePat.params||defaultStepParams(patW(activePat))):defaultStepParams()).map(sp=>sp[lane.key]??lane.def).slice(barOff,barOff+COLS);
                     // Only FLT/OCT/GLIDE actually animate mid-note (Bell.play's mods array
                     // schedules cutoff/pitch/transition style). Everything else (VEL, DUR,
                     // DLY, REV, RHY) is locked at note-start, so on tied-note extension
                     // cells those lanes stay locked.
                     const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
-                    const colHasNote=Array.from({length:COLS},(_,c)=>{
+                    const colHasNote=Array.from({length:COLS},(_,vc)=>{
                       if(!activePat)return false;
+                      const c=barOff+vc;
                       if(!isMidNote){
-                        for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
+                        for(let r=0;r<ROWS;r++) if(activePat.grid[r]&&activePat.grid[r][c]) return true;
                         return false;
                       }
                       for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
-                        if(activePat.grid[r][c2]){
+                        if(activePat.grid[r]&&activePat.grid[r][c2]){
                           const span=Math.max(1,activePat.durs?.[r]?.[c2]??1);
                           if(c<c2+span) return true;
                         }
                       }
                       return false;
                     });
-                    const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
+                    const curVal=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?vals[step-barOff]:null;
                     const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                     return(
                       <div key={lane.key} style={S.stepLaneSection}>
@@ -6676,8 +7263,8 @@ export default function Tabula(){
                           <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button>
                         </div>
                         <StepLane lane={lane} values={vals} colHasNote={colHasNote}
-                          activeStep={playing&&playId===activeId?step:-1}
-                          onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory} onResetCol={resetStepCol}
+                          activeStep={playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1}
+                          onChange={(col,val)=>setStepParam(barOff+col,lane.key,val)} onDragStart={pushHistory} onResetCol={c=>resetStepCol(barOff+c)}
                           tall/>
                       </div>
                     );
@@ -7024,13 +7611,14 @@ export default function Tabula(){
                           if(targetPats.length<8){
                             pushHistory();
                             const srcGrid=p.grid.map(r=>[...r]);
-                            const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs();
+                            const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs(gridW(p.grid));
                             const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
                             const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
                               grid:culled.grid,
                               durs:culled.durs,
-                              params:(p.params||defaultStepParams()).map(s=>Object.assign({},s)),
+                              params:(p.params||defaultStepParams(gridW(p.grid))).map(s=>Object.assign({},s)),
                               gridLen:p.gridLen??16,
+                              bars:patBars(p),
                               speedMult:p.speedMult??1,
                             });
                             layerStoreR.current[tl]={...targetData,pats:[...targetPats,newPat],activeId:newPat.id};
@@ -7245,6 +7833,7 @@ export default function Tabula(){
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
               <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+                  {barStrip}
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
@@ -7253,17 +7842,19 @@ export default function Tabula(){
                       const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                       return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
-                          const isCol=playing&&playId===activeId&&c===step,isQ=c%4===0;
-                          const on=activePat?activePat.grid[r][c]:false;const inactive=c>=gridLen;
+                          const ac=barOff+c;
+                          const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
+                          const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=ac>=gridLen;
                           return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
                             background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];let ci=0;while(ci<COLS){const on=activePat?activePat.grid[r][ci]:false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${ci/COLS}*(100% + 2px))`;const W=`calc(${span/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + 2px))`;const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                         {vSGrid&&Array.from({length:COLS},(_,c)=>{
-                          if(c>=gridLen)return null;
-                          const baseOn=activePat?activePat.grid[r][c]:false;
-                          const vOn=!!(vSGrid[r]&&vSGrid[r][c]);
+                          const ac=barOff+c;
+                          if(ac>=gridLen)return null;
+                          const baseOn=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
+                          const vOn=!!(vSGrid[r]&&vSGrid[r][ac]);
                           if(vOn===baseOn)return null;
                           const L=`calc(${c/COLS}*(100% + 2px))`;const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
                           return vOn
@@ -7273,11 +7864,11 @@ export default function Tabula(){
                       </div>);
                     })}
                   </div>
-                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const isA=playing&&c===step,isQ=c%4===0,inactive=c>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
                   <div ref={lenSliderRef} style={S.lenSlider} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${(gridLen/COLS)*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${((COLS-gridLen)/COLS)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                    <div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${(gridLen/COLS)*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                    {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${_lenFrac*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
                     <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",pointerEvents:"none"}}>{gridLen}</span>
                   </div>
                 </div>
@@ -7301,6 +7892,7 @@ export default function Tabula(){
                   const SIZE=isLandscape?`min(calc(100vw - 190px), calc(100dvh - 32px))`:`min(calc(100vw - 20px), calc(100dvh - 150px))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
+                      <div style={{width:SIZE,flexShrink:0}}>{barStrip}</div>
                       <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
                         {DRUM_VOICES.map((voice,r)=>{
                           const dc=drumColor(r,linkHat,linkTom);
@@ -7308,14 +7900,16 @@ export default function Tabula(){
                           <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
                             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
                             {Array.from({length:COLS},(_,step)=>{
-                              const on=dPat?.grid[r]?.[step]||false;
-                              const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][step]!=null)?dPat.vel[r][step]:100;
-                              const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][step]!=null)?dPat.rat[r][step]:1;
-                              const isActive=playing&&step===drumStep;
-                              const inactive=step>=dLen;
+                              // step = view column on this bar page; ac = absolute.
+                              const ac=barOff+step;
+                              const on=dPat?.grid[r]?.[ac]||false;
+                              const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][ac]!=null)?dPat.vel[r][ac]:100;
+                              const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][ac]!=null)?dPat.rat[r][ac]:1;
+                              const isActive=playing&&ac===drumStep;
+                              const inactive=ac>=dLen;
                               const isQ=step%4===0;
-                              const varOn=vGridD?!!(vGridD[r]&&vGridD[r][step]):on;
-                              const vAdd=vGridD&&varOn&&!on&&step<dLen, vDrop=vGridD&&!varOn&&on;
+                              const varOn=vGridD?!!(vGridD[r]&&vGridD[r][ac]):on;
+                              const vAdd=vGridD&&varOn&&!on&&ac<dLen, vDrop=vGridD&&!varOn&&on;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":dc+aHex;
                               return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
@@ -7329,7 +7923,7 @@ export default function Tabula(){
                                   e.preventDefault();e.stopPropagation();
                                   const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
                                   const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
-                                  const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel),rat:toDrumRat2D(dPat.rat),gridLen:dLen};
+                                  const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                                   pushHistory();
                                   const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
                                   const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
@@ -7338,7 +7932,7 @@ export default function Tabula(){
                                 }
                                 e.preventDefault();e.stopPropagation();if(inactive)return;
                                 // Ctrl/Cmd+click → cycle this cell's ratchet count.
-                                if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,step);return;}
+                                if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,ac);return;}
                                 // Horizontal drag = paint/erase a run; vertical drag
                                 // = per-cell velocity; tap = toggle.
                                 const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
@@ -7347,23 +7941,23 @@ export default function Tabula(){
                                 let mode=null;const painted=new Set();
                                 const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
                                 pushHistory();
-                                if(!wasOn){setDrumCell(r,step,true);painted.add(r+":"+step);}
+                                if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
                                 const onMove=ev=>{
                                   const dx=ev.clientX-startX,dy=startY-ev.clientY;
                                   if(mode===null){
-                                    if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,step);}
+                                    if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                     else if(Math.abs(dy)>5){mode="vel";}
                                   }
-                                  if(mode==="vel")setDrumVelCell(r,step,Math.max(1,Math.min(127,Math.round(startVel+dy))));
+                                  if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                   else if(mode==="paint"){
-                                    const cc=Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
+                                    const cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
                                     const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
                                     paint(rr,cc);
                                   }
                                 };
                                 const onUp=()=>{
                                   document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
-                                  if(mode===null&&wasOn)setDrumCell(r,step,false);
+                                  if(mode===null&&wasOn)setDrumCell(r,ac,false);
                                 };
                                 document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                               }}>
@@ -7387,8 +7981,8 @@ export default function Tabula(){
                           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                         }}>
-                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${(dLen/COLS)*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 0 0 5px"}}/>
-                        <div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${(dLen/COLS)*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 0 0 5px"}}/>
+                        {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${_lenFrac*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>}
                         <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:6,color:"rgba(210,195,175,0.4)",pointerEvents:"none"}}>{dLen}</span>
                       </div>
                     </div>
@@ -7554,26 +8148,29 @@ export default function Tabula(){
                           <div style={{flex:1}}/>
                         </div>
                         {LANES.map(lane=>{
-                          const vals=(activePat?(activePat.params||defaultStepParams()):defaultStepParams()).map(sp=>sp[lane.key]??lane.def);
+                          // StepLane is COLS-wide, so it gets THIS BAR's slice of the lane and its
+                    // column indices are mapped back to absolute on the way out.
+                    const vals=(activePat?(activePat.params||defaultStepParams(patW(activePat))):defaultStepParams()).map(sp=>sp[lane.key]??lane.def).slice(barOff,barOff+COLS);
                           // Only FLT/OCT/GLIDE animate mid-note via Bell.play's mods array.
                           // VEL/DUR/DLY/REV/RHY are locked at note-start, so tied-note
                           // extension cells stay locked for those lanes.
                           const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
-                          const colHasNote=Array.from({length:COLS},(_,c)=>{
+                          const colHasNote=Array.from({length:COLS},(_,vc)=>{
                             if(!activePat)return false;
+                            const c=barOff+vc;
                             if(!isMidNote){
-                              for(let r=0;r<ROWS;r++) if(activePat.grid[r][c]) return true;
+                              for(let r=0;r<ROWS;r++) if(activePat.grid[r]&&activePat.grid[r][c]) return true;
                               return false;
                             }
                             for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
-                              if(activePat.grid[r][c2]){
+                              if(activePat.grid[r]&&activePat.grid[r][c2]){
                                 const span=Math.max(1,activePat.durs?.[r]?.[c2]??1);
                                 if(c<c2+span) return true;
                               }
                             }
                             return false;
                           });
-                          const curVal=playing&&playId===activeId&&step>=0?vals[step]:null;
+                          const curVal=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?vals[step-barOff]:null;
                           const liveLabel=curVal==null?null:lane.key==="oct"?(curVal-2>0?"+":(curVal-2<0?"":""))+String(curVal-2)+"oct":lane.key==="rhy"?("×"+Math.max(1,curVal)):lane.key==="dur"?(curVal>0?"+"+curVal+"%":curVal+"%"):String(curVal);
                           return(
                             <div key={lane.key} style={S.stepLaneSection}>
@@ -7585,8 +8182,8 @@ export default function Tabula(){
                                 <button style={Object.assign({},S.stepLaneBtn,{borderColor:lane.color+"55",color:lane.color})} onClick={()=>randStepLane(lane.key)}>RAND</button>
                               </div>
                               <StepLane lane={lane} values={vals} colHasNote={colHasNote}
-                                activeStep={playing&&playId===activeId?step:-1}
-                                onChange={(col,val)=>setStepParam(col,lane.key,val)} onDragStart={pushHistory} onResetCol={resetStepCol}
+                                activeStep={playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1}
+                                onChange={(col,val)=>setStepParam(barOff+col,lane.key,val)} onDragStart={pushHistory} onResetCol={c=>resetStepCol(barOff+c)}
                                 tall/>
                             </div>
                           );

@@ -25,7 +25,7 @@ npm run audit     # standalone CJS return_react2 audit
 - GitHub Pages serves `index.html` from `main` — a push auto-deploys in ~30s.
 - Preview locally: `.claude/launch.json` defines a `tabula` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
 
-**Verifying changes:** the build validates syntax. Logic (scheduler math, the pattern randomizer, range-slider frequency mapping) is best checked by extracting the pure function into a tiny Node harness and running Monte-Carlo/round-trip asserts — do NOT rely on headless AudioContext (gesture-gated, non-deterministic) and **do not auto-start playback** (Jake often has other audio running). UI/layout changes: verify in the browser preview (read the DOM / console, not just screenshots — screenshots have been flaky).
+**Verifying changes:** the build validates syntax. For grid/paging/codec work, a headless Playwright pass over the built `index.html` is worth the setup (`npm i --no-save playwright react@18.2.0 react-dom@18.2.0`, serve a copy with the CDN `<script src>`s pointed at the local UMD builds, then drive the DOM and read back `localStorage["tnori-autosave"]` to assert on real pattern data). That's how the duplicate-bar overwrite bug was caught. Filter resource 404s out of the console check — a bare static server has no samples/manifest/lamejs. Logic (scheduler math, the pattern randomizer, range-slider frequency mapping) is best checked by extracting the pure function into a tiny Node harness and running Monte-Carlo/round-trip asserts — do NOT rely on headless AudioContext (gesture-gated, non-deterministic) and **do not auto-start playback** (Jake often has other audio running). UI/layout changes: verify in the browser preview (read the DOM / console, not just screenshots — screenshots have been flaky).
 
 ---
 
@@ -45,11 +45,17 @@ synth + lead share one `Bell` WebAudio engine — a VCO/VCF/VCA chain built fres
 
 Only the **active** synth-type layer's pattern library lives in live `pats` state; the other is parked in `layerStoreR.current[layer] = {pats, activeId, phrases, …}`. `switchLayer()` saves the outgoing layer and loads the incoming one. Drums never participate (own `drumPats`).
 
-**Consequence:** when the scheduler needs a *non-active* layer's pattern it must read `layerStoreR.current[layer]`, NOT `patsR.current`. `resolveLayerPat(layer, bar)` centralizes this. Get it wrong → tracks go silent on layer switch (a recurring bug).
+**Consequence:** when the scheduler needs a *non-active* layer's pattern it must read `layerStoreR.current[layer]`, NOT `patsR.current`. `resolveLayerPat(layer, bar)` centralizes this. Get it wrong → tracks go silent on layer switch (a recurring bug). The same trap applies to serialization: patterns live in `pats`, `drumPats` **and** every parked `layerStore[layer].pats` — `_mapProjectPats` walks all three.
 
 ### Pattern data model
 
-Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells), `params[c]` (per-**column** step params), `gridLen` (loop length 1–16), `speedMult`, `id`, `name`.
+Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells), `params[c]` (per-**column** step params), `gridLen` (loop length in steps), `bars`, `speedMult`, `id`, `name`.
+
+- **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the playable loop length in steps, now `1..bars*16` — it is the single source of truth for length; bar count is just its allocation. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
+- **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
+- **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. In render, `c` is the view column and `ac = barOff+c` is the data column. In the pointer handlers, `synthBarOffR()` / `drumBarOffR()` convert a hit-tested view column to absolute — they read live refs so the `[]`-dep useCallbacks don't bake in a stale page. **Paged, not scrolled**, deliberately: a scrolling grid needs a parent `overflow-x`, which is the iOS gesture-interception trap below.
+- **Bar-scoped ops.** RAND / CLR / CPY / PST / MUT8 and the STEP-lane RST/RAND all act on the **visible bar**, not the whole pattern (`sliceCols`/`spliceCols`/`sliceFlat`/`spliceFlat`). DUP/DEL stay pattern-level and must carry `bars`. `⧉` (duplicate bar) *inserts* after the visible bar — it opens a gap with `openBarGap` and slides later bars right; overwriting the next bar instead is a bug that was caught once already.
+- **VARY rerolls per bar** (`s % COLS === 0`), scoped to that bar's column window, so shifts/ghosts wrap inside the bar and earlier bars keep their roll. On a 1-bar pattern this is identical to the old per-loop behaviour.
 
 - `params[c]` keys: `vel, flt, dly, rev, rhy, dur, oct, glide` (see `defaultStepParams`). `rev`/`dur` were added after the first arch doc.
 - `rhy` is **ratchet only** (1–4 retriggers). rhy=0-as-tie is a dead semantic — durations live on `durs`.
@@ -89,6 +95,8 @@ When you add saved state, add it to EVERY site or saves/undo silently lose it:
 4. `doSave` snap object / `doLoad` apply — and the `[["key",setter],…]` load arrays (there are several; grep the sibling param, e.g. `rvPreDelay`, to find them all).
 5. The **play-start re-apply** block that pushes FX values to the engine on every play.
 6. For engine params also: state + `useEffect(()=>bell.current.setX(x),[x])` + the engine method + the UI control.
+
+**Sparse codec (required, not an optimization).** `packProject` / `unpackProject` (built on `packPat` / `unpackPat`) store only the cells that are ON and the values that differ from default. Dense JSON costs ~3.3KB per bar per pattern, so a 32-bar project serializes to ~2.4MB — which breaks share links (whole project base64'd into the URL) and blows the ~5MB localStorage quota autosave lives in, and would put 50 dense undo snapshots in phone memory. Packed, that same project is ~244KB, and an ordinary project is ~4× smaller than the old dense 1-bar encoding. Applied at all four persistence sites; `packPat` also serves as the undo deep copy (it returns fresh arrays for every heavy lane, so no JSON round-trip is needed first). Decoding is tolerant — anything without the `_pk` marker is a pre-codec dense save and passes straight through, so old projects still load.
 
 Autosave is separate (`storageSet("autosave", …)` — `window.storage`, falling back to `tnori-`-prefixed localStorage): a lean snapshot (no samples) written on a debounce, samples on a dirty flag, **never during playback or export**. Restored on mount; a loaded share link is a "preview" that adopts on first edit.
 
