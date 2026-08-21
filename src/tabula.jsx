@@ -3508,10 +3508,10 @@ export default function Tabula(){
     }
     return false;
   };
-  const _barBtn={display:"flex",alignItems:"center",justifyContent:"center",
-    width:IS_MOBILE?22:24,minWidth:IS_MOBILE?22:24,height:IS_MOBILE?18:20,
-    borderRadius:3,background:"rgba(220,200,180,0.07)",color:"rgba(220,205,185,0.75)",
-    fontSize:IS_MOBILE?9:11,lineHeight:1,cursor:"pointer",userSelect:"none",touchAction:"none"};
+  // Chips only. Every control that used to sit alongside them (add / remove /
+  // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
+  // ops, where the buttons can be a real touch size — a row of 18px glyphs above
+  // the grid was too small to hit on the phone.
   const _scrubTo=(clientX,el)=>{
     const rect=el.getBoundingClientRect();
     const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
@@ -3520,10 +3520,10 @@ export default function Tabula(){
     setBarPage(bi);
   };
   const barStrip=(
-    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?3:4,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
-      <div style={Object.assign({},_barBtn,{opacity:curBar<=0?0.3:1})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();if(curBar>0){setBarFollow(false);setBarPage(curBar-1);}}}>‹</div>
-      <div style={{position:"relative",flex:1,display:"flex",gap:2,height:IS_MOBILE?18:20,touchAction:"none",cursor:"pointer"}}
+    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+      {/* Tap or drag anywhere along the chips to move. The row is deliberately
+          tall so a thin chip on a long pattern is still an easy target. */}
+      <div style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{e.stopPropagation();e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);_scrubTo(e.clientX,e.currentTarget);}}
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
         {Array.from({length:barCount},(_,bi)=>{
@@ -3532,31 +3532,40 @@ export default function Tabula(){
           // Bars past the loop end are allocated but never sounded — show them
           // recessed so a trimmed pattern reads honestly.
           const past=bi*COLS>=(editPat?.gridLen??COLS);
+          const wide=barCount<=8;   // number the chips while they're readable
           return(
-            <div key={bi} style={{flex:1,minWidth:2,borderRadius:2,position:"relative",
+            <div key={bi} style={{flex:1,minWidth:2,borderRadius:3,
+              display:"flex",alignItems:"center",justifyContent:"center",
               background:isCur?"rgba(232,220,205,0.55)":past?"rgba(220,200,180,0.03)":has?"rgba(220,200,180,0.17)":"rgba(220,200,180,0.07)",
               boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
-              transition:"background .08s"}}/>
+              color:isCur?"rgba(20,16,12,0.75)":"rgba(210,195,175,0.45)",
+              fontSize:9,fontWeight:700,lineHeight:1,pointerEvents:"none",
+              transition:"background .08s"}}>{wide?bi+1:""}</div>
           );
         })}
       </div>
-      <div style={Object.assign({},_barBtn,{opacity:curBar>=barCount-1?0.3:1})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();if(curBar<barCount-1){setBarFollow(false);setBarPage(curBar+1);}}}>›</div>
-      <span style={{fontSize:IS_MOBILE?7:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:IS_MOBILE?26:34,textAlign:"center",pointerEvents:"none"}}>
+      <span style={{fontSize:IS_MOBILE?8:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:IS_MOBILE?28:34,textAlign:"center",pointerEvents:"none"}}>
         {curBar+1}/{barCount}
       </span>
-      <div title="Follow the playhead"
-           style={Object.assign({},_barBtn,{background:barFollow?"rgba(201,169,110,0.28)":"rgba(220,200,180,0.07)",color:barFollow?C_VARY:"rgba(220,205,185,0.55)"})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();setBarFollow(f=>!f);}}>◎</div>
-      <div title="Duplicate this bar"
-           style={Object.assign({},_barBtn,{opacity:barCount>=MAX_BARS?0.3:1})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();duplicateBar();}}>⧉</div>
-      <div title="Add a bar"
-           style={Object.assign({},_barBtn,{opacity:barCount>=MAX_BARS?0.3:1})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();addBar();}}>+</div>
-      <div title="Remove the last bar"
-           style={Object.assign({},_barBtn,{opacity:barCount<=1?0.3:1})}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();removeBar();}}>–</div>
+    </div>
+  );
+  // Desktop sidebar version of the bar controls. The mobile drawer carries a
+  // thumb-sized set; this one matches the density of the ops rows it sits under.
+  const barOpsRow=(
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
+      {[["+BAR",addBar,barCount>=MAX_BARS,false],
+        ["⧉BAR",duplicateBar,barCount>=MAX_BARS,false],
+        ["−BAR",removeBar,barCount<=1,true]].map(([l,f,d,danger])=>(
+        <button key={l} disabled={!!d} title={l==="⧉BAR"?"Duplicate the visible bar":undefined}
+          style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}}
+          onClick={d?undefined:f}>{l}</button>
+      ))}
+      <button title="Follow the playhead across bars"
+        style={{padding:"4px 0",borderRadius:5,fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",
+          border:"1px solid "+(barFollow?C_VARY+"99":"rgba(200,185,165,0.13)"),
+          background:barFollow?"rgba(201,169,110,0.14)":"transparent",
+          color:barFollow?C_VARY:"rgba(200,185,165,0.55)"}}
+        onClick={()=>setBarFollow(f=>!f)}>FOLLOW</button>
     </div>
   );
 
@@ -6460,6 +6469,7 @@ export default function Tabula(){
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
+                    {barOpsRow}
                     {/* Per-pattern SPEED selector */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
                       {SPEED_OPTS.map(({label,mult})=>(
@@ -6484,6 +6494,7 @@ export default function Tabula(){
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
+                    {barOpsRow}
                     {/* Per-pattern SPEED selector — drums layer */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
                       {SPEED_OPTS.map(({label,mult})=>(
@@ -8119,11 +8130,38 @@ export default function Tabula(){
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
                         :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
+                      // Bar controls live here rather than beside the chips above
+                      // the grid: at a real touch size they don't fit up there,
+                      // and they belong with the other pattern-editing ops.
+                      const barOps=[
+                        ["ADD BAR",  addBar,       barCount>=MAX_BARS, false],
+                        ["DUP BAR",  duplicateBar, barCount>=MAX_BARS, false],
+                        ["DEL BAR",  removeBar,    barCount<=1,        true ],
+                      ];
+                      const opBtn=(d,danger)=>({padding:"13px 0",border:"1px solid "+(d?"rgba(200,185,165,0.06)":accentF+"0.3)"),borderRadius:8,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":accent,fontSize:10,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600});
+                      const grpLabel={fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5,display:"flex",alignItems:"center",gap:6};
                       return(
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:12}}>
-                          {ops.map(([l,f,d,danger])=>(
-                            <button key={l} disabled={!!d} style={{padding:"7px 0",border:"1px solid "+(d?"rgba(200,185,165,0.06)":accentF+"0.3)"),borderRadius:7,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":accent,fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600}} onClick={d?undefined:f}>{l}</button>
-                          ))}
+                        <div style={{marginBottom:12}}>
+                          <div style={grpLabel}>PATTERN</div>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:12}}>
+                            {ops.map(([l,f,d,danger])=>(
+                              <button key={l} disabled={!!d} style={opBtn(d,danger)} onClick={d?undefined:f}>{l}</button>
+                            ))}
+                          </div>
+                          <div style={grpLabel}>
+                            <span>BARS</span>
+                            <span style={{color:"rgba(210,195,175,0.32)",letterSpacing:1}}>{curBar+1} / {barCount}</span>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
+                            {barOps.map(([l,f,d,danger])=>(
+                              <button key={l} disabled={!!d} style={opBtn(d,danger)} onClick={d?undefined:f}>{l}</button>
+                            ))}
+                            {/* FOLLOW is a toggle, so it reads lit rather than tapped. */}
+                            <button
+                              style={Object.assign({},opBtn(false,false),
+                                barFollow?{borderColor:C_VARY+"99",background:"rgba(201,169,110,0.14)",color:C_VARY}:{})}
+                              onClick={()=>setBarFollow(f=>!f)}>FOLLOW</button>
+                          </div>
                         </div>
                       );
                     })()}
