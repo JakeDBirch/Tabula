@@ -3158,7 +3158,7 @@ export default function Tabula(){
   };
   const doLoad=slot=>{
     let s=slotData[slot];if(!s)return;
-    setBarPage(0);setBarFollow(true);
+    setBarPage(0);
     s=migrateLegacyBass(unpackProject(s));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
@@ -3331,7 +3331,7 @@ export default function Tabula(){
     }
     const p0=mkPat(symPat(0));
     const dp0=mkDrumPat(symPat(0));
-    setBarPage(0);setBarFollow(true);
+    setBarPage(0);
     setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
     setDrumPats([dp0]);setActiveDrumId(dp0.id);setDrumChain([dp0.id]);
     // Seed the lead store with a fresh empty pat so switching to MONO after
@@ -3425,14 +3425,15 @@ export default function Tabula(){
   // FOLLOW: while playing, page along with the music. Tapping a bar pins it
   // (turns follow off) so you can edit bar 1 while bar 7 plays; the ◎ button
   // and pressing stop both re-arm it.
-  // FOLLOW on (the default) pulls the visible page along with the playhead, bar
-  // by bar. Turn it off to hold one bar still while the rest of the pattern
-  // plays. Nothing else touches it — see _scrubTo.
-  const [barFollow, setBarFollow] = useState(true);
+  // Page-follow is part of the EXISTING FOLLOW (followSeq), not a toggle of its
+  // own: FOLLOW already means "keep the editor on whatever is playing", and the
+  // visible bar is just the finer grain of the same idea. So the same button
+  // that locks the active pattern to the playing one also pulls the page
+  // through the bars.
   useEffect(()=>{
-    if(!barFollow||!playing)return;
+    if(!followSeq||!playing)return;
     if(playingBar>=0&&playingBar!==barPage&&playingBar<barCount)setBarPage(playingBar);
-  },[barFollow,playing,playingBar,barPage,barCount]);
+  },[followSeq,playing,playingBar,barPage,barCount]);
   // Never leave the page pointing past the end of a pattern (switching pattern,
   // switching layer, or removing bars can all strand it).
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
@@ -3517,11 +3518,8 @@ export default function Tabula(){
     const rect=el.getBoundingClientRect();
     const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
     const bi=Math.max(0,Math.min(barCount-1,i));
-    // Deliberately does NOT switch FOLLOW off. Chips are the only way to move
-    // between bars, so auto-pinning on tap meant follow was always off by the
-    // time you pressed play — and the toggle that said otherwise was hidden in
-    // the drawer. FOLLOW is now the single, explicit control: on = the page
-    // tracks the playhead, off = the page stays where you put it.
+    // Deliberately does NOT switch FOLLOW off — that's the transport's toggle
+    // and a grid edit is what clears it, same as it always was.
     setBarPage(bi);
   };
   // Tap or drag anywhere along the chips to move. The row is deliberately tall
@@ -3561,18 +3559,23 @@ export default function Tabula(){
           are always visible in the sidebar, so there's no drawer to open.) */}
       {IS_MOBILE?(
         <div role="button" aria-label="Pattern and bar controls"
-          onPointerDown={e=>{e.stopPropagation();e.preventDefault();
-            setSeqPage("step");
-            setActiveSheet(sh=>sh==="pattern"?null:"pattern");}}
+          onClick={e=>{
+            // onClick, NOT onPointerDown: opening the sheet from pointerdown
+            // mounts the full-screen backdrop under the finger, and the same
+            // tap's trailing click then lands on it and dismisses the sheet
+            // instantly — the handle just looks dead. Every other sheet opener
+            // in here is onClick for the same reason.
+            e.stopPropagation();
+            setActiveSheet(sh=>sh==="bars"?null:"bars");}}
           style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3,
             height:22,minWidth:52,padding:"0 8px",borderRadius:5,
-            border:"1px solid "+(activeSheet==="pattern"?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),
-            background:activeSheet==="pattern"?"rgba(232,220,205,0.12)":"transparent",
-            color:activeSheet==="pattern"?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",
+            border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),
+            background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
+            color:activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",
             fontSize:10,fontWeight:600,letterSpacing:0.5,lineHeight:1,
-            cursor:"pointer",userSelect:"none",touchAction:"none",flexShrink:0}}>
+            cursor:"pointer",userSelect:"none",flexShrink:0}}>
           <span>{curBar+1}/{barCount}</span>
-          <span style={{fontSize:7,opacity:0.7,transform:activeSheet==="pattern"?"rotate(180deg)":"none"}}>▾</span>
+          <span style={{fontSize:7,opacity:0.7,transform:activeSheet==="bars"?"rotate(180deg)":"none"}}>▾</span>
         </div>
       ):(
         <span style={{fontSize:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:34,textAlign:"center",pointerEvents:"none"}}>
@@ -3584,7 +3587,7 @@ export default function Tabula(){
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
   // thumb-sized set; this one matches the density of the ops rows it sits under.
   const barOpsRow=(
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
       {[["+BAR",addBar,barCount>=MAX_BARS,false],
         ["⧉BAR",duplicateBar,barCount>=MAX_BARS,false],
         ["−BAR",removeBar,barCount<=1,true]].map(([l,f,d,danger])=>(
@@ -3592,12 +3595,6 @@ export default function Tabula(){
           style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}}
           onClick={d?undefined:f}>{l}</button>
       ))}
-      <button title="Follow the playhead across bars"
-        style={{padding:"4px 0",borderRadius:5,fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",
-          border:"1px solid "+(barFollow?C_VARY+"99":"rgba(200,185,165,0.13)"),
-          background:barFollow?"rgba(201,169,110,0.14)":"transparent",
-          color:barFollow?C_VARY:"rgba(200,185,165,0.55)"}}
-        onClick={()=>setBarFollow(f=>!f)}>FOLLOW</button>
     </div>
   );
 
@@ -3639,7 +3636,7 @@ export default function Tabula(){
 
   const applyShareState=rawState=>{
     if(!rawState)return;
-    setBarPage(0);setBarFollow(true);
+    setBarPage(0);
     const s=migrateLegacyBass(unpackProject(rawState));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
     // Restore the non-active layers + active layer (mirror doLoad). Without
@@ -7507,7 +7504,7 @@ export default function Tabula(){
                       onClick={()=>{
                         const wasActive=isSynth?activeId===p.id:activeDrumId===p.id;
                         if(songView){ if(!wasActive)isSynth?setActiveId(p.id):setActiveDrumId(p.id); setSongView(false); setActiveSheet(null); }
-                        else if(wasActive){ setSeqPage("step"); setActiveSheet(s=>s==="pattern"?null:"pattern"); }
+                        else if(wasActive){ const k=activeLayer==="drums"?"bars":"pattern"; setSeqPage("step"); setActiveSheet(s=>s===k?null:k); }
                         else { isSynth?setActiveId(p.id):setActiveDrumId(p.id); setActiveSheet(null); }
                       }}>{p.name}</button>
                   );
@@ -7516,8 +7513,8 @@ export default function Tabula(){
               </div>
               {/* per-layer function pills — STEP / SOUND / VARY */}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
-              {[["step","STEP",activeSheet==="pattern"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
-                <button key={key} onClick={()=>{ if(key==="step"){setSeqPage("step");setActiveSheet(s=>s==="pattern"?null:"pattern");} else setActiveSheet(s=>s===key?null:key); }}
+              {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+                <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setSeqPage("step");setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                   style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
                     border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
                     background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
@@ -7706,8 +7703,8 @@ export default function Tabula(){
                reached only by tapping the already-active layer/pattern.) */}
           {!isLandscape&&(
           <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
-            {[["step","STEP",activeSheet==="pattern"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
-              <button key={key} onClick={()=>{ if(key==="step"){setSeqPage("step");setActiveSheet(s=>s==="pattern"?null:"pattern");} else setActiveSheet(s=>s===key?null:key); }}
+            {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+              <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setSeqPage("step");setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                 style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
                   border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
                   background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
@@ -8152,9 +8149,11 @@ export default function Tabula(){
                 )}
 
                 {/* SEQUENCE sheet — single page, all four levels */}
-                {activeSheet==="pattern"&&(
+                {/* PATTERN + BARS sheet — opened by the bar-count handle beside
+                    the chips. Deliberately separate from the STEP sheet: these
+                    are edits to the pattern and its bars, not per-step params. */}
+                {activeSheet==="bars"&&(
                   <div style={{paddingBottom:8}}>
-                    {/* Pattern ops — operate on the active pattern of the active layer */}
                     {(()=>{
                       const isDrum=activeLayer==="drums";
                       const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
@@ -8162,9 +8161,9 @@ export default function Tabula(){
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
                         :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
-                      // Bar controls live here rather than beside the chips above
-                      // the grid: at a real touch size they don't fit up there,
-                      // and they belong with the other pattern-editing ops.
+                      // Bar controls sit with the pattern ops because they are
+                      // the same kind of thing: edits to the pattern you're on.
+                      // FOLLOW is NOT here — that's the transport's toggle.
                       const barOps=[
                         ["ADD BAR",  addBar,       barCount>=MAX_BARS, false],
                         ["DUP BAR",  duplicateBar, barCount>=MAX_BARS, false],
@@ -8185,22 +8184,22 @@ export default function Tabula(){
                             <span style={{color:"rgba(210,195,175,0.32)",letterSpacing:1}}>{curBar+1} / {barCount}</span>
                           </div>
                           {/* The sheet covers the strip above the grid, so the
-                              chips repeat here — DUP BAR / DEL BAR act on
+                              chips repeat here — ADD / DUP / DEL BAR act on
                               whichever bar is selected. */}
                           <div style={{display:"flex",marginBottom:7}}>{barChips}</div>
                           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
                             {barOps.map(([l,f,d,danger])=>(
                               <button key={l} disabled={!!d} style={opBtn(d,danger)} onClick={d?undefined:f}>{l}</button>
                             ))}
-                            {/* FOLLOW is a toggle, so it reads lit rather than tapped. */}
-                            <button
-                              style={Object.assign({},opBtn(false,false),
-                                barFollow?{borderColor:C_VARY+"99",background:"rgba(201,169,110,0.14)",color:C_VARY}:{})}
-                              onClick={()=>setBarFollow(f=>!f)}>FOLLOW</button>
                           </div>
                         </div>
                       );
                     })()}
+                  </div>
+                )}
+
+                {activeSheet==="pattern"&&(
+                  <div style={{paddingBottom:8}}>
                     {/* STEP page (only page now — sequence/phrase chains are replaced by SONG matrix) */}
                     {activeLayer!=="drums"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
