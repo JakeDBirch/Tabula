@@ -3425,12 +3425,14 @@ export default function Tabula(){
   // FOLLOW: while playing, page along with the music. Tapping a bar pins it
   // (turns follow off) so you can edit bar 1 while bar 7 plays; the ◎ button
   // and pressing stop both re-arm it.
+  // FOLLOW on (the default) pulls the visible page along with the playhead, bar
+  // by bar. Turn it off to hold one bar still while the rest of the pattern
+  // plays. Nothing else touches it — see _scrubTo.
   const [barFollow, setBarFollow] = useState(true);
   useEffect(()=>{
     if(!barFollow||!playing)return;
     if(playingBar>=0&&playingBar!==barPage&&playingBar<barCount)setBarPage(playingBar);
   },[barFollow,playing,playingBar,barPage,barCount]);
-  useEffect(()=>{ if(!playing)setBarFollow(true); },[playing]);
   // Never leave the page pointing past the end of a pattern (switching pattern,
   // switching layer, or removing bars can all strand it).
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
@@ -3487,7 +3489,6 @@ export default function Tabula(){
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
     setBarPage(curBar+1);
-    setBarFollow(false);
   };
 
   // ── BAR STRIP ──────────────────────────────────────────────────────────
@@ -3516,13 +3517,19 @@ export default function Tabula(){
     const rect=el.getBoundingClientRect();
     const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
     const bi=Math.max(0,Math.min(barCount-1,i));
-    setBarFollow(false);
+    // Deliberately does NOT switch FOLLOW off. Chips are the only way to move
+    // between bars, so auto-pinning on tap meant follow was always off by the
+    // time you pressed play — and the toggle that said otherwise was hidden in
+    // the drawer. FOLLOW is now the single, explicit control: on = the page
+    // tracks the playhead, off = the page stays where you put it.
     setBarPage(bi);
   };
-  const barStrip=(
-    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
-      {/* Tap or drag anywhere along the chips to move. The row is deliberately
-          tall so a thin chip on a long pattern is still an easy target. */}
+  // Tap or drag anywhere along the chips to move. The row is deliberately tall
+  // so a thin chip on a long pattern is still an easy target. Held separately
+  // from barStrip because the drawer repeats the chips on their own: the sheet
+  // covers the strip above the grid, and DUP BAR / DEL BAR act on the VISIBLE
+  // bar, so you must be able to see and change it from inside the drawer.
+  const barChips=(
       <div style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{e.stopPropagation();e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);_scrubTo(e.clientX,e.currentTarget);}}
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
@@ -3544,9 +3551,34 @@ export default function Tabula(){
           );
         })}
       </div>
-      <span style={{fontSize:IS_MOBILE?8:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:IS_MOBILE?28:34,textAlign:"center",pointerEvents:"none"}}>
-        {curBar+1}/{barCount}
-      </span>
+  );
+  const barStrip=(
+    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+      {barChips}
+      {/* The bar count doubles as the handle for the pattern drawer — the bar
+          controls it holds belong to what this readout is describing, so that's
+          where you reach for them. (Mobile only: on desktop the same controls
+          are always visible in the sidebar, so there's no drawer to open.) */}
+      {IS_MOBILE?(
+        <div role="button" aria-label="Pattern and bar controls"
+          onPointerDown={e=>{e.stopPropagation();e.preventDefault();
+            setSeqPage("step");
+            setActiveSheet(sh=>sh==="pattern"?null:"pattern");}}
+          style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3,
+            height:22,minWidth:52,padding:"0 8px",borderRadius:5,
+            border:"1px solid "+(activeSheet==="pattern"?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),
+            background:activeSheet==="pattern"?"rgba(232,220,205,0.12)":"transparent",
+            color:activeSheet==="pattern"?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",
+            fontSize:10,fontWeight:600,letterSpacing:0.5,lineHeight:1,
+            cursor:"pointer",userSelect:"none",touchAction:"none",flexShrink:0}}>
+          <span>{curBar+1}/{barCount}</span>
+          <span style={{fontSize:7,opacity:0.7,transform:activeSheet==="pattern"?"rotate(180deg)":"none"}}>▾</span>
+        </div>
+      ):(
+        <span style={{fontSize:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:34,textAlign:"center",pointerEvents:"none"}}>
+          {curBar+1}/{barCount}
+        </span>
+      )}
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -8152,6 +8184,10 @@ export default function Tabula(){
                             <span>BARS</span>
                             <span style={{color:"rgba(210,195,175,0.32)",letterSpacing:1}}>{curBar+1} / {barCount}</span>
                           </div>
+                          {/* The sheet covers the strip above the grid, so the
+                              chips repeat here — DUP BAR / DEL BAR act on
+                              whichever bar is selected. */}
+                          <div style={{display:"flex",marginBottom:7}}>{barChips}</div>
                           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
                             {barOps.map(([l,f,d,danger])=>(
                               <button key={l} disabled={!!d} style={opBtn(d,danger)} onClick={d?undefined:f}>{l}</button>
