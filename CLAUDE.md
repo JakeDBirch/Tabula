@@ -49,17 +49,17 @@ A **pattern** now holds all three parts at once — `{id, name, bars, parts:{syn
 
 Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go straight to `setPatterns` — duplicating through a per-layer view would produce a copy with two empty parts.
 
-`unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost (a project with patterns but no arrangement would otherwise migrate to only the active combination — that bug was caught in testing). Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
+`unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost, and the column order becomes the `song`. Two data-loss bugs were caught here by testing, both worth remembering: a project with patterns but no arrangement migrated to only the active combination; and the old per-lane "filter ids against this layer's library" load step ran *after* unification had deleted those libraries, so it blanked every lane and wiped the arrangement. Legacy fixtures need an actual song in them or neither shows up. Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
 
 The **song page** is the pattern selector: a PATTERNS palette (tap a chip to make it the pattern every part page edits, `+` adds one) above one lane of 64 slots. Tapping an empty slot places the selected pattern — placement is tap-first because drag is awkward on a phone; drag still moves between slots and off-grid clears. Runs of the same pattern draw a `×N` badge without merging the cells. The pattern pills are gone from every part page; the bar strip's handle names the current pattern instead.
 
-`songMatrix` survives only as a derived three-lane view of `song` (all lanes identical), still read by the MP3/MIDI export helpers.
+`songMatrix` and `layerStore` are **gone from live state** — they survive only inside the legacy readers (`unifyLegacyProject`, `migrateLegacyBass`, `_mapProjectPats`), which still have to understand old saves. Nothing in the running app reads either.
 
 ### Layer-store swap (removed)
 
-**Gone.** Patterns used to be per-layer, so the inactive synth layer's library was parked in `layerStoreR` and swapped on every layer switch — the cause of the recurring "a track went silent when I switched layers" bug. `switchLayer` now just changes which part you're looking at, and `layerStoreR` is a read-only mirror of the store kept only until the scheduler's `resolveLayerPat` is rewritten.
+**Gone.** Patterns used to be per-layer, so the inactive synth layer's library was parked in `layerStoreR` and swapped on every layer switch — the cause of the recurring "a track went silent when I switched layers" bug. `switchLayer` now just changes which part you're looking at, and `layerStoreR` no longer exists.
 
-**Consequence:** when the scheduler needs a *non-active* layer's pattern it must read `layerStoreR.current[layer]`, NOT `patsR.current`. `resolveLayerPat(layer, bar)` centralizes this. Get it wrong → tracks go silent on layer switch (a recurring bug). The same trap applies to serialization: patterns live in `pats`, `drumPats` **and** every parked `layerStore[layer].pats` — `_mapProjectPats` walks all three.
+**Consequence:** the whole class of "resolve this layer's pattern from the right place" bugs is gone with it — there is one store and one active id. `_mapProjectPats` still walks a legacy save's `pats` / `drumPats` / `layerStore[layer].pats` so old packed projects decode, but nothing writes those shapes any more.
 
 ### Pattern data model
 

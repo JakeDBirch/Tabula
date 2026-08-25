@@ -567,13 +567,9 @@ const unifyLegacyProject=(s)=>{
   if(!patterns.length)patterns.push(mkPattern("A"));
   // Close the gaps: the old matrix could be sparse, a song is linear.
   const linear=song.filter(x=>x!=null);
-  const lane=linear.concat(new Array(64).fill(null)).slice(0,64);
-  // All three lanes carry the SAME ids now — a pattern is one thing. Keeping
-  // the matrix shape (rather than collapsing to a single list here) lets the
-  // existing scheduler and song page keep working while they're rewritten.
   const out=Object.assign({},s,{patterns,activePatId:patterns[0].id,
-    songMatrix:{synth:[...lane],lead:[...lane],drums:[...lane]}});
-  delete out.pats;delete out.drumPats;delete out.layerStore;
+    song:linear.concat(new Array(64).fill(null)).slice(0,64)});
+  delete out.pats;delete out.drumPats;delete out.layerStore;delete out.songMatrix;
   return out;
 };
 
@@ -2843,21 +2839,6 @@ export default function Tabula(){
   // labels are POLY / MONO. The legacy "bass" layer was removed in the
   // 3-layer pare-down — bass pats from legacy saves migrate into the mono
   // layer (see fillLayerParams + load paths).
-  // layerStoreR is now a read-only MIRROR of the store, not a parking space:
-  // the scheduler still asks it for a non-active layer's patterns, and this
-  // keeps that working while those call sites get rewritten. Nothing writes
-  // pattern data through it any more, so the swap-on-switch bug can't recur.
-  const layerStoreR = useRef({
-    synth: null, // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
-    lead:  null
-  });
-  // Refreshed every render (same ref-mirror pattern as pushHistoryR) so the
-  // scheduler's resolveLayerPat sees current data without re-binding.
-  const _layerMirror = useMemo(()=>({
-    synth:{pats:layerLib(patterns,"synth"),activeId:activePatternId},
-    lead: {pats:layerLib(patterns,"lead"), activeId:activePatternId}
-  }),[patterns,activePatternId]);
-  layerStoreR.current=_layerMirror;
   const activeLayerR = useRef("synth");
   useEffect(()=>{activeLayerR.current=activeLayer;},[activeLayer]);
   const SYNTH_LAYERS = ["synth","lead"];
@@ -2883,26 +2864,29 @@ export default function Tabula(){
   const [songView,     setSongView]     = useState(false);
   // ── THE SONG ───────────────────────────────────────────────────────────
   // A linear list of pattern ids. A pattern is all three parts, so there is
-  // nothing left to put in separate lanes. `songMatrix` stays as a derived
-  // three-lane view purely so the current song page renders unchanged while it
-  // is rewritten — all three lanes hold the same ids.
+  // nothing left to put in separate lanes.
   const [song, setSong] = useState(()=>Array(64).fill(null));
-  const songMatrix = useMemo(()=>({synth:song,lead:song,drums:song}),[song]);
-  const setSongMatrix = useCallback(updater=>setSong(prev=>{
-    const m={synth:prev,lead:prev,drums:prev};
-    const next=typeof updater==="function"?updater(m):updater;
-    // Any lane is the song now; take whichever one actually changed.
-    for(const l of ["synth","lead","drums"]){
-      const lane=next&&next[l];
-      if(Array.isArray(lane)&&lane.some((v,i)=>v!==prev[i]))return lane.slice(0,64);
+  // Legacy saves carry a three-lane matrix. Every lane holds ids that are all
+  // the same pattern after unification, so the first non-null across the three
+  // is the entry for that slot.
+  const _songFromLegacyMatrix=(sm)=>{
+    if(!sm)return null;
+    const out=new Array(64).fill(null);
+    for(let i=0;i<64;i++){
+      const v=(sm.synth&&sm.synth[i])??(sm.lead&&sm.lead[i])??(sm.drums&&sm.drums[i])??null;
+      out[i]=v==null?null:v;
     }
-    return (next&&Array.isArray(next.synth))?next.synth.slice(0,64):prev;
-  }),[]);
+    const linear=out.filter(x=>x!=null);
+    return linear.concat(new Array(64).fill(null)).slice(0,64);
+  };
+  const _adoptSong=(st)=>{
+    if(Array.isArray(st.song))setSong(st.song.slice(0,64));
+    else{const l=_songFromLegacyMatrix(st.songMatrix);if(l)setSong(l);}
+  };
   const [songBar,      setSongBar]      = useState(-1); // index into the song; -1 when stopped
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
-  const songMatrixR = useRef(songMatrix);
   // Per-part scheduler cursors: {step, nextNoteTime}. Parts drift apart inside a
   // pattern (different gridLen / speedMult) and are snapped back together at the
   // pattern boundary. Named freeR from when "free mode" existed.
@@ -2914,7 +2898,6 @@ export default function Tabula(){
   useEffect(()=>{songBarR.current=songBar;},[songBar]);
   useEffect(()=>{songModeR.current=songMode;},[songMode]);
 
-  useEffect(()=>{songMatrixR.current=songMatrix;},[songMatrix]);
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
   useEffect(()=>{drumPatsR.current=drumPats;},[drumPats]);
@@ -3147,7 +3130,7 @@ export default function Tabula(){
     synthPhrases:JSON.parse(JSON.stringify(synthPhrases)),
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
-    songMatrix:JSON.parse(JSON.stringify(songMatrix)),
+    song:[...song],
     songMode,songView,
     activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
@@ -3179,7 +3162,7 @@ export default function Tabula(){
     setChain(s.chain);setDrumChain(s.drumChain);
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):defaultDrumMix()); // global mix (snapshots always carry it)
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
-    if(s.songMatrix)setSongMatrix(s.songMatrix);
+    _adoptSong(s);
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);
 
@@ -3264,7 +3247,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,chain,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,chain,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,song,songMode,songView};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3292,7 +3275,7 @@ export default function Tabula(){
   });
   // 3-layer pare-down: collapse legacy "bass" layer into "lead". Active
   // layer "bass" becomes "lead"; bass pats append to lead pats (capped at
-  // 8). Bass songMatrix lane is folded by the setSongMatrix calls separately.
+  // 8). The legacy bass song lane is folded in by unifyLegacyProject.
   // Returns a normalized save state — non-bass saves pass through unchanged.
   const migrateLegacyBass = (s)=>{
     if(!s) return s;
@@ -3399,32 +3382,7 @@ export default function Tabula(){
     if(s.activeSynthPhraseId)setActiveSynthPhraseId(s.activeSynthPhraseId);
     if(s.activeDrumPhraseId)setActiveDrumPhraseId(s.activeDrumPhraseId);
     if(s.activeSectionId)setActiveSectionId(s.activeSectionId);
-    if(s.songMatrix){
-      // Sanitize each lane against its layer's current pats. Drop entries
-      // referencing pat IDs that no longer exist; pad to 64. Legacy "bass"
-      // lane is folded into the lead lane where lead is null at that bar
-      // (mono playback can only carry one of them per bar).
-      const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
-      const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
-      // Synth pats live in s.layerStore.synth.pats regardless of which layer
-      // was active at save time. Pulling from s.pats only works when active
-      // was synth — saves made from MONO or DRUMS had s.pats holding the
-      // last-touched synth-type pats (often lead's), so filtering the synth
-      // lane against it dropped every valid synth id and the lane came back
-      // blank. Fall back to s.pats for very old saves that predate layerStore.
-      const synthPats=(s.layerStore?.synth?.pats)||(s.pats||[]);
-      // Lead now also covers legacy bass content.
-      const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
-      const drumPats=s.drumPats||[];
-      const leadLane=padTo64(s.songMatrix.lead);
-      const bassLane=padTo64(s.songMatrix.bass);
-      const mergedLead=leadLane.map((v,i)=>v!=null?v:bassLane[i]);
-      setSongMatrix({
-        synth: filterIds(padTo64(s.songMatrix.synth),synthPats),
-        lead:  filterIds(mergedLead,leadPats),
-        drums: filterIds(padTo64(s.songMatrix.drums),drumPats)
-      });
-    }
+    _adoptSong(s);
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
 
@@ -3479,19 +3437,12 @@ export default function Tabula(){
     setBarPage(0);
     setPatterns([p0]);setActivePatId(p0.id);setChain([p0.id]);setDrumChain([p0.id]);
     // Seed the lead store with a fresh empty pat so switching to MONO after
-    // NEW doesn't carry over POLY's live pats (which would look like stale
-    // "orphaned" pills on the mono layer).
-    const _newLeadPat=mkPat(symPat(0));
-    layerStoreR.current={
-      synth:null,
-      lead:{pats:[_newLeadPat],activeId:_newLeadPat.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_newLeadPat.id]}],activePhraseId:"LP1"}
-    };
     setActiveLayer("synth");
     setLoopMode(false);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);
-    setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),drums:Array(64).fill(null)});
+    setSong(Array(64).fill(null));
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
@@ -3940,7 +3891,7 @@ export default function Tabula(){
     loopMode,varyMode,drumChain,
     patterns,activePatId:activePatternId,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songView,activeLayer
+    song,songMode,songView,activeLayer
   });
 
   const applyShareState=rawState=>{
@@ -3999,25 +3950,7 @@ export default function Tabula(){
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
-    if(s.songMatrix){
-      const padTo64=arr=>{const a=Array.isArray(arr)?arr.slice(0,64):[];while(a.length<64)a.push(null);return a;};
-      const filterIds=(arr,pats)=>{const ids=new Set((pats||[]).map(p=>p.id));return arr.map(v=>v!=null&&ids.has(v)?v:null);};
-      // Synth pats live in s.layerStore.synth.pats regardless of active layer
-      // at save — same fix as doLoad. s.pats only matches synth when active
-      // was synth; on MONO or DRUMS saves the synth lane would otherwise come
-      // back blank.
-      const synthPats=(s.layerStore?.synth?.pats)||(s.pats||[]);
-      // Fold legacy bass lane into lead where lead is null.
-      const leadPats=[...(s.layerStore?.lead?.pats||[]),...(s.layerStore?.bass?.pats||[])].slice(0,8);
-      const leadLane=padTo64(s.songMatrix.lead);
-      const bassLane=padTo64(s.songMatrix.bass);
-      const mergedLead=leadLane.map((v,i)=>v!=null?v:bassLane[i]);
-      setSongMatrix({
-        synth: filterIds(padTo64(s.songMatrix.synth),synthPats),
-        lead:  filterIds(mergedLead,leadPats),
-        drums: filterIds(padTo64(s.songMatrix.drums),s.drumPats||[])
-      });
-    }
+    _adoptSong(s);
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
 
@@ -4042,9 +3975,11 @@ export default function Tabula(){
 
   // ── Song export helpers (shared by MIDI + MP3) ────────────────────────────
   // Resolve a synth-type layer's patterns (active layer is live in `pats`;
-  // others sit in layerStoreR) and its active pattern id.
-  const _layerPats=(layer)=> activeLayer===layer ? pats : (layerStoreR.current[layer]?.pats||[]);
-  const _activeIdFor=(layer)=> activeLayer===layer ? activeId : (layerStoreR.current[layer]?.activeId);
+  // One part of one pattern, in the flat shape the export code expects.
+  const _partOf=(id,layer)=>{
+    const p2=patterns.find(x=>x.id===id);
+    return p2&&p2.parts&&p2.parts[layer]?partView(p2,layer):null;
+  };
   // Ordered bars to export: the full populated song matrix, else one bar of the
   // active patterns. Each entry = {synth,lead,drums} pattern ids (or null).
   // What a bounce plays: the song's patterns in order, or just the one you're
@@ -4088,7 +4023,7 @@ export default function Tabula(){
       const cellSteps=_midiCellSteps(bar);
       _runTick+=cellSteps*TICKS_16;
       [["synth",synthEv,0],["lead",leadEv,1]].forEach(([layer,ev,ch])=>{
-        const pat=_layerPats(layer).find(p=>p.id===bar[layer]);
+        const pat=_partOf(bar[layer],layer);
         if(!pat||!pat.grid)return;
         const len=pat.gridLen||16;
         const layerOct=(layerParams[layer]&&layerParams[layer].octave)||0;
@@ -4235,7 +4170,7 @@ export default function Tabula(){
       // after). Sync/free and random are left exactly as set, so the bounce
       // captures the arrangement they were working on — only LOOP is forced off
       // (it solos one pattern, which would not play the song).
-      const haveSong=(()=>{const sm=songMatrix;for(let i=0;i<64;i++)if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)return true;return false;})();
+      const haveSong=songSeq.length>0;
       if(haveSong){
         restore={mode:songModeR.current,loop:loopR.current};
         songModeR.current=true;setSongMode(true);
@@ -4350,7 +4285,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView]);
+  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,song,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -5457,7 +5392,7 @@ export default function Tabula(){
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
   const dupPatId=dupPatternId;
-  // Strip the id from songMatrix as well — leaving a dangling ref produces
+  // Strip the id from the song as well — leaving a dangling ref produces
   // silent gaps in the song timeline. Drag-off-layer delete relies on this.
   const delPatId=delPatternId;
   // Deleting from any layer deletes the pattern — it's one object now, so
@@ -6407,14 +6342,13 @@ export default function Tabula(){
           {/* Layer boxes — select layer + pattern, replaces old pills + layer selector */}
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-              {/* POLY / MONO layer boxes — non-active layers read pats from layerStoreR */}
+              {/* POLY / MONO layer boxes — layer selection only; patterns are
+                  chosen on the SONG page. */}
               {[
                 ["synth","POLY","#a8c5a0","168,197,160"],
                 ["lead", "MONO","#6c9ad6","108,154,214"]
               ].map(([layer,label,accent,accentRgb])=>{
                 const isActive=activeLayer===layer;
-                const layerPats=isActive?pats:(layerStoreR.current[layer]?.pats||[]);
-                const layerActiveId=isActive?activeId:layerStoreR.current[layer]?.activeId;
                 return(
                   <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
                     onClick={()=>{
