@@ -8220,6 +8220,10 @@ export default function Tabula(){
                           <div style={S.stepPagePat}>{activePat?.name||""}</div>
                           <div style={{flex:1}}/>
                         </div>
+                        {/* The lanes show ONE bar at a time, and this sheet covers
+                            the strip above the grid — so the chips come along, or
+                            bar 3's step params would be unreachable from here. */}
+                        <div style={{display:"flex",marginBottom:8}}>{barChips}</div>
                         {LANES.map(lane=>{
                           // StepLane is COLS-wide, so it gets THIS BAR's slice of the lane and its
                     // column indices are mapped back to absolute on the way out.
