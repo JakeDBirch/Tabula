@@ -919,7 +919,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
   loopMode:false, varyMode:{synth:false,lead:false,drums:false},
-  songMode:false, songView:false, songSyncMode:"sync", songRandom:false,
+  songMode:false, songView:false,
 });
 
 
@@ -2881,38 +2881,31 @@ export default function Tabula(){
   // pattern grid is shown. Decoupled from songMode so tapping a pill in song
   // view leaves the view without changing the playback source.
   const [songView,     setSongView]     = useState(false);
-  // Song playback mode: "sync" = single shared cursor across all four layers,
-  // "free" = each layer has its own cursor and advances independently,
-  // "random" = at each bar boundary, jump to a random populated bar (sync-style timing).
-  // Stored as a string; legacy saves had booleans (true=sync, false=free) — load
-  // paths migrate via _normalizeSongSyncMode below.
-  // Base advance mode — "sync" or "free" (mutually exclusive). RANDOM is a
-  // separate additive flag (songRandom) that layers on top of either:
-  //   sync   + random → all layers play the SAME randomly-chosen column each bar
-  //   free   + random → each layer independently jumps to a random populated bar
-  const [songSyncMode, setSongSyncMode] = useState("sync");
-  const [songRandom,   setSongRandom]   = useState(false);
-  const songRandomR    = useRef(false);
-  const [songMatrix,   setSongMatrix]   = useState({
-    synth: Array(64).fill(null),
-    lead:  Array(64).fill(null),
-    drums: Array(64).fill(null)
-  });
-  const [songBar,      setSongBar]      = useState(-1); // sync mode current bar; -1 when stopped
-  // Per-layer cursor for free mode. In sync mode, kept equal to songBar via the scheduler.
+  // ── THE SONG ───────────────────────────────────────────────────────────
+  // A linear list of pattern ids. A pattern is all three parts, so there is
+  // nothing left to put in separate lanes. `songMatrix` stays as a derived
+  // three-lane view purely so the current song page renders unchanged while it
+  // is rewritten — all three lanes hold the same ids.
+  const [song, setSong] = useState(()=>Array(64).fill(null));
+  const songMatrix = useMemo(()=>({synth:song,lead:song,drums:song}),[song]);
+  const setSongMatrix = useCallback(updater=>setSong(prev=>{
+    const m={synth:prev,lead:prev,drums:prev};
+    const next=typeof updater==="function"?updater(m):updater;
+    // Any lane is the song now; take whichever one actually changed.
+    for(const l of ["synth","lead","drums"]){
+      const lane=next&&next[l];
+      if(Array.isArray(lane)&&lane.some((v,i)=>v!==prev[i]))return lane.slice(0,64);
+    }
+    return (next&&Array.isArray(next.synth))?next.synth.slice(0,64):prev;
+  }),[]);
+  const [songBar,      setSongBar]      = useState(-1); // index into the song; -1 when stopped
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,drums:-1});
   const songBarR    = useRef(-1);
   const songModeR   = useRef(false);
-  const songSyncR   = useRef("sync");
-  // Legacy saves stored songSyncMode as boolean (true=sync, false=free), and
-  // later as "sync"/"free"/"random". RANDOM is now a separate flag, so the base
-  // coerces "random" → "sync" (its old behaviour was random over the shared
-  // column). _songRandomFromSave derives the additive flag.
-  const _normalizeSongSyncMode=(v)=>typeof v==="boolean"?(v?"sync":"free"):(v==="random"?"sync":(v||"sync"));
-  const _songRandomFromSave=(s)=>s.songRandom!=null?!!s.songRandom:(s.songSyncMode==="random");
   const songMatrixR = useRef(songMatrix);
-  // Free-mode per-layer scheduler state. Each layer has its own (step, nextNoteTime, bar)
-  // so layers can drift apart by gridLen. In sync mode these are unused.
+  // Per-part scheduler cursors: {step, nextNoteTime}. Parts drift apart inside a
+  // pattern (different gridLen / speedMult) and are snapped back together at the
+  // pattern boundary. Named freeR from when "free mode" existed.
   const freeR = useRef({
     synth:{step:0,nextAt:0,bar:0},
     lead: {step:0,nextAt:0,bar:0},
@@ -2920,8 +2913,7 @@ export default function Tabula(){
   });
   useEffect(()=>{songBarR.current=songBar;},[songBar]);
   useEffect(()=>{songModeR.current=songMode;},[songMode]);
-  useEffect(()=>{songSyncR.current=songSyncMode;},[songSyncMode]);
-  useEffect(()=>{songRandomR.current=songRandom;},[songRandom]);
+
   useEffect(()=>{songMatrixR.current=songMatrix;},[songMatrix]);
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
@@ -2935,6 +2927,17 @@ export default function Tabula(){
   // Note: the legacy `chain` (synth-track) and `drumChain` are vestigial in
   // non-song mode. The song matrix is the arrangement primitive now.
   const stepR=useRef(0),tmrR=useRef(null),nextNoteR=useRef(0);
+  // Live mirrors for the scheduler.
+  const patternsR=useRef(patterns);
+  useEffect(()=>{patternsR.current=patterns;},[patterns]);
+  const activePatternIdR=useRef(activePatternId);
+  useEffect(()=>{activePatternIdR.current=activePatternId;},[activePatternId]);
+  // The playable song: the list with its gaps closed. Editing leaves holes;
+  // playback shouldn't sit in silence waiting them out.
+  const songSeq = useMemo(()=>song.filter(x=>x!=null),[song]);
+  const songSeqR=useRef(songSeq);
+  useEffect(()=>{songSeqR.current=songSeq;},[songSeq]);
+  const songPosR=useRef(0);
   const patsR=useRef(pats),chainR=useRef(chain);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
   const loopR=useRef(false),activeIdR=useRef(activeId);
@@ -3149,7 +3152,7 @@ export default function Tabula(){
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
     songMatrix:JSON.parse(JSON.stringify(songMatrix)),
-    songMode,songView,songSyncMode,songRandom,
+    songMode,songView,
     activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
     bpm,scale,transpose,swing,speedMult,
@@ -3183,8 +3186,7 @@ export default function Tabula(){
     if(s.songMatrix)setSongMatrix(s.songMatrix);
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);
-    if(s.songSyncMode!=null)setSongSyncMode(_normalizeSongSyncMode(s.songSyncMode));
-    setSongRandom(_songRandomFromSave(s));
+
     setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     setActiveSynthPhraseId(s.activeSynthPhraseId);setActiveDrumPhraseId(s.activeDrumPhraseId);setActiveSectionId(s.activeSectionId);
     // Undo/redo snapshots — fall back to defaults for any field a previous
@@ -3270,7 +3272,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,chain,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,chain,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3433,8 +3435,7 @@ export default function Tabula(){
     }
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
-    setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
-    setSongRandom(_songRandomFromSave(s));
+
     setActiveSlot(slot);
     showFlash("LOADED "+slot);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
@@ -3497,7 +3498,7 @@ export default function Tabula(){
     setLoopMode(false);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
-    setSongMode(false);setSongView(false);setSongSyncMode("sync");setSongRandom(false);
+    setSongMode(false);setSongView(false);
     setSongMatrix({synth:Array(64).fill(null),lead:Array(64).fill(null),drums:Array(64).fill(null)});
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
@@ -3783,7 +3784,7 @@ export default function Tabula(){
     loopMode,varyMode,drumChain,
     patterns,activePatId:activePatternId,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songView,songSyncMode,songRandom,activeLayer
+    songMatrix,songMode,songView,activeLayer
   });
 
   const applyShareState=rawState=>{
@@ -3863,8 +3864,7 @@ export default function Tabula(){
     }
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
-    setSongSyncMode(s.songSyncMode!=null?_normalizeSongSyncMode(s.songSyncMode):SESSION_DEFAULTS.songSyncMode);
-    setSongRandom(_songRandomFromSave(s));
+
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
     const sharedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
     loadKit(sharedKit).catch(()=>{});
@@ -3891,16 +3891,18 @@ export default function Tabula(){
   const _activeIdFor=(layer)=> activeLayer===layer ? activeId : (layerStoreR.current[layer]?.activeId);
   // Ordered bars to export: the full populated song matrix, else one bar of the
   // active patterns. Each entry = {synth,lead,drums} pattern ids (or null).
+  // What a bounce plays: the song's patterns in order, or just the one you're
+  // editing. Every entry is a whole pattern now, so a "bar" is a pattern id.
   const _exportBars=()=>{
-    const sm=songMatrix;
-    let first=-1,last=-1;
-    for(let i=0;i<64;i++){ if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){ if(first<0)first=i; last=i; } }
-    if(songMode&&first>=0){
-      const bars=[];
-      for(let b=first;b<=last;b++)bars.push({synth:sm.synth[b],lead:sm.lead[b],drums:sm.drums[b]});
-      return bars;
-    }
-    return [{synth:_activeIdFor("synth"),lead:_activeIdFor("lead"),drums:activeDrumId}];
+    if(songMode&&songSeq.length)return songSeq.map(id=>({synth:id,lead:id,drums:id}));
+    const id=activePatternId;
+    return [{synth:id,lead:id,drums:id}];
+  };
+  // A song entry lasts its pattern's full length — that's the boundary the
+  // scheduler re-synchronises on.
+  const _patStepsOf=(id)=>{
+    const p2=patterns.find(x=>x.id===id);
+    return p2?Math.max(1,patBars(p2)*COLS):COLS;
   };
 
   // Export the song arrangement as a Standard MIDI File. Each song cell runs for
@@ -3923,16 +3925,7 @@ export default function Tabula(){
     // is what the sync scheduler uses as the song-bar boundary. speedMult is
     // deliberately NOT applied here — per-pattern speed is a performance layer,
     // and this export is the underlying composition.
-    const _midiCellSteps=(bar)=>{
-      let m=Infinity;
-      for(const layer of ["synth","lead"]){
-        const pt=_layerPats(layer).find(x=>x.id===bar[layer]);
-        if(pt)m=Math.min(m,Math.max(1,pt.gridLen??16));
-      }
-      const dpt=drumPats.find(x=>x.id===bar.drums);
-      if(dpt)m=Math.min(m,Math.max(1,dpt.gridLen??16));
-      return m===Infinity?16:m;
-    };
+    const _midiCellSteps=(bar)=>_patStepsOf(bar.synth);
     let _runTick=0;
     bars.forEach((bar)=>{
       const barTick=_runTick;
@@ -4060,21 +4053,12 @@ export default function Tabula(){
       // in absolute 16th steps), mirroring the live sync scheduler — so a song
       // with 1/2-speed patterns bounces at its true (longer) length, not 16/bar.
       const absStepSec=60/Math.max(1,bpm)/4;
-      const _cellSteps=bar=>{
-        let minDur=Infinity;
-        for(const layer of ["synth","lead"]){
-          const pat=_layerPats(layer).find(p=>p.id===bar[layer]);
-          if(pat){const d=Math.max(1,Math.round((pat.gridLen??16)*(pat.speedMult??1)));if(d<minDur)minDur=d;}
-        }
-        const dp=drumPats.find(p=>p.id===bar.drums);
-        if(dp){const d=Math.max(1,Math.round((dp.gridLen??16)*(dp.speedMult??1)));if(d<minDur)minDur=d;}
-        return minDur===Infinity?16:minDur;
-      };
+      const _cellSteps=bar=>_patStepsOf(bar.synth);
       const _bars=_exportBars();
       // Sync/free linear bounces play the whole first→last span (gaps included).
       // RANDOM never visits gap bars, so one of its cycles is just the total
       // duration of the AVAILABLE (populated) patterns.
-      const isRandom=songRandomR.current;
+      const isRandom=false;
       const spanSec =_bars.reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
       const availSec=_bars.filter(b=>b.synth!=null||b.lead!=null||b.drums!=null)
                           .reduce((s,bar)=>s+_cellSteps(bar)*absStepSec,0);
@@ -4097,14 +4081,13 @@ export default function Tabula(){
       // (it solos one pattern, which would not play the song).
       const haveSong=(()=>{const sm=songMatrix;for(let i=0;i<64;i++)if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)return true;return false;})();
       if(haveSong){
-        restore={mode:songModeR.current,sync:songSyncR.current,rand:songRandomR.current,loop:loopR.current};
+        restore={mode:songModeR.current,loop:loopR.current};
         songModeR.current=true;setSongMode(true);
         loopR.current=false;setLoopMode(false);
         // Start at the first populated bar (startStop only does this when its
         // `songMode` state closure is true; force via the ref so the bounce
         // starts from the top even if the user wasn't viewing song mode).
-        let firstBar=0;{const sm=songMatrix;for(let i=0;i<64;i++){if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}}}
-        songBarR.current=firstBar;setSongBar(firstBar);
+        songPosR.current=0;songBarR.current=0;setSongBar(0);
       }
       showFlash("BOUNCING…");setExportPhase("Bouncing");
       capturing=true;
@@ -4140,7 +4123,7 @@ export default function Tabula(){
       // Safety: never leave the master muted or the FX feedback flushed if the
       // bounce bailed out between the silence step and its restore.
       try{const c=bell.current.ctx;if(c&&bell.current.master){bell.current.master.gain.setValueAtTime(0.55,c.currentTime);bell.current.setRvSize&&bell.current.setRvSize(rvSize);bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100);}}catch(e){}
-      if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);songSyncR.current=restore.sync;setSongSyncMode(restore.sync);songRandomR.current=restore.rand;setSongRandom(restore.rand);loopR.current=restore.loop;setLoopMode(restore.loop);}
+      if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);loopR.current=restore.loop;setLoopMode(restore.loop);}
       exportingR.current=false;setExporting(false);
     }
   };
@@ -4211,7 +4194,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom]);
+  },[playing,pats,chain,drumPats,drumChain,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -4384,78 +4367,39 @@ export default function Tabula(){
 
     const inLoop=loopR.current;
     const inSong=songModeR.current&&!inLoop;
-    const isFree=inSong&&songSyncR.current==="free";
-    // RANDOM is additive — it modifies whichever base (sync or free) is active.
-    const isRandom=inSong&&songRandomR.current;
 
-    // ── Layer pat resolution. Same data, different mode-dependent source.
-    const sm=inSong?songMatrixR.current:null;
-    // Find populated bar range (for song modes).
-    let songFirstBar=-1,songLastBar=-1,songAllEmpty=true;
-    if(inSong){
-      for(let i=0;i<64;i++){
-        if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){
-          if(songFirstBar===-1)songFirstBar=i;
-          songLastBar=i;songAllEmpty=false;
-        }
-      }
-      if(songFirstBar===-1){songFirstBar=0;songLastBar=0;}
+    // ── What is playing right now ──────────────────────────────────────
+    // A pattern is all three parts, so there is exactly one of them at any
+    // moment: the song's current entry, or the pattern you're editing. No
+    // per-layer resolution, no parked layer store, no shortest-lane fudge.
+    const allPats=patternsR.current||[];
+    const seq=songSeqR.current||[];
+    let curPat=null;
+    if(inSong&&seq.length){
+      if(songPosR.current<0||songPosR.current>=seq.length)songPosR.current=0;
+      curPat=allPats.find(p=>p.id===seq[songPosR.current]);
     }
-    const layerData=(layer)=>{
-      if(layer==="drums")return null;
-      return activeLayerR.current===layer?{pats:patsR.current,activeId:activeIdR.current}:layerStoreR.current[layer];
-    };
-    const resolveLayerPat=(layer,bar)=>{
-      if(inLoop){
-        if(layer!==activeLayerR.current)return null; // loop = solo of active
-        if(layer==="drums")return drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
-        return patsR.current.find(x=>x.id===activeIdR.current);
-      }
-      if(inSong){
-        const id=sm[layer]?.[bar];
-        if(layer==="drums")return id!=null?drumPatsR.current.find(x=>x.id===id):null;
-        const data=layerData(layer);if(!data)return null;
-        // Synth fallback: empty matrix → loop synth's active pat at bar 0.
-        if(layer==="synth"&&songAllEmpty)return data.pats.find(x=>x.id===data.activeId);
-        return id!=null?data.pats.find(x=>x.id===id):null;
-      }
-      // Pattern mode: each layer plays its own active pat.
-      if(layer==="drums")return drumPatsR.current.find(x=>x.id===activeDrumIdR.current);
-      const data=layerData(layer);if(!data)return null;
-      return data.pats.find(x=>x.id===data.activeId);
+    if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
+    if(!curPat)return;
+    // The pattern's own length in absolute steps. Everything re-synchronises
+    // here: parts loop inside it at their own gridLen and speed, and the song
+    // advances when it wraps.
+    const patLen=Math.max(1,patBars(curPat)*COLS);
+    const curPart=(layer)=>{
+      const part=curPat.parts&&curPat.parts[layer];
+      if(!part)return null;
+      return Object.assign({},part,{id:curPat.id,name:curPat.name,bars:curPat.bars});
     };
 
-    // Free mode per-layer populated ranges (+ the explicit list of populated
-    // bars, used when RANDOM is additive over free).
-    let ranges=null;
-    if(isFree){
-      ranges={};
-      for(const layer of ["synth","lead","drums"]){
-        let first=-1,last=-1;const bars=[];
-        for(let i=0;i<64;i++){if(sm[layer][i]!=null){if(first===-1)first=i;last=i;bars.push(i);}}
-        ranges[layer]={first,last,empty:first===-1,bars};
-      }
-    }
-
-    // ── PER-LAYER SCHEDULING — each layer plays at its own pat's speedMult.
-    // freeR.current[layer] = {step, nextAt, bar} per layer.
-    let cursorChanged=false;
-    const newCursor={...songBarLayer};
-    for(const layer of ["synth","lead","drums"]){
+    // ── PART SCHEDULING — each part runs its own cursor inside the pattern,
+    // at its own gridLen and speedMult. They can drift apart within the
+    // pattern (that's the polymeter) and are snapped back together at the
+    // pattern boundary by the master clock below.
+    for(const layer of PART_LAYERS){
       const lf=freeR.current[layer];
-      // Free mode: skip silent layers, init bar within range.
-      if(isFree){
-        const r=ranges[layer];
-        if(r.empty&&!(layer==="synth"&&songAllEmpty))continue;
-        if(lf.bar<r.first||lf.bar>r.last){lf.bar=r.empty?0:r.first;lf.step=0;}
-      } else if(inSong){
-        // Sync/random: per-layer bar mirrors songBar (kept in sync below).
-        lf.bar=Math.max(0,songBarR.current||0);
-      } else {
-        lf.bar=0;
-      }
+      lf.bar=0;
       while(lf.nextAt<ctx.currentTime+LOOKAHEAD){
-        const pat=resolveLayerPat(layer,lf.bar);
+        const pat=curPart(layer);
         if(!pat){
           // Silent layer at this bar — just advance time so we re-check next tick.
           lf.nextAt+=absStepDur;
@@ -4543,69 +4487,22 @@ export default function Tabula(){
         const ns=(s+1)%len;
         lf.step=ns;
         lf.nextAt+=layerStepDur;
-        // Free mode: per-layer bar advances on layer-step wrap. With RANDOM
-        // additive, jump to a random populated bar for this layer instead of
-        // stepping linearly — "any cell, no inter-relation between layers".
-        if(isFree&&ns===0){
-          const r=ranges[layer];
-          let nb;
-          if(isRandom&&r.bars&&r.bars.length){
-            nb=r.bars[Math.floor(Math.random()*r.bars.length)];
-          } else {
-            nb=lf.bar+1;
-            if(nb>r.last)nb=r.empty?0:r.first;
-          }
-          lf.bar=nb;
-          if(newCursor[layer]!==lf.bar){newCursor[layer]=lf.bar;cursorChanged=true;}
-        }
       }
-      if(isFree && newCursor[layer]!==lf.bar){newCursor[layer]=lf.bar;cursorChanged=true;}
     }
-    if(cursorChanged)setSongBarLayer(newCursor);
 
-    // ── MASTER CLOCK — drives songBar (sync/random only) + visual bar position.
-    // The master advances at absStepDur; the shared bar boundary lands after the
-    // SHORTEST pattern in the current song cell completes one loop, measured in
-    // absolute steps as gridLen × speedMult. So a lone 1/2-speed pattern holds
-    // the cell twice as long (cycles half as often), matching how FREE mode
-    // already advances each layer by its own real duration. Free mode's bars are
-    // per-layer above; sync/random share songBar advanced here.
+    // ── MASTER CLOCK — one pattern long. When it wraps, the song moves to
+    // its next entry and every part restarts from step 0. That single rule
+    // replaces sync/free/random and the old "shortest populated lane" bar.
     while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){
-      const masterAt=nextNoteR.current;
-      void masterAt;
-      // Shortest real duration across the cell's populated layers (fallback 16).
-      // Non-song modes keep the plain 16-step master bar.
-      let cycleLen=16;
-      if(inSong&&!isFree){
-        let minDur=Infinity;
-        for(const l of ["synth","lead","drums"]){
-          const pat=resolveLayerPat(l,songBarR.current);
-          if(pat){const d=Math.max(1,Math.round((pat.gridLen??16)*(pat.speedMult??1)));if(d<minDur)minDur=d;}
+      const ns=(stepR.current+1)%patLen;
+      if(ns===0){
+        if(inSong&&seq.length>1){
+          songPosR.current=(songPosR.current+1)%seq.length;
+          setSongBar(songPosR.current);
+          setSongBarLayer({synth:songPosR.current,lead:songPosR.current,drums:songPosR.current});
         }
-        if(minDur!==Infinity)cycleLen=minDur;
-      }
-      const ns=(stepR.current+1)%cycleLen;
-      if(inSong&&!isFree&&ns===0){
-        // Shared bar boundary — advance songBar and snap all per-layer cursors.
-        let nextBar;
-        if(isRandom){
-          const candidates=[];
-          for(let i=songFirstBar;i<=songLastBar;i++){
-            if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null)candidates.push(i);
-          }
-          nextBar=candidates.length?candidates[Math.floor(Math.random()*candidates.length)]:songFirstBar;
-        } else {
-          let cur=songBarR.current;
-          if(cur<songFirstBar||cur>songLastBar)cur=songFirstBar;
-          nextBar=cur+1;
-          if(nextBar>songLastBar)nextBar=songFirstBar;
-        }
-        songBarR.current=nextBar;setSongBar(nextBar);
-        setSongBarLayer({synth:nextBar,lead:nextBar,drums:nextBar});
-        // Reset per-layer step index so each layer starts new bar from step 0.
-        for(const l of ["synth","lead","drums"]){
+        for(const l of PART_LAYERS){
           freeR.current[l].step=0;
-          // Realign nextAt to bar boundary so layers re-sync after bar advance.
           freeR.current[l].nextAt=nextNoteR.current+absStepDur;
         }
       }
@@ -4677,27 +4574,15 @@ export default function Tabula(){
     }
     stepR.current=0;
     const t0=bell.current.ctx.currentTime+0.05;
-    // Initialize per-layer schedulers — pattern mode starts at step 0 / bar 0;
-    // song mode also sets each layer's bar to its first populated cell.
-    for(const layer of ["synth","lead","drums"]){
+    // All three parts start together at the top of the pattern.
+    for(const layer of PART_LAYERS){
       freeR.current[layer]={step:0,nextAt:t0,bar:0};
     }
+    // The song always starts at its first entry — it's a linear list now.
+    songPosR.current=0;
     if(songMode){
-      const sm=songMatrix;
-      const layerFirst={};
-      for(const layer of ["synth","lead","drums"]){
-        let f=-1;
-        for(let i=0;i<64;i++){if(sm[layer][i]!=null){f=i;break;}}
-        layerFirst[layer]=f===-1?0:f;
-        freeR.current[layer].bar=layerFirst[layer];
-      }
-      let firstBar=-1;
-      for(let i=0;i<64;i++){
-        if(sm.synth[i]!=null||sm.lead[i]!=null||sm.drums[i]!=null){firstBar=i;break;}
-      }
-      if(firstBar===-1)firstBar=0;
-      songBarR.current=firstBar;setSongBar(firstBar);
-      setSongBarLayer({synth:layerFirst.synth,lead:layerFirst.lead,drums:layerFirst.drums});
+      songBarR.current=0;setSongBar(0);
+      setSongBarLayer({synth:0,lead:0,drums:0});
     }
     nextNoteR.current=t0; // master clock for visual playhead + bar advance
     playingR.current=true;
@@ -6762,25 +6647,6 @@ export default function Tabula(){
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                {/* SYNC|FREE (exclusive base) + RAND (additive). RAND over SYNC
-                    cycles a random shared column each bar; RAND over FREE jumps
-                    each layer to a random populated bar independently. */}
-                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center",alignItems:"center"}}>
-                  {[["sync","SYNC"],["free","FREE"]].map(([val,lbl])=>{
-                    const sel=songSyncMode===val;
-                    return(
-                      <button key={lbl} onClick={()=>setSongSyncMode(val)}
-                        style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(sel?"rgba(220,200,180,0.5)":"rgba(220,200,180,0.12)"),background:sel?"rgba(220,200,180,0.08)":"transparent",color:sel?"rgba(220,200,180,0.9)":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
-                        {lbl}
-                      </button>
-                    );
-                  })}
-                  <div style={{width:1,height:16,background:"rgba(220,200,180,0.15)",margin:"0 2px"}}/>
-                  <button onClick={()=>setSongRandom(v=>!v)}
-                    style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(songRandom?"#c9a96e":"rgba(220,200,180,0.12)"),background:songRandom?"rgba(201,169,110,0.12)":"transparent",color:songRandom?"#c9a96e":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
-                    RAND
-                  </button>
-                </div>
                 <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
@@ -7835,25 +7701,6 @@ export default function Tabula(){
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
             {songView&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                {/* SYNC|FREE (exclusive base) + RAND (additive). RAND over SYNC
-                    cycles a random shared column each bar; RAND over FREE jumps
-                    each layer to a random populated bar independently. */}
-                <div style={{display:"flex",gap:4,flexShrink:0,alignSelf:"center",alignItems:"center"}}>
-                  {[["sync","SYNC"],["free","FREE"]].map(([val,lbl])=>{
-                    const sel=songSyncMode===val;
-                    return(
-                      <button key={lbl} onClick={()=>setSongSyncMode(val)}
-                        style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(sel?"rgba(220,200,180,0.5)":"rgba(220,200,180,0.12)"),background:sel?"rgba(220,200,180,0.08)":"transparent",color:sel?"rgba(220,200,180,0.9)":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
-                        {lbl}
-                      </button>
-                    );
-                  })}
-                  <div style={{width:1,height:16,background:"rgba(220,200,180,0.15)",margin:"0 2px"}}/>
-                  <button onClick={()=>setSongRandom(v=>!v)}
-                    style={{padding:"4px 14px",fontSize:9,letterSpacing:2,fontWeight:600,border:"1px solid "+(songRandom?"#c9a96e":"rgba(220,200,180,0.12)"),background:songRandom?"rgba(201,169,110,0.12)":"transparent",color:songRandom?"#c9a96e":"rgba(220,200,180,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>
-                    RAND
-                  </button>
-                </div>
                 <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
                   {Array.from({length:4},(_,group)=>(
                     <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>

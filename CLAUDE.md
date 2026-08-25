@@ -51,7 +51,7 @@ Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go 
 
 `unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost (a project with patterns but no arrangement would otherwise migrate to only the active combination — that bug was caught in testing). Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
 
-**Still to do:** the song is still a 3-lane `songMatrix` whose lanes now carry identical ids (kept so the existing scheduler and song page work untouched); it should collapse to one linear list. The sync/free/random modes and `cycleLen = min over layers` should go. The song page should become the pattern selector and the pattern pills should leave the part pages.
+**Still to do:** the song page should become the pattern selector and the pattern pills should leave the part pages. `songMatrix` survives only as a derived three-lane view of `song` (all lanes identical) so that page renders unchanged — delete it with the page.
 
 ### Layer-store swap (removed)
 
@@ -76,14 +76,14 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **`speedMult`** = per-pattern step-duration multiplier. `stepDur = 60/bpm/4 * speedMult`. The button LABEL is the speed factor, the value is its inverse: `2×` (twice as fast) = `mult 0.5`; `½×` = `mult 2`. `SPEED_OPTS` order is value-ascending (2×,1×,⅔×,½×,⅓×,¼×). Duplicating a pattern must carry `speedMult` (it's part of the pattern).
 - Rows are scale degrees (pitch is already scale-quantized): `fromBot = ROWS-1-row`, tonic at `fromBot % 7 == 0`, triad tones (1/3/5) at `fromBot % 7 ∈ {0,2,4}`.
 
-### Song matrix + scheduler
+### Song + scheduler
 
-`songMatrix = {synth, lead, drums}`, each `Array(64)` of pattern-id-or-null. `songMode` = playback intent; `songView` = UI gate (decoupled). `songSyncMode` = `"sync"` | `"free"`; `songRandom` is an additive flag.
+`song` = `Array(64)` of pattern-id-or-null; `songSeq` is that list with its gaps closed, and `songPosR` indexes it. `songMode` = playback intent; `songView` = UI gate (decoupled). There is no sync/free/random any more — playback is always linear.
 
-The scheduler is a per-layer lookahead loop (~25 ms tick, ~100 ms ahead). `layerStepDur = absStepDur * (pat.speedMult ?? 1)` — this is where speed enters; each layer loops within its own `gridLen`.
+The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
-- **Free**: each layer advances independently via `freeR.current[layer] = {step, nextAt, bar}`, so a ½-speed pattern naturally cycles half as often.
-- **Sync**: a master clock advances the shared song bar after the **shortest** pattern in the cell finishes one loop — `cycleLen = min over populated layers of round(gridLen * speedMult)` absolute steps (fallback 16). Non-song modes keep a plain 16-step master. `stepR` is read nowhere else; the visual playhead uses the per-layer step.
+- **Parts** each run their own cursor (`freeR.current[layer] = {step, nextAt}`) at `absStepDur * part.speedMult`, looping within their own `gridLen`. They drift apart inside the pattern — that's the polymeter.
+- **The master clock is one pattern long** (`patLen = bars * COLS` absolute steps). When it wraps, the song advances to its next entry and every part cursor resets to step 0. That single rule replaced sync/free/random and the old `cycleLen = min over populated layers` fudge, which existed only to invent a shared bar for three independent lanes.
 
 ### Controls & interaction conventions
 
