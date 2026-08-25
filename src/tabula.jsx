@@ -3044,8 +3044,9 @@ export default function Tabula(){
           variedGrids.current.set(p.id,safeVaryGrid(p.grid,vp,p.gridLen));
         }
       };
-      if(varyMode.synth)regenSynth(activeLayer==="synth"?patsR.current:(layerStoreR.current?.synth?.pats));
-      if(varyMode.lead) regenSynth(activeLayer==="lead" ?patsR.current:(layerStoreR.current?.lead?.pats));
+      // Both parts come straight off the unified store — no parked library.
+      if(varyMode.synth)regenSynth(layerLib(patternsR.current||[],"synth"));
+      if(varyMode.lead) regenSynth(layerLib(patternsR.current||[],"lead"));
       if(varyMode.drums){
         for(const dp of (drumPatsR.current||[])){
           if(!dp||!dp.grid)continue;
@@ -3136,11 +3137,6 @@ export default function Tabula(){
   // pushHistory is called from (including stale useCallback closures).
   const captureSnapshotR = useRef(()=>null);
   captureSnapshotR.current = ()=>{
-    // Build layer store snapshot: include current synth-type layer's live data
-    const liveLayerStore = {...layerStoreR.current};
-    if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
-      liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
-    }
     // packPat produces fresh arrays for every heavy lane, so it doubles as the
     // deep copy this snapshot needs — and keeps MAX_HISTORY snapshots of 32-bar
     // patterns from running the phone out of memory.
@@ -3264,10 +3260,6 @@ export default function Tabula(){
   });
 
   const doSave=async slot=>{
-    const liveLayerStore={...layerStoreR.current};
-    if(SYNTH_LAYERS.indexOf(activeLayer)>=0){
-      liveLayerStore[activeLayer]={pats,activeId,phrases:synthPhrases,activePhraseId:activeSynthPhraseId};
-    }
     // Reverb knobs + drumLevel were previously not in this snap → they never
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
@@ -3644,6 +3636,165 @@ export default function Tabula(){
     setBarPage(curBar+1);
   };
 
+  // ── SONG PAGE ──────────────────────────────────────────────────────────
+  // One lane, because a pattern is all three parts. The palette at the top is
+  // the pattern selector for the whole app — picking one here is what the part
+  // pages then edit, which is what frees the pill row from those pages.
+  //
+  // Placement is tap-first: tapping an empty slot drops the selected pattern in.
+  // Dragging still works (move between slots, drag off to clear) but nothing
+  // requires it, which matters on a phone.
+  const _songPlayingSlot = (()=>{
+    if(!playing||!songMode||songBar<0)return -1;
+    let n=0;
+    for(let i=0;i<64;i++){ if(song[i]==null)continue; if(n===songBar)return i; n++; }
+    return -1;
+  })();
+  const _patColorOf=(id)=>{
+    const i=patterns.findIndex(p=>p.id===id);
+    return i<0?"rgba(220,200,180,0.4)":patCol(i);
+  };
+  const songPage=(
+    <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
+      {/* PATTERNS — the selector. Tap to make one active; it is then what the
+          part pages edit and what an empty song slot receives. */}
+      <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
+        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5}}>PATTERNS</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+          {patterns.map((p,i)=>{
+            const sel=p.id===activePatternId;
+            const col=patCol(i);
+            // Show at a glance whether a pattern has anything in it at all.
+            const empty=PART_LAYERS.every(l=>{
+              const g=p.parts[l]&&p.parts[l].grid;
+              return !g||!g.some(row=>row&&row.some(Boolean));
+            });
+            return(
+              <div key={p.id} onClick={()=>setActivePatId(p.id)}
+                style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",
+                  alignItems:"center",justifyContent:"center",gap:5,cursor:"pointer",userSelect:"none",
+                  border:"1px solid "+(sel?col:"rgba(200,185,165,0.16)"),
+                  background:sel?col+"22":"transparent",
+                  color:sel?col:(empty?"rgba(210,195,175,0.3)":"rgba(210,195,175,0.7)"),
+                  fontSize:13,fontWeight:700,lineHeight:1}}>
+                {p.name}
+                <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+              </div>
+            );
+          })}
+          {patterns.length<MAX_PATTERNS&&(
+            // Deferred call, not a bare reference: addPattern is declared later
+            // in the component and Babel turns const into var, so binding it
+            // directly here would silently install onClick={undefined}.
+            <div onClick={()=>addPattern()}
+              style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
+                justifyContent:"center",cursor:"pointer",userSelect:"none",
+                border:"1px dashed rgba(200,185,165,0.25)",background:"transparent",
+                color:"rgba(210,195,175,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
+          )}
+        </div>
+      </div>
+      {/* SONG — 64 slots, played top-left to bottom-right, gaps skipped. */}
+      <div style={{width:"100%",maxWidth:640,flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
+        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,display:"flex",gap:8}}>
+          <span>SONG</span>
+          <span style={{color:"rgba(210,195,175,0.3)",letterSpacing:1,fontWeight:500}}>
+            {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
+          </span>
+        </div>
+        <div style={{width:"100%",display:"flex",flexDirection:"column",gap:3,flexShrink:0}}>
+          {Array.from({length:4},(_,row)=>(
+            <div key={row} style={{display:"flex",gap:3}}>
+              {Array.from({length:16},(_,col)=>{
+                const idx=row*16+col;
+                const id=song[idx];
+                const pat=id!=null?patterns.find(p=>p.id===id):null;
+                const isCursor=idx===_songPlayingSlot;
+                const col0=id!=null?_patColorOf(id):null;
+                // Run length, drawn on the first slot of a repeat so a long
+                // stretch of the same pattern reads as "x4" without collapsing
+                // the individually tappable cells.
+                const runStart=id!=null&&(idx===0||song[idx-1]!==id);
+                let run=0; if(runStart){let j=idx;while(j<64&&song[j]===id){run++;j++;}}
+                const isHover=patternDrag&&patternDrag.overSongCell&&patternDrag.overSongCell.barIdx===idx;
+                return(
+                  <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
+                    style={{flex:1,aspectRatio:"1",borderRadius:3,position:"relative",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      background:pat?col0:(isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)"),
+                      outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
+                      outlineOffset:"-1px",
+                      boxShadow:isCursor?"0 0 8px rgba(255,255,255,0.5)":"none",
+                      color:pat?"#1a1814":"transparent",fontSize:11,fontWeight:700,
+                      touchAction:"none",cursor:"pointer",userSelect:"none",
+                      transition:"background .08s, outline .08s"}}
+                    onPointerDown={(e)=>{
+                      e.stopPropagation();
+                      const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
+                      let dragging=false;
+                      const onMove=(ev)=>{
+                        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                        if(id==null)return;                       // nothing to drag out of an empty slot
+                        if(!dragging){
+                          if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                          dragging=true;
+                          setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
+                        }
+                        let over=null;
+                        const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                        const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                        if(tc){const t=parseInt(tc.dataset.songBar,10);if(t!==idx)over={barIdx:t};}
+                        setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:over}:null);
+                      };
+                      const onUp=(ev)=>{
+                        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                        document.removeEventListener("pointermove",onMove);
+                        document.removeEventListener("pointerup",onUp);
+                        document.removeEventListener("pointercancel",onUp);
+                        if(!dragging){
+                          pushHistory();
+                          if(id==null){
+                            // Tap an empty slot: place the selected pattern.
+                            setSong(sg=>{const r=[...sg];r[idx]=activePatternId;return r;});
+                          } else {
+                            // Tap a filled slot: make that pattern the one you're editing.
+                            setActivePatId(id);
+                          }
+                          return;
+                        }
+                        const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                        const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                        pushHistory();
+                        if(tc){
+                          const t=parseInt(tc.dataset.songBar,10);
+                          if(t!==idx)setSong(sg=>{const r=[...sg];r[t]=id;r[idx]=null;return r;});
+                        } else {
+                          // Dragged off the grid: the slot empties. The pattern
+                          // itself stays in the palette.
+                          setSong(sg=>{const r=[...sg];r[idx]=null;return r;});
+                        }
+                        setPatternDrag(null);
+                      };
+                      document.addEventListener("pointermove",onMove);
+                      document.addEventListener("pointerup",onUp);
+                      document.addEventListener("pointercancel",onUp);
+                    }}>
+                    {pat?pat.name:""}
+                    {runStart&&run>1&&(
+                      <span style={{position:"absolute",right:1,bottom:0,fontSize:7,fontWeight:700,
+                        color:"rgba(26,24,20,0.65)",pointerEvents:"none",lineHeight:1}}>×{run}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   // ── BAR STRIP ──────────────────────────────────────────────────────────
   // Kept as a JSX VALUE rather than a function returning JSX — module-level
   // arrows returning JSX are the CJS-transform footgun the build audit guards
@@ -3720,18 +3871,23 @@ export default function Tabula(){
             e.stopPropagation();
             setActiveSheet(sh=>sh==="bars"?null:"bars");}}
           style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3,
-            height:22,minWidth:52,padding:"0 8px",borderRadius:5,
+            height:22,minWidth:66,padding:"0 8px",borderRadius:5,
             border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),
             background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
             color:activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",
             fontSize:10,fontWeight:600,letterSpacing:0.5,lineHeight:1,
             cursor:"pointer",userSelect:"none",flexShrink:0}}>
+          {/* Names the pattern you're editing — the pills that used to say so
+              are gone from the part pages. */}
+          <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
+          <span style={{opacity:0.35}}>·</span>
           <span>{curBar+1}/{barCount}</span>
           <span style={{fontSize:7,opacity:0.7,transform:activeSheet==="bars"?"rotate(180deg)":"none"}}>▾</span>
         </div>
       ):(
-        <span style={{fontSize:9,color:"rgba(210,195,175,0.4)",letterSpacing:0.5,minWidth:34,textAlign:"center",pointerEvents:"none"}}>
-          {curBar+1}/{barCount}
+        <span style={{fontSize:9,letterSpacing:0.5,minWidth:52,textAlign:"center",pointerEvents:"none",display:"flex",gap:4,justifyContent:"center"}}>
+          <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
+          <span style={{color:"rgba(210,195,175,0.4)"}}>{curBar+1}/{barCount}</span>
         </span>
       )}
     </div>
@@ -5251,29 +5407,38 @@ export default function Tabula(){
   // A pattern is all three parts, so add/duplicate/delete work on the unified
   // store directly rather than through a per-layer view — duplicating via the
   // synth view would have produced a copy with empty lead and drums.
-  const addPattern=()=>{pushHistory();setPatterns(ps=>{
-    if(ps.length>=MAX_PATTERNS)return ps;
-    const np=mkPattern(pickSym(ps.map(x=>x.name)));
-    setActivePatId(np.id);setChain(c=>[...c,np.id]);
-    return [...ps,np];
-  });};
-  const dupPatternId=(id)=>{pushHistory();setPatterns(ps=>{
-    if(ps.length>=MAX_PATTERNS)return ps;
-    const src=ps.find(x=>x.id===id);if(!src)return ps;
+  // NB: everything is computed BEFORE the setPatterns call. Calling other
+  // setState functions from inside an updater is unsupported — React can drop
+  // the whole update, which is exactly what made the palette's + do nothing.
+  const addPattern=()=>{
+    if(patterns.length>=MAX_PATTERNS)return;
+    pushHistory();
+    const np=mkPattern(pickSym(patterns.map(x=>x.name)));
+    setPatterns(ps=>[...ps,np]);
+    setActivePatId(np.id);
+    setChain(c=>[...c,np.id]);
+  };
+  const dupPatternId=(id)=>{
+    if(patterns.length>=MAX_PATTERNS)return;
+    const src=patterns.find(x=>x.id===id);
+    if(!src)return;
+    pushHistory();
     const np=JSON.parse(JSON.stringify(src));
-    np.id=++_id;np.name=pickSym(ps.map(x=>x.name));
-    setActivePatId(np.id);setChain(c=>[...c,np.id]);
-    return [...ps,np];
-  });};
-  const delPatternId=(id)=>{pushHistory();setPatterns(ps=>{
-    if(ps.length<=1)return ps;
-    const rem=ps.filter(x=>x.id!==id);
+    np.id=++_id;np.name=pickSym(patterns.map(x=>x.name));
+    setPatterns(ps=>[...ps,np]);
+    setActivePatId(np.id);
+    setChain(c=>[...c,np.id]);
+  };
+  const delPatternId=(id)=>{
+    if(patterns.length<=1)return;
+    pushHistory();
+    const rem=patterns.filter(x=>x.id!==id);
+    setPatterns(rem);
     setChain(c=>c.filter(pid=>pid!==id));
     setDrumChain(c=>c.filter(pid=>pid!==id));
-    setActivePatId(a=>a===id?rem[0].id:a);
-    setSongMatrix(m=>({synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v),drums:m.drums.map(v=>v===id?null:v)}));
-    return rem;
-  });};
+    if(activePatternId===id)setActivePatId(rem[0].id);
+    setSong(sg=>sg.map(v=>v===id?null:v));
+  };
   const addPat=addPattern;
   const dupPat=()=>dupPatternId(activeId);
   const delPat=()=>delPatternId(activeId);
@@ -6260,115 +6425,7 @@ export default function Tabula(){
                       else{switchLayer(layer);}
                     }}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
-                      {layerPats.map((p)=>{
-                        const isA=p.id===layerActiveId&&isActive;
-                        const isP=playing&&isActive&&playId===p.id;
-                        const isDragging=patternDrag&&patternDrag.patId===p.id;
-                        return(
-                          <div key={p.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px "+accent+"88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
-                            onClick={e=>e.stopPropagation()}
-                            onPointerDown={e=>{
-                              e.stopPropagation();
-                              const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
-                              let dragging=false;
-                              const dragLayer=layer;
-                              const onMove=(ev)=>{
-                                if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                if(!dragging){
-                                  if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
-                                  dragging=true;
-                                  try{target.setPointerCapture(pointerId);}catch(_){}
-                                  setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,overLayerBox:null});
-                                }
-                                const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                let overSongCell=null;
-                                if(songView){
-                                  const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                  if(cell&&cell.dataset.songLayer===dragLayer){
-                                    overSongCell={layer:cell.dataset.songLayer,barIdx:parseInt(cell.dataset.songBar,10)};
-                                  }
-                                }
-                                // Cross-layer drop target — synth-type only, different from source.
-                                let overLayerBox=null;
-                                const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
-                                if(boxEl){
-                                  const tl=boxEl.dataset.layerBox;
-                                  if(SYNTH_LAYERS.indexOf(tl)>=0&&tl!==dragLayer)overLayerBox=tl;
-                                }
-                                setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell,overLayerBox}:null);
-                              };
-                              const onUp=(ev)=>{
-                                if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                document.removeEventListener("pointermove",onMove);
-                                document.removeEventListener("pointerup",onUp);
-                                document.removeEventListener("pointercancel",onUp);
-                                try{target.releasePointerCapture(pointerId);}catch(_){}
-                                if(!dragging){
-                                  // Clicking an already-active pattern jumps into edit
-                                  // (mirrors mobile). New layer / new pattern: switch + activate.
-                                  const wasActivePattern=isActive&&activeId===p.id;
-                                  if(!isActive)switchLayer(dragLayer);
-                                  setActiveId(p.id);
-                                  if(songView){setSongView(false);setPage("edit");}
-                                  else if(wasActivePattern){setPage("edit");}
-                                  return;
-                                }
-                                const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                // Drop on song-matrix cell (same-layer only)
-                                if(songView){
-                                  const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                  if(cell&&cell.dataset.songLayer===dragLayer){
-                                    const barIdx=parseInt(cell.dataset.songBar,10);
-                                    pushHistory();
-                                    setSongMatrix(m=>{const r=[...m[dragLayer]];r[barIdx]=p.id;return{...m,[dragLayer]:r};});
-                                    setPatternDrag(null);
-                                    return;
-                                  }
-                                }
-                                // Drop on a layer box — cross-layer copy if different layer, cancel if same.
-                                const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
-                                if(boxEl){
-                                  const tl=boxEl.dataset.layerBox;
-                                  if(SYNTH_LAYERS.indexOf(tl)>=0&&tl!==dragLayer){
-                                    // Cross-layer copy. POLY → MONO culls to monophonic.
-                                    const targetData=layerStoreR.current[tl]||{pats:[],activeId:null};
-                                    const targetPats=targetData.pats||[];
-                                    if(targetPats.length<8){
-                                      pushHistory();
-                                      const srcGrid=p.grid.map(r=>[...r]);
-                                      const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs(gridW(p.grid));
-                                      const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
-                                      const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
-                                        grid:culled.grid,
-                                        durs:culled.durs,
-                                        params:(p.params||defaultStepParams(gridW(p.grid))).map(s=>Object.assign({},s)),
-                                        gridLen:p.gridLen??16,
-                                        bars:patBars(p)
-                                      });
-                                      layerStoreR.current[tl]={...targetData,pats:[...targetPats,newPat],activeId:newPat.id};
-                                      switchLayer(tl);
-                                    }
-                                  }
-                                  // Dropping on ANY layer box (including the source) is a cancel,
-                                  // not a delete. Only truly off-canvas drops delete.
-                                  setPatternDrag(null);
-                                  return;
-                                }
-                                // Dropped outside any valid target — delete the pattern.
-                                delPatInLayer(dragLayer,p.id);
-                                setPatternDrag(null);
-                              };
-                              document.addEventListener("pointermove",onMove);
-                              document.addEventListener("pointerup",onUp);
-                              document.addEventListener("pointercancel",onUp);
-                            }}>
-                            {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                          </div>
-                        );
-                      })}
-                      {isActive&&layerPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba("+accentRgb+",0.3)",background:"transparent",color:"rgba("+accentRgb+",0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addPat();}}>＋</button>}
-                    </div>
+                    {/* Pattern pills removed — selection lives on the SONG page now. */}
                   </div>
                 );
               })}
@@ -6387,86 +6444,7 @@ export default function Tabula(){
                   if(songView){setSongView(false);setPage("edit");}
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:3,alignItems:"center"}}>
-                  {drumPats.map((dp)=>{
-                    const isA=dp.id===activeDrumId&&activeLayer==="drums";
-                    // "Currently playing" highlight: song mode reads the matrix
-                    // at the drum lane's current bar; otherwise the active pat
-                    // is the one being fired by the scheduler.
-                    const _playingDrumId=songMode?songMatrix.drums?.[songBarLayer.drums]:activeDrumId;
-                    const isP=playing&&_playingDrumId===dp.id;
-                    const isDragging=patternDrag&&patternDrag.patId===dp.id;
-                    return(
-                      <div key={dp.id} style={{padding:"3px 9px",borderRadius:20,border:"1.5px solid #c4727a",background:isA?"#c4727a":"transparent",color:isA?"#1a1814":"#c4727a",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:3,boxShadow:isP&&!isA?"0 0 10px #c4727a88":"none",touchAction:"none",opacity:isDragging?0.4:1}}
-                        onClick={e=>e.stopPropagation()}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const startX=e.clientX,startY=e.clientY,pointerId=e.pointerId,target=e.currentTarget;
-                          let dragging=false;
-                          const onMove=(ev)=>{
-                            if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                            if(!dragging){
-                              if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
-                              dragging=true;
-                              try{target.setPointerCapture(pointerId);}catch(_){}
-                              setPatternDrag({patId:dp.id,name:dp.name,accent:"#c4727a",x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
-                            }
-                            let overSongCell=null;
-                            if(songView){
-                              const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                              const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                              if(cell&&cell.dataset.songLayer==="drums"){
-                                overSongCell={layer:"drums",barIdx:parseInt(cell.dataset.songBar,10)};
-                              }
-                            }
-                            setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
-                          };
-                          const onUp=(ev)=>{
-                            if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                            document.removeEventListener("pointermove",onMove);
-                            document.removeEventListener("pointerup",onUp);
-                            document.removeEventListener("pointercancel",onUp);
-                            try{target.releasePointerCapture(pointerId);}catch(_){}
-                            if(!dragging){
-                              // Same rule as synth pillows: clicking the active drum
-                              // pattern enters edit.
-                              const wasActivePattern=activeLayer==="drums"&&activeDrumId===dp.id;
-                              if(activeLayer!=="drums")switchLayer("drums");
-                              setActiveDrumId(dp.id);
-                              if(songView){setSongView(false);setPage("edit");}
-                              else if(wasActivePattern){setPage("edit");}
-                              return;
-                            }
-                            const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                            // Drop on drums song-matrix cell
-                            if(songView){
-                              const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                              if(cell&&cell.dataset.songLayer==="drums"){
-                                const barIdx=parseInt(cell.dataset.songBar,10);
-                                pushHistory();
-                                setSongMatrix(m=>{const r=[...m.drums];r[barIdx]=dp.id;return{...m,drums:r};});
-                                setPatternDrag(null);
-                                return;
-                              }
-                            }
-                            // Drop on a layer box — cancel (no cross-layer drum → synth or vice versa).
-                            const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
-                            if(boxEl){setPatternDrag(null);return;}
-                            // Dropped outside any valid target — delete this drum pattern.
-                            delPatInLayer("drums",dp.id);
-                            setPatternDrag(null);
-                          };
-                          document.addEventListener("pointermove",onMove);
-                          document.addEventListener("pointerup",onUp);
-                          document.addEventListener("pointercancel",onUp);
-                        }}
-                        onContextMenu={e=>{e.preventDefault();e.stopPropagation();setActiveDrumId(dp.id);setDrumMenu({id:dp.id,x:e.clientX,y:e.clientY});}}>
-                        {isP&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{dp.name}
-                      </div>
-                    );
-                  })}
-                  {drumPats.length<8&&<button style={{padding:"3px 7px",borderRadius:20,border:"1px dashed rgba(196,114,122,0.3)",background:"transparent",color:"rgba(196,114,122,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}} onClick={e=>{e.stopPropagation();addDrumPat();}}>＋</button>}
-                </div>
+                {/* Pattern pills removed — selection lives on the SONG page now. */}
               </div>
               {/* Action buttons — context-sensitive to active layer.
                   SPEED selector sits inside this block because it's a per-pattern
@@ -6645,125 +6623,7 @@ export default function Tabula(){
           {/* Page content — always present, fills 1fr */}
           <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
-            {songView&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
-                  {Array.from({length:4},(_,group)=>(
-                    <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
-                      {["synth","lead","drums"].map(layer=>{
-                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#6c9ad6":"#c4727a";
-                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"108,154,214":"196,114,122";
-                        const patSet = layer==="drums"
-                          ? drumPats
-                          : layer===activeLayer
-                            ? pats
-                            : (layerStoreR.current[layer]?.pats || (layer==="synth"?pats:[]));
-                        return (
-                          <div key={layer} style={{flex:1,display:"flex",gap:1}}>
-                            {Array.from({length:16},(_,col)=>{
-                              const barIdx = group*16+col;
-                              const patId = songMatrix[layer][barIdx];
-                              const pat = patId!=null ? patSet.find(p=>p.id===patId) : null;
-                              const isQ = col%4===0;
-                              const isHoverTarget = patternDrag?.overSongCell&&patternDrag.overSongCell.layer===layer&&patternDrag.overSongCell.barIdx===barIdx;
-                              const isDragSource = patternDrag?.sourceCell&&patternDrag.sourceCell.layer===layer&&patternDrag.sourceCell.barIdx===barIdx;
-                              const isCursor = playing&&songView&&songBarLayer[layer]===barIdx;
-                              return (
-                                <div key={col}
-                                     data-song-cell="1"
-                                     data-song-layer={layer}
-                                     data-song-bar={barIdx}
-                                     style={{flex:1,aspectRatio:"1",
-                                             background: pat ? accent : (isCursor ? `rgba(${accentRgb},0.35)` : `rgba(${accentRgb},0.06)`),
-                                             outline: isHoverTarget ? `2px solid ${accent}` : (isCursor ? `2.5px solid #ffffff` : "none"),
-                                             outlineOffset:"-1px",
-                                             borderRadius:2,
-                                             display:"flex",alignItems:"center",justifyContent:"center",
-                                             color: pat ? "#1a1814" : "transparent",
-                                             fontSize:11,fontWeight:700,
-                                             opacity: isDragSource ? 0.3 : 1,
-                                             boxShadow: isCursor ? `0 0 8px rgba(255,255,255,0.55)${pat?", 0 0 0 2px rgba(255,255,255,0.95) inset":""}` : "none",
-                                             zIndex: isCursor ? 2 : 1,
-                                             transform: isHoverTarget ? "scale(1.08)" : (isCursor ? "scale(1.04)" : "scale(1)"),
-                                             transition:"transform 0.08s, outline 0.08s, opacity 0.08s",
-                                             touchAction:"none",cursor:"pointer",userSelect:"none"}}
-                                     onPointerDown={(e)=>{
-                                       e.stopPropagation();
-                                       // Empty cell — no action. (Filling happens via drag from the
-                                       // persistent pattern row above.)
-                                       if(patId==null) return;
-                                       const pointerId=e.pointerId;
-                                       const startX=e.clientX, startY=e.clientY;
-                                       const draggedPat=pat;
-                                       let dragging=false;
-                                       const onMove=(ev)=>{
-                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                         if(!dragging){
-                                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                                           dragging=true;
-                                           setPatternDrag({patId,name:draggedPat.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{layer,barIdx}});
-                                         }
-                                         // hit-test other cells, exclude source
-                                         let overSongCell=null;
-                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                         if(targetCell&&targetCell.dataset.songLayer===layer){
-                                           const tBar=parseInt(targetCell.dataset.songBar,10);
-                                           if(tBar!==barIdx) overSongCell={layer,barIdx:tBar};
-                                         }
-                                         setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
-                                       };
-                                       const onUp=(ev)=>{
-                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                         document.removeEventListener("pointerup",onUp);
-                                         document.removeEventListener("pointercancel",onUp);
-                                         document.removeEventListener("pointermove",onMove);
-                                         if(!dragging){
-                                           // Tap on filled cell → step into the pattern. Switch to the
-                                           // cell's layer (if different), make this pat the active one,
-                                           // exit song view, land on the edit page. Clearing a cell now
-                                           // happens via drag-off-grid (handled below).
-                                           if(layer!==activeLayer)switchLayer(layer);
-                                           if(layer==="drums")setActiveDrumId(patId);
-                                           else setActiveId(patId);
-                                           setSongView(false);
-                                           setPage("edit");
-                                           return;
-                                         }
-                                         // drop logic — same-layer cell = move; off-grid = clear source cell.
-                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                         if(targetCell&&targetCell.dataset.songLayer===layer){
-                                           const tBar=parseInt(targetCell.dataset.songBar,10);
-                                           if(tBar!==barIdx){
-                                             pushHistory();
-                                             setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
-                                           }
-                                         } else {
-                                           // Dropped outside the song grid (or on a different layer's cell)
-                                           // → remove the pattern from this cell. The pattern itself stays in
-                                           // the library; only the bar assignment goes away.
-                                           pushHistory();
-                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
-                                         }
-                                         setPatternDrag(null);
-                                       };
-                                       document.addEventListener("pointermove",onMove);
-                                       document.addEventListener("pointerup",onUp);
-                                       document.addEventListener("pointercancel",onUp);
-                                     }}>
-                                  {pat?pat.name:""}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {songView&&songPage}
             {!songView&&(<>
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -7522,150 +7382,11 @@ export default function Tabula(){
             ))}
           </div>
           )}
-          {/* ── PERSISTENT PATTERN PILLS — tap to select, drag to phrase or song-matrix cell (portrait) ── */}
-          {!isLandscape&&(
-          <div style={{display:"flex",gap:5,flexWrap:"wrap",flexShrink:0,padding:"4px 12px 6px",alignItems:"center",touchAction:"none"}}>
-            {(activeLayer==="drums"?drumPats:pats).map(p=>{
-              const isDrums=activeLayer==="drums";
-              const isSynth=!isDrums; // any synth-type layer
-              const isA=isDrums?p.id===activeDrumId:p.id===activeId;
-              const isP=playing&&(isSynth&&activeLayer==="synth"?playId===p.id:false);
-              const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
-              const isDragging=patternDrag&&patternDrag.patId===p.id;
-              return(
-                <div key={p.id} style={{padding:"6px 14px",borderRadius:20,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer",flexShrink:0,userSelect:"none",WebkitUserSelect:"none",touchAction:"none",display:"flex",alignItems:"center",gap:2,opacity:isDragging?0.4:1,lineHeight:1}}
-                  onPointerDown={e=>{
-                    e.stopPropagation();
-                    const startX=e.clientX,startY=e.clientY;
-                    const pointerId=e.pointerId;
-                    const target=e.currentTarget;
-                    let dragging=false;
-                    const dragLayer = activeLayer; // captured at drag start; song cell must match this layer
-                    const onMove=(ev)=>{
-                      if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                      if(!dragging){
-                        if(Math.abs(ev.clientX-startX)<4&&Math.abs(ev.clientY-startY)<4)return;
-                        dragging=true;
-                        try{target.setPointerCapture(pointerId);}catch(_){}
-                        setPatternDrag({patId:p.id,name:p.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
-                      }
-                      let overDrop=false;
-                      if(phraseDropRef.current){
-                        const rect=phraseDropRef.current.getBoundingClientRect();
-                        overDrop=ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right;
-                      }
-                      const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                      // hit-test song-matrix cells (only valid if cell.layer === dragLayer)
-                      let overSongCell=null;
-                      if(songView){
-                        const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                        if(cell&&cell.dataset.songLayer===dragLayer){
-                          overSongCell={layer:cell.dataset.songLayer,barIdx:parseInt(cell.dataset.songBar,10)};
-                        }
-                      }
-                      // hit-test mobile layer bar — cross-layer drag between synth-type layers
-                      let overLayerBox=null;
-                      const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
-                      if(boxEl){
-                        const tl=boxEl.dataset.layerBox;
-                        if(SYNTH_LAYERS.indexOf(tl)>=0&&SYNTH_LAYERS.indexOf(dragLayer)>=0&&tl!==dragLayer)overLayerBox=tl;
-                      }
-                      setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overDrop,overSongCell,overLayerBox}:null);
-                    };
-                    const onUp=(ev)=>{
-                      if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                      document.removeEventListener("pointermove",onMove);
-                      document.removeEventListener("pointerup",onUp);
-                      document.removeEventListener("pointercancel",onUp);
-                      try{target.releasePointerCapture(pointerId);}catch(_){}
-                      if(!dragging){
-                        const wasActive = isSynth ? activeId===p.id : activeDrumId===p.id;
-                        if(songView){
-                          // Song view: tap = leave view, show pattern's note grid.
-                          // songMode (playback source) is unchanged — matrix keeps driving playback.
-                          if(!wasActive) isSynth?setActiveId(p.id):setActiveDrumId(p.id);
-                          setSongView(false);
-                          setActiveSheet(null);
-                        }else if(wasActive){
-                          // Already on this pattern's grid: tap opens drawer
-                          setSeqPage("step");
-                          setActiveSheet(s=>s==="pattern"?null:"pattern");
-                        }else{
-                          // Different pattern: just activate it
-                          isSynth?setActiveId(p.id):setActiveDrumId(p.id);
-                          setActiveSheet(null);
-                        }
-                        return;
-                      }
-                      const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                      // Drop on song-matrix cell — same-layer only
-                      if(songView){
-                        const cell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                        if(cell&&cell.dataset.songLayer===dragLayer){
-                          const barIdx=parseInt(cell.dataset.songBar,10);
-                          pushHistory();
-                          setSongMatrix(m=>{const r=[...m[dragLayer]];r[barIdx]=p.id;return{...m,[dragLayer]:r};});
-                          setPatternDrag(null);
-                          return;
-                        }
-                      }
-                      // Drop on a layer button — cross-layer copy if different synth-type; cancel otherwise.
-                      // Mobile mono-cull mirrors the desktop drop rule.
-                      const boxEl=el&&el.closest&&el.closest('[data-layer-box]');
-                      if(boxEl){
-                        const tl=boxEl.dataset.layerBox;
-                        if(SYNTH_LAYERS.indexOf(tl)>=0&&SYNTH_LAYERS.indexOf(dragLayer)>=0&&tl!==dragLayer){
-                          const targetData=layerStoreR.current[tl]||{pats:[],activeId:null};
-                          const targetPats=targetData.pats||[];
-                          if(targetPats.length<8){
-                            pushHistory();
-                            const srcGrid=p.grid.map(r=>[...r]);
-                            const srcDurs=p.durs?p.durs.map(r=>[...r]):mkDurs(gridW(p.grid));
-                            const culled=tl==="lead"?cullPatToMono(srcGrid,srcDurs):{grid:srcGrid,durs:srcDurs};
-                            const newPat=Object.assign({},mkPat(symPat(targetPats.length)),{
-                              grid:culled.grid,
-                              durs:culled.durs,
-                              params:(p.params||defaultStepParams(gridW(p.grid))).map(s=>Object.assign({},s)),
-                              gridLen:p.gridLen??16,
-                              bars:patBars(p),
-                              speedMult:p.speedMult??1,
-                            });
-                            layerStoreR.current[tl]={...targetData,pats:[...targetPats,newPat],activeId:newPat.id};
-                            switchLayer(tl);
-                            setActiveSheet(null);
-                            setPatternDrag(null);
-                            return;
-                          }
-                        }
-                        // Layer-bar drop (any direction) is a cancel — not a delete.
-                        setPatternDrag(null);
-                        return;
-                      }
-                      // Drop on phrase chain — append to active phrase.
-                      if(phraseDropRef.current){
-                        const rect=phraseDropRef.current.getBoundingClientRect();
-                        if(ev.clientY>=rect.top&&ev.clientY<=rect.bottom&&ev.clientX>=rect.left&&ev.clientX<=rect.right){
-                          pushHistory();
-                          if(isSynth)setSynthPhrases(ps=>ps.map(ph=>ph.id===activeSynthPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
-                          else setDrumPhrases(ps=>ps.map(ph=>ph.id===activeDrumPhraseId?{...ph,chain:[...ph.chain,p.id]}:ph));
-                          setPatternDrag(null);
-                          return;
-                        }
-                      }
-                      // Dropped outside any valid target — delete the pattern.
-                      delPatInLayer(dragLayer,p.id);
-                      setPatternDrag(null);
-                    };
-                    document.addEventListener("pointermove",onMove);
-                    document.addEventListener("pointerup",onUp);
-                    document.addEventListener("pointercancel",onUp);
-                  }}>
-                  {isP&&!isA&&<span style={{fontSize:6,opacity:0.7}}>●</span>}{p.name}
-                </div>);
-            })}
-            {(activeLayer==="drums"?drumPats:pats).length<8&&<div style={{padding:"4px 10px",borderRadius:20,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",flexShrink:0,userSelect:"none"}} onPointerDown={e=>{e.stopPropagation();activeLayer==="drums"?addDrumPat():addPat();}}>＋</div>}
-          </div>
-          )}
+          {/* The pattern pills used to live here. Pattern selection moved to
+              the SONG page — a pattern is now all three parts, so choosing one
+              is a whole-arrangement decision rather than a per-layer one, and
+              the part pages get the space back. The bar strip's handle shows
+              which pattern you're in. */}
           {/* ── PER-LAYER FUNCTION PILLS — STEP / SOUND / VARY (portrait) ──
                First-class home-screen access to the pattern's step drawer, the
                layer's sound page, and per-layer variation. (These were formerly
@@ -7699,125 +7420,7 @@ export default function Tabula(){
           <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
             {/* SONG matrix — 12×16, 4 row-groups × 3 layers (poly/mono/drums) × 16 bars */}
-            {songView&&(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"6px 10px 6px",boxSizing:"border-box",gap:6}}>
-                <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?56:175)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0,gap:3}}>
-                  {Array.from({length:4},(_,group)=>(
-                    <div key={group} style={{flex:1,display:"flex",flexDirection:"column",gap:1}}>
-                      {["synth","lead","drums"].map(layer=>{
-                        const accent = layer==="synth"?"#a8c5a0":layer==="lead"?"#6c9ad6":"#c4727a";
-                        const accentRgb = layer==="synth"?"168,197,160":layer==="lead"?"108,154,214":"196,114,122";
-                        const patSet = layer==="drums"
-                          ? drumPats
-                          : layer===activeLayer
-                            ? pats
-                            : (layerStoreR.current[layer]?.pats || (layer==="synth"?pats:[]));
-                        return (
-                          <div key={layer} style={{flex:1,display:"flex",gap:1}}>
-                            {Array.from({length:16},(_,col)=>{
-                              const barIdx = group*16+col;
-                              const patId = songMatrix[layer][barIdx];
-                              const pat = patId!=null ? patSet.find(p=>p.id===patId) : null;
-                              const isQ = col%4===0;
-                              const isHoverTarget = patternDrag?.overSongCell&&patternDrag.overSongCell.layer===layer&&patternDrag.overSongCell.barIdx===barIdx;
-                              const isDragSource = patternDrag?.sourceCell&&patternDrag.sourceCell.layer===layer&&patternDrag.sourceCell.barIdx===barIdx;
-                              const isCursor = playing&&songView&&songBarLayer[layer]===barIdx;
-                              return (
-                                <div key={col}
-                                     data-song-cell="1"
-                                     data-song-layer={layer}
-                                     data-song-bar={barIdx}
-                                     style={{flex:1,aspectRatio:"1",
-                                             background: pat ? accent : (isCursor ? `rgba(${accentRgb},0.35)` : `rgba(${accentRgb},0.06)`),
-                                             outline: isHoverTarget ? `2px solid ${accent}` : (isCursor ? `2.5px solid #ffffff` : "none"),
-                                             outlineOffset:"-1px",
-                                             borderRadius:2,
-                                             display:"flex",alignItems:"center",justifyContent:"center",
-                                             color: pat ? "#1a1814" : "transparent",
-                                             fontSize:11,fontWeight:700,
-                                             opacity: isDragSource ? 0.3 : 1,
-                                             boxShadow: isCursor ? `0 0 8px rgba(255,255,255,0.55)${pat?", 0 0 0 2px rgba(255,255,255,0.95) inset":""}` : "none",
-                                             zIndex: isCursor ? 2 : 1,
-                                             transform: isHoverTarget ? "scale(1.08)" : (isCursor ? "scale(1.04)" : "scale(1)"),
-                                             transition:"transform 0.08s, outline 0.08s, opacity 0.08s",
-                                             touchAction:"none",cursor:"pointer",userSelect:"none"}}
-                                     onPointerDown={(e)=>{
-                                       e.stopPropagation();
-                                       // Empty cell — no action. (Filling happens via drag from the
-                                       // persistent pattern row above.)
-                                       if(patId==null) return;
-                                       const pointerId=e.pointerId;
-                                       const startX=e.clientX, startY=e.clientY;
-                                       const draggedPat=pat;
-                                       let dragging=false;
-                                       const onMove=(ev)=>{
-                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                         if(!dragging){
-                                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                                           dragging=true;
-                                           setPatternDrag({patId,name:draggedPat.name,accent,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{layer,barIdx}});
-                                         }
-                                         // hit-test other cells, exclude source
-                                         let overSongCell=null;
-                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                         if(targetCell&&targetCell.dataset.songLayer===layer){
-                                           const tBar=parseInt(targetCell.dataset.songBar,10);
-                                           if(tBar!==barIdx) overSongCell={layer,barIdx:tBar};
-                                         }
-                                         setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell}:null);
-                                       };
-                                       const onUp=(ev)=>{
-                                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                                         document.removeEventListener("pointerup",onUp);
-                                         document.removeEventListener("pointercancel",onUp);
-                                         document.removeEventListener("pointermove",onMove);
-                                         if(!dragging){
-                                           // Tap on filled cell → step into the pattern. Switch to the
-                                           // cell's layer (if different), make this pat the active one,
-                                           // exit song view, land on the edit page. Clearing a cell now
-                                           // happens via drag-off-grid (handled below).
-                                           if(layer!==activeLayer)switchLayer(layer);
-                                           if(layer==="drums")setActiveDrumId(patId);
-                                           else setActiveId(patId);
-                                           setSongView(false);
-                                           setPage("edit");
-                                           return;
-                                         }
-                                         // drop logic — same-layer cell = move; off-grid = clear source cell.
-                                         const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                                         const targetCell=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                                         if(targetCell&&targetCell.dataset.songLayer===layer){
-                                           const tBar=parseInt(targetCell.dataset.songBar,10);
-                                           if(tBar!==barIdx){
-                                             pushHistory();
-                                             setSongMatrix(m=>{const r=[...m[layer]];r[tBar]=patId;r[barIdx]=null;return{...m,[layer]:r};});
-                                           }
-                                         } else {
-                                           // Dropped outside the song grid (or on a different layer's cell)
-                                           // → remove the pattern from this cell. The pattern itself stays in
-                                           // the library; only the bar assignment goes away.
-                                           pushHistory();
-                                           setSongMatrix(m=>{const r=[...m[layer]];r[barIdx]=null;return{...m,[layer]:r};});
-                                         }
-                                         setPatternDrag(null);
-                                       };
-                                       document.addEventListener("pointermove",onMove);
-                                       document.addEventListener("pointerup",onUp);
-                                       document.addEventListener("pointercancel",onUp);
-                                     }}>
-                                  {pat?pat.name:""}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {songView&&songPage}
 
             {/* SYNTH EDIT grid */}
             {!songView&&activeLayer!=="drums"&&(

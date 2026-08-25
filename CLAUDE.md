@@ -51,7 +51,9 @@ Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go 
 
 `unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost (a project with patterns but no arrangement would otherwise migrate to only the active combination — that bug was caught in testing). Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
 
-**Still to do:** the song page should become the pattern selector and the pattern pills should leave the part pages. `songMatrix` survives only as a derived three-lane view of `song` (all lanes identical) so that page renders unchanged — delete it with the page.
+The **song page** is the pattern selector: a PATTERNS palette (tap a chip to make it the pattern every part page edits, `+` adds one) above one lane of 64 slots. Tapping an empty slot places the selected pattern — placement is tap-first because drag is awkward on a phone; drag still moves between slots and off-grid clears. Runs of the same pattern draw a `×N` badge without merging the cells. The pattern pills are gone from every part page; the bar strip's handle names the current pattern instead.
+
+`songMatrix` survives only as a derived three-lane view of `song` (all lanes identical), still read by the MP3/MIDI export helpers.
 
 ### Layer-store swap (removed)
 
@@ -124,7 +126,8 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 - **useCallback empty-deps trap**: `useCallback(fn, [])` baked first-render closures over `pushHistory` etc. Fix is ref-based: `pushHistoryR.current` reassigned each render, stable callbacks invoke `.current()`. Same for `captureSnapshotR`. Don't collapse back to direct closures.
 - **Grid pointer events** live on the parent `gridRef` container, not per-cell. If you change grid event handling, test on iPhone immediately.
 - **iOS gesture interception**: parent `touch-action: pan-x` / `overflow-x: auto` makes Safari swallow gestures at the OS level — vertical drags don't propagate. If a drag feels "stuck horizontally," check the parent's `touch-action`.
-- **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building.
+- **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building. Worse in JSX values: `const songPage = (<div onClick={addPattern}/>)` defined *above* `addPattern` silently binds `onClick={undefined}` (Babel lowers `const` to `var`, so there's no TDZ error and no crash — the control just does nothing). Defer the lookup: `onClick={()=>addPattern()}`.
+- **Never call a setState function from inside another setState updater.** `setPatterns(ps=>{ …; setActivePatId(x); return next; })` looks fine and silently drops the whole update. Compute first, then call the setters in sequence.
 - **Cross-layer audio**: always resolve pattern data through `resolveLayerPat` / `layerStoreR.current[layer]`, never assume `patsR.current` (only valid for the active layer).
 
 ---
