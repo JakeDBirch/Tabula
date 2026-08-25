@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── Scales — all 7 church modes, root C3 at row 15 (bottom) ─────────────────
 // Ascending from C3: each mode built from C so tonal center stays fixed
@@ -398,6 +398,13 @@ const unpackPat=(p)=>{
 const _mapProjectPats=(st,fn)=>{
   if(!st)return st;
   const o=Object.assign({},st);
+  // Unified store: every part of every pattern.
+  if(Array.isArray(st.patterns))o.patterns=st.patterns.map(p=>{
+    if(!p||!p.parts)return p;
+    const parts={};
+    for(const l of Object.keys(p.parts))parts[l]=fn(p.parts[l]);
+    return Object.assign({},p,{parts});
+  });
   if(Array.isArray(st.pats))o.pats=st.pats.map(fn);
   if(Array.isArray(st.drumPats))o.drumPats=st.drumPats.map(fn);
   if(st.layerStore&&typeof st.layerStore==="object"){
@@ -412,6 +419,163 @@ const _mapProjectPats=(st,fn)=>{
 };
 const packProject  =(st)=>_mapProjectPats(st,packPat);
 const unpackProject=(st)=>_mapProjectPats(st,unpackPat);
+
+// ── Unified patterns ─────────────────────────────────────────────────────
+// A PATTERN is everything the machine is doing at once: a synth part, a lead
+// part and a drum part, sharing one bar count. It is the unit a song sequences.
+//
+// This replaces three independent per-layer libraries (`pats`, the parked
+// `layerStore[layer].pats`, and `drumPats`) plus a three-lane song matrix. That
+// arrangement is what forced the layer-store swap — the single largest source
+// of "a track went silent when I switched layers" bugs — and what forced the
+// scheduler to invent a shared bar length by taking the shortest populated
+// lane. With one pattern holding all three parts, both problems stop existing:
+// there is nothing to park, and a pattern knows its own length.
+//
+// The trade, stated plainly: parts can no longer be reused independently. The
+// same drums under two different melodies means two patterns, and edits to one
+// don't reach the other.
+const MAX_PATTERNS=16;
+const PART_LAYERS=["synth","lead","drums"];
+const mkSynthPart=(w=COLS)=>({grid:mkGrid(w),durs:mkDurs(w),params:defaultStepParams(w),gridLen:Math.min(COLS,w),speedMult:1});
+const mkDrumPart =(w=COLS)=>({grid:Array.from({length:DRUM_ROWS},()=>new Array(w).fill(false)),
+  vel:mkDrumVel(w),rat:mkDrumRat(w),gridLen:Math.min(COLS,w),speedMult:1,
+  mix:defaultDrumMix(),vRhythm:0,vVelocity:0,vo:DRUM_ORDER_V});
+const mkPattern=(name,bars=1)=>{
+  const w=Math.max(1,Math.min(MAX_BARS,bars))*COLS;
+  return {id:++_id,name,bars:Math.max(1,Math.min(MAX_BARS,bars)),
+    parts:{synth:mkSynthPart(w),lead:mkSynthPart(w),drums:mkDrumPart(w)}};
+};
+// ── Compatibility views ──────────────────────────────────────────────────
+// Most of the editor was written against a flat per-layer pattern: `p.grid`,
+// `p.gridLen`, `p.id`, `p.name`, `p.bars`. `partView` presents one part in
+// exactly that shape, and `mergeLayer` folds an edited library back into the
+// unified store — so the existing call sites keep working while the model
+// underneath is a single list. Delete these once the call sites are rewritten.
+const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pat.name,bars:pat.bars});
+const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
+const _stripView=(v)=>{const o=Object.assign({},v);delete o.id;delete o.name;delete o.bars;return o;};
+const mergeLayer=(patterns,layer,next)=>{
+  const seen=new Set((next||[]).map(v=>v.id));
+  const out=[];
+  for(const p of (patterns||[])){
+    if(!seen.has(p.id))continue;                 // dropped from the view = pattern deleted
+    const v=(next||[]).find(x=>x.id===p.id);
+    const nb=Math.max(1,Math.min(MAX_BARS,v.bars||p.bars||1));
+    const np=Object.assign({},p,{name:v.name!=null?v.name:p.name,bars:nb});
+    np.parts=Object.assign({},p.parts,{[layer]:_stripView(v)});
+    // A bar-count change has to carry ALL THREE parts with it, or the untouched
+    // parts read as undefined past the old width at playback time.
+    if(nb!==p.bars){
+      for(const l of PART_LAYERS)
+        np.parts[l]=_stripView(resizePatBars(Object.assign({},np.parts[l],{bars:nb}),nb));
+    }
+    out.push(np);
+  }
+  for(const v of (next||[])){                    // a new id in the view = a new pattern
+    if((patterns||[]).some(p=>p.id===v.id))continue;
+    const bars=Math.max(1,Math.min(MAX_BARS,v.bars||1));
+    const base=mkPattern(v.name,bars);
+    base.id=v.id;
+    base.parts[layer]=_stripView(v);
+    out.push(base);
+  }
+  return out;
+};
+
+// ── Legacy project migration ─────────────────────────────────────────────
+// Pre-unification saves hold three independent libraries (the active layer in
+// `pats`, the parked one in `layerStore[layer].pats`, drums in `drumPats`) and
+// a three-lane `songMatrix`. Each populated song column names one combination
+// of the three, which is exactly what a unified pattern is — so every distinct
+// column becomes a pattern, in first-appearance order, and the song becomes the
+// sequence of those.
+//
+// This is lossy in one specific way, and deliberately so: where a drum pattern
+// was shared across several columns it becomes independent copies, so editing
+// one no longer changes the others. Nothing is silenced.
+const unifyLegacyProject=(s)=>{
+  if(!s||Array.isArray(s.patterns))return s;            // already unified
+  if(!Array.isArray(s.pats)&&!Array.isArray(s.drumPats))return s;
+  const libOf=(layer)=>{
+    if(layer==="drums")return s.drumPats||[];
+    if(s.activeLayer===layer||(!s.activeLayer&&layer==="synth"))return s.pats||[];
+    const ld=s.layerStore&&s.layerStore[layer];
+    return (ld&&ld.pats)||[];
+  };
+  const libs={synth:libOf("synth"),lead:libOf("lead"),drums:libOf("drums")};
+  const activeOf=(layer)=>{
+    if(layer==="drums")return s.activeDrumId;
+    if(s.activeLayer===layer||(!s.activeLayer&&layer==="synth"))return s.activeId;
+    const ld=s.layerStore&&s.layerStore[layer];
+    return ld&&ld.activeId;
+  };
+  const sm=s.songMatrix||null;
+  const cols=[];
+  if(sm){
+    for(let i=0;i<64;i++){
+      const t={synth:sm.synth?sm.synth[i]:null,lead:sm.lead?sm.lead[i]:null,drums:sm.drums?sm.drums[i]:null};
+      if(t.synth!=null||t.lead!=null||t.drums!=null)cols.push({i,t});
+    }
+  }
+  // Every library pattern has to end up somewhere or it is silently lost — a
+  // project with patterns but no song arrangement would otherwise migrate to
+  // just the active combination. Pair the libraries up by index and append any
+  // combination the song didn't already name.
+  const maxLib=Math.max(libs.synth.length,libs.lead.length,libs.drums.length,1);
+  const _k=t=>[t.synth,t.lead,t.drums].join("|");
+  const named=new Set(cols.map(c=>_k(c.t)));
+  for(let i=0;i<maxLib;i++){
+    const t={synth:libs.synth[i]?libs.synth[i].id:null,
+             lead: libs.lead[i]? libs.lead[i].id :null,
+             drums:libs.drums[i]?libs.drums[i].id:null};
+    if(t.synth==null&&t.lead==null&&t.drums==null)continue;
+    if(named.has(_k(t)))continue;
+    named.add(_k(t));
+    cols.push({i:-1,t});                      // -1 = exists as a pattern, not placed in the song
+  }
+  if(!cols.length)cols.push({i:0,t:{synth:activeOf("synth"),lead:activeOf("lead"),drums:activeOf("drums")}});
+  const key=t=>[t.synth,t.lead,t.drums].join("|");
+  const byKey=new Map(); const patterns=[]; const song=new Array(64).fill(null);
+  for(const {i,t} of cols){
+    const k=key(t);
+    let pat=byKey.get(k);
+    if(!pat){
+      if(patterns.length>=MAX_PATTERNS)continue;        // more sections than slots — drop the tail
+      const src={};
+      let bars=1;
+      for(const l of PART_LAYERS){
+        let found=t[l]!=null?libs[l].find(x=>x&&x.id===t[l]):null;
+        // Drum saves are positional; bring them to the current voice order
+        // before they become a part, or the kit remaps silently.
+        if(found&&l==="drums")found=migrateDrumPatRows(found);
+        if(found)bars=Math.max(bars,patBars(normalizePatBars(found)));
+        src[l]=found||null;
+      }
+      pat=mkPattern(String.fromCharCode(65+patterns.length),bars);
+      for(const l of PART_LAYERS){
+        if(!src[l])continue;
+        const np=normalizePatBars(resizePatBars(src[l],bars));
+        const part=Object.assign({},np);
+        delete part.id;delete part.name;delete part.bars;
+        pat.parts[l]=part;
+      }
+      byKey.set(k,pat);patterns.push(pat);
+    }
+    if(i>=0)song[i]=pat.id;
+  }
+  if(!patterns.length)patterns.push(mkPattern("A"));
+  // Close the gaps: the old matrix could be sparse, a song is linear.
+  const linear=song.filter(x=>x!=null);
+  const lane=linear.concat(new Array(64).fill(null)).slice(0,64);
+  // All three lanes carry the SAME ids now — a pattern is one thing. Keeping
+  // the matrix shape (rather than collapsing to a single list here) lets the
+  // existing scheduler and song page keep working while they're rewritten.
+  const out=Object.assign({},s,{patterns,activePatId:patterns[0].id,
+    songMatrix:{synth:[...lane],lead:[...lane],drums:[...lane]}});
+  delete out.pats;delete out.drumPats;delete out.layerStore;
+  return out;
+};
 
 // ── Bar-scoped column helpers ────────────────────────────────────────────
 // The editor works one bar at a time, so RAND / CLR / CPY / PST / MUT8 all act
@@ -2284,14 +2448,39 @@ function SynthSection({title,accent,children}){
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function Tabula(){
-  const [pats,setPats]=useState(()=>{
-    const a=mkPat(symPat(0));
-    return[a];
-  });
-  const [activeId,  setActiveId]  = useState(1);
-  const [chain,     setChain]     = useState([1]);
+  // ── THE STORE ──────────────────────────────────────────────────────────
+  // One list of unified patterns; each holds all three parts. Everything below
+  // (`pats`, `drumPats`, `activeId`, `activeDrumId`) is a VIEW onto this, kept
+  // so the per-layer editor code can stay as it is while the model underneath
+  // is single. There is no layer store any more: nothing to park, nothing to
+  // go silent on a layer switch.
+  const [patterns, setPatterns] = useState(()=>[mkPattern(symPat(0))]);
+  const [activePatId, setActivePatId] = useState(null);
+  // Falls back to the first pattern, which also covers "the active one was
+  // just deleted" without a separate effect.
+  const activePatternId = (activePatId!=null&&patterns.some(p=>p.id===activePatId))
+    ? activePatId : (patterns[0]?patterns[0].id:null);
+
   const [page,      setPage]      = useState("edit");
   const [activeLayer, setActiveLayer] = useState("synth"); // "synth" (POLY) | "lead" (MONO) | "drums"
+  // Which part the synth-side views read. Drums keep their own view below.
+  const _synthLayer = activeLayer==="drums"?"synth":activeLayer;
+  // useMemo matters here: these arrays feed dependency lists (the scheduler
+  // effect among them). Rebuilding them every render would re-run it every
+  // render — back when `pats` was state its identity only changed on an edit.
+  const pats = useMemo(()=>layerLib(patterns,_synthLayer),[patterns,_synthLayer]);
+  const activeId = activePatternId;
+  const setActiveId = setActivePatId;
+  // Writes an edited per-layer library back into the unified store. Handles
+  // edits, additions (a new id = a new pattern) and removals (a missing id =
+  // the whole pattern goes).
+  const setPats = useCallback(updater=>setPatterns(ps=>{
+    const layer = activeLayerR.current==="drums"?"synth":activeLayerR.current;
+    const prev = layerLib(ps,layer);
+    const next = typeof updater==="function"?updater(prev):updater;
+    return mergeLayer(ps,layer,next);
+  }),[]);
+  const [chain,     setChain]     = useState([1]);
   // Drums have no per-step page — never leave the drums layer parked on STEP
   // (its tab is hidden); fall back to the grid editor.
   useEffect(()=>{if(activeLayer==="drums"&&page==="step")setPage("edit");},[activeLayer,page]);
@@ -2626,9 +2815,17 @@ export default function Tabula(){
   const silentLoopR=useRef(null);
   const wakeLockR=useRef(null);
   // Drum layer — independent pattern list, completely separate from synth patterns
-  const initDrum=mkDrumPat(symPat(0));
-  const [drumPats,    setDrumPats]    = useState([initDrum]);
-  const [activeDrumId,setActiveDrumId]= useState(initDrum.id);
+  // Drum view over the same store. activeDrumId IS activePatternId now — a
+  // pattern is one thing, so selecting it selects all three parts at once.
+  const drumPats = useMemo(()=>layerLib(patterns,"drums"),[patterns]);
+  const activeDrumId = activePatternId;
+  const setActiveDrumId = setActivePatId;
+  const setDrumPats = useCallback(updater=>setPatterns(ps=>{
+    const prev = layerLib(ps,"drums");
+    const next = typeof updater==="function"?updater(prev):updater;
+    return mergeLayer(ps,"drums",next);
+  }),[]);
+  const initDrum = drumPats[0];
   const [drumChain,   setDrumChain]   = useState([initDrum.id]);
   const [drumClipboard,setDrumClipboard]=useState(null);
   // ── Phrase & Section architecture ──────────────────────────────────────────
@@ -2646,37 +2843,28 @@ export default function Tabula(){
   // labels are POLY / MONO. The legacy "bass" layer was removed in the
   // 3-layer pare-down — bass pats from legacy saves migrate into the mono
   // layer (see fillLayerParams + load paths).
-  const _initLeadPat = mkPat(symPat(0));
+  // layerStoreR is now a read-only MIRROR of the store, not a parking space:
+  // the scheduler still asks it for a non-active layer's patterns, and this
+  // keeps that working while those call sites get rewritten. Nothing writes
+  // pattern data through it any more, so the swap-on-switch bug can't recur.
   const layerStoreR = useRef({
     synth: null, // synth lives in `pats`/`activeId`/`synthPhrases`/`activeSynthPhraseId` at start
-    lead:  { pats:[_initLeadPat], activeId:_initLeadPat.id, phrases:[{id:"LP1",name:symPhr(0),chain:[_initLeadPat.id]}], activePhraseId:"LP1" }
+    lead:  null
   });
+  // Refreshed every render (same ref-mirror pattern as pushHistoryR) so the
+  // scheduler's resolveLayerPat sees current data without re-binding.
+  const _layerMirror = useMemo(()=>({
+    synth:{pats:layerLib(patterns,"synth"),activeId:activePatternId},
+    lead: {pats:layerLib(patterns,"lead"), activeId:activePatternId}
+  }),[patterns,activePatternId]);
+  layerStoreR.current=_layerMirror;
   const activeLayerR = useRef("synth");
   useEffect(()=>{activeLayerR.current=activeLayer;},[activeLayer]);
   const SYNTH_LAYERS = ["synth","lead"];
+  // Switching layers is now just "look at a different part of the same
+  // pattern" — no saving, no loading, nothing that can go out of sync.
   const switchLayer = (newLayer)=>{
     if(newLayer===activeLayer)return;
-    const oldIsSynth = SYNTH_LAYERS.indexOf(activeLayer)>=0;
-    const newIsSynth = SYNTH_LAYERS.indexOf(newLayer)>=0;
-    // Save old synth-type layer state
-    if(oldIsSynth){
-      layerStoreR.current[activeLayer] = {
-        pats: pats,
-        activeId: activeId,
-        phrases: synthPhrases,
-        activePhraseId: activeSynthPhraseId
-      };
-    }
-    // Load new synth-type layer state
-    if(newIsSynth){
-      const data = layerStoreR.current[newLayer];
-      if(data){
-        setPats(data.pats);
-        setActiveId(data.activeId);
-        setSynthPhrases(data.phrases);
-        setActiveSynthPhraseId(data.activePhraseId);
-      }
-    }
     setActiveLayer(newLayer);
   };
 
@@ -2954,17 +3142,16 @@ export default function Tabula(){
     // deep copy this snapshot needs — and keeps MAX_HISTORY snapshots of 32-bar
     // patterns from running the phone out of memory.
     return ({
-    pats:pats.map(packPat),
-    drumPats:drumPats.map(packPat),
+    patterns:_mapProjectPats({patterns},packPat).patterns,
+    activePatId:activePatternId,
     chain:[...chain],drumChain:[...drumChain],
     synthPhrases:JSON.parse(JSON.stringify(synthPhrases)),
     drumPhrases:JSON.parse(JSON.stringify(drumPhrases)),
     sections:JSON.parse(JSON.stringify(sections)),
     songMatrix:JSON.parse(JSON.stringify(songMatrix)),
     songMode,songView,songSyncMode,songRandom,
-    activeId,activeDrumId,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
+    activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
     activeLayer,
-    layerStore:_mapProjectPats({layerStore:JSON.parse(JSON.stringify(liveLayerStore))},packPat).layerStore,
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
@@ -2974,29 +3161,23 @@ export default function Tabula(){
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
+  // Installs a unified pattern list from any load path, and bumps the id
+  // counter past everything in it so a later-created pattern can't collide.
+  const _adoptPatterns=(s)=>{
+    const pl=(Array.isArray(s.patterns)&&s.patterns.length)?s.patterns:[mkPattern(symPat(0))];
+    const maxId=Math.max(0,...pl.map(p=>p&&p.id).filter(x=>typeof x==="number"));
+    if(maxId>=_id)_id=maxId+1;
+    setPatterns(pl);
+    setActivePatId(s.activePatId!=null?s.activePatId:(s.activeId!=null?s.activeId:pl[0].id));
+  };
+
   const applySnapshot = rawSnap=>{
     if(!rawSnap)return;
-    const s=unpackProject(rawSnap);
+    const s=unifyLegacyProject(unpackProject(rawSnap));
     setBarPage(0);
-    // Reset layerStoreR to fresh defaults BEFORE restoring — undo/redo
-    // snapshots from previous projects shouldn't bleed through stale lead/
-    // synth data if the new snapshot doesn't define them.
-    const _freshLead=mkPat(symPat(0));
-    layerStoreR.current={
-      synth:null,
-      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
-    };
-    if(s.layerStore){
-      // Restore non-active layers to the store
-      for(const layer of SYNTH_LAYERS){
-        if(s.layerStore[layer]&&layer!==(s.activeLayer||activeLayer)){
-          layerStoreR.current[layer]=JSON.parse(JSON.stringify(s.layerStore[layer]));
-        }
-      }
-    }
-    // See doLoad note: legacy shares lack activeLayer; their `s.pats` is synth.
     {const t=s.activeLayer||"synth";if(t!==activeLayer)setActiveLayer(t);}
-    setPats(migratePats(s.pats,s.speedMult));setDrumPats(s.drumPats);setChain(s.chain);setDrumChain(s.drumChain);
+    _adoptPatterns(s);
+    setChain(s.chain);setDrumChain(s.drumChain);
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):defaultDrumMix()); // global mix (snapshots always carry it)
     setSynthPhrases(s.synthPhrases);setDrumPhrases(s.drumPhrases);setSections(s.sections);
     if(s.songMatrix)setSongMatrix(s.songMatrix);
@@ -3089,7 +3270,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,pats,chain,bpm,scale,transpose,swing,speedMult,activeId,activeLayer,layerStore:liveLayerStore,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumPats,activeDrumId,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,chain,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,drumChain,synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,songMatrix,songMode,songView,songSyncMode,songRandom};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3159,36 +3340,12 @@ export default function Tabula(){
   const doLoad=slot=>{
     let s=slotData[slot];if(!s)return;
     setBarPage(0);
-    s=migrateLegacyBass(unpackProject(s));
+    s=unifyLegacyProject(migrateLegacyBass(unpackProject(s)));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
-    // Reset layerStoreR to fresh defaults BEFORE loading so absent layer
-    // entries in the save don't leave stale data from a previous load. Lead
-    // gets a fresh empty pat (matches init shape so switching to MONO post-
-    // load doesn't fall through to inheriting POLY's pats).
-    const _freshLead=mkPat(symPat(0));
-    layerStoreR.current={
-      synth:null,
-      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
-    };
-    if(s.layerStore){
-      for(const layer of SYNTH_LAYERS){
-        if(s.layerStore[layer]){
-          const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if(ld.pats) ld.pats = reIconize(migratePats(ld.pats, s.speedMult), reroll);
-          if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
-          layerStoreR.current[layer]=ld;
-        }
-      }
-    }
-    // Legacy saves predate per-layer pats — `s.pats` was always synth pats.
-    // Force activeLayer to "synth" when the field is missing so the live pats
-    // slot maps to synth on setPats below; otherwise the user's current
-    // activeLayer (e.g. bass) would absorb the legacy synth data.
     setActiveLayer(s.activeLayer||"synth");
-    const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
-    const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
-    const cleanChain=sanitizeChain(s.chain,s.pats);
-    setPats(reIconize(migratePats(s.pats,s.speedMult),reroll));setChain(cleanChain.length?cleanChain:[s.activeId||s.pats[0].id]);
+    _adoptPatterns(s);
+    const cleanChain=sanitizeChain(s.chain,s.patterns);
+    setChain(cleanChain.length?cleanChain:[s.patterns[0].id]);
     // Top-level scalar params — always set, fall back to defaults if missing.
     // Old saves predate some fields (e.g. swing, speedMult); without explicit
     // fallback the previous project's value would leak into this load.
@@ -3236,14 +3393,10 @@ export default function Tabula(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
     // {level,pan} per voice; rvSend/dlySend default to 0.
-    if(s.drumPats){
-      const _dp=reIconize(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),reroll);
-      setDrumPats(_dp);
-      // Global mix: use the saved global drumMix; for legacy projects (which
-      // stored mix per-pattern) seed it from the first pattern's migrated mix
-      // so the old console state isn't lost.
-      setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):fillDrumMix(_dp[0]&&_dp[0].mix));
-    }
+    // Global mix: use the saved global drumMix; for legacy projects (which
+    // stored mix per-pattern) seed it from the first pattern's drum part.
+    setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
+      :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
     if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats),symPhr));
@@ -3329,11 +3482,9 @@ export default function Tabula(){
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
       releaseWakeLock();
     }
-    const p0=mkPat(symPat(0));
-    const dp0=mkDrumPat(symPat(0));
+    const p0=mkPattern(symPat(0));
     setBarPage(0);
-    setPats([p0]);setActiveId(p0.id);setChain([p0.id]);
-    setDrumPats([dp0]);setActiveDrumId(dp0.id);setDrumChain([dp0.id]);
+    setPatterns([p0]);setActivePatId(p0.id);setChain([p0.id]);setDrumChain([p0.id]);
     // Seed the lead store with a fresh empty pat so switching to MONO after
     // NEW doesn't carry over POLY's live pats (which would look like stale
     // "orphaned" pills on the mono layer).
@@ -3621,7 +3772,7 @@ export default function Tabula(){
   // grids. applyShareState unpacks, and pre-codec saves pass through untouched.
   const getShareState=(includeSamples=true)=>packProject({
     ver:PROJ_VER,
-    pats,chain,bpm,scale,transpose,swing,speedMult,activeId,
+    chain,bpm,scale,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
@@ -3629,41 +3780,19 @@ export default function Tabula(){
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,varyMode,drumPats,activeDrumId,drumChain,
+    loopMode,varyMode,drumChain,
+    patterns,activePatId:activePatternId,
     synthPhrases,drumPhrases,sections,activeSynthPhraseId,activeDrumPhraseId,activeSectionId,
-    songMatrix,songMode,songView,songSyncMode,songRandom,layerStore:layerStoreR.current,activeLayer
+    songMatrix,songMode,songView,songSyncMode,songRandom,activeLayer
   });
 
   const applyShareState=rawState=>{
     if(!rawState)return;
     setBarPage(0);
-    const s=migrateLegacyBass(unpackProject(rawState));
-    const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
-    // Restore the non-active layers + active layer (mirror doLoad). Without
-    // this, importing a project authored on a different layer dropped the other
-    // layer's patterns and dumped the active-layer pats into the wrong slot.
-    const _freshLead=mkPat(symPat(0));
-    layerStoreR.current={
-      synth:null,
-      lead:{pats:[_freshLead],activeId:_freshLead.id,phrases:[{id:"LP1",name:symPhr(0),chain:[_freshLead.id]}],activePhraseId:"LP1"}
-    };
-    if(s.layerStore){
-      for(const layer of SYNTH_LAYERS){
-        if(s.layerStore[layer]){
-          const ld=JSON.parse(JSON.stringify(s.layerStore[layer]));
-          if(ld.pats)ld.pats=reIconize(migratePats(ld.pats,s.speedMult),reroll);
-          if(ld.pats&&ld.phrases)ld.phrases=sanitizePhrases(ld.phrases,ld.pats);
-          layerStoreR.current[layer]=ld;
-        }
-      }
-    }
+    const s=unifyLegacyProject(migrateLegacyBass(unpackProject(rawState)));
     setActiveLayer(s.activeLayer||"synth");
-    // Advance _id past EVERY numeric-id collection (synth + lead pats AND drum
-    // pats), else a later-created pattern can collide with an existing id.
-    const _allIds=[...(s.pats||[]),...(s.drumPats||[]),...Object.values(s.layerStore||{}).flatMap(l=>(l&&l.pats)||[])].map(p=>p&&p.id).filter(x=>typeof x==="number");
-    const maxId=Math.max(0,..._allIds);if(maxId>=_id)_id=maxId+1;
-    if(s.pats)setPats(reIconize(migratePats(s.pats,s.speedMult),reroll));
-    if(s.chain){const cc=sanitizeChain(s.chain,s.pats||[]);setChain(cc.length?cc:[s.activeId||(s.pats&&s.pats[0]&&s.pats[0].id)||1]);}
+    _adoptPatterns(s);
+    if(s.chain){const cc=sanitizeChain(s.chain,s.patterns||[]);setChain(cc.length?cc:[s.patterns[0].id]);}
     // Apply with fallback to defaults — share imports should reset to a clean
     // baseline for anything the link doesn't carry, same rule as doLoad.
     setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
@@ -3697,14 +3826,10 @@ export default function Tabula(){
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    if(s.drumPats){
-      const _dp=reIconize(s.drumPats.map(p=>{const mp=migrateDrumPatRows(p);return Object.assign({},mp,{mix:fillDrumMix(mp.mix)});}),reroll);
-      setDrumPats(_dp);
-      // Global mix: saved global drumMix, else seed from legacy per-pattern mix.
-      setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):fillDrumMix(_dp[0]&&_dp[0].mix));
-    }
-    if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
-    if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.drumPats||[]));
+    // Global mix: saved global drumMix, else seed from the first pattern's drums.
+    setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
+      :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
+    if(s.drumChain)setDrumChain(sanitizeChain(s.drumChain,s.patterns||[]));
     if(s.synthPhrases)setSynthPhrases(relabelByIndex(sanitizePhrases(s.synthPhrases,s.pats||[]),symPhr));
     if(s.drumPhrases)setDrumPhrases(relabelByIndex(sanitizePhrases(s.drumPhrases,s.drumPats||[]),symPhr));
     if(s.sections)setSections(relabelByIndex(s.sections,symSec));
@@ -4386,7 +4511,7 @@ export default function Tabula(){
               const rvg=genVariation(src.grid,vp);
               const newParams=(src.params||defaultStepParams()).map(p2=>jitterStepParam(p2,vp));
               const newPat={id:++_id,name:pickSym(patsR.current.map(p=>p.name)),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(gridW(src.grid)),params:newParams,gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1};
-              setPats(ps=>{if(ps.length>=8){recModeR.current=false;setRecMode(false);return ps;}return [...ps,newPat];});
+              setPats(ps=>{if(ps.length>=MAX_PATTERNS){recModeR.current=false;setRecMode(false);return ps;}return [...ps,newPat];});
               setChain(c=>[...c,newPat.id]);
             }
           }
@@ -5237,9 +5362,36 @@ export default function Tabula(){
     return Object.assign({},p,{grid:p.grid.map((row,ri)=>ri!==r?row:row.map((v,ci)=>(ci>=off&&ci<off+COLS)?false:v))});
   }));
   const clearCol=c=>setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:p.grid.map(row=>row.map((v,ci)=>ci===c?false:v))})));
-  const addPat=()=>{pushHistory();if(pats.length>=8)return;const p=mkPat(pickSym(pats.map(p=>p.name)));setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const dupPat=()=>{if(pats.length>=8)return;const src=pats.find(p=>p.id===activeId);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(gridW(src.grid)),params:(src.params||defaultStepParams(gridW(src.grid))).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
-  const delPat=()=>{if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==activeId);setPats(rem);setChain(c=>c.filter(pid=>pid!==activeId));setActiveId(rem[0].id);};
+  // ── Whole-pattern ops ──────────────────────────────────────────────────
+  // A pattern is all three parts, so add/duplicate/delete work on the unified
+  // store directly rather than through a per-layer view — duplicating via the
+  // synth view would have produced a copy with empty lead and drums.
+  const addPattern=()=>{pushHistory();setPatterns(ps=>{
+    if(ps.length>=MAX_PATTERNS)return ps;
+    const np=mkPattern(pickSym(ps.map(x=>x.name)));
+    setActivePatId(np.id);setChain(c=>[...c,np.id]);
+    return [...ps,np];
+  });};
+  const dupPatternId=(id)=>{pushHistory();setPatterns(ps=>{
+    if(ps.length>=MAX_PATTERNS)return ps;
+    const src=ps.find(x=>x.id===id);if(!src)return ps;
+    const np=JSON.parse(JSON.stringify(src));
+    np.id=++_id;np.name=pickSym(ps.map(x=>x.name));
+    setActivePatId(np.id);setChain(c=>[...c,np.id]);
+    return [...ps,np];
+  });};
+  const delPatternId=(id)=>{pushHistory();setPatterns(ps=>{
+    if(ps.length<=1)return ps;
+    const rem=ps.filter(x=>x.id!==id);
+    setChain(c=>c.filter(pid=>pid!==id));
+    setDrumChain(c=>c.filter(pid=>pid!==id));
+    setActivePatId(a=>a===id?rem[0].id:a);
+    setSongMatrix(m=>({synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v),drums:m.drums.map(v=>v===id?null:v)}));
+    return rem;
+  });};
+  const addPat=addPattern;
+  const dupPat=()=>dupPatternId(activeId);
+  const delPat=()=>delPatternId(activeId);
   // CPY / PST move ONE BAR. That's what makes a long pattern workable: build a
   // bar, copy it forward, vary it. The clipboard is a COLS-wide slice.
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(!src)return;const off=barOffIn(src);
@@ -5254,31 +5406,13 @@ export default function Tabula(){
   const clearPat=()=>mutatePat((g,p2)=>spliceCols(g,null,barOffIn(p2)));
 
   // ID-targeted versions — used by pill context menu so activeId is never involved
-  const dupPatId=(id)=>{pushHistory();if(pats.length>=8)return;const src=pats.find(p=>p.id===id);if(!src)return;const p=Object.assign({},mkPat(pickSym(pats.map(p=>p.name))),{grid:src.grid.map(r=>[...r]),durs:src.durs?src.durs.map(r=>[...r]):mkDurs(gridW(src.grid)),params:(src.params||defaultStepParams(gridW(src.grid))).map(s=>Object.assign({},s)),gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1});setPats(ps=>[...ps,p]);setActiveId(p.id);};
+  const dupPatId=dupPatternId;
   // Strip the id from songMatrix as well — leaving a dangling ref produces
   // silent gaps in the song timeline. Drag-off-layer delete relies on this.
-  const delPatId=(id)=>{pushHistory();if(pats.length<=1)return;const rem=pats.filter(p=>p.id!==id);setPats(rem);setChain(c=>c.filter(pid=>pid!==id));setActiveId(a=>a===id?rem[0].id:a);setSongMatrix(m=>({...m,synth:m.synth.map(v=>v===id?null:v),lead:m.lead.map(v=>v===id?null:v)}));};
-  // Unified by-layer delete. Used by drag-off-layer-to-delete since dragged
-  // pat lives in whichever layer the drag started from, not necessarily the
-  // active one. For the active synth layer we go through delPatId (touches
-  // live state). For a non-active synth layer we have to mutate layerStoreR
-  // directly — refs don't trigger re-render, but the setSongMatrix call we
-  // do next will cause one and the layerPats lookup re-reads the ref.
-  const delPatInLayer=(layer,id)=>{
-    if(layer==="drums"){delDrumPatId(id);return;}
-    if(layer===activeLayer){delPatId(id);return;}
-    const stored=layerStoreR.current[layer];
-    if(!stored||!stored.pats||stored.pats.length<=1)return;
-    pushHistory();
-    const rem=stored.pats.filter(x=>x.id!==id);
-    layerStoreR.current[layer]={
-      ...stored,
-      pats:rem,
-      activeId:stored.activeId===id?rem[0].id:stored.activeId,
-      phrases:(stored.phrases||[]).map(ph=>({...ph,chain:(ph.chain||[]).filter(x=>x!==id)})),
-    };
-    setSongMatrix(m=>({...m,[layer]:m[layer].map(v=>v===id?null:v)}));
-  };
+  const delPatId=delPatternId;
+  // Deleting from any layer deletes the pattern — it's one object now, so
+  // there is no such thing as removing only its drums.
+  const delPatInLayer=(layer,id)=>delPatternId(id);
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(!src)return;const off=barOffIn(src);
     setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off)});};
   const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>{
@@ -5683,37 +5817,11 @@ export default function Tabula(){
     setUserSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
     samplesDirtyR.current=true; // user cleared → persist the new sample set
   };
-  const dupDrumPat=()=>{
-    if(drumPats.length>=8)return;
-    const src=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-    const d=Object.assign({},mkDrumPat(pickSym(drumPats.map(p=>p.name))),{
-      grid:src.grid.map(r=>[...r]),vel:toDrumVel2D(src.vel,gridW(src.grid)),rat:toDrumRat2D(src.rat,gridW(src.grid)),gridLen:src.gridLen,
-      bars:patBars(src),
-      mix:(src.mix||defaultDrumMix()).map(m=>({...m})),
-      motion:src.motion?JSON.parse(JSON.stringify(src.motion)):undefined,
-      vRhythm:src.vRhythm,vVelocity:src.vVelocity,speedMult:src.speedMult??1
-    });
-    setDrumPats(ps=>[...ps,d]);setActiveDrumId(d.id);
-    setDrumChain(c=>[...c,d.id]);
-  };
-  const delDrumPat=()=>{
-    if(drumPats.length<=1)return;
-    const rem=drumPats.filter(p=>p.id!==activeDrumId);
-    setDrumPats(rem);setDrumChain(c=>c.filter(id=>id!==activeDrumId));
-    setActiveDrumId(rem[0].id);
-  };
-  // ID-targeted drum delete — needed for drag-off-layer-to-delete since the
-  // dragged pat isn't necessarily the active one. Also strips the id from
-  // the songMatrix.drums lane so deleted pats don't leave dangling refs.
-  const delDrumPatId=(id)=>{
-    if(drumPats.length<=1)return;
-    pushHistory();
-    const rem=drumPats.filter(p=>p.id!==id);
-    setDrumPats(rem);
-    setDrumChain(c=>c.filter(x=>x!==id));
-    setActiveDrumId(a=>a===id?rem[0].id:a);
-    setSongMatrix(m=>({...m,drums:m.drums.map(v=>v===id?null:v)}));
-  };
+  // The drum "library" is the same pattern list seen through the drums part,
+  // so its lifecycle ops are the whole-pattern ones.
+  const dupDrumPat=()=>dupPatternId(activeDrumId);
+  const delDrumPat=()=>delPatternId(activeDrumId);
+  const delDrumPatId=delPatternId;
   // One bar, like the synth clipboard. mix/motion stay pattern-level (they're
   // not per-column state you'd want to smear across a paste).
   const copyDrumPatFn=()=>{
@@ -5740,12 +5848,7 @@ export default function Tabula(){
     }));
   };
   const setDrumVary=(key,val)=>setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{[key]:val})));
-  const addDrumPat=()=>{pushHistory();
-    if(drumPats.length>=8)return;
-    const d=mkDrumPat(pickSym(drumPats.map(p=>p.name)));
-    setDrumPats(ps=>[...ps,d]);
-    setActiveDrumId(d.id);
-  };
+  const addDrumPat=addPattern;
     // `col` is an ABSOLUTE pattern column (the STEP page maps its view columns
     // through barOff before calling in).
     const setStepParam=(col,key,val)=>{setFollowSeq(false);setPats(ps=>ps.map(p=>{
@@ -6162,7 +6265,7 @@ export default function Tabula(){
                   ["CLR",   ()=>act(()=>clearPatId(targetId))],
                   ["CPY",   ()=>act(()=>copyPatId(targetId))],
                   ["PST",   ()=>act(()=>pastePatId(targetId)), !clipboard],
-                  ["DUP",   ()=>act(()=>dupPatId(targetId)),   pats.length>=8],
+                  ["DUP",   ()=>act(()=>dupPatId(targetId)),   pats.length>=MAX_PATTERNS],
                   ["DEL",   ()=>act(()=>delPatId(targetId)),   isOnlyPat, true],
                   ["MUT8",  ()=>act(mutatePat1)],
                   ["",      null, true],
@@ -6494,7 +6597,7 @@ export default function Tabula(){
                       ))}
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
-                      {[["CPY",()=>copyPatId(targetId),false,false],["PST",()=>pastePatId(targetId),!clipboard,false],["DUP",()=>dupPatId(targetId),pats.length>=8,false],["DEL",()=>delPatId(targetId),isOnlyPat,true]].map(([l,f,d,danger])=>(
+                      {[["CPY",()=>copyPatId(targetId),false,false],["PST",()=>pastePatId(targetId),!clipboard,false],["DUP",()=>dupPatId(targetId),pats.length>=MAX_PATTERNS,false],["DEL",()=>delPatId(targetId),isOnlyPat,true]].map(([l,f,d,danger])=>(
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
@@ -6519,7 +6622,7 @@ export default function Tabula(){
                       ))}
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
-                      {[["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,isOnlyDrum,true]].map(([l,f,d,danger])=>(
+                      {[["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,isOnlyDrum,true]].map(([l,f,d,danger])=>(
                         <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
@@ -8159,8 +8262,8 @@ export default function Tabula(){
                       const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
                       const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(108,154,214,":"rgba(196,114,122,";
                       const ops=isDrum
-                        ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=8,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
-                        :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=8,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
+                        ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
+                        :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=MAX_PATTERNS,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
                       // Bar controls sit with the pattern ops because they are
                       // the same kind of thing: edits to the pattern you're on.
                       // FOLLOW is NOT here — that's the transport's toggle.
@@ -8678,7 +8781,7 @@ export default function Tabula(){
             return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
               <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
-                  {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=8],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
+                  {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=MAX_PATTERNS],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
                     <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onClick={disabled?undefined:fn}>{label}</button>
                   ))}
@@ -8695,7 +8798,7 @@ export default function Tabula(){
             return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
               <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
-                  {[["RAND",()=>act(randDrumVel)],["CLR",()=>act(clearDrums)],["CPY",()=>act(copyDrumPatFn)],["PST",()=>act(pasteDrumPatFn),!drumClipboard],["DUP",()=>act(dupDrumPat),drumPats.length>=8],["DEL",()=>act(delDrumPat),isOnly,true]].map(([label,fn,disabled,danger])=>(
+                  {[["RAND",()=>act(randDrumVel)],["CLR",()=>act(clearDrums)],["CPY",()=>act(copyDrumPatFn)],["PST",()=>act(pasteDrumPatFn),!drumClipboard],["DUP",()=>act(dupDrumPat),drumPats.length>=MAX_PATTERNS],["DEL",()=>act(delDrumPat),isOnly,true]].map(([label,fn,disabled,danger])=>(
                     <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onClick={disabled?undefined:fn}>{label}</button>
                   ))}

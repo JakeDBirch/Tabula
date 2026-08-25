@@ -41,9 +41,21 @@ npm run audit     # standalone CJS return_react2 audit
 
 synth + lead share one `Bell` WebAudio engine — a VCO/VCF/VCA chain built fresh per `play()` call (that's the polyphony). Per-layer sound design lives in `layerParams` (waveform, ADSR, filter, octave, rvSend, dlySend…), read per-note via `play()`'s layer arg. The active-layer accessor pattern means render code like `<Knob value={waveform} onChange={setWaveform}/>` is automatically per-layer.
 
-### Layer-store swap
+### Unified patterns (in progress)
 
-Only the **active** synth-type layer's pattern library lives in live `pats` state; the other is parked in `layerStoreR.current[layer] = {pats, activeId, phrases, …}`. `switchLayer()` saves the outgoing layer and loads the incoming one. Drums never participate (own `drumPats`).
+A **pattern** now holds all three parts at once — `{id, name, bars, parts:{synth, lead, drums}}` — and is the unit a song sequences. `MAX_PATTERNS` = 16. Each part keeps its own `gridLen` and `speedMult` and loops inside the pattern; everything re-syncs at the pattern top.
+
+`patterns` + `activePatternId` are the real state. `pats` / `drumPats` / `activeId` / `activeDrumId` are **compatibility views** (`layerLib` / `partView`), and `setPats` / `setDrumPats` fold an edited per-layer library back through `mergeLayer` — that is what let ~190 per-layer call sites survive the model change unedited. `mergeLayer` handles edits, additions (a new id = a new pattern) and removals (a missing id = the pattern goes), and carries a bar-count change across all three parts. Delete these views as call sites get rewritten.
+
+Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go straight to `setPatterns` — duplicating through a per-layer view would produce a copy with two empty parts.
+
+`unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost (a project with patterns but no arrangement would otherwise migrate to only the active combination — that bug was caught in testing). Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
+
+**Still to do:** the song is still a 3-lane `songMatrix` whose lanes now carry identical ids (kept so the existing scheduler and song page work untouched); it should collapse to one linear list. The sync/free/random modes and `cycleLen = min over layers` should go. The song page should become the pattern selector and the pattern pills should leave the part pages.
+
+### Layer-store swap (removed)
+
+**Gone.** Patterns used to be per-layer, so the inactive synth layer's library was parked in `layerStoreR` and swapped on every layer switch — the cause of the recurring "a track went silent when I switched layers" bug. `switchLayer` now just changes which part you're looking at, and `layerStoreR` is a read-only mirror of the store kept only until the scheduler's `resolveLayerPat` is rewritten.
 
 **Consequence:** when the scheduler needs a *non-active* layer's pattern it must read `layerStoreR.current[layer]`, NOT `patsR.current`. `resolveLayerPat(layer, bar)` centralizes this. Get it wrong → tracks go silent on layer switch (a recurring bug). The same trap applies to serialization: patterns live in `pats`, `drumPats` **and** every parked `layerStore[layer].pats` — `_mapProjectPats` walks all three.
 
