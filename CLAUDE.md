@@ -53,7 +53,7 @@ Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go 
 
 The **song page** is the pattern selector: a PATTERNS palette (tap a chip to make it the pattern every part page edits, `+` adds one) above one lane of 64 slots. Tapping an empty slot places the selected pattern — placement is tap-first because drag is awkward on a phone; drag still moves between slots and off-grid clears. Runs of the same pattern draw a `×N` badge without merging the cells. The pattern pills are gone from every part page; the bar strip's handle names the current pattern instead.
 
-`songMatrix` and `layerStore` are **gone from live state** — they survive only inside the legacy readers (`unifyLegacyProject`, `migrateLegacyBass`, `_mapProjectPats`), which still have to understand old saves. Nothing in the running app reads either.
+The old per-layer pattern `chain`s, `synthPhrases` / `drumPhrases`, `sections` and their active ids are **gone** — they were serialized on every save but never read. `songMatrix` and `layerStore` are likewise **gone from live state** — they survive only inside the legacy readers (`unifyLegacyProject`, `migrateLegacyBass`, `_mapProjectPats`), which still have to understand old saves. Nothing in the running app reads either.
 
 ### Layer-store swap (removed)
 
@@ -127,6 +127,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 - **Grid pointer events** live on the parent `gridRef` container, not per-cell. If you change grid event handling, test on iPhone immediately.
 - **iOS gesture interception**: parent `touch-action: pan-x` / `overflow-x: auto` makes Safari swallow gestures at the OS level — vertical drags don't propagate. If a drag feels "stuck horizontally," check the parent's `touch-action`.
 - **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building. Worse in JSX values: `const songPage = (<div onClick={addPattern}/>)` defined *above* `addPattern` silently binds `onClick={undefined}` (Babel lowers `const` to `var`, so there's no TDZ error and no crash — the control just does nothing). Defer the lookup: `onClick={()=>addPattern()}`.
+- **A silent `catch(e){}` around project restore hides everything.** The mount restore used to swallow its exception, so a throw inside `applyShareState` looked exactly like "the project didn't load" — and because no state changed, autosave never fired either, leaving the old save in place to be re-read next time. It now logs. That is how a deleted-but-still-called `migrateLegacyBass` was found; without the log there was no symptom to chase.
 - **Never call a setState function from inside another setState updater.** `setPatterns(ps=>{ …; setActivePatId(x); return next; })` looks fine and silently drops the whole update. Compute first, then call the setters in sequence.
 - **Cross-layer audio**: always resolve pattern data through `resolveLayerPat` / `layerStoreR.current[layer]`, never assume `patsR.current` (only valid for the active layer).
 
