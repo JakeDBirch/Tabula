@@ -3486,24 +3486,29 @@ export default function Tabula(){
   const removeBar = ()=>setEditPatBars(patBars(editPat)-1);
   // Copy the visible bar into a NEW bar appended right after it — the fastest
   // way to build a long pattern (lay down bar 1, extend, vary).
+  // DUP BAR inserts a copy of the visible bar right after it — in ALL THREE
+  // parts. Doing it through a per-layer view was wrong: mergeLayer would notice
+  // the bar count changed and resize the other two parts, which appends a blank
+  // bar at the END rather than inserting one, so the parts slid out of
+  // alignment with each other.
   const duplicateBar=()=>{
     if(!editPat)return;
     const n=patBars(editPat);
     if(n>=MAX_BARS)return;
     pushHistory();
     _dropVaryCache(editPat.id);
-    const off=curBar*COLS, dst=(curBar+1)*COLS;
-    const grow=p=>{
-      const oldW=gridW(p.grid), newW=(n+1)*COLS;
-      const g=resizePatBars(p,n+1);
-      // Slide bars after the current one right, THEN drop the copy into the gap.
-      // Without the slide this overwrote the following bar instead of inserting.
+    const off=curBar*COLS, dst=(curBar+1)*COLS, newW=(n+1)*COLS;
+    const growPart=(part)=>{
+      if(!part||!Array.isArray(part.grid))return part;
+      const oldW=gridW(part.grid);
+      const g=resizePatBars(Object.assign({},part,{bars:n}),n+1);
+      // Slide everything from the insert point right, THEN drop the copy in.
       const out=Object.assign({},g,{
-        grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCols(p.grid,off),dst)});
-      if(g.durs)  out.durs  = spliceCols(openBarGap(g.durs,dst,newW),  sliceCols(p.durs||[],off,COLS,()=>1),dst,0,COLS,()=>1);
-      if(g.params)out.params= spliceFlat(openBarGapFlat(g.params,dst,newW),sliceFlat(p.params||[],off),dst);
-      if(g.vel)   out.vel   = spliceCols(openBarGap(g.vel,dst,newW),   sliceCols(toDrumVel2D(p.vel,oldW),off,COLS,()=>100),dst,0,COLS,()=>100);
-      if(g.rat)   out.rat   = spliceCols(openBarGap(g.rat,dst,newW),   sliceCols(toDrumRat2D(p.rat,oldW),off,COLS,()=>1),  dst,0,COLS,()=>1);
+        grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCols(part.grid,off),dst)});
+      if(g.durs)  out.durs  = spliceCols(openBarGap(g.durs,dst,newW),  sliceCols(part.durs||[],off,COLS,()=>1),dst,0,COLS,()=>1);
+      if(g.params)out.params= spliceFlat(openBarGapFlat(g.params,dst,newW),sliceFlat(part.params||[],off),dst);
+      if(g.vel)   out.vel   = spliceCols(openBarGap(g.vel,dst,newW),   sliceCols(toDrumVel2D(part.vel,oldW),off,COLS,()=>100),dst,0,COLS,()=>100);
+      if(g.rat)   out.rat   = spliceCols(openBarGap(g.rat,dst,newW),   sliceCols(toDrumRat2D(part.rat,oldW),off,COLS,()=>1),  dst,0,COLS,()=>1);
       if(out.motion&&typeof out.motion==="object"){
         const m={};
         for(const k of Object.keys(out.motion))m[k]=openBarGap(out.motion[k],dst,newW);
@@ -3511,12 +3516,17 @@ export default function Tabula(){
       }
       // Inserting a bar inside the loop extends the loop by exactly that bar,
       // rather than snapping the length out to the full allocated width.
-      const oldLen=Math.max(1,Math.min(oldW,p.gridLen||oldW));
+      const oldLen=Math.max(1,Math.min(oldW,part.gridLen||oldW));
       out.gridLen=Math.min(newW,oldLen+COLS);
+      delete out.bars;                       // bars lives on the pattern
       return out;
     };
-    if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
-    else setPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
+    setPatterns(ps=>ps.map(p=>{
+      if(p.id!==editPat.id)return p;
+      const parts={};
+      for(const l of PART_LAYERS)parts[l]=growPart(p.parts[l]);
+      return Object.assign({},p,{bars:n+1,parts});
+    }));
     // Land on the copy, for the same reason ADD BAR does.
     setFollowSeq(false);
     setBarPage(curBar+1);
@@ -4463,10 +4473,14 @@ export default function Tabula(){
     }
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
-    // The pattern's own length in absolute steps. Everything re-synchronises
-    // here: parts loop inside it at their own gridLen and speed, and the song
+    // LOOP cycles the ONE bar you're looking at, in every part, so you can sit
+    // on a bar and work on it. Otherwise the cycle is the whole pattern.
+    const loopBar=inLoop?Math.max(0,Math.min(patBars(curPat)-1,barPageR.current||0)):-1;
+    const loopOff=loopBar*COLS;
+    // The cycle length in absolute steps. Everything re-synchronises here:
+    // parts loop inside it at their own gridLen and speed, and the song
     // advances when it wraps.
-    const patLen=Math.max(1,patBars(curPat)*COLS);
+    const patLen=Math.max(1,inLoop?COLS:patBars(curPat)*COLS);
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
       if(!part)return null;
@@ -4489,7 +4503,9 @@ export default function Tabula(){
         }
         const len=pat.gridLen??16;
         const layerStepDur=absStepDur*(pat.speedMult??1);
-        const s=lf.step%len;
+        // In LOOP the cursor runs 0..COLS-1 across the visible bar's columns;
+        // otherwise it runs the part's own loop length.
+        const s=inLoop?loopOff+(lf.step%COLS):lf.step%len;
         const at=lf.nextAt;
         // Variation regenerates at every BAR boundary (s%COLS===0), not just at
         // the top of the pattern. On a 1-bar pattern that IS step 0, so this is
@@ -4565,7 +4581,7 @@ export default function Tabula(){
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if(layer==="synth")setPlayId(pat.id);
         // Advance step.
-        const ns=(s+1)%len;
+        const ns=inLoop?(lf.step+1)%COLS:(s+1)%len;
         lf.step=ns;
         lf.nextAt+=layerStepDur;
       }
