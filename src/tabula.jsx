@@ -87,6 +87,9 @@ const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 const C_VARY="#c9a96e";
+// LOOP's accent — same steel blue as the LOOP button, so the marked bar chip
+// reads as "this is the bar LOOP is holding".
+const C_LOOP="#9fb4c7";
 
 const rowHue=r=>Math.round(195-(r/(ROWS-1))*135);
 const rowCol=r=>"hsl("+rowHue(r)+",100%,62%)";
@@ -907,7 +910,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
-  loopMode:false, varyMode:{synth:false,lead:false,drums:false},
+  loopMode:false, loopBar:-1, varyMode:{synth:false,lead:false,drums:false},
   songMode:false, songView:false,
 });
 
@@ -2541,6 +2544,11 @@ export default function Tabula(){
   const [actPlayId, setActPlayId] = useState(null);
   const actPlayIdR = useRef(null);
   const [loopMode,  setLoopMode]  = useState(false);
+  // Which bar LOOP is pinned to (-1 = not looping). Captured when LOOP is
+  // switched on and held there: paging, FOLLOW and the playhead cannot move
+  // it. Reading the live page every tick meant the loop crawled around under
+  // you, which is what made LOOP feel intertwined with everything else.
+  const [loopBar,   setLoopBar]   = useState(-1);
   const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
@@ -2965,6 +2973,8 @@ export default function Tabula(){
   useEffect(()=>{speedMultR.current=speedMult;bell.current.stepDur=60/bpmR.current/4*speedMult;},[speedMult]);
   useEffect(()=>{scaleR.current=scale;},[scale]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
+  const loopBarR=useRef(-1);
+  useEffect(()=>{loopBarR.current=loopBar;},[loopBar]);
   // FOLLOW only meaningfully applies to the synth track — that's where
   // playId comes from the synth part of the playing pattern. On bass/lead,
   // setting activeId to a synth pat id leaves activePat undefined and
@@ -3105,7 +3115,7 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
-    varyMode,loopMode,
+    varyMode,loopMode,loopBar,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -3182,6 +3192,7 @@ export default function Tabula(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     setVaryMode(normVary(s.varyMode));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
+    setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
   };
   // Stable function references — read live state via the refs above
   const pushHistoryR = useRef(()=>{});
@@ -3240,7 +3251,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3296,6 +3307,7 @@ export default function Tabula(){
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
+    setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -3361,7 +3373,7 @@ export default function Tabula(){
     setPatterns([p0]);setActivePatId(p0.id);
     // Seed the lead store with a fresh empty pat so switching to MONO after
     setActiveLayer("synth");
-    setLoopMode(false);setVaryMode({synth:false,lead:false,drums:false});
+    setLoopMode(false);setLoopBar(-1);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);
@@ -3455,6 +3467,16 @@ export default function Tabula(){
   // Never leave the page pointing past the end of a pattern (switching pattern,
   // switching layer, or removing bars can all strand it).
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
+  // LOOP pins itself to the bar you are ON when you switch it on, and holds
+  // there until you switch it off. Move it by turning LOOP off and on again
+  // from the bar you want. Every LOOP button goes through here.
+  const toggleLoop=()=>{
+    if(loopMode){setLoopMode(false);setLoopBar(-1);}
+    else{setLoopMode(true);setLoopBar(curBar);}
+  };
+  // A pattern that shrank (DEL BAR, or switching to a shorter one) must not
+  // leave the loop pinned past the end.
+  useEffect(()=>{ if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1)); },[loopMode,loopBar,barCount]);
 
   // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
   // Resizing invalidates the cached VARY grids for that pattern (they're keyed
@@ -3791,19 +3813,28 @@ export default function Tabula(){
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
         {Array.from({length:barCount},(_,bi)=>{
           const isCur=bi===curBar, isPlaying=bi===playingBar;
+          // Three states have to stay tellable apart on the same chip: the bar
+          // you're EDITING (light fill), the bar that's SOUNDING (gold inset
+          // ring) and the bar LOOP is holding (steel underline, LOOP's colour).
+          const isLoop=loopMode&&bi===loopBar;
           const has=_barHasNotes(bi);
           // Bars past the loop end are allocated but never sounded — show them
           // recessed so a trimmed pattern reads honestly.
           const past=bi*COLS>=(editPat?.gridLen??COLS);
           const wide=barCount<=8;   // number the chips while they're readable
           return(
-            <div key={bi} style={{flex:1,minWidth:2,borderRadius:3,
+            <div key={bi} style={{position:"relative",flex:1,minWidth:2,borderRadius:3,
               display:"flex",alignItems:"center",justifyContent:"center",
-              background:isCur?"rgba(232,220,205,0.55)":past?"rgba(220,200,180,0.03)":has?"rgba(220,200,180,0.17)":"rgba(220,200,180,0.07)",
+              background:isCur?"rgba(232,220,205,0.55)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(220,200,180,0.03)":has?"rgba(220,200,180,0.17)":"rgba(220,200,180,0.07)",
               boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
-              color:isCur?"rgba(20,16,12,0.75)":"rgba(210,195,175,0.45)",
+              color:isCur?"rgba(20,16,12,0.75)":isLoop?C_LOOP:"rgba(210,195,175,0.45)",
               fontSize:9,fontWeight:700,lineHeight:1,pointerEvents:"none",
-              transition:"background .08s"}}>{wide?bi+1:""}</div>
+              transition:"background .08s"}}>
+              {wide?bi+1:""}
+              {/* Underline, not a ring or a fill: it survives a 2px-wide chip on
+                  a 32-bar pattern and doesn't collide with the other two states. */}
+              {isLoop?<div style={{position:"absolute",left:1,right:1,bottom:1,height:2,borderRadius:1,background:C_LOOP}}/>:null}
+            </div>
           );
         })}
       </div>
@@ -3892,7 +3923,7 @@ export default function Tabula(){
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,varyMode,
+    loopMode,loopBar,varyMode,
     patterns,activePatId:activePatternId,
     song,songMode,songView,activeLayer
   });
@@ -3932,6 +3963,7 @@ export default function Tabula(){
       setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
+    setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4284,7 +4316,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -4471,10 +4503,11 @@ export default function Tabula(){
     }
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
-    // LOOP cycles the ONE bar you're looking at, in every part, so you can sit
-    // on a bar and work on it. Otherwise the cycle is the whole pattern.
-    const loopBar=inLoop?Math.max(0,Math.min(patBars(curPat)-1,barPageR.current||0)):-1;
-    const loopOff=loopBar*COLS;
+    // LOOP cycles ONE bar, in every part, so you can sit on it and work. The
+    // bar is the one that was visible when LOOP was switched on and stays put —
+    // NOT whatever page you happen to be on now. Otherwise: the whole pattern.
+    const loopBarIdx=inLoop?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;
+    const loopOff=loopBarIdx*COLS;
     // The cycle length in absolute steps. Everything re-synchronises here:
     // parts loop inside it at their own gridLen and speed, and the song
     // advances when it wraps.
@@ -7132,7 +7165,7 @@ export default function Tabula(){
             <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-            <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+            <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
             <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
           </div>
         </div>
@@ -7468,7 +7501,7 @@ export default function Tabula(){
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
             </div>
           </div>
@@ -7481,7 +7514,7 @@ export default function Tabula(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopMode?S.loopOn:{})} onClick={()=>setLoopMode(l=>!l)}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
                 <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:30,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
