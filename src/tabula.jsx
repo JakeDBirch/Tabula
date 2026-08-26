@@ -3467,11 +3467,20 @@ export default function Tabula(){
   const setEditPatBars=(n)=>{
     const target=Math.max(1,Math.min(MAX_BARS,n));
     if(!editPat||target===patBars(editPat))return;
+    const grew=target>patBars(editPat);
     pushHistory();
     _dropVaryCache(editPat.id);
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
-    setBarPage(bp=>Math.min(bp,target-1));
+    if(grew){
+      // Adding a bar means you want to write in it — land there. FOLLOW has to
+      // go or the playhead would drag the page straight back off it, same as
+      // any other edit clearing follow.
+      setFollowSeq(false);
+      setBarPage(target-1);
+    } else {
+      setBarPage(bp=>Math.min(bp,target-1));
+    }
   };
   const addBar    = ()=>setEditPatBars(patBars(editPat)+1);
   const removeBar = ()=>setEditPatBars(patBars(editPat)-1);
@@ -3508,6 +3517,8 @@ export default function Tabula(){
     };
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?grow(p):p));
+    // Land on the copy, for the same reason ADD BAR does.
+    setFollowSeq(false);
     setBarPage(curBar+1);
   };
 
