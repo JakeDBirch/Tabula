@@ -4488,7 +4488,10 @@ export default function Tabula(){
     const absStepDur=60/bpmR.current/4;
 
     const inLoop=loopR.current;
-    const inSong=songModeR.current&&!inLoop;
+    // LOOP does NOT drop you out of the song any more. In song mode it parks
+    // the song on its CURRENT entry and cycles one bar of that entry's pattern;
+    // switch LOOP off and the song carries on from where it was held.
+    const inSong=songModeR.current;
 
     // ── What is playing right now ──────────────────────────────────────
     // A pattern is all three parts, so there is exactly one of them at any
@@ -4503,14 +4506,17 @@ export default function Tabula(){
     }
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
-    // LOOP cycles ONE bar, in every part, so you can sit on it and work. The
-    // bar is the one that was visible when LOOP was switched on and stays put —
-    // NOT whatever page you happen to be on now. Otherwise: the whole pattern.
+    // LOOP cycles ONE bar of whatever pattern is playing (the song's current
+    // entry in song mode, the pattern you're editing otherwise), in every part,
+    // so you can sit on it and work. The bar is the one that was visible when
+    // LOOP was switched on and stays put — NOT whatever page you're on now. It
+    // is a bar INDEX, so it clamps into a shorter song entry. Otherwise: the
+    // whole pattern.
     const loopBarIdx=inLoop?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;
     const loopOff=loopBarIdx*COLS;
     // The cycle length in absolute steps. Everything re-synchronises here:
     // parts loop inside it at their own gridLen and speed, and the song
-    // advances when it wraps.
+    // advances when it wraps (unless LOOP is holding it).
     const patLen=Math.max(1,inLoop?COLS:patBars(curPat)*COLS);
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
@@ -4618,13 +4624,17 @@ export default function Tabula(){
       }
     }
 
-    // ── MASTER CLOCK — one pattern long. When it wraps, the song moves to
-    // its next entry and every part restarts from step 0. That single rule
-    // replaces sync/free/random and the old "shortest populated lane" bar.
+    // ── MASTER CLOCK — one pattern long (one BAR while LOOP holds one). When
+    // it wraps, the song moves to its next entry and every part restarts from
+    // step 0. That single rule replaces sync/free/random and the old "shortest
+    // populated lane" bar.
     while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){
       const ns=(stepR.current+1)%patLen;
       if(ns===0){
-        if(inSong&&seq.length>1){
+        // LOOP holds the song where it is: the entry keeps playing, one bar
+        // of it at a time, and position is exactly where you left it when LOOP
+        // goes off.
+        if(inSong&&!inLoop&&seq.length>1){
           songPosR.current=(songPosR.current+1)%seq.length;
           setSongBar(songPosR.current);
           setSongBarLayer({synth:songPosR.current,lead:songPosR.current,drums:songPosR.current});
@@ -7471,7 +7481,8 @@ export default function Tabula(){
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>TEMPO</span>
               </button>
               {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
-                   stays on once enabled — only loop mode in transport overrides it. */}
+                   stays on once enabled; LOOP holds the song's place rather than
+                   overriding it. */}
               <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),borderRadius:9,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>{
                   if(songView){ setSongView(false); }

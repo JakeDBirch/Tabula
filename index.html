@@ -1348,16 +1348,22 @@ var ratRow=pat.rat&&pat.rat[r];var rat=Array.isArray(ratRow)&&ratRow[s]!=null?ra
 // Master clock = absolute, BPM-derived. NO per-pat multiplier here.
 // Each pattern plays at its own speedMult as an independent multiplier
 // on this clock — see playSynthLayerStep / playDrumStep call sites below.
-var absStepDur=60/bpmR.current/4;var inLoop=loopR.current;var inSong=songModeR.current&&!inLoop;// ── What is playing right now ──────────────────────────────────────
+var absStepDur=60/bpmR.current/4;var inLoop=loopR.current;// LOOP does NOT drop you out of the song any more. In song mode it parks
+// the song on its CURRENT entry and cycles one bar of that entry's pattern;
+// switch LOOP off and the song carries on from where it was held.
+var inSong=songModeR.current;// ── What is playing right now ──────────────────────────────────────
 // A pattern is all three parts, so there is exactly one of them at any
 // moment: the song's current entry, or the pattern you're editing. No
 // per-layer resolution, no parked layer store, no shortest-lane fudge.
-var allPats=patternsR.current||[];var seq=songSeqR.current||[];var curPat=null;if(inSong&&seq.length){if(songPosR.current<0||songPosR.current>=seq.length)songPosR.current=0;curPat=allPats.find(function(p){return p.id===seq[songPosR.current];});}if(!curPat)curPat=allPats.find(function(p){return p.id===activePatternIdR.current;})||allPats[0];if(!curPat)return;// LOOP cycles ONE bar, in every part, so you can sit on it and work. The
-// bar is the one that was visible when LOOP was switched on and stays put —
-// NOT whatever page you happen to be on now. Otherwise: the whole pattern.
+var allPats=patternsR.current||[];var seq=songSeqR.current||[];var curPat=null;if(inSong&&seq.length){if(songPosR.current<0||songPosR.current>=seq.length)songPosR.current=0;curPat=allPats.find(function(p){return p.id===seq[songPosR.current];});}if(!curPat)curPat=allPats.find(function(p){return p.id===activePatternIdR.current;})||allPats[0];if(!curPat)return;// LOOP cycles ONE bar of whatever pattern is playing (the song's current
+// entry in song mode, the pattern you're editing otherwise), in every part,
+// so you can sit on it and work. The bar is the one that was visible when
+// LOOP was switched on and stays put — NOT whatever page you're on now. It
+// is a bar INDEX, so it clamps into a shorter song entry. Otherwise: the
+// whole pattern.
 var loopBarIdx=inLoop?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;var loopOff=loopBarIdx*COLS;// The cycle length in absolute steps. Everything re-synchronises here:
 // parts loop inside it at their own gridLen and speed, and the song
-// advances when it wraps.
+// advances when it wraps (unless LOOP is holding it).
 var patLen=Math.max(1,inLoop?COLS:patBars(curPat)*COLS);var curPart=function curPart(layer){var part=curPat.parts&&curPat.parts[layer];if(!part)return null;return Object.assign({},part,{id:curPat.id,name:curPat.name,bars:curPat.bars});};// ── PART SCHEDULING — each part runs its own cursor inside the pattern,
 // at its own gridLen and speedMult. They can drift apart within the
 // pattern (that's the polymeter) and are snapped back together at the
@@ -1389,10 +1395,14 @@ if(layer===activeLayerR.current){if(layer==="drums")setDrumStep(s);else setStep(
 // push state when it actually changes, so this isn't a per-step churn).
 if(actPlayIdR.current!==pat.id){actPlayIdR.current=pat.id;setActPlayId(pat.id);}}// Update playId — used by FOLLOW + pill highlights — synth-track focused.
 if(layer==="synth")setPlayId(pat.id);// Advance step.
-var ns=inLoop?(lf.step+1)%COLS:(s+1)%len;lf.step=ns;lf.nextAt+=layerStepDur;};while(lf.nextAt<ctx.currentTime+LOOKAHEAD){if(_loop7())break;}}// ── MASTER CLOCK — one pattern long. When it wraps, the song moves to
-// its next entry and every part restarts from step 0. That single rule
-// replaces sync/free/random and the old "shortest populated lane" bar.
-}catch(err){_iterator20.e(err);}finally{_iterator20.f();}while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){var ns=(stepR.current+1)%patLen;if(ns===0){if(inSong&&seq.length>1){songPosR.current=(songPosR.current+1)%seq.length;setSongBar(songPosR.current);setSongBarLayer({synth:songPosR.current,lead:songPosR.current,drums:songPosR.current});}var _iterator21=_createForOfIteratorHelper(PART_LAYERS),_step21;try{for(_iterator21.s();!(_step21=_iterator21.n()).done;){var l=_step21.value;freeR.current[l].step=0;freeR.current[l].nextAt=nextNoteR.current+absStepDur;}}catch(err){_iterator21.e(err);}finally{_iterator21.f();}}stepR.current=ns;nextNoteR.current+=absStepDur;}},[]);// ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
+var ns=inLoop?(lf.step+1)%COLS:(s+1)%len;lf.step=ns;lf.nextAt+=layerStepDur;};while(lf.nextAt<ctx.currentTime+LOOKAHEAD){if(_loop7())break;}}// ── MASTER CLOCK — one pattern long (one BAR while LOOP holds one). When
+// it wraps, the song moves to its next entry and every part restarts from
+// step 0. That single rule replaces sync/free/random and the old "shortest
+// populated lane" bar.
+}catch(err){_iterator20.e(err);}finally{_iterator20.f();}while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){var ns=(stepR.current+1)%patLen;if(ns===0){// LOOP holds the song where it is: the entry keeps playing, one bar
+// of it at a time, and position is exactly where you left it when LOOP
+// goes off.
+if(inSong&&!inLoop&&seq.length>1){songPosR.current=(songPosR.current+1)%seq.length;setSongBar(songPosR.current);setSongBarLayer({synth:songPosR.current,lead:songPosR.current,drums:songPosR.current});}var _iterator21=_createForOfIteratorHelper(PART_LAYERS),_step21;try{for(_iterator21.s();!(_step21=_iterator21.n()).done;){var l=_step21.value;freeR.current[l].step=0;freeR.current[l].nextAt=nextNoteR.current+absStepDur;}}catch(err){_iterator21.e(err);}finally{_iterator21.f();}}stepR.current=ns;nextNoteR.current+=absStepDur;}},[]);// ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
 /* legacy unified sync scheduler — body removed in the per-layer rewrite */var _startStop=/*#__PURE__*/function(){var _ref26=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee10(){var dlyT,_m,r,t0,_iterator22,_step22,layer,_t0;return _regenerator().w(function(_context10){while(1)switch(_context10.p=_context10.n){case 0:if(!playingR.current){_context10.n=1;break;}clearInterval(tmrR.current);playingR.current=false;setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);setSongBar(-1);songBarR.current=-1;setSongBarLayer({synth:-1,lead:-1,drums:-1});layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};setRecMode(false);recModeR.current=false;if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}releaseWakeLock();if("mediaSession"in navigator)navigator.mediaSession.playbackState="paused";return _context10.a(2);case 1:dlyT=60/bpm*DLY_NOTES[dlyIdx].mult;if(bell.current.ready){_context10.n=3;break;}_context10.n=2;return bell.current.init(dlyT,dlyFbPct/100,50,dlyHpVal,dlyLpVal);case 2:_context10.n=4;break;case 3:_context10.n=4;return bell.current.resume();case 4:bell.current.stepDur=60/bpm/4*speedMult;// Pass Bell's reverb + delay inputs so DrumEngine voices can have per-
 // channel sends. Without these refs, send knobs in the drum mixer no-op.
 _context10.n=5;return drumEngine.current.init(bell.current.master,bell.current.rev,bell.current.dly);case 5:// Re-apply the engine-side state for anything that wasn't passed into
