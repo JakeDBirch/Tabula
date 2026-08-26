@@ -3151,7 +3151,9 @@ export default function Tabula(){
   const applySnapshot = rawSnap=>{
     if(!rawSnap)return;
     const s=unifyLegacyProject(unpackProject(rawSnap));
-    setBarPage(0);
+    // Do NOT reset the bar page here. Undo is an edit-level operation — being
+    // thrown back to bar 1 every time you undo a note makes it feel broken.
+    // The clamp effect handles a page left past the end of a shorter pattern.
     {const t=s.activeLayer||"synth";if(t!==activeLayer)setActiveLayer(t);}
     _adoptPatterns(s);
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):defaultDrumMix()); // global mix (snapshots always carry it)
@@ -3159,7 +3161,6 @@ export default function Tabula(){
     if(s.songMode!=null)setSongMode(s.songMode);
     if(s.songView!=null)setSongView(s.songView);
 
-    setActiveId(s.activeId);setActiveDrumId(s.activeDrumId);
     // Undo/redo snapshots — fall back to defaults for any field a previous
     // snapshot didn't carry (so undo across a feature-add boundary doesn't
     // leave new params at stale values from outside the snapshot's lifetime).
@@ -3262,7 +3263,6 @@ export default function Tabula(){
     setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
     setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
-    setActiveId(s.activeId);
     // layerParams: prefer new format; migrate old flat fields into synth slot if absent.
     // No-data case still resets to defaults so leftover sound design from the
     // previous load doesn't bleed in.
@@ -3305,7 +3305,6 @@ export default function Tabula(){
     // stored mix per-pattern) seed it from the first pattern's drum part.
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
-    if(s.activeDrumId!=null)setActiveDrumId(s.activeDrumId);
     _adoptSong(s);
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
@@ -3913,7 +3912,6 @@ export default function Tabula(){
     // s.gridLen was per-pattern in legacy shares; new shares carry it on
     // each pat directly. The global setGridLen doesn't exist any more.
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
-    if(s.activeId)setActiveId(s.activeId);
     if(s.layerParams)setLayerParams(fillLayerParams(s.layerParams));
     else if(s.waveform!=null||s.attack!=null){
       // Migrate legacy flat fields into synth slot
