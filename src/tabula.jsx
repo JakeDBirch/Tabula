@@ -3525,6 +3525,15 @@ export default function Tabula(){
     for(let i=0;i<64;i++){ if(song[i]==null)continue; if(n===songBar)return i; n++; }
     return -1;
   })();
+  // Eight slots across. The grid shows two rows until the song outgrows them,
+  // then one more row than it needs — so there is always somewhere to drop the
+  // next pattern without the page being mostly empty squares.
+  const SONG_COLS=8;
+  const _songRows=(()=>{
+    let last=-1;
+    for(let i=0;i<64;i++)if(song[i]!=null)last=i;
+    return Math.max(2,Math.min(64/SONG_COLS,Math.floor(last/SONG_COLS)+2));
+  })();
   const _patColorOf=(id)=>{
     const i=patterns.findIndex(p=>p.id===id);
     return i<0?"rgba(220,200,180,0.4)":patCol(i);
@@ -3616,7 +3625,11 @@ export default function Tabula(){
           )}
         </div>
       </div>
-      {/* SONG — 64 slots, played top-left to bottom-right, gaps skipped. */}
+      {/* SONG — played top-left to bottom-right, gaps skipped. Eight across, so
+          a slot is a real touch target rather than a 21px sliver: a slot holds a
+          whole pattern now (up to MAX_BARS long), so there was never any need to
+          show all 64 at once. Starts at two rows and grows a row at a time as
+          you fill it, up to the full 64. */}
       <div style={{width:"100%",maxWidth:640,flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
         <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,display:"flex",gap:8}}>
           <span>SONG</span>
@@ -3624,11 +3637,11 @@ export default function Tabula(){
             {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
           </span>
         </div>
-        <div style={{width:"100%",display:"flex",flexDirection:"column",gap:3,flexShrink:0}}>
-          {Array.from({length:4},(_,row)=>(
-            <div key={row} style={{display:"flex",gap:3}}>
-              {Array.from({length:16},(_,col)=>{
-                const idx=row*16+col;
+        <div style={{width:"100%",display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+          {Array.from({length:_songRows},(_,row)=>(
+            <div key={row} style={{display:"flex",gap:4}}>
+              {Array.from({length:SONG_COLS},(_,col)=>{
+                const idx=row*SONG_COLS+col;
                 const id=song[idx];
                 const pat=id!=null?patterns.find(p=>p.id===id):null;
                 const isCursor=idx===_songPlayingSlot;
@@ -3641,13 +3654,14 @@ export default function Tabula(){
                 const isHover=patternDrag&&patternDrag.overSongCell&&patternDrag.overSongCell.barIdx===idx;
                 return(
                   <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
-                    style={{flex:1,aspectRatio:"1",borderRadius:3,position:"relative",
+                    style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
                       display:"flex",alignItems:"center",justifyContent:"center",
                       background:pat?col0:(isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)"),
+                      border:pat?"none":"1px solid rgba(220,200,180,0.09)",boxSizing:"border-box",
                       outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
                       outlineOffset:"-1px",
-                      boxShadow:isCursor?"0 0 8px rgba(255,255,255,0.5)":"none",
-                      color:pat?"#1a1814":"transparent",fontSize:11,fontWeight:700,
+                      boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
+                      color:pat?"#1a1814":"transparent",fontSize:17,fontWeight:700,
                       touchAction:"none",cursor:"pointer",userSelect:"none",
                       transition:"background .08s, outline .08s"}}
                     onPointerDown={(e)=>{
@@ -3703,8 +3717,8 @@ export default function Tabula(){
                     }}>
                     {pat?pat.name:""}
                     {runStart&&run>1&&(
-                      <span style={{position:"absolute",right:1,bottom:0,fontSize:7,fontWeight:700,
-                        color:"rgba(26,24,20,0.65)",pointerEvents:"none",lineHeight:1}}>×{run}</span>
+                      <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
+                        color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{run}</span>
                     )}
                   </div>
                 );
