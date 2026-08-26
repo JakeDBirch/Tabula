@@ -3532,8 +3532,10 @@ export default function Tabula(){
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
       justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
-      {/* PATTERNS — the selector. Tap to make one active; it is then what the
-          part pages edit and what an empty song slot receives. */}
+      {/* PATTERNS — the selector. Tap a chip to make it active (what the part
+          pages edit); DRAG one onto a song slot to place it there, which is the
+          workflow the old pattern pills had. Both, because tapping is easier on
+          a phone and dragging is faster once you know where a section goes. */}
       <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
         <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5}}>PATTERNS</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
@@ -3545,13 +3547,57 @@ export default function Tabula(){
               const g=p.parts[l]&&p.parts[l].grid;
               return !g||!g.some(row=>row&&row.some(Boolean));
             });
+            const dragging=patternDrag&&patternDrag.fromPalette&&patternDrag.patId===p.id;
             return(
-              <div key={p.id} onClick={()=>setActivePatId(p.id)}
+              <div key={p.id}
+                onPointerDown={(e)=>{
+                  e.stopPropagation();
+                  const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
+                  let moved=false;
+                  const hit=(ev)=>{
+                    const el=document.elementFromPoint(ev.clientX,ev.clientY);
+                    const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                    return tc?parseInt(tc.dataset.songBar,10):null;
+                  };
+                  const onMove=(ev)=>{
+                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                    if(!moved){
+                      if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                      moved=true;
+                      setPatternDrag({patId:p.id,name:p.name,accent:col,fromPalette:true,
+                        x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+                    }
+                    const t=hit(ev);
+                    setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:t==null?null:{barIdx:t}}:null);
+                  };
+                  const onUp=(ev)=>{
+                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                    document.removeEventListener("pointermove",onMove);
+                    document.removeEventListener("pointerup",onUp);
+                    document.removeEventListener("pointercancel",onUp);
+                    if(!moved){ setActivePatId(p.id); return; }   // a tap just selects
+                    const t=hit(ev);
+                    if(t!=null){
+                      // Dropped on a slot — fill it (replacing whatever was there)
+                      // and make this the pattern you're editing, so dragging one
+                      // in and going straight to a part page works.
+                      pushHistory();
+                      setSong(sg=>{const r=[...sg];r[t]=p.id;return r;});
+                      setActivePatId(p.id);
+                    }
+                    setPatternDrag(null);
+                  };
+                  document.addEventListener("pointermove",onMove);
+                  document.addEventListener("pointerup",onUp);
+                  document.addEventListener("pointercancel",onUp);
+                }}
                 style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",
-                  alignItems:"center",justifyContent:"center",gap:5,cursor:"pointer",userSelect:"none",
+                  alignItems:"center",justifyContent:"center",gap:5,cursor:"grab",userSelect:"none",
+                  touchAction:"none",
                   border:"1px solid "+(sel?col:"rgba(200,185,165,0.16)"),
                   background:sel?col+"22":"transparent",
                   color:sel?col:(empty?"rgba(210,195,175,0.3)":"rgba(210,195,175,0.7)"),
+                  opacity:dragging?0.35:1,
                   fontSize:13,fontWeight:700,lineHeight:1}}>
                 {p.name}
                 <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
