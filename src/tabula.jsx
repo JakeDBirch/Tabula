@@ -661,9 +661,23 @@ const resizePatBars=(p,bars)=>{
     }
     out.motion=m;
   }
-  void isDrum;
-  out.gridLen=grew?w:Math.max(1,Math.min(w,p.gridLen||w));
+  void isDrum;void grew;
+  // A part keeps ITS OWN length when the pattern gets longer. That's what makes
+  // a part loop to fill: the scheduler wraps each part's cursor at its gridLen
+  // inside a pattern that is bars*COLS long, so a 1-bar drum part repeats
+  // through a 4-bar pattern instead of playing one bar and going silent.
+  // Snapping gridLen out to the full width on every ADD BAR is what killed it.
+  out.gridLen=Math.max(1,Math.min(w,p.gridLen||w));
   return out;
+};
+// Writing into a bar past the end of a part would be silent under that rule, so
+// an explicit note extends the part through the bar it landed in — that's how a
+// bar you just added gets content of its own. Only note CREATION calls this;
+// erasing never shortens, and the length slider stays the way to trim.
+const growLenTo=(p,col)=>{
+  if(!p||!Array.isArray(p.grid))return p;
+  const w=gridW(p.grid), end=Math.min(w,(Math.floor(col/COLS)+1)*COLS);
+  return (p.gridLen||0)>=end?p:Object.assign({},p,{gridLen:end});
 };
 // Normalize a pattern loaded from disk: derive `bars` from whatever its arrays
 // actually carry, then re-run the resize so every lane agrees on the width.
@@ -3541,9 +3555,11 @@ export default function Tabula(){
         out.motion=m;
       }
       // Inserting a bar inside the loop extends the loop by exactly that bar,
-      // rather than snapping the length out to the full allocated width.
+      // rather than snapping the length out to the full allocated width. A part
+      // whose loop ends before the duplicated bar never sounded it, so its
+      // length is left alone and it keeps looping to fill.
       const oldLen=Math.max(1,Math.min(oldW,part.gridLen||oldW));
-      out.gridLen=Math.min(newW,oldLen+COLS);
+      out.gridLen=oldLen>off?Math.min(newW,oldLen+COLS):oldLen;
       delete out.bars;                       // bars lives on the pattern
       return out;
     };
@@ -3862,8 +3878,9 @@ export default function Tabula(){
           // ring) and the bar LOOP is holding (steel underline, LOOP's colour).
           const isLoop=loopMode&&bi===loopBar;
           const has=_barHasNotes(bi);
-          // Bars past the loop end are allocated but never sounded — show them
-          // recessed so a trimmed pattern reads honestly.
+          // Bars past this part's loop end hold no content of their own — the
+          // part repeats its own length through them (loop to fill), which is
+          // also why the playhead ring never visits them. Recessed for that.
           const past=bi*COLS>=(editPat?.gridLen??COLS);
           const wide=barCount<=8;   // number the chips while they're readable
           return(
@@ -5224,7 +5241,7 @@ export default function Tabula(){
                 const colWasEmpty=!p.grid.some(row=>row[sc.c]);
                 if(!isMono||isExisting)ng[sc.r][sc.c]=true;
                 np[sc.c]=(!isExisting&&colWasEmpty)?{...defaultStepParams()[0],rhy:1}:{...np[sc.c],rhy:1};
-                return Object.assign({},p,{grid:ng,params:np});
+                return growLenTo(Object.assign({},p,{grid:ng,params:np}),sc.c);
               }));
             }
           }
@@ -5272,7 +5289,7 @@ export default function Tabula(){
             const colWasEmpty=!p.grid.some(row=>row[cc]);
             if(!isMono)ng[cr][cc]=true;
             np[cc]=colWasEmpty?{...defaultStepParams()[0],rhy:1}:{...np[cc],rhy:1};
-            return Object.assign({},p,{grid:ng,params:np});
+            return growLenTo(Object.assign({},p,{grid:ng,params:np}),cc);
           }));
         }
       }
@@ -5408,7 +5425,10 @@ export default function Tabula(){
             }
             return ri!==r?row:row.map((v,ci)=>ci===c?1:v);
           });
-          return Object.assign({},p,{grid:newGrid,durs:newDurs,params:np});
+          // A tap that turns a cell ON in a bar past the part's end extends the
+          // part to cover that bar; turning one off never shortens it.
+          const _out=Object.assign({},p,{grid:newGrid,durs:newDurs,params:np});
+          return wasOn?_out:growLenTo(_out,c);
         }));
       }
     }
@@ -5508,7 +5528,8 @@ export default function Tabula(){
   const setDrumCell=(row,col,val)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
     const grid=p.grid.map((r,ri)=>ri===row?r.map((c,ci)=>ci===col?val:c):r);
-    return Object.assign({},p,{grid});
+    const out=Object.assign({},p,{grid});
+    return val?growLenTo(out,col):out;
   }));
   // Per-cell velocity setter (row, col). vel is normalized to 2D first so
   // legacy 1D saves edited in-session upgrade cleanly.
