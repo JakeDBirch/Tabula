@@ -2660,6 +2660,11 @@ export default function Tabula(){
   const seqDropRef   = useRef(null);
   const activePtrsR  = useRef(new Set()); // active pointer IDs on grid — stateless multi-touch via isPrimary, this set just tracks "all up". Self-heals (cleared on every primary-down) so a missed up/cancel can't permanently lock editing.
   const [patternDrag, setPatternDrag] = useState(null); // {patId, name, accent, x, y, overDrop}
+  // Song page's DEL is armed by the first tap and fires on the second. Deleting
+  // a pattern also empties every song slot holding it, which is too much to
+  // hand a stray thumb on a phone. Holds the id it was armed for, so selecting
+  // a different chip disarms it.
+  const [delArm, setDelArm] = useState(null);
   // Vary params
   const [vDropRate,  setVDropRate]  = useState(13);
   const [vShiftRate, setVShiftRate] = useState(17);
@@ -3576,6 +3581,8 @@ export default function Tabula(){
     for(let i=0;i<64;i++)if(song[i]!=null)last=i;
     return Math.max(2,Math.min(64/SONG_COLS,Math.floor(last/SONG_COLS)+2));
   })();
+  useEffect(()=>{ if(delArm==null)return; const t=setTimeout(()=>setDelArm(null),4000); return ()=>clearTimeout(t); },[delArm]);
+  useEffect(()=>{ setDelArm(null); },[activePatternId]);
   const _patColorOf=(id)=>{
     const i=patterns.findIndex(p=>p.id===id);
     return i<0?"rgba(220,200,180,0.4)":patCol(i);
@@ -3588,7 +3595,44 @@ export default function Tabula(){
           workflow the old pattern pills had. Both, because tapping is easier on
           a phone and dragging is faster once you know where a section goes. */}
       <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
-        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5}}>PATTERNS</div>
+        {/* DUP / DEL act on the SELECTED chip — the same rule as the bar ops
+            acting on the visible bar. Deferred calls, not bare references:
+            dupPatternId / delPatternId are declared further down and Babel
+            lowers const to var, so binding them here installs undefined. */}
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
+          <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PATTERNS</div>
+          {(()=>{
+            const selName=(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name;
+            const full=patterns.length>=MAX_PATTERNS;
+            const last=patterns.length<=1;
+            const armed=delArm!=null&&delArm===activePatternId;
+            const btn=(d,extra)=>Object.assign({minWidth:34,height:28,padding:"0 9px",borderRadius:6,
+              display:"flex",alignItems:"center",justifyContent:"center",gap:3,
+              fontSize:9,letterSpacing:1,fontWeight:600,lineHeight:1,userSelect:"none",
+              cursor:d?"default":"pointer",flexShrink:0,
+              border:"1px solid rgba(200,185,165,"+(d?"0.07":"0.2")+")",background:"transparent",
+              color:d?"rgba(200,185,165,0.16)":"rgba(210,195,175,0.6)"},extra||{});
+            return(
+              <Fragment>
+                {/* Names the chip DUP/DEL will act on — the highlighted chip
+                    says so too, but not while your thumb is over the row. */}
+                <span style={{fontSize:11,fontWeight:700,color:_patColorOf(activePatternId),marginRight:1}}>{selName}</span>
+                <div role="button" aria-label="Duplicate selected pattern"
+                  onClick={full?undefined:()=>{setDelArm(null);dupPatternId(activePatternId);}}
+                  style={btn(full)}>⧉ DUP</div>
+                <div role="button" aria-label="Delete selected pattern"
+                  onClick={last?undefined:()=>{
+                    // First tap arms, second deletes. delPatternId also strips
+                    // the pattern out of the song, so this is not a one-tap op.
+                    if(armed){delPatternId(activePatternId);setDelArm(null);}
+                    else setDelArm(activePatternId);
+                  }}
+                  style={btn(last,armed?{border:"1px solid #c47a7a",background:"rgba(196,122,122,0.14)",color:"#d09090"}:last?{}:{color:"rgba(196,122,122,0.7)"})}>
+                  {armed?"DELETE "+selName+"?":"✕ DEL"}</div>
+              </Fragment>
+            );
+          })()}
+        </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
           {patterns.map((p,i)=>{
             const sel=p.id===activePatternId;
