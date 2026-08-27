@@ -437,6 +437,17 @@ const unpackProject=(st)=>_mapProjectPats(st,unpackPat);
 // same drums under two different melodies means two patterns, and edits to one
 // don't reach the other.
 const MAX_PATTERNS=16;
+// A song slot can play its pattern up to this many times before the song moves
+// on — a ratchet for the arrangement. Four, like a step's ratchet.
+const SONG_MAX_REP=4;
+const normSongRep=(r)=>{
+  const out=new Array(64).fill(1);
+  if(Array.isArray(r))for(let i=0;i<64;i++){
+    const v=Math.round(r[i]);
+    if(v>=1&&v<=SONG_MAX_REP)out[i]=v;
+  }
+  return out;
+};
 const PART_LAYERS=["synth","lead","drums"];
 const mkSynthPart=(w=COLS)=>({grid:mkGrid(w),durs:mkDurs(w),params:defaultStepParams(w),gridLen:Math.min(COLS,w),speedMult:1});
 const mkDrumPart =(w=COLS)=>({grid:Array.from({length:DRUM_ROWS},()=>new Array(w).fill(false)),
@@ -2679,6 +2690,9 @@ export default function Tabula(){
   // hand a stray thumb on a phone. Holds the id it was armed for, so selecting
   // a different chip disarms it.
   const [delArm, setDelArm] = useState(null);
+  // Long-press a filled song slot to set how many times it repeats.
+  // {idx,x,y} while open.
+  const [repPopup, setRepPopup] = useState(null);
   // Vary params
   const [vDropRate,  setVDropRate]  = useState(13);
   const [vShiftRate, setVShiftRate] = useState(17);
@@ -2867,6 +2881,13 @@ export default function Tabula(){
   // A linear list of pattern ids. A pattern is all three parts, so there is
   // nothing left to put in separate lanes.
   const [song, setSong] = useState(()=>Array(64).fill(null));
+  // How many times each slot plays before the song moves on — 1..SONG_MAX_REP,
+  // the same idea as a step's ratchet. Kept in a parallel array rather than
+  // making a slot an object: `song` is a flat list of ids at four persistence
+  // sites, in the packed codec and in the legacy readers, and every one of them
+  // would have had to learn a new element type. A missing entry reads as 1.
+  const [songRep, setSongRep] = useState(()=>Array(64).fill(1));
+  const _rep=(i)=>Math.max(1,Math.min(SONG_MAX_REP,(songRep&&songRep[i])||1));
   // Legacy saves carry a three-lane matrix. Every lane holds ids that are all
   // the same pattern after unification, so the first non-null across the three
   // is the entry for that slot.
@@ -2883,6 +2904,8 @@ export default function Tabula(){
   const _adoptSong=(st)=>{
     if(Array.isArray(st.song))setSong(st.song.slice(0,64));
     else{const l=_songFromLegacyMatrix(st.songMatrix);if(l)setSong(l);}
+    // Pre-repeat saves have no songRep at all — every slot plays once.
+    setSongRep(normSongRep(st.songRep));
   };
   const [songBar,      setSongBar]      = useState(-1); // index into the song; -1 when stopped
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,drums:-1});
@@ -2916,7 +2939,17 @@ export default function Tabula(){
   useEffect(()=>{activePatternIdR.current=activePatternId;},[activePatternId]);
   // The playable song: the list with its gaps closed. Editing leaves holes;
   // playback shouldn't sit in silence waiting them out.
-  const songSeq = useMemo(()=>song.filter(x=>x!=null),[song]);
+  // Repeats expand here, so the scheduler and songPosR still see a plain list
+  // of pattern ids and needed no changes at all.
+  const songSeq = useMemo(()=>{
+    const out=[];
+    for(let i=0;i<64;i++){
+      if(song[i]==null)continue;
+      const n=Math.max(1,Math.min(SONG_MAX_REP,(songRep&&songRep[i])||1));
+      for(let k=0;k<n;k++)out.push(song[i]);
+    }
+    return out;
+  },[song,songRep]);
   const songSeqR=useRef(songSeq);
   useEffect(()=>{songSeqR.current=songSeq;},[songSeq]);
   const songPosR=useRef(0);
@@ -3126,7 +3159,7 @@ export default function Tabula(){
     return ({
     patterns:_mapProjectPats({patterns},packPat).patterns,
     activePatId:activePatternId,
-    song:[...song],
+    song:[...song],songRep:[...songRep],
     songMode,songView,
     activeLayer,
     bpm,scale,transpose,swing,speedMult,
@@ -3270,7 +3303,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3396,7 +3429,7 @@ export default function Tabula(){
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);
-    setSong(Array(64).fill(null));
+    setSong(Array(64).fill(null));setSongRep(Array(64).fill(1));
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
@@ -3582,10 +3615,29 @@ export default function Tabula(){
   // Placement is tap-first: tapping an empty slot drops the selected pattern in.
   // Dragging still works (move between slots, drag off to clear) but nothing
   // requires it, which matters on a phone.
+  // songBar indexes the EXPANDED sequence, so walk the slots consuming each
+  // one's repeat count to find which cell the cursor is actually sitting on.
   const _songPlayingSlot = (()=>{
     if(!playing||!songMode||songBar<0)return -1;
     let n=0;
-    for(let i=0;i<64;i++){ if(song[i]==null)continue; if(n===songBar)return i; n++; }
+    for(let i=0;i<64;i++){
+      if(song[i]==null)continue;
+      const r=_rep(i);
+      if(songBar<n+r)return i;
+      n+=r;
+    }
+    return -1;
+  })();
+  // Which pass through a repeated slot is playing (0-based), for lighting the
+  // pips one at a time.
+  const _songPlayingPass = (()=>{
+    if(_songPlayingSlot<0)return -1;
+    let n=0;
+    for(let i=0;i<64;i++){
+      if(song[i]==null)continue;
+      if(i===_songPlayingSlot)return songBar-n;
+      n+=_rep(i);
+    }
     return -1;
   })();
   // Eight slots across. The grid shows two rows until the song outgrows them,
@@ -3694,6 +3746,7 @@ export default function Tabula(){
                       // in and going straight to a part page works.
                       pushHistory();
                       setSong(sg=>{const r=[...sg];r[t]=p.id;return r;});
+                      setSongRep(rp=>{const r=[...rp];r[t]=1;return r;});
                       setActivePatId(p.id);
                     }
                     setPatternDrag(null);
@@ -3751,8 +3804,14 @@ export default function Tabula(){
                 // Run length, drawn on the first slot of a repeat so a long
                 // stretch of the same pattern reads as "x4" without collapsing
                 // the individually tappable cells.
+                const rep=_rep(idx);
+                // A run's badge counts PLAYS, not cells, so it agrees with the
+                // pips: two cells at x2 each is a run of 4. Only drawn when the
+                // run spans more than one cell — a single cell's repeats are
+                // already spelled out by its pips.
                 const runStart=id!=null&&(idx===0||song[idx-1]!==id);
-                let run=0; if(runStart){let j=idx;while(j<64&&song[j]===id){run++;j++;}}
+                let run=0,plays=0;
+                if(runStart){let j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}
                 const isHover=patternDrag&&patternDrag.overSongCell&&patternDrag.overSongCell.barIdx===idx;
                 return(
                   <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
@@ -3769,12 +3828,22 @@ export default function Tabula(){
                     onPointerDown={(e)=>{
                       e.stopPropagation();
                       const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
-                      let dragging=false;
+                      let dragging=false,held=false;
+                      // Press and hold a filled slot to set its repeat count —
+                      // the same gesture that opens a step's params. Movement
+                      // past the drag threshold cancels it, so holding never
+                      // steals a drag.
+                      const holdT=id==null?null:setTimeout(()=>{
+                        held=true;
+                        setRepPopup({idx,x:startX,y:startY});
+                      },450);
                       const onMove=(ev)=>{
                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
                         if(id==null)return;                       // nothing to drag out of an empty slot
+                        if(held)return;
                         if(!dragging){
                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                          if(holdT)clearTimeout(holdT);
                           dragging=true;
                           setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
                         }
@@ -3786,14 +3855,19 @@ export default function Tabula(){
                       };
                       const onUp=(ev)=>{
                         if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                        if(holdT)clearTimeout(holdT);
                         document.removeEventListener("pointermove",onMove);
                         document.removeEventListener("pointerup",onUp);
                         document.removeEventListener("pointercancel",onUp);
+                        // The hold already did the work; releasing must not also
+                        // count as a tap on the slot.
+                        if(held)return;
                         if(!dragging){
                           pushHistory();
                           if(id==null){
                             // Tap an empty slot: place the selected pattern.
                             setSong(sg=>{const r=[...sg];r[idx]=activePatternId;return r;});
+                            setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
                           } else {
                             // Tap a filled slot: make that pattern the one you're editing.
                             setActivePatId(id);
@@ -3805,22 +3879,41 @@ export default function Tabula(){
                         pushHistory();
                         if(tc){
                           const t=parseInt(tc.dataset.songBar,10);
-                          if(t!==idx)setSong(sg=>{const r=[...sg];r[t]=id;r[idx]=null;return r;});
+                          if(t!==idx){
+                            setSong(sg=>{const r=[...sg];r[t]=id;r[idx]=null;return r;});
+                            // The repeat count belongs to the slot's contents,
+                            // so it travels with them.
+                            setSongRep(rp=>{const r=[...rp];r[t]=r[idx];r[idx]=1;return r;});
+                          }
                         } else {
                           // Dragged off the grid: the slot empties. The pattern
                           // itself stays in the palette.
                           setSong(sg=>{const r=[...sg];r[idx]=null;return r;});
+                          setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
                         }
                         setPatternDrag(null);
                       };
                       document.addEventListener("pointermove",onMove);
                       document.addEventListener("pointerup",onUp);
                       document.addEventListener("pointercancel",onUp);
-                    }}>
+                    }}
+                    onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
                     {pat?pat.name:""}
                     {runStart&&run>1&&(
-                      <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
-                        color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{run}</span>
+                      <span style={{position:"absolute",right:3,top:2,fontSize:9,fontWeight:700,
+                        color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                    )}
+                    {/* Repeat pips — one per play, along the bottom edge. The
+                        one that's sounding lights up, so a x4 cell reads as
+                        progress rather than a static count. */}
+                    {pat&&rep>1&&(
+                      <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
+                        justifyContent:"center",gap:2,pointerEvents:"none"}}>
+                        {Array.from({length:rep},(_,k)=>(
+                          <div key={k} style={{width:4,height:4,borderRadius:2,
+                            background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(26,24,20,0.45)"}}/>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );
@@ -3829,6 +3922,54 @@ export default function Tabula(){
           ))}
         </div>
       </div>
+      {/* Repeat picker. Sits ABOVE the press point on purpose: it opens while
+          your finger is still down, and the trailing click of that same press
+          would otherwise land on whatever is underneath. The backdrop dismisses
+          on pointerDOWN for the same reason — a click handler there would eat
+          the release of the press that opened it (the sheet-opener trap). */}
+      {repPopup&&(()=>{
+        const W=4*38+3*6, vw=(typeof window!=="undefined"?window.innerWidth:360);
+        const left=Math.max(8,Math.min(vw-W-8,repPopup.x-W/2));
+        const above=repPopup.y-64;
+        const top=above<8?repPopup.y+22:above;
+        const cur=_rep(repPopup.idx);
+        const acc=_patColorOf(song[repPopup.idx]);
+        return(
+          <Fragment>
+            <div onPointerDown={(e)=>{e.stopPropagation();setRepPopup(null);}}
+              style={{position:"fixed",inset:0,zIndex:60,background:"transparent"}}/>
+            <div style={{position:"fixed",left,top,zIndex:61,display:"flex",gap:6,padding:6,
+              borderRadius:9,background:"rgba(28,25,21,0.97)",
+              border:"1px solid rgba(200,185,165,0.22)",
+              boxShadow:"0 6px 20px rgba(0,0,0,0.5)",touchAction:"none"}}
+              onPointerDown={e=>e.stopPropagation()}>
+              {Array.from({length:SONG_MAX_REP},(_,k)=>{
+                const n=k+1, on=n===cur;
+                return(
+                  <div key={n} role="button" aria-label={"Play "+n+" time"+(n===1?"":"s")}
+                    onClick={()=>{
+                      if(n!==cur){pushHistory();setSongRep(rp=>{const r=[...rp];r[repPopup.idx]=n;return r;});}
+                      setRepPopup(null);
+                    }}
+                    style={{width:38,height:38,borderRadius:7,display:"flex",flexDirection:"column",
+                      alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",userSelect:"none",
+                      border:"1px solid "+(on?acc:"rgba(200,185,165,0.18)"),
+                      background:on?acc+"22":"transparent",
+                      color:on?acc:"rgba(210,195,175,0.7)",fontSize:13,fontWeight:700,lineHeight:1}}>
+                    <span>{n}</span>
+                    <div style={{display:"flex",gap:1.5}}>
+                      {Array.from({length:n},(_,j)=>(
+                        <div key={j} style={{width:3,height:3,borderRadius:1.5,
+                          background:on?acc:"rgba(210,195,175,0.4)"}}/>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Fragment>
+        );
+      })()}
     </div>
   );
 
@@ -3986,7 +4127,7 @@ export default function Tabula(){
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,loopBar,varyMode,
     patterns,activePatId:activePatternId,
-    song,songMode,songView,activeLayer
+    song,songRep,songMode,songView,activeLayer
   });
 
   const applyShareState=rawState=>{
@@ -4377,7 +4518,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -5480,6 +5621,7 @@ export default function Tabula(){
     setPatterns(rem);
     if(activePatternId===id)setActivePatId(rem[0].id);
     setSong(sg=>sg.map(v=>v===id?null:v));
+    setSongRep(rp=>rp.map((v,i)=>song[i]===id?1:v));
   };
   const addPat=addPattern;
   const dupPat=()=>dupPatternId(activeId);
