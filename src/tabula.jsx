@@ -3612,6 +3612,54 @@ export default function Tabula(){
     setFollowSeq(false);
     setBarPage(curBar+1);
   };
+  // DOUBLE — the pattern becomes twice as long and the new half is a copy of
+  // the old one, so "two nearly identical passes with small variations" is one
+  // button instead of DUP BAR n times. Like DUP BAR this has to go through
+  // setPatterns and touch all three parts at once.
+  //
+  // Every part's DATA is copied, but only a part whose loop already spanned the
+  // whole pattern gets its gridLen doubled. A shorter part was looping to fill
+  // and still is — doubling its length would turn a 1-bar drum loop into a
+  // half-empty 8-bar part. Its copied data sits past its loop end, inert, in
+  // the same way notes past a trimmed length always have.
+  const doublePattern=()=>{
+    if(!editPat)return;
+    const n=patBars(editPat);
+    if(n*2>MAX_BARS){showFlash("MAX "+MAX_BARS+" BARS");return;}
+    pushHistory();
+    _dropVaryCache(editPat.id);
+    const oldW=n*COLS, W=oldW*2;
+    const dbl=(part)=>{
+      if(!part||!Array.isArray(part.grid))return part;
+      const srcW=gridW(part.grid);
+      const oldLen=Math.max(1,Math.min(srcW,part.gridLen||srcW));
+      const g=resizePatBars(Object.assign({},part,{bars:n}),n*2);
+      const out=Object.assign({},g,{
+        grid:spliceCols(g.grid,sliceCols(part.grid,0,oldW),oldW,0,oldW)});
+      if(g.durs)  out.durs  = spliceCols(g.durs, sliceCols(part.durs||[],0,oldW,()=>1),oldW,0,oldW,()=>1);
+      if(g.params)out.params= spliceFlat(g.params,sliceFlat(part.params||[],0,oldW),oldW,0,oldW);
+      if(g.vel)   out.vel   = spliceCols(g.vel,  sliceCols(toDrumVel2D(part.vel,srcW),0,oldW,()=>100),oldW,0,oldW,()=>100);
+      if(g.rat)   out.rat   = spliceCols(g.rat,  sliceCols(toDrumRat2D(part.rat,srcW),0,oldW,()=>1),  oldW,0,oldW,()=>1);
+      if(out.motion&&typeof out.motion==="object"){
+        const m={};
+        for(const k of Object.keys(out.motion))
+          m[k]=spliceCols(out.motion[k],sliceCols(out.motion[k],0,oldW,()=>null),oldW,0,oldW,()=>null);
+        out.motion=m;
+      }
+      out.gridLen=oldLen>=oldW?W:oldLen;
+      delete out.bars;
+      return out;
+    };
+    setPatterns(ps=>ps.map(p=>{
+      if(p.id!==editPat.id)return p;
+      const parts={};
+      for(const l of PART_LAYERS)parts[l]=dbl(p.parts[l]);
+      return Object.assign({},p,{bars:n*2,parts});
+    }));
+    // Land on the top of the copy — that's the half you're about to vary.
+    setFollowSeq(false);
+    setBarPage(n);
+  };
 
   // ── SONG PAGE ──────────────────────────────────────────────────────────
   // One lane, because a pattern is all three parts. The palette at the top is
@@ -4183,11 +4231,12 @@ export default function Tabula(){
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
   // thumb-sized set; this one matches the density of the ops rows it sits under.
   const barOpsRow=(
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
       {[["+BAR",addBar,barCount>=MAX_BARS,false],
         ["⧉BAR",duplicateBar,barCount>=MAX_BARS,false],
-        ["−BAR",removeBar,barCount<=1,true]].map(([l,f,d,danger])=>(
-        <button key={l} disabled={!!d} title={l==="⧉BAR"?"Duplicate the visible bar":undefined}
+        ["−BAR",removeBar,barCount<=1,true],
+        ["×2",doublePattern,barCount*2>MAX_BARS,false]].map(([l,f,d,danger])=>(
+        <button key={l} disabled={!!d} title={l==="⧉BAR"?"Duplicate the visible bar":(l==="×2"?"Double the pattern — the new half is a copy of the old one":undefined)}
           style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}}
           onClick={d?undefined:f}>{l}</button>
       ))}
@@ -7915,9 +7964,12 @@ export default function Tabula(){
                       // the same kind of thing: edits to the pattern you're on.
                       // FOLLOW is NOT here — that's the transport's toggle.
                       const barOps=[
-                        ["ADD BAR",  addBar,       barCount>=MAX_BARS, false],
-                        ["DUP BAR",  duplicateBar, barCount>=MAX_BARS, false],
-                        ["DEL BAR",  removeBar,    barCount<=1,        true ],
+                        ["ADD BAR",  addBar,        barCount>=MAX_BARS,    false],
+                        ["DUP BAR",  duplicateBar,  barCount>=MAX_BARS,    false],
+                        ["DEL BAR",  removeBar,     barCount<=1,           true ],
+                        // Doubles the whole pattern, copy and all — the fast way
+                        // to get a second nearly-identical pass to vary.
+                        ["×2",       doublePattern, barCount*2>MAX_BARS,   false],
                       ];
                       const opBtn=(d,danger)=>({padding:"13px 0",border:"1px solid "+(d?"rgba(200,185,165,0.06)":accentF+"0.3)"),borderRadius:8,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":accent,fontSize:10,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600});
                       const grpLabel={fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5,display:"flex",alignItems:"center",gap:6};
