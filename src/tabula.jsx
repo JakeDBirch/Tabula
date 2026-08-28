@@ -2907,6 +2907,12 @@ export default function Tabula(){
     // Pre-repeat saves have no songRep at all — every slot plays once.
     setSongRep(normSongRep(st.songRep));
   };
+  // Quarter-note position inside the playing pattern, as bar*4+quarter. The
+  // song page's bar dots read it: which dot is lit, and a value that changes
+  // on every quarter so the lit dot can re-trigger its pulse. Published at
+  // QUARTER granularity — two renders a second at 120bpm rather than eight.
+  const [songPulse,    setSongPulse]    = useState(-1);
+  const songPulseR  = useRef(-1);
   const [songBar,      setSongBar]      = useState(-1); // index into the song; -1 when stopped
   const [songBarLayer, setSongBarLayer] = useState({synth:-1,lead:-1,drums:-1});
   const songBarR    = useRef(-1);
@@ -3617,6 +3623,8 @@ export default function Tabula(){
   // requires it, which matters on a phone.
   // songBar indexes the EXPANDED sequence, so walk the slots consuming each
   // one's repeat count to find which cell the cursor is actually sitting on.
+  // Which bar of the playing pattern is sounding, from the quarter-note pulse.
+  const _pulseBar=songPulse<0?-1:Math.floor(songPulse/4);
   const _songPlayingSlot = (()=>{
     if(!playing||!songMode||songBar<0)return -1;
     let n=0;
@@ -3805,6 +3813,7 @@ export default function Tabula(){
                 // stretch of the same pattern reads as "x4" without collapsing
                 // the individually tappable cells.
                 const rep=_rep(idx);
+                const pbars=pat?patBars(pat):1;
                 // A run's badge counts PLAYS, not cells, so it agrees with the
                 // pips: two cells at x2 each is a run of 4. Only drawn when the
                 // run spans more than one cell — a single cell's repeats are
@@ -3900,8 +3909,31 @@ export default function Tabula(){
                     onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
                     {pat?pat.name:""}
                     {runStart&&run>1&&(
-                      <span style={{position:"absolute",right:3,top:2,fontSize:9,fontWeight:700,
+                      <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
                         color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                    )}
+                    {/* Bar dots — one per bar of the pattern, above the symbol,
+                        mirroring the repeat pips below it. On the playing cell
+                        the current bar's dot swells on every quarter note, so
+                        the song page carries the tempo. They flex to fit: real
+                        dots up to 8 bars, and past that they close into a
+                        segmented bar where the lit one still reads as it moves
+                        (32 countable dots don't fit in a phone-sized cell). */}
+                    {pat&&(pbars>1||isCursor)&&(
+                      <div style={{position:"absolute",left:4,right:4,top:3,display:"flex",
+                        alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,
+                        pointerEvents:"none"}}>
+                        {Array.from({length:pbars},(_,k)=>{
+                          const lit=isCursor&&k===_pulseBar;
+                          return(
+                            <div key={lit?"p"+k+"-"+songPulse:k}
+                              className={lit?"barpulse":undefined}
+                              style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
+                                height:3,borderRadius:pbars<=8?2:0,
+                                background:lit?"rgba(255,255,255,0.95)":"rgba(26,24,20,0.4)"}}/>
+                          );
+                        })}
+                      </div>
                     )}
                     {/* Repeat pips — one per play, along the bottom edge. The
                         one that's sounding lights up, so a x4 cell reads as
@@ -4849,6 +4881,15 @@ export default function Tabula(){
       stepR.current=ns;
       nextNoteR.current+=absStepDur;
     }
+    // Coarse position for the song page's bar dots. Same lookahead lead as the
+    // grid playhead — both are published when a step is SCHEDULED, not when it
+    // sounds — so the two agree with each other.
+    {
+      const cs=stepR.current;
+      const pb=inLoop?loopBarIdx:Math.floor(cs/COLS);
+      const pq=pb*4+Math.floor((cs%COLS)/4);
+      if(songPulseR.current!==pq){songPulseR.current=pq;setSongPulse(pq);}
+    }
   },[]);
 
   // ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
@@ -4863,6 +4904,7 @@ export default function Tabula(){
       playingR.current=false;
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
+      setSongPulse(-1);songPulseR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,drums:-1});
       layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
       setRecMode(false);recModeR.current=false;
@@ -8365,6 +8407,10 @@ const CSS=`
   .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}
   @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}
   @keyframes dflash{from{opacity:1}to{opacity:0}}
+  /* Song-page bar dot: a quick swell on each quarter note. Restarted by giving
+     the lit dot a key that changes every quarter, which remounts it. */
+  @keyframes barpulse{0%{transform:scaleY(2.6);opacity:1}100%{transform:scaleY(1);opacity:.9}}
+  .barpulse{animation:barpulse .26s ease-out;}
   select option{background:#111;color:#fff;}
   .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .left-col select{min-width:0;}
