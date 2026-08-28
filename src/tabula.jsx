@@ -3659,6 +3659,59 @@ export default function Tabula(){
   })();
   useEffect(()=>{ if(delArm==null)return; const t=setTimeout(()=>setDelArm(null),4000); return ()=>clearTimeout(t); },[delArm]);
   useEffect(()=>{ setDelArm(null); },[activePatternId]);
+  // ── Song drop targets ───────────────────────────────────────────────
+  // A drop lands either ON a cell (replace what's there) or on the SEAM
+  // between two cells (insert, sliding everything after it right). Rects are
+  // cached when the drag starts: the song grid can't move or reflow mid-drag,
+  // and measuring 64 elements on every pointermove would be felt on a phone.
+  const songHitR=useRef([]);
+  const _songMeasure=()=>{
+    const out=[];
+    document.querySelectorAll('[data-song-cell="1"]').forEach(el=>{
+      const r=el.getBoundingClientRect();
+      out.push({idx:parseInt(el.dataset.songBar,10),l:r.left,t:r.top,w:r.width,h:r.height});
+    });
+    songHitR.current=out;
+  };
+  const _songHit=(x,y)=>{
+    let best=null,bd=Infinity;
+    for(const r of songHitR.current){
+      const dx=x<r.l?r.l-x:(x>r.l+r.w?x-(r.l+r.w):0);
+      const dy=y<r.t?r.t-y:(y>r.t+r.h?y-(r.t+r.h):0);
+      const d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=r;}
+    }
+    // Nearest-rect rather than elementFromPoint, so the gap BETWEEN two cells
+    // is a seam instead of "off the grid" (it used to clear the slot). The slop
+    // is kept to about a third of a cell: enough to catch the gaps and the space
+    // between rows, tight enough that "off the grid" — which CLEARS a slot —
+    // still means clearly off it, not a near miss at the edge.
+    if(!best||bd>Math.pow(best.w*0.35,2))return null;
+    const rx=(x-best.l)/best.w;
+    if(rx<0.22)return{seam:best.idx};
+    if(rx>0.78)return{seam:best.idx+1};
+    return{cell:best.idx};
+  };
+  // Insert at a seam. The song is a fixed 64 slots, so this pushes the tail
+  // right and drops the (empty) last one; if the last slot is occupied there is
+  // nowhere for it to go and the drop is refused rather than losing it.
+  const _songInsert=(k,id,rep)=>{
+    if(song[63]!=null){showFlash("SONG FULL");return false;}
+    setSong(sg=>{const r=[...sg];r.splice(k,0,id);r.length=64;return r;});
+    setSongRep(rp=>{const r=[...rp];r.splice(k,0,Math.max(1,rep||1));r.length=64;return r;});
+    return true;
+  };
+  // Reorder: pull the slot out, then drop it in at the seam. Removing first is
+  // what makes the target index shift when you drag rightwards.
+  const _songMove=(from,k)=>{
+    const id=song[from],rep=_rep(from);
+    const ns=[...song],nr=[...songRep];
+    ns.splice(from,1);nr.splice(from,1);
+    const t=k>from?k-1:k;
+    ns.splice(t,0,id);nr.splice(t,0,rep);
+    ns.length=64;nr.length=64;
+    setSong(ns);setSongRep(nr);
+  };
   const _patColorOf=(id)=>{
     const i=patterns.findIndex(p=>p.id===id);
     return i<0?"rgba(220,200,180,0.4)":patCol(i);
@@ -3725,11 +3778,8 @@ export default function Tabula(){
                   e.stopPropagation();
                   const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
                   let moved=false;
-                  const hit=(ev)=>{
-                    const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                    const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                    return tc?parseInt(tc.dataset.songBar,10):null;
-                  };
+                  _songMeasure();
+                  const hit=(ev)=>_songHit(ev.clientX,ev.clientY);
                   const onMove=(ev)=>{
                     if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
                     if(!moved){
@@ -3738,8 +3788,7 @@ export default function Tabula(){
                       setPatternDrag({patId:p.id,name:p.name,accent:col,fromPalette:true,
                         x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
                     }
-                    const t=hit(ev);
-                    setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:t==null?null:{barIdx:t}}:null);
+                    setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:hit(ev)}:null);
                   };
                   const onUp=(ev)=>{
                     if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
@@ -3748,14 +3797,18 @@ export default function Tabula(){
                     document.removeEventListener("pointercancel",onUp);
                     if(!moved){ setActivePatId(p.id); return; }   // a tap just selects
                     const t=hit(ev);
-                    if(t!=null){
-                      // Dropped on a slot — fill it (replacing whatever was there)
-                      // and make this the pattern you're editing, so dragging one
-                      // in and going straight to a part page works.
+                    if(t){
+                      // On a slot: fill it, replacing whatever was there. On a
+                      // seam: insert, sliding the rest of the song right. Either
+                      // way this becomes the pattern you're editing, so dragging
+                      // one in and going straight to a part page works.
                       pushHistory();
-                      setSong(sg=>{const r=[...sg];r[t]=p.id;return r;});
-                      setSongRep(rp=>{const r=[...rp];r[t]=1;return r;});
-                      setActivePatId(p.id);
+                      if(t.seam!=null){ if(_songInsert(t.seam,p.id,1))setActivePatId(p.id); }
+                      else{
+                        setSong(sg=>{const r=[...sg];r[t.cell]=p.id;return r;});
+                        setSongRep(rp=>{const r=[...rp];r[t.cell]=1;return r;});
+                        setActivePatId(p.id);
+                      }
                     }
                     setPatternDrag(null);
                   };
@@ -3821,7 +3874,13 @@ export default function Tabula(){
                 const runStart=id!=null&&(idx===0||song[idx-1]!==id);
                 let run=0,plays=0;
                 if(runStart){let j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}
-                const isHover=patternDrag&&patternDrag.overSongCell&&patternDrag.overSongCell.barIdx===idx;
+                const _ov=patternDrag&&patternDrag.overSongCell;
+                const isHover=!!(_ov&&_ov.cell===idx);
+                // Seam k draws as a caret on cell k's LEFT edge. A seam at the
+                // end of a row has no cell to its right on that row, so it
+                // draws on this cell's right edge instead.
+                const seamL=!!(_ov&&_ov.seam===idx);
+                const seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);
                 return(
                   <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
                     style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
@@ -3854,12 +3913,14 @@ export default function Tabula(){
                           if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
                           if(holdT)clearTimeout(holdT);
                           dragging=true;
+                          _songMeasure();
                           setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
                         }
-                        let over=null;
-                        const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                        const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
-                        if(tc){const t=parseInt(tc.dataset.songBar,10);if(t!==idx)over={barIdx:t};}
+                        const h=_songHit(ev.clientX,ev.clientY);
+                        // Hovering your own cell isn't a target; hovering the
+                        // seams either side of it is a no-op reorder, so those
+                        // aren't marked either.
+                        const over=(h&&((h.cell!=null&&h.cell===idx)||(h.seam!=null&&(h.seam===idx||h.seam===idx+1))))?null:h;
                         setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:over}:null);
                       };
                       const onUp=(ev)=>{
@@ -3883,16 +3944,18 @@ export default function Tabula(){
                           }
                           return;
                         }
-                        const el=document.elementFromPoint(ev.clientX,ev.clientY);
-                        const tc=el&&el.closest&&el.closest('[data-song-cell="1"]');
+                        const t=_songHit(ev.clientX,ev.clientY);
                         pushHistory();
-                        if(tc){
-                          const t=parseInt(tc.dataset.songBar,10);
-                          if(t!==idx){
-                            setSong(sg=>{const r=[...sg];r[t]=id;r[idx]=null;return r;});
+                        if(t&&t.seam!=null){
+                          // Onto a seam: reorder — pull this slot out and drop
+                          // it back in between the two you aimed at.
+                          _songMove(idx,t.seam);
+                        } else if(t){
+                          if(t.cell!==idx){
+                            setSong(sg=>{const r=[...sg];r[t.cell]=id;r[idx]=null;return r;});
                             // The repeat count belongs to the slot's contents,
                             // so it travels with them.
-                            setSongRep(rp=>{const r=[...rp];r[t]=r[idx];r[idx]=1;return r;});
+                            setSongRep(rp=>{const r=[...rp];r[t.cell]=r[idx];r[idx]=1;return r;});
                           }
                         } else {
                           // Dragged off the grid: the slot empties. The pattern
@@ -3908,6 +3971,11 @@ export default function Tabula(){
                     }}
                     onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
                     {pat?pat.name:""}
+                    {(seamL||seamR)&&(
+                      <div style={{position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2,
+                        [seamL?"left":"right"]:-3.5,background:"rgba(232,220,205,0.95)",
+                        boxShadow:"0 0 6px rgba(232,220,205,0.6)",pointerEvents:"none",zIndex:2}}/>
+                    )}
                     {runStart&&run>1&&(
                       <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
                         color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
