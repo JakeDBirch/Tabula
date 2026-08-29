@@ -5448,13 +5448,31 @@ export default function Tabula(){
 
   // Lock the interface against iOS sheet-dismiss swipe and long-press selection
   useEffect(()=>{
-    const noSelect=e=>e.preventDefault();
+    // Everything in this block exists to stop a knob drag or a grid swipe
+    // selecting text, raising a callout, or bouncing the page. All of it has to
+    // exempt real text fields — the cloud sign-in has an email box and a code
+    // box, and with these applied blindly they are dead: you can focus them but
+    // never place a caret or type.
+    //
+    // clearSel is the worst of the four. `selectionchange` fires when an input's
+    // caret moves, and removeAllRanges() then wipes it — in WebKit the input's
+    // caret IS part of the document selection, so every keystroke's caret is
+    // destroyed as it's created. Chromium keeps input carets outside the
+    // document selection, so this reproduces in Safari and not in Chrome, and a
+    // Playwright type() bypasses it entirely by dispatching straight to the
+    // focused node. Hence: not caught by any headless pass, only by hand.
+    const inField=t=>!!(t&&t.closest&&t.closest('input,textarea,[contenteditable="true"]'));
+    const noSelect=e=>{if(inField(e.target))return;e.preventDefault();};
     const noContext=e=>{
       // Allow right-click on the grid (handled by onContextMenu for param popup)
       if(e.target&&(e.target.dataset?.grid||e.target.closest?.('[data-grid]')))return;
+      if(inField(e.target))return; // …and in a text field, so paste is reachable
       e.preventDefault();
     };
-    const clearSel=()=>{try{window.getSelection()?.removeAllRanges();}catch(e){}};
+    const clearSel=()=>{
+      if(inField(document.activeElement))return; // never fight a focused field's caret
+      try{window.getSelection()?.removeAllRanges();}catch(e){}
+    };
 
     // Block touchmove for any touch that didn't start inside a scrollable container.
     // Use a per-touch-identifier map so multi-touch is handled correctly.
@@ -5477,6 +5495,9 @@ export default function Tabula(){
       for(const t of e.changedTouches) scrollableStarts.delete(t.identifier);
     };
     const noOverscroll = e => {
+      // A drag inside a text field is the user positioning a caret or selecting
+      // — never an overscroll to suppress.
+      if(inField(e.target)) return;
       // Block if ALL active touches started on non-scrollable elements
       let anyScrollable = false;
       for(const t of e.touches){
@@ -6869,7 +6890,15 @@ export default function Tabula(){
   );
 
   return(
-    <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
+    <div style={S.root}
+      onContextMenu={e=>{
+        // The root swallows the context menu so a long-press on a pad never
+        // raises one — but a text field needs it, because right-click /
+        // long-press → Paste is how a code from an email reaches the box.
+        if(e.target&&e.target.closest&&e.target.closest('input,textarea,[contenteditable="true"]'))return;
+        e.preventDefault();
+      }}
+      onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
 
       {/* MP3 share prompt (mobile) — appears after a bounce so the SHARE tap is a
