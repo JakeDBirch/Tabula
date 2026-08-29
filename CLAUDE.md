@@ -101,6 +101,20 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 - **Ballistic drag helper** = `ballisticDelta(pd, dim, range)`. Double-tap detection = `isDoubleTap(e, key?)` (custom, because DOM `dblclick` is unreliable on touch).
 - **STEP lanes**, **autosave**, **MP3/MIDI export**, and **S1–S4 save slots** (SAVE/LOAD/CLEAR, persisted via `storageSet("slots", …)`) all exist.
 
+### The PROJECT menu
+
+Everything that isn't playing or editing — NEW PROJECT, the S1–S4 local slots, the cloud slots, LINK / EXPORT / IMPORT / MIDI / MP3 — lives behind **one menu**, `projectMenuBody`. It used to be a permanently-open column pinned to the bottom of the desktop sidebar; none of it is wanted mid-take. Desktop opens it as a modal (a `☰ PROJECT` button where the panel was; ESC or a backdrop tap closes, and the keydown handler hands the keyboard to the modal while it's open so space types a space instead of starting playback). Mobile keeps the existing PROJECT bottom sheet, which now renders MIX and then the same body. **One body, two mounts** — don't fork it, or the platforms drift.
+
+`showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) that shows `flash || shareFlash` for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
+
+### Cloud sync (Supabase)
+
+Four cloud slots (C1–C4) beside the four local ones, same SAVE / LOAD / CLEAR and the same confirm-before-overwrite rules, on the account instead of the device. Save is `JSON.stringify(getShareState(true))` into one `text` column; load is `applyShareState(JSON.parse(...))` — the same packed payload a file export carries, which is only viable because of the sparse codec (~244KB for 32 bars, not ~2.4MB). Refused above `CLOUD_MAX_BYTES` (6MB) before it leaves the device.
+
+Auth is email one-time-code, hand-rolled over `fetch` against Supabase's REST endpoints rather than `supabase-js` — Tabula is one static file with two UMD tags, and an SDK from a CDN would also have to be precached by the service worker. Only the **refresh token** is persisted (`storageSet("cloud", …)`); every launch trades it for a fresh pair, and a failure drops the session rather than showing a dead account. The slot list selects `slot,name,updated_at` and deliberately **not** `data` — opening the menu shouldn't download every project. `sw.js` skips `/auth/v1/` and `/rest/v1/`; they're cross-origin GETs that would otherwise land in its cache-first branch and serve a stale list forever.
+
+`CLOUD_URL` / `CLOUD_KEY` at the top of the source are blank, so `CLOUD_ON` is false, the whole section doesn't render and nothing touches the network. Filling them in + `npm run build` is the entire switch-on. The anon key is public by design (RLS decides who sees what), so it belongs in the source. Setup, SQL and the email-template change: `docs/cloud-sync.md`.
+
 ### FX
 
 Global delay + reverb buses; each layer has send amounts, and per-step `dly`/`rev` override the layer default. Reverb = Schroeder 8-comb (Freeverb-ish), tap BEFORE the feedback shelves so damping compounds per recirculation (true frequency-dependent decay). `setRvSize` scales both feedback and comb delay length (concave, up to ~2.6× room). `setRvMod` = per-comb LFO chorus on the tail. `RV_DAMP_DB` = per-pass shelf cut.
@@ -148,5 +162,6 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 ## Open threads
 
-- **Cloud sync (task #87)**: chose **Supabase** for cross-device project sync (start on desktop, continue on phone). v1 = manual Save/Load to cloud (like the slots, synced), email-OTP auth. Blocked on Jake providing the Supabase **project URL + anon key** (and running the given SQL / adding `{{ .Token }}` to the magic-link email template). Reuse `getShareState(true)` to serialize. Don't create his account or enter credentials.
+- **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
+- **Cloud sync, next**: v1 is four slots, no names, last-write-wins, manual only. The `name` column exists for when that becomes a named project list. Auto-sync and conflict handling are deliberately not in v1.
 - Long-form content beyond 64 bars is not planned.

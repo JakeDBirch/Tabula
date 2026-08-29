@@ -62,6 +62,15 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
 
+  // Cloud-sync API traffic is never cached. These are cross-origin GETs, so
+  // they'd otherwise fall into the cache-first branch below and a stale project
+  // list would be served forever — and there is nothing useful to hand back
+  // offline anyway. Let them go straight to the network and fail honestly.
+  try {
+    const u = new URL(req.url);
+    if (u.pathname.startsWith("/rest/v1/") || u.pathname.startsWith("/auth/v1/")) return;
+  } catch (_) {}
+
   const isNav = req.mode === "navigate" || req.destination === "document";
   if (isNav) {
     // Network-first so a new deploy lands as soon as you're online.

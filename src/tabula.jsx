@@ -1043,6 +1043,80 @@ const isDoubleTap=(e,key=null)=>{
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
 
+// ── Cloud sync (Supabase) ────────────────────────────────────────────────────
+// Cross-device project sync: the same four save slots, except the row lives in
+// a Supabase table keyed by the signed-in user instead of in this device's
+// localStorage. Start a sketch on the desktop, SAVE to C1, LOAD C1 on the
+// phone. Auth is an emailed one-time code — no password to remember, and the
+// only thing kept on the device is a refresh token.
+//
+// Hand-rolled over `fetch` rather than pulling in supabase-js: Tabula ships as
+// ONE static file with two UMD script tags, and the six calls we need (send
+// code, verify, refresh, select/upsert/delete a row) are a page of code. An SDK
+// from a CDN would also have to be precached by the service worker to keep the
+// installed PWA offline-clean, for no gain.
+//
+// CLOUD_URL / CLOUD_KEY are blank until the Supabase project exists — see
+// docs/cloud-sync.md for the setup and the SQL. The anon key is public by
+// design (it grants only what row-level security allows), so it belongs in the
+// source, not in a secret. While they're blank CLOUD_ON is false, the cloud
+// section of the project menu doesn't render, and nothing touches the network.
+const CLOUD_URL="";
+const CLOUD_KEY="";
+const CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);
+const CLOUD_SLOTS=["C1","C2","C3","C4"];
+// Refuse to upload past this. A project carrying recorded samples runs to
+// megabytes, and a phone on cellular shouldn't find that out mid-save.
+const CLOUD_MAX_BYTES=6*1024*1024;
+
+// Supabase reports failures as JSON in half a dozen shapes; surface whichever
+// message it actually sent, else the status code.
+const cloudErr=async res=>{
+  let m="";
+  try{const j=await res.json();m=j.error_description||j.msg||j.message||j.error||"";}catch(e){}
+  return m||("HTTP "+res.status);
+};
+// PostgREST honours Prefer:return=minimal with an empty 201, which res.json()
+// would choke on — read as text and only parse when there's something there.
+const cloudBody=async res=>{const t=await res.text();if(!t)return null;try{return JSON.parse(t);}catch(e){return null;}};
+const cloudPost=async(path,body)=>{
+  const res=await fetch(CLOUD_URL+"/auth/v1/"+path,{method:"POST",headers:{apikey:CLOUD_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!res.ok)throw new Error(await cloudErr(res));
+  return cloudBody(res);
+};
+// The session kept in memory and in storage — flat and small, because it's
+// rewritten on every token refresh.
+const cloudSessionOf=j=>({token:j.access_token,refresh:j.refresh_token,exp:Date.now()+((j.expires_in||3600)*1000),uid:j.user&&j.user.id,email:j.user&&j.user.email});
+const cloudSendCode=email=>cloudPost("otp",{email,create_user:true});
+const cloudVerify=async(email,code)=>cloudSessionOf(await cloudPost("verify",{email,token:code,type:"email"}));
+const cloudRefreshSession=async refresh=>cloudSessionOf(await cloudPost("token?grant_type=refresh_token",{refresh_token:refresh}));
+const cloudRest=async(sess,path,opts)=>{
+  const o=opts||{};
+  const res=await fetch(CLOUD_URL+"/rest/v1/"+path,Object.assign({},o,{headers:Object.assign({apikey:CLOUD_KEY,Authorization:"Bearer "+sess.token,"Content-Type":"application/json"},o.headers||{})}));
+  if(!res.ok)throw new Error(await cloudErr(res));
+  return cloudBody(res);
+};
+// The slot list deliberately does NOT select `data` — the menu only needs to
+// know which slots are filled and how stale they are. Pulling the payload here
+// would download every project just to open the menu.
+const cloudList=sess=>cloudRest(sess,"projects?select=slot,name,updated_at");
+const cloudGetSlot=async(sess,slot)=>{const rows=await cloudRest(sess,"projects?select=data&slot=eq."+encodeURIComponent(slot));return rows&&rows[0]?rows[0].data:null;};
+// Upsert on the (user_id,slot) primary key. user_id defaults to auth.uid() in
+// the schema, but PostgREST needs it in the payload to infer the conflict
+// target, so it's sent explicitly.
+const cloudPutSlot=(sess,slot,name,data)=>cloudRest(sess,"projects?on_conflict=user_id,slot",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({user_id:sess.uid,slot,name,data,updated_at:new Date().toISOString()})});
+const cloudDelSlot=(sess,slot)=>cloudRest(sess,"projects?slot=eq."+encodeURIComponent(slot),{method:"DELETE",headers:{Prefer:"return=minimal"}});
+// "NOW" / "20m" / "4h" / "3d" — a slot caption has room for three characters,
+// not a date.
+const cloudAgo=iso=>{
+  const t=Date.parse(iso||"");if(!t)return "";
+  const m=Math.floor((Date.now()-t)/60000);
+  if(m<1)return "NOW";
+  if(m<60)return m+"m";
+  if(m<1440)return Math.floor(m/60)+"h";
+  return Math.floor(m/1440)+"d";
+};
+
 // ── User-sample (de)serialization ────────────────────────────────────────────
 // Recorded drum samples are AudioBuffers (binary). To save/export them with a
 // project they're encoded to 16-bit PCM WAV → base64. Short one-shots, so the
@@ -2611,6 +2685,22 @@ export default function Tabula(){
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
   const seqTrackRef=useRef(null);
   const [shareFlash,setShareFlash]= useState("");
+  // Save / load / share / cloud all live behind one PROJECT menu — none of it
+  // is needed while you're playing. Desktop opens it as a modal; on mobile it's
+  // the existing PROJECT bottom sheet, and both render the same body.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // ── Cloud sync (see the CLOUD_* helpers) ───────────────────────────────
+  // cloudSess is the whole account: null = signed out. Mirrored to a ref so
+  // the token-refresh helper can read it without a stale closure.
+  const [cloudSess,  setCloudSess]  = useState(null);
+  const cloudSessR = useRef(null);
+  useEffect(()=>{cloudSessR.current=cloudSess;},[cloudSess]);
+  const [cloudRows,  setCloudRows]  = useState({});      // slot → {name,updated_at}
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudCode,  setCloudCode]  = useState("");
+  const [cloudStage, setCloudStage] = useState("email"); // "email" (ask) → "code" (a code is in flight)
+  const [cloudBusy,  setCloudBusy]  = useState("");      // label of the request in flight, "" when idle
+  const [cloudSlotActive, setCloudSlotActive] = useState(null); // last cloud slot saved/loaded
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
   // VARY is per-layer now — each layer toggles independently. Normalizer
@@ -3166,6 +3256,25 @@ export default function Tabula(){
     (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
   },[]);
 
+  // Restore the cloud session on mount. Only the refresh token is persisted —
+  // access tokens expire in an hour, so there's no point keeping one across a
+  // reload; we trade the refresh token for a fresh pair instead. A refresh that
+  // fails means the token was revoked or expired: drop it and show signed-out
+  // rather than leaving a dead session on screen.
+  useEffect(()=>{
+    if(!CLOUD_ON)return;
+    (async()=>{
+      const v=await storageGet("cloud");if(!v)return;
+      let saved=null;try{saved=JSON.parse(v);}catch(e){return;}
+      if(!saved||!saved.refresh)return;
+      try{
+        const fresh=await cloudRefreshSession(saved.refresh);
+        setCloudSess(fresh);cloudSessR.current=fresh;
+        storageSet("cloud",JSON.stringify(fresh));
+      }catch(e){storageSet("cloud","");}
+    })();
+  },[]);
+
   // Pre-load the default kit's samples on first mount so the bundled sound is
   // ready before the user presses play. loadKit falls back to an
   // OfflineAudioContext when the live audio context isn't up yet.
@@ -3316,6 +3425,13 @@ export default function Tabula(){
       if(exportingR.current)return; // UI is locked while an MP3 bounce is capturing
       const tag=(e.target?.tagName||"").toLowerCase();
       const isEditable=tag==="input"||tag==="textarea"||e.target?.isContentEditable;
+      // The PROJECT modal is the one thing that takes the keyboard: ESC closes
+      // it, and space is a space (there's an email field in there) rather than
+      // a play toggle behind the scrim.
+      if(menuOpen){
+        if(e.key==="Escape"){e.preventDefault();setMenuOpen(false);setConfirmAction(null);}
+        return;
+      }
       // Spacebar toggles play/stop globally (skip when typing in a text field).
       if(!isEditable&&(e.key===" "||e.code==="Space")){
         e.preventDefault();
@@ -3512,6 +3628,9 @@ export default function Tabula(){
     else if(confirmAction.type==="load")doLoad(confirmAction.slot);
     else if(confirmAction.type==="clear")doClear(confirmAction.slot);
     else if(confirmAction.type==="new")doNew();
+    else if(confirmAction.type==="csave")doCloudSave(confirmAction.slot);
+    else if(confirmAction.type==="cload")doCloudLoad(confirmAction.slot);
+    else if(confirmAction.type==="cclear")doCloudClear(confirmAction.slot);
     setConfirmAction(null);
   };
   const confirmNo=()=>setConfirmAction(null);
@@ -4376,6 +4495,120 @@ export default function Tabula(){
   const exportJSON=()=>{
     const blob=new Blob([JSON.stringify(getShareState(),null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tabula-preset.json";a.click();
+  };
+
+  // ── Cloud sync actions ────────────────────────────────────────────────────
+  // Every request goes through cloudRun so there's exactly one place that
+  // formats a failure. It returns [ok,value] rather than throwing, because half
+  // these calls legitimately resolve to null (an empty slot, a minimal DELETE).
+  const cloudRun=async(label,fn)=>{
+    setCloudBusy(label);
+    try{return [true,await fn()];}
+    catch(err){
+      console.error("cloud "+label+" failed",err);
+      showFlash(String((err&&err.message)||err).toUpperCase().slice(0,38));
+      return [false,null];
+    }
+    finally{setCloudBusy("");}
+  };
+  // Hand back a session whose access token is good for at least another minute,
+  // trading the refresh token for a new pair if it isn't. Ref-based for the
+  // same reason pushHistoryR is — it must always read the live session.
+  const cloudTokenR = useRef(null);
+  cloudTokenR.current=async()=>{
+    const cur=cloudSessR.current;
+    if(!cur)throw new Error("SIGNED OUT");
+    if(cur.exp-Date.now()>60000)return cur;
+    const fresh=await cloudRefreshSession(cur.refresh);
+    setCloudSess(fresh);cloudSessR.current=fresh;
+    storageSet("cloud",JSON.stringify(fresh));
+    return fresh;
+  };
+  const cloudLoadRows=async()=>{
+    const [ok,rows]=await cloudRun("LIST",async()=>cloudList(await cloudTokenR.current()));
+    if(!ok)return;
+    const bySlot={};(rows||[]).forEach(r=>{bySlot[r.slot]=r;});
+    setCloudRows(bySlot);
+  };
+  // An account appearing (sign-in, or the mount restore) pulls the slot list so
+  // the menu shows what's up there. Signing out empties it.
+  useEffect(()=>{
+    if(!CLOUD_ON)return;
+    if(cloudSess)cloudLoadRows();else setCloudRows({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[cloudSess&&cloudSess.uid]);
+
+  const cloudSignIn=async()=>{
+    const email=cloudEmail.trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){showFlash("ENTER AN EMAIL");return;}
+    const [ok]=await cloudRun("SENDING",()=>cloudSendCode(email));
+    if(!ok)return;
+    setCloudStage("code");setCloudCode("");
+    showFlash("CODE SENT");
+  };
+  const cloudEnterCode=async()=>{
+    const code=cloudCode.trim();
+    if(code.length<6){showFlash("6-DIGIT CODE");return;}
+    const [ok,sess]=await cloudRun("VERIFY",()=>cloudVerify(cloudEmail.trim(),code));
+    if(!ok)return;
+    setCloudSess(sess);cloudSessR.current=sess;
+    storageSet("cloud",JSON.stringify(sess));
+    setCloudStage("email");setCloudCode("");
+    showFlash("SIGNED IN");
+  };
+  const cloudSignOut=async()=>{
+    const cur=cloudSessR.current;
+    setCloudSess(null);cloudSessR.current=null;
+    setCloudRows({});setCloudSlotActive(null);
+    setCloudStage("email");setCloudCode("");
+    storageSet("cloud","");
+    // Best-effort server-side revoke — this device is signed out either way.
+    if(cur)try{await fetch(CLOUD_URL+"/auth/v1/logout",{method:"POST",headers:{apikey:CLOUD_KEY,Authorization:"Bearer "+cur.token}});}catch(e){}
+    showFlash("SIGNED OUT");
+  };
+  // Cloud save/load reuse getShareState / applyShareState — the same packed
+  // payload a file export or a share link carries, samples included. That's the
+  // whole point of the sparse codec: a 32-bar project is ~244KB, not ~2.4MB.
+  const doCloudSave=async slot=>{
+    const payload=JSON.stringify(getShareState(true));
+    if(payload.length>CLOUD_MAX_BYTES){showFlash("TOO LARGE FOR CLOUD");return;}
+    const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),slot,null,payload));
+    if(!ok)return;
+    setCloudSlotActive(slot);showFlash("CLOUD SAVED "+slot);
+    cloudLoadRows();
+  };
+  const doCloudLoad=async slot=>{
+    const [ok,raw]=await cloudRun("LOADING",async()=>cloudGetSlot(await cloudTokenR.current(),slot));
+    if(!ok)return;
+    if(!raw){showFlash("CLOUD "+slot+" IS EMPTY");cloudLoadRows();return;}
+    let parsed=null;
+    try{parsed=JSON.parse(raw);}catch(e){showFlash("CLOUD "+slot+" UNREADABLE");return;}
+    applyShareState(parsed);
+    setActiveSlot(null);setCloudSlotActive(slot);
+    showFlash("CLOUD LOADED "+slot);
+  };
+  const doCloudClear=async slot=>{
+    const [ok]=await cloudRun("CLEARING",async()=>cloudDelSlot(await cloudTokenR.current(),slot));
+    if(!ok)return;
+    if(cloudSlotActive===slot)setCloudSlotActive(null);
+    showFlash("CLOUD CLEARED "+slot);
+    cloudLoadRows();
+  };
+  // Guarded entry points — same confirm rules as the local slots, routed
+  // through the one confirmAction bar so there's a single yes/no in the menu.
+  const cloudSaveSlot=slot=>{
+    if(cloudRows[slot]){setConfirmAction({type:"csave",slot,label:"OVERWRITE CLOUD "+slot+"?"});return;}
+    doCloudSave(slot);
+  };
+  const cloudLoadSlot=slot=>{
+    if(!cloudRows[slot])return;
+    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
+    if(hasContent){setConfirmAction({type:"cload",slot,label:"LOAD CLOUD "+slot+"? UNSAVED WORK LOST"});return;}
+    doCloudLoad(slot);
+  };
+  const cloudClearSlot=slot=>{
+    if(!cloudRows[slot])return;
+    setConfirmAction({type:"cclear",slot,label:"CLEAR CLOUD "+slot+"?"});
   };
 
   // ── Song export helpers (shared by MIDI + MP3) ────────────────────────────
@@ -6461,6 +6694,131 @@ export default function Tabula(){
     </SynthSection>
   </>);
 
+  // ── PROJECT menu ───────────────────────────────────────────────────────────
+  // One menu, two mounts: the desktop modal and the mobile PROJECT bottom sheet
+  // both render this block, so save/load, cloud and share can't drift apart
+  // between platforms. On desktop this used to be a permanently-visible column
+  // pinned to the bottom of the sidebar; none of it is wanted mid-take, so it
+  // lives behind a single button now.
+  const mSecLbl={fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8};
+  const mBtn={width:"100%",padding:"9px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",borderRadius:6,fontFamily:"inherit"};
+  const mBtnLit={border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"};
+  const C_CLOUD="#8fb0c9";
+  const mInput={flex:1,minWidth:0,padding:"9px 10px",borderRadius:6,border:"1px solid rgba(200,185,165,0.2)",background:"rgba(200,185,165,0.05)",color:"rgba(232,224,213,0.9)",fontSize:12,letterSpacing:1,fontFamily:"inherit",outline:"none"};
+  // Slot column — the same shape for a local slot and a cloud slot, so the two
+  // banks read as one control with two homes. `caption` is the cloud's staleness
+  // readout ("4h"); local slots have nothing useful to put there.
+  const mSlotCol=(key,label,has,accent,caption,onSave,onLoad,onClear,isActive)=>(
+    <div key={key} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"stretch"}}>
+      <div style={{fontSize:10,letterSpacing:2,fontWeight:700,color:isActive?accent:"rgba(210,195,175,0.5)",textAlign:"center"}}>
+        {label}{has&&<span style={{color:accent,fontSize:9,marginLeft:2}}>●</span>}
+      </div>
+      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",height:9,marginBottom:1}}>{caption||""}</div>
+      <button style={Object.assign({},mBtn,isActive?{border:"1px solid "+accent,color:accent,background:accent+"1f"}:{})} onClick={()=>onSave()}>SAVE</button>
+      <button style={Object.assign({},mBtn,has?mBtnLit:{},isActive&&has?{border:"1px solid "+accent,color:accent,background:accent+"1f"}:{})} onClick={()=>onLoad()} disabled={!has}>LOAD</button>
+      <button style={Object.assign({},mBtn,{color:has?"#c98a8a":undefined})} onClick={()=>onClear()} disabled={!has}>CLEAR</button>
+    </div>
+  );
+  const projectMenuBody=(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {confirmAction&&(
+        <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6}}>
+          <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
+          <button style={{padding:"5px 12px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={()=>confirmYes()}>YES</button>
+          <button style={{padding:"5px 12px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>confirmNo()}>NO</button>
+        </div>
+      )}
+
+      {/* NEW PROJECT — discards in-memory work and resets to defaults */}
+      <button style={{width:"100%",padding:"11px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:7,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>newProject()}>＋ NEW PROJECT</button>
+
+      {/* ── Local save slots ── */}
+      <div>
+        <div style={mSecLbl}>THIS DEVICE</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+          {SLOTS.map(slot=>mSlotCol(slot,slot,!!slotData[slot],"#c9a96e","",
+            ()=>saveSlot(slot),()=>loadSlot(slot),()=>clearSlot(slot),activeSlot===slot))}
+        </div>
+      </div>
+
+      {/* ── Cloud slots — the same four slots, on the account instead of this
+          device. Hidden entirely until the Supabase project is configured. ── */}
+      {CLOUD_ON&&(
+        <div>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+            <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>CLOUD{cloudBusy?" · "+cloudBusy:""}</div>
+            {cloudSess&&(
+              <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
+            )}
+          </div>
+          {!cloudSess&&(
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              <div style={{fontSize:9,lineHeight:1.5,color:"rgba(210,195,175,0.45)"}}>
+                {cloudStage==="code"
+                  ?"Enter the 6-digit code sent to "+cloudEmail.trim()+"."
+                  :"Sign in with your email to save projects to the cloud and pick them up on another device. We'll send a one-time code — no password."}
+              </div>
+              {cloudStage==="email"?(
+                <div style={{display:"flex",gap:6}}>
+                  <input style={mInput} type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                    placeholder="you@example.com" value={cloudEmail}
+                    onChange={e=>setCloudEmail(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter")cloudSignIn();}}/>
+                  <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
+                    disabled={!!cloudBusy} onClick={()=>cloudSignIn()}>SEND CODE</button>
+                </div>
+              ):(
+                <div style={{display:"flex",gap:6}}>
+                  <input style={Object.assign({},mInput,{letterSpacing:6,textAlign:"center"})} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={8}
+                    placeholder="000000" value={cloudCode}
+                    onChange={e=>setCloudCode(e.target.value.replace(/\D/g,""))}
+                    onKeyDown={e=>{if(e.key==="Enter")cloudEnterCode();}}/>
+                  <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
+                    disabled={!!cloudBusy} onClick={()=>cloudEnterCode()}>SIGN IN</button>
+                </div>
+              )}
+              {cloudStage==="code"&&(
+                <div style={{display:"flex",gap:10}}>
+                  <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
+                  <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>{setCloudStage("email");setCloudCode("");}}>USE A DIFFERENT EMAIL</button>
+                </div>
+              )}
+            </div>
+          )}
+          {cloudSess&&(
+            <>
+              <div style={{fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",marginBottom:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                {CLOUD_SLOTS.map(slot=>mSlotCol(slot,slot,!!cloudRows[slot],C_CLOUD,cloudRows[slot]?cloudAgo(cloudRows[slot].updated_at):"",
+                  ()=>cloudSaveSlot(slot),()=>cloudLoadSlot(slot),()=>cloudClearSlot(slot),cloudSlotActive===slot))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Share / export ── */}
+      <div>
+        <div style={mSecLbl}>SHARE / EXPORT</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+          <button style={mBtn} onClick={()=>copyShareLink()}>LINK</button>
+          <button style={mBtn} onClick={()=>exportJSON()}>EXPORT</button>
+          <button style={mBtn} onClick={()=>importRef.current&&importRef.current.click()}>IMPORT</button>
+          <button style={mBtn} onClick={()=>exportMIDI()}>MIDI</button>
+          <button style={Object.assign({},mBtn,{opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={()=>exportMP3()}>{exporting?"…":"MP3"}</button>
+        </div>
+        {/* MP3 bounce length — how many passes through the song. */}
+        <div style={{display:"flex",alignItems:"center",gap:5,marginTop:8}}>
+          <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.35)",flexShrink:0}}>MP3 PASSES ×</span>
+          {[1,2,4,8].map(n=>(
+            <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:700,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.14)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
+          ))}
+        </div>
+        <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
+      </div>
+    </div>
+  );
+
   return(
     <div style={S.root} onContextMenu={e=>e.preventDefault()} onDragStart={e=>e.preventDefault()}>
       <style>{CSS}</style>
@@ -6500,6 +6858,32 @@ export default function Tabula(){
               style={{padding:"10px 18px",borderRadius:10,border:"1px solid #a8c5a0",background:"rgba(168,197,160,0.18)",color:"#cfe3c8",fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}>↗ SHARE</button>
             <button onClick={()=>setShareFile(null)}
               style={{padding:"10px 12px",borderRadius:10,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* Status line. It used to live inside the save/load panel, which was
+          pinned open on desktop — now that the panel is a menu, "SAVED S1" /
+          "UNDO" / "MIDI EXPORTED" need somewhere to land whether or not the
+          menu is open, so it floats above everything (the modal included). */}
+      {(flash||shareFlash)&&(
+        <div style={{position:"fixed",top:10,left:0,right:0,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div style={{padding:"7px 14px",borderRadius:8,background:"rgba(26,24,20,0.96)",border:"1px solid rgba(105,240,174,0.3)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.5,color:"#7aaa96",fontWeight:600}}>{flash||shareFlash}</div>
+        </div>
+      )}
+
+      {/* PROJECT menu (desktop) — a modal over everything. Mobile opens the same
+          body as the PROJECT bottom sheet; neither is on screen while playing. */}
+      {!IS_MOBILE&&menuOpen&&(
+        <div style={{position:"fixed",inset:0,zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)",backdropFilter:"blur(3px)",WebkitBackdropFilter:"blur(3px)"}}
+          onClick={()=>{setMenuOpen(false);setConfirmAction(null);}}>
+          <div style={{width:"min(92vw,460px)",maxHeight:"84vh",overflowY:"auto",background:"rgba(26,24,20,0.98)",border:"1px solid rgba(200,185,165,0.2)",borderRadius:16,boxShadow:"0 16px 50px rgba(0,0,0,0.65)",padding:"16px 18px 20px"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",marginBottom:14}}>
+              <span style={{flex:1,fontSize:11,letterSpacing:3,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PROJECT</span>
+              <div onClick={()=>{setMenuOpen(false);setConfirmAction(null);}} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(210,195,175,0.45)",fontSize:18,cursor:"pointer",borderRadius:13}}>×</div>
+            </div>
+            {projectMenuBody}
           </div>
         </div>
       )}
@@ -6843,58 +7227,15 @@ export default function Tabula(){
 
           {!IS_MOBILE&&<div style={{flex:1,minHeight:0}}/>}
 
-          {/* Save/load + share — pinned to bottom of left column */}
+          {/* PROJECT menu — one button, everything behind it. Save/load, cloud
+              and share used to be a permanently-open column here; none of it is
+              wanted mid-take, and the space is better spent on the mixer. */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:10,marginTop:4}}>
-              <div style={{marginBottom:6}}>
-                <div style={{...S.menuSaveLabel,marginBottom:4}}>SAVE / LOAD</div>
-                {flash&&<div style={S.menuFlash}>{flash}</div>}
-              {confirmAction&&(
-                <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:5}}>
-                  <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
-                  <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
-                  <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
-                </div>
-              )}
-
-                {/* NEW PROJECT — discards in-memory work and resets to defaults */}
-                <button style={{width:"100%",padding:"7px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:5,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:6,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
-                {/* Slot grid: each slot is a column with label, SAVE, LOAD stacked */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-                  {SLOTS.map(slot=>{
-                    const has=!!slotData[slot];
-                    const isActive=activeSlot===slot;
-                    const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};
-                    return(
-                      <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"stretch"}}>
-                        <div style={{fontSize:9,letterSpacing:2,fontWeight:600,color:isActive?"#c9a96e":"rgba(210,195,175,0.55)",textAlign:"center",marginBottom:1}}>{slot}{has&&<span style={{...S.menuSlotDot,marginLeft:2}}>●</span>}</div>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600},has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                        <button style={Object.assign({},S.menuSlotBtn,{padding:"6px 0",fontSize:9,letterSpacing:1,fontWeight:600,color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div style={{marginBottom:6}}>
-                <div style={S.menuSaveLabel}>SHARE</div>
-                {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
-                <div style={{display:"grid",gridTemplateColumns:winW>900?"repeat(3,1fr)":"repeat(auto-fill,minmax(36px,1fr))",gap:3}}>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={copyShareLink}>{winW>650?"LINK":"LNK"}</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportJSON}>{winW>650?"EXPORT":"EXP"}</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={()=>importRef.current?.click()}>{winW>650?"IMPORT":"IMP"}</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0})} onClick={exportMIDI}>MIDI</button>
-                  <button style={Object.assign({},S.menuSlotBtn,{padding:winW>900?"8px 0":"4px 0",fontSize:winW>900?9:7,minWidth:0,opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
-                </div>
-                {/* MP3 bounce length — how many passes through the song. */}
-                <div style={{display:"flex",alignItems:"center",gap:3,marginTop:4}}>
-                  <span style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.35)",flexShrink:0}}>MP3 ×</span>
-                  {[1,2,4,8].map(n=>(
-                    <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"3px 0",fontSize:8,fontWeight:600,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.12)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
-                  ))}
-                </div>
-                <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
-              </div>
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:8,marginTop:4}}>
+              <button style={{width:"100%",padding:"9px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:6,border:"1px solid "+(menuOpen?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),borderRadius:7,background:menuOpen?"rgba(232,220,205,0.1)":"transparent",color:menuOpen?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",fontSize:winW>650?10:8,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                onClick={()=>setMenuOpen(o=>!o)}>
+                <span style={{fontSize:11,lineHeight:1}}>☰</span>{winW>650&&<span>PROJECT</span>}
+              </button>
             </div>
           )}
         </div>
@@ -8330,14 +8671,6 @@ export default function Tabula(){
                 {activeSheet==="project"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
-                    {flash&&<div style={S.menuFlash}>{flash}</div>}
-                    {confirmAction&&(
-                      <div style={{display:"flex",alignItems:"center",gap:4,padding:"5px 6px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6,marginBottom:8}}>
-                        <span style={{flex:1,fontSize:8,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
-                        <button style={{padding:"3px 8px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={confirmYes}>YES</button>
-                        <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={confirmNo}>NO</button>
-                      </div>
-                    )}
                     {/* MIXER — per-layer level balancing */}
                     {(()=>{
                       const polyMix=layerParams.synth?.mix??85;
@@ -8383,35 +8716,7 @@ export default function Tabula(){
                         </div>
                       );
                     })()}
-                    {/* NEW PROJECT — discards in-memory work and resets to defaults */}
-                    <button style={{width:"100%",padding:"10px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:6,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:14,transition:"all .12s"}} onClick={newProject}>＋ NEW PROJECT</button>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                      {SLOTS.map(slot=>{const has=!!slotData[slot];const isActive=activeSlot===slot;const activeStyle=isActive?{border:"1px solid #c9a96e",background:"rgba(201,169,110,0.12)",color:"#c9a96e"}:{};return(
-                        <div key={slot} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"center"}}>
-                          <span style={Object.assign({},S.menuSlotName,isActive?{color:"#c9a96e"}:{})}>{slot}{has&&<span style={S.menuSlotDot}>●</span>}</span>
-                          <button style={Object.assign({},S.menuSlotBtn,activeStyle)} onClick={()=>saveSlot(slot)}>SAVE</button>
-                          <button style={Object.assign({},S.menuSlotBtn,has?S.menuSlotBtnLit:{},activeStyle)} onClick={()=>loadSlot(slot)} disabled={!has}>LOAD</button>
-                          <button style={Object.assign({},S.menuSlotBtn,{color:has?"#c98a8a":undefined})} onClick={()=>clearSlot(slot)} disabled={!has}>CLEAR</button>
-                        </div>
-                      );})}
-                    </div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>SHARE</div>
-                    {shareFlash&&<div style={S.menuFlash}>{shareFlash}</div>}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={copyShareLink}>LINK</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportJSON}>EXPORT</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={()=>importRef.current?.click()}>IMPORT</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0"})} onClick={exportMIDI}>MIDI</button>
-                      <button style={Object.assign({},S.menuSlotBtn,{padding:"10px 0",opacity:exporting?0.5:1})} disabled={exporting} onClick={exportMP3}>{exporting?"…":"MP3"}</button>
-                    </div>
-                    {/* MP3 bounce length — how many passes through the song. */}
-                    <div style={{display:"flex",alignItems:"center",gap:5,marginTop:8}}>
-                      <span style={{fontSize:9,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",flexShrink:0}}>MP3 PASSES ×</span>
-                      {[1,2,4,8].map(n=>(
-                        <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:700,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.14)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
-                      ))}
-                    </div>
-                    <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
+                    {projectMenuBody}
                   </div>
                 )}
                 {/* VARY sheet */}
@@ -8659,14 +8964,9 @@ const S={
   mBtnLit:      {border:"1px solid rgba(255,255,255,0.45)",color:"#fff"},
   mBtnDanger:   {border:"1px solid rgba(255,80,80,0.35)",color:"rgba(255,100,100,0.8)"},
   menuDivider:  {height:1,background:"rgba(255,255,255,0.08)",marginBottom:14},
-  menuSaveLabel:{fontSize:IS_MOBILE?7:11,letterSpacing:1,color:"rgba(210,195,175,0.3)",marginBottom:10},
   menuFlash:    {padding:"6px 10px",background:"rgba(122,170,150,0.12)",border:"1px solid rgba(105,240,174,0.25)",borderRadius:5,fontSize:9,color:"#7aaa96",letterSpacing:1,textAlign:"center",marginBottom:10},
   menuSlots:    {display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8},
   menuSlot:     {display:"flex",flexDirection:"column",gap:5,alignItems:"center"},
-  menuSlotName: {fontSize:11,fontWeight:700,color:"rgba(210,195,175,0.5)",letterSpacing:2,position:"relative"},
-  menuSlotDot:  {color:"#7aaa96",fontSize:IS_MOBILE?8:10,marginLeft:2},
-  menuSlotBtn:  {width:"100%",padding:"8px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:IS_MOBILE?8:11,letterSpacing:1,cursor:"pointer",borderRadius:5},
-  menuSlotBtnLit:{border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"},
   // STEP page
   stepPage:     {paddingTop:4,display:"flex",flexDirection:"column",gap:14},
   stepPageHdr:  {display:"flex",alignItems:"center",gap:10},
