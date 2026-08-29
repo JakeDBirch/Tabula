@@ -1070,6 +1070,11 @@ const CLOUD_SLOTS=["C1","C2","C3","C4"];
 // range rather than baking a length in. Hardcoding 6 silently truncated an
 // 8-digit code to something the server would only ever reject.
 const CLOUD_OTP_MIN=6, CLOUD_OTP_MAX=10;
+
+// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
+// menu — the cheapest way to tell a stale cache from a real bug when the only
+// device that reproduces something is one I can't inspect.
+const BUILD_ID="__BUILD__";
 // Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 const CLOUD_MAX_BYTES=6*1024*1024;
@@ -6832,6 +6837,7 @@ export default function Tabula(){
         </div>
         <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
       </div>
+      <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
   );
 

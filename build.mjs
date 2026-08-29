@@ -28,9 +28,14 @@ const compiled = join(tmp, "tabula.js");
 
 // 1. Prepare source — drop the React import line and the `export default`.
 const raw = readFileSync(SRC, "utf8");
+// Stamp the build. BUILD_ID is rendered in the PROJECT menu, so when something
+// misbehaves on a device we can't inspect, the first question — "are you even
+// running the build I just pushed?" — has an answer on screen.
+const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
 const prepped = raw
   .replace(/^import React.*$\n?/m, "")
-  .replace(/^export default function Tabula/m, "function Tabula") +
+  .replace(/^export default function Tabula/m, "function Tabula")
+  .replace(/__BUILD__/g, stamp) +
   '\n\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Tabula));\n';
 writeFileSync(srcStripped, prepped);
 
@@ -124,5 +129,6 @@ ${js}
 `;
 
 writeFileSync(OUT, html);
+console.log("Build stamp: " + stamp);
 const sizeKB = Math.round(html.length / 1024);
 console.log(`Built ${OUT} (${sizeKB}KB)`);
