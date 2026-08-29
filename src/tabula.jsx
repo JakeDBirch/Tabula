@@ -935,7 +935,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
-  loopMode:false, loopBar:-1, varyMode:{synth:false,lead:false,drums:false},
+  loopMode:false, loopBar:-1, loopPat:null, varyMode:{synth:false,lead:false,drums:false},
   songMode:false, songView:false,
 });
 
@@ -2574,6 +2574,10 @@ export default function Tabula(){
   // it. Reading the live page every tick meant the loop crawled around under
   // you, which is what made LOOP feel intertwined with everything else.
   const [loopBar,   setLoopBar]   = useState(-1);
+  // ...and WHICH pattern's bar. A bar index alone was applied to whatever the
+  // song happened to be playing, so looping bar 4 of pattern B while the song
+  // sat in A sounded A's bar 4.
+  const [loopPat,   setLoopPat]   = useState(null);
   const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
@@ -3033,6 +3037,8 @@ export default function Tabula(){
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
   const loopBarR=useRef(-1);
   useEffect(()=>{loopBarR.current=loopBar;},[loopBar]);
+  const loopPatR=useRef(null);
+  useEffect(()=>{loopPatR.current=loopPat;},[loopPat]);
   // FOLLOW only meaningfully applies to the synth track — that's where
   // playId comes from the synth part of the playing pattern. On bass/lead,
   // setting activeId to a synth pat id leaves activePat undefined and
@@ -3173,7 +3179,7 @@ export default function Tabula(){
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
-    varyMode,loopMode,loopBar,
+    varyMode,loopMode,loopBar,loopPat,
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
   });};
@@ -3251,6 +3257,7 @@ export default function Tabula(){
     setVaryMode(normVary(s.varyMode));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopPat(s.loopPat!=null?s.loopPat:null);
   };
   // Stable function references — read live state via the refs above
   const pushHistoryR = useRef(()=>{});
@@ -3309,7 +3316,7 @@ export default function Tabula(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
     const next=Object.assign({},slotData,{[slot]:packProject(snap)});
     setSlotData(next);
     const ok=await storageSet("slots",JSON.stringify(next));
@@ -3366,6 +3373,7 @@ export default function Tabula(){
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopPat(s.loopPat!=null?s.loopPat:null);
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -3431,7 +3439,7 @@ export default function Tabula(){
     setPatterns([p0]);setActivePatId(p0.id);
     // Seed the lead store with a fresh empty pat so switching to MONO after
     setActiveLayer("synth");
-    setLoopMode(false);setLoopBar(-1);setVaryMode({synth:false,lead:false,drums:false});
+    setLoopMode(false);setLoopBar(-1);setLoopPat(null);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongMode(false);setSongView(false);
@@ -3529,9 +3537,13 @@ export default function Tabula(){
   // there until you switch it off. Move it by turning LOOP off and on again
   // from the bar you want. Every LOOP button goes through here.
   const toggleLoop=()=>{
-    if(loopMode){setLoopMode(false);setLoopBar(-1);}
-    else{setLoopMode(true);setLoopBar(curBar);}
+    if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}
+    else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}
   };
+  // Switching to a different pattern while LOOP is on moves the loop with you —
+  // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
+  // which the pin deliberately ignores.
+  useEffect(()=>{ if(loopMode)setLoopPat(activePatternId); },[loopMode,activePatternId]);
   // A pattern that shrank (DEL BAR, or switching to a shorter one) must not
   // leave the loop pinned past the end.
   useEffect(()=>{ if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1)); },[loopMode,loopBar,barCount]);
@@ -4274,7 +4286,7 @@ export default function Tabula(){
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
     vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,loopBar,varyMode,
+    loopMode,loopBar,loopPat,varyMode,
     patterns,activePatId:activePatternId,
     song,songRep,songMode,songView,activeLayer
   });
@@ -4315,6 +4327,7 @@ export default function Tabula(){
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopPat(s.loopPat!=null?s.loopPat:null);
     setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4667,7 +4680,7 @@ export default function Tabula(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -4855,6 +4868,8 @@ export default function Tabula(){
       if(songPosR.current<0||songPosR.current>=seq.length)songPosR.current=0;
       curPat=allPats.find(p=>p.id===seq[songPosR.current]);
     }
+    // LOOP pins the pattern you were LOOKING AT, not the one the song is on.
+    if(inLoop){const lp=allPats.find(p=>p.id===loopPatR.current);if(lp)curPat=lp;}
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
     // LOOP cycles ONE bar of whatever pattern is playing (the song's current
