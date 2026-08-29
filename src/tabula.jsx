@@ -1070,6 +1070,7 @@ const CLOUD_SLOTS=["C1","C2","C3","C4"];
 // range rather than baking a length in. Hardcoding 6 silently truncated an
 // 8-digit code to something the server would only ever reject.
 const CLOUD_OTP_MIN=6, CLOUD_OTP_MAX=10;
+const CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
@@ -1099,6 +1100,7 @@ const cloudSay=err=>{
   if(t.includes("rate limit"))            return "EMAIL LIMIT REACHED — TRY LATER";
   if(t.includes("expired")||(t.includes("invalid")&&t.includes("token"))) return "WRONG OR EXPIRED CODE";
   if(t.includes("invalid api key"))       return "CLOUD MISCONFIGURED — TELL CLAUDE";
+  if(t.includes("could not find the table")||t.includes("schema cache")||t.includes("does not exist")) return "CLOUD TABLE MISSING — RUN THE SETUP SQL";
   if(t.includes("permission")||t.includes("row-level")||t.includes("rls")) return "CLOUD REFUSED THE WRITE";
   if(t.includes("failed to fetch")||t.includes("networkerror")||t.includes("load failed")) return "CLOUD UNREACHABLE";
   if(t.includes("signed out"))            return "SIGNED OUT";
@@ -3317,9 +3319,13 @@ export default function Tabula(){
   // sit longer — you can't act on a rate-limit message you didn't finish
   // reading.
   const showFlash=(msg,tone)=>{
-    setFlash(msg);setFlashTone(tone==="warn"?"warn":"ok");
+    const warn=tone==="warn";
+    setFlash(msg);setFlashTone(warn?"warn":"ok");
     clearTimeout(flashTmr.current);
-    flashTmr.current=setTimeout(()=>setFlash(""),tone==="warn"?4200:1800);
+    // Successes fade; warnings STAY until tapped. A failure message is often the
+    // only diagnosis there is, and one that clears itself after a few seconds is
+    // one you finish reading too late to act on — or to screenshot.
+    if(!warn)flashTmr.current=setTimeout(()=>setFlash(""),1800);
   };
 
   // ── Undo / Redo history ──────────────────────────────────────────────────
@@ -4577,7 +4583,7 @@ export default function Tabula(){
 
   const cloudSignIn=async()=>{
     const email=cloudEmail.trim();
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){showFlash("ENTER AN EMAIL","warn");return;}
+    if(!CLOUD_EMAIL_RE.test(email)){showFlash("ENTER AN EMAIL","warn");return;}
     const [ok]=await cloudRun("SENDING",()=>cloudSendCode(email));
     if(!ok)return;
     setCloudStage("code");setCloudCode("");
@@ -6846,6 +6852,16 @@ export default function Tabula(){
                     disabled={!!cloudBusy} onClick={()=>cloudEnterCode()}>SIGN IN</button>
                 </div>
               )}
+              {/* A code is good for an hour, so asking for a new email is the wrong
+                  and rate-limited way back to the box when one is already sitting
+                  in your inbox. */}
+              {cloudStage==="email"&&(
+                <button style={{alignSelf:"flex-start",padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}
+                  onClick={()=>{
+                    if(!CLOUD_EMAIL_RE.test(cloudEmail.trim())){showFlash("ENTER YOUR EMAIL FIRST","warn");return;}
+                    setCloudCode("");setCloudStage("code");
+                  }}>ALREADY HAVE A CODE?</button>
+              )}
               {cloudStage==="code"&&(
                 <div style={{display:"flex",gap:10}}>
                   <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
@@ -6948,9 +6964,14 @@ export default function Tabula(){
         <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get
               when something server-side refuses, and half a sentence is no use. */}
-          <div style={{maxWidth:"min(92vw,420px)",padding:"8px 14px",borderRadius:8,background:"rgba(26,24,20,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.2,lineHeight:1.5,fontWeight:600,textAlign:"center",
+          <div onClick={()=>{if(flashTone==="warn"){clearTimeout(flashTmr.current);setFlash("");}}}
+            style={{maxWidth:"min(92vw,420px)",padding:"8px 14px",borderRadius:8,background:"rgba(26,24,20,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.2,lineHeight:1.5,fontWeight:600,textAlign:"center",
+            pointerEvents:flashTone==="warn"?"auto":"none",cursor:flashTone==="warn"?"pointer":"default",
             border:"1px solid "+(flashTone==="warn"?"rgba(214,166,90,0.5)":"rgba(105,240,174,0.3)"),
-            color:flashTone==="warn"?"#d6a65a":"#7aaa96"}}>{flash||shareFlash}</div>
+            color:flashTone==="warn"?"#d6a65a":"#7aaa96"}}>
+            {flash||shareFlash}
+            {flashTone==="warn"&&flash&&<span style={{display:"block",marginTop:4,fontSize:8,letterSpacing:1,opacity:0.55,fontWeight:500}}>TAP TO DISMISS</span>}
+          </div>
         </div>
       )}
 
