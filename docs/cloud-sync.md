@@ -45,6 +45,8 @@ create table if not exists public.projects (
 alter table public.projects enable row level security;
 
 -- One policy, all four verbs: you can only ever touch your own rows.
+-- Dropped first so the whole block is safe to re-run.
+drop policy if exists "own rows only" on public.projects;
 create policy "own rows only" on public.projects
   for all
   using      (auth.uid() = user_id)
@@ -121,6 +123,25 @@ dots. Each filled slot shows how stale it is (`NOW` / `20m` / `4h` / `3d`).
 The service worker skips `/auth/v1/` and `/rest/v1/` entirely; they're
 cross-origin GETs that would otherwise land in its cache-first branch and serve
 a stale project list forever.
+
+## Two operational limits worth knowing
+
+Neither is a bug in Tabula, and both look exactly like "cloud sync is broken".
+
+**The built-in email sender allows 2 messages per hour.** Supabase's default SMTP
+is explicitly a demo service. Signing in on the desktop and then the phone is
+two emails — right at the ceiling. A mistyped code costs nothing (verifying
+doesn't re-send), but tapping RESEND does. If you hit it, wait an hour or wire
+up a real sender: Authentication → Emails → SMTP Settings, point it at any
+provider (Resend, Postmark, SES), and the limit becomes configurable — it starts
+at 30/hour. Worth doing only if the 2/hour actually bites; sign-ins are rare
+because the refresh token keeps a device signed in indefinitely.
+
+**Free-plan projects pause after 7 days of no activity.** A paused project
+refuses connections, so SAVE/LOAD fail until you hit Restore in the dashboard
+(paused projects stay restorable for 90 days). For an app you might not open for
+a fortnight this is the thing most likely to trip you up. The fix is a dashboard
+click; the alternative is a paid plan, which is not worth it for four slots.
 
 ## What v1 deliberately isn't
 
