@@ -1061,8 +1061,8 @@ const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value
 // design (it grants only what row-level security allows), so it belongs in the
 // source, not in a secret. While they're blank CLOUD_ON is false, the cloud
 // section of the project menu doesn't render, and nothing touches the network.
-const CLOUD_URL="";
-const CLOUD_KEY="";
+const CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";
+const CLOUD_KEY="sb_publishable_pNOJu33uSeJ38sCEr1urNg_UtOExYNU";
 const CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);
 const CLOUD_SLOTS=["C1","C2","C3","C4"];
 // Refuse to upload past this. A project carrying recorded samples runs to

@@ -404,7 +404,7 @@ return false;};var storageSet=/*#__PURE__*/function(){var _ref=_asyncToGenerator
 // design (it grants only what row-level security allows), so it belongs in the
 // source, not in a secret. While they're blank CLOUD_ON is false, the cloud
 // section of the project menu doesn't render, and nothing touches the network.
-var CLOUD_URL="";var CLOUD_KEY="";var CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);var CLOUD_SLOTS=["C1","C2","C3","C4"];// Refuse to upload past this. A project carrying recorded samples runs to
+var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publishable_pNOJu33uSeJ38sCEr1urNg_UtOExYNU";var CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);var CLOUD_SLOTS=["C1","C2","C3","C4"];// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
