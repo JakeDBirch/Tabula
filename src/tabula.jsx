@@ -1086,6 +1086,24 @@ const cloudErr=async res=>{
   try{const j=await res.json();m=j.error_description||j.msg||j.message||j.error||"";}catch(e){}
   return m||("HTTP "+res.status);
 };
+// Supabase's wording is written for a server log, not for a strip of text on a
+// phone ("For security purposes, you can only request this after 47 seconds.").
+// Map the ones that actually come back to something you can act on, and pass
+// anything unrecognised through in full rather than truncating it — a message
+// cut off mid-sentence is worse than no message.
+const cloudSay=err=>{
+  const raw=String((err&&err.message)||err||"");
+  const wait=raw.match(/after (\d+) seconds?/i);
+  if(wait)return "WAIT "+wait[1]+"s BEFORE ASKING AGAIN";
+  const t=raw.toLowerCase();
+  if(t.includes("rate limit"))            return "EMAIL LIMIT REACHED — TRY LATER";
+  if(t.includes("expired")||(t.includes("invalid")&&t.includes("token"))) return "WRONG OR EXPIRED CODE";
+  if(t.includes("invalid api key"))       return "CLOUD MISCONFIGURED — TELL CLAUDE";
+  if(t.includes("permission")||t.includes("row-level")||t.includes("rls")) return "CLOUD REFUSED THE WRITE";
+  if(t.includes("failed to fetch")||t.includes("networkerror")||t.includes("load failed")) return "CLOUD UNREACHABLE";
+  if(t.includes("signed out"))            return "SIGNED OUT";
+  return raw.toUpperCase();
+};
 // PostgREST honours Prefer:return=minimal with an empty 201, which res.json()
 // would choke on — read as text and only parse when there's something there.
 const cloudBody=async res=>{const t=await res.text();if(!t)return null;try{return JSON.parse(t);}catch(e){return null;}};
@@ -2691,6 +2709,7 @@ export default function Tabula(){
   // wrong one. Resets to null on page reload (not persisted).
   const [activeSlot, setActiveSlot] = useState(null);
   const [flash,     setFlash]     = useState("");
+  const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
   const seqTrackRef=useRef(null);
@@ -3293,7 +3312,15 @@ export default function Tabula(){
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  const showFlash=msg=>{setFlash(msg);clearTimeout(flashTmr.current);flashTmr.current=setTimeout(()=>setFlash(""),1800);};
+  // tone: "ok" (green) or "warn" (amber). Everything used to render green,
+  // so a failure looked like a success in the corner of your eye. Warnings also
+  // sit longer — you can't act on a rate-limit message you didn't finish
+  // reading.
+  const showFlash=(msg,tone)=>{
+    setFlash(msg);setFlashTone(tone==="warn"?"warn":"ok");
+    clearTimeout(flashTmr.current);
+    flashTmr.current=setTimeout(()=>setFlash(""),tone==="warn"?4200:1800);
+  };
 
   // ── Undo / Redo history ──────────────────────────────────────────────────
   const historyR = useRef([]);
@@ -4516,7 +4543,7 @@ export default function Tabula(){
     try{return [true,await fn()];}
     catch(err){
       console.error("cloud "+label+" failed",err);
-      showFlash(String((err&&err.message)||err).toUpperCase().slice(0,38));
+      showFlash(cloudSay(err),"warn");
       return [false,null];
     }
     finally{setCloudBusy("");}
@@ -4550,7 +4577,7 @@ export default function Tabula(){
 
   const cloudSignIn=async()=>{
     const email=cloudEmail.trim();
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){showFlash("ENTER AN EMAIL");return;}
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){showFlash("ENTER AN EMAIL","warn");return;}
     const [ok]=await cloudRun("SENDING",()=>cloudSendCode(email));
     if(!ok)return;
     setCloudStage("code");setCloudCode("");
@@ -4561,7 +4588,7 @@ export default function Tabula(){
     // Length is whatever the project's "Email OTP Length" is set to (Supabase
     // allows 6..10 and doesn't report it), so the client only checks that
     // something plausible was typed and lets the server be the judge.
-    if(code.length<CLOUD_OTP_MIN){showFlash("ENTER THE CODE");return;}
+    if(code.length<CLOUD_OTP_MIN){showFlash("ENTER THE CODE","warn");return;}
     const [ok,sess]=await cloudRun("VERIFY",()=>cloudVerify(cloudEmail.trim(),code));
     if(!ok)return;
     setCloudSess(sess);cloudSessR.current=sess;
@@ -4584,7 +4611,7 @@ export default function Tabula(){
   // whole point of the sparse codec: a 32-bar project is ~244KB, not ~2.4MB.
   const doCloudSave=async slot=>{
     const payload=JSON.stringify(getShareState(true));
-    if(payload.length>CLOUD_MAX_BYTES){showFlash("TOO LARGE FOR CLOUD");return;}
+    if(payload.length>CLOUD_MAX_BYTES){showFlash("TOO LARGE FOR CLOUD","warn");return;}
     const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),slot,null,payload));
     if(!ok)return;
     setCloudSlotActive(slot);showFlash("CLOUD SAVED "+slot);
@@ -4593,9 +4620,9 @@ export default function Tabula(){
   const doCloudLoad=async slot=>{
     const [ok,raw]=await cloudRun("LOADING",async()=>cloudGetSlot(await cloudTokenR.current(),slot));
     if(!ok)return;
-    if(!raw){showFlash("CLOUD "+slot+" IS EMPTY");cloudLoadRows();return;}
+    if(!raw){showFlash("CLOUD "+slot+" IS EMPTY","warn");cloudLoadRows();return;}
     let parsed=null;
-    try{parsed=JSON.parse(raw);}catch(e){showFlash("CLOUD "+slot+" UNREADABLE");return;}
+    try{parsed=JSON.parse(raw);}catch(e){showFlash("CLOUD "+slot+" UNREADABLE","warn");return;}
     applyShareState(parsed);
     setActiveSlot(null);setCloudSlotActive(slot);
     showFlash("CLOUD LOADED "+slot);
@@ -6889,8 +6916,12 @@ export default function Tabula(){
           "UNDO" / "MIDI EXPORTED" need somewhere to land whether or not the
           menu is open, so it floats above everything (the modal included). */}
       {(flash||shareFlash)&&(
-        <div style={{position:"fixed",top:10,left:0,right:0,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
-          <div style={{padding:"7px 14px",borderRadius:8,background:"rgba(26,24,20,0.96)",border:"1px solid rgba(105,240,174,0.3)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.5,color:"#7aaa96",fontWeight:600}}>{flash||shareFlash}</div>
+        <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          {/* Wraps rather than clipping: these carry the only diagnosis you get
+              when something server-side refuses, and half a sentence is no use. */}
+          <div style={{maxWidth:"min(92vw,420px)",padding:"8px 14px",borderRadius:8,background:"rgba(26,24,20,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.2,lineHeight:1.5,fontWeight:600,textAlign:"center",
+            border:"1px solid "+(flashTone==="warn"?"rgba(214,166,90,0.5)":"rgba(105,240,174,0.3)"),
+            color:flashTone==="warn"?"#d6a65a":"#7aaa96"}}>{flash||shareFlash}</div>
         </div>
       )}
 
