@@ -404,7 +404,9 @@ const _mapProjectPats=(st,fn)=>{
     if(!p||!p.parts)return p;
     const parts={};
     for(const l of Object.keys(p.parts))parts[l]=fn(p.parts[l]);
-    return Object.assign({},p,{parts});
+    // Parts carry their own widths, so the pattern's bar count is whatever the
+    // longest one turned out to be — never a stored value that drifted.
+    return syncPatBars(Object.assign({},p,{parts}));
   });
   if(Array.isArray(st.pats))o.pats=st.pats.map(fn);
   if(Array.isArray(st.drumPats))o.drumPats=st.drumPats.map(fn);
@@ -449,6 +451,23 @@ const normSongRep=(r)=>{
   return out;
 };
 const PART_LAYERS=["synth","lead","drums"];
+// Parts inside a pattern have INDEPENDENT lengths: a part's bar count is its
+// own allocated width, nothing pattern-level. Adding a bar to the drums must
+// not touch the synth.
+// Reads a PACKED part too (sparse grid, width in `_w`) — the codec maps parts
+// before the pattern's bar count is re-derived, and measuring a packed grid as
+// COLS wide would quietly rewrite every multi-bar pattern to one bar on save.
+const partWidth=part=>(part&&typeof part._w==="number"&&part._w>0)?part._w:gridW(part&&part.grid);
+const partBars=part=>Math.max(1,Math.min(MAX_BARS,Math.round(partWidth(part)/COLS)||1));
+// The pattern's own `bars` is the LONGEST part — it's what the master clock
+// uses for the cycle everything re-synchronises on, and what the song page
+// draws as a slot's length. Re-derive it after any part changes shape.
+const syncPatBars=(p)=>{
+  if(!p||!p.parts)return p;
+  let b=1;
+  for(const l of PART_LAYERS)if(p.parts[l])b=Math.max(b,partBars(p.parts[l]));
+  return p.bars===b?p:Object.assign({},p,{bars:b});
+};
 const mkSynthPart=(w=COLS)=>({grid:mkGrid(w),durs:mkDurs(w),params:defaultStepParams(w),gridLen:Math.min(COLS,w),speedMult:1});
 const mkDrumPart =(w=COLS)=>({grid:Array.from({length:DRUM_ROWS},()=>new Array(w).fill(false)),
   vel:mkDrumVel(w),rat:mkDrumRat(w),gridLen:Math.min(COLS,w),speedMult:1,
@@ -464,7 +483,7 @@ const mkPattern=(name,bars=1)=>{
 // exactly that shape, and `mergeLayer` folds an edited library back into the
 // unified store — so the existing call sites keep working while the model
 // underneath is a single list. Delete these once the call sites are rewritten.
-const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pat.name,bars:pat.bars});
+const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pat.name,bars:partBars(pat.parts[layer])});
 const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
 const _stripView=(v)=>{const o=Object.assign({},v);delete o.id;delete o.name;delete o.bars;return o;};
 const mergeLayer=(patterns,layer,next)=>{
@@ -473,16 +492,15 @@ const mergeLayer=(patterns,layer,next)=>{
   for(const p of (patterns||[])){
     if(!seen.has(p.id))continue;                 // dropped from the view = pattern deleted
     const v=(next||[]).find(x=>x.id===p.id);
-    const nb=Math.max(1,Math.min(MAX_BARS,v.bars||p.bars||1));
-    const np=Object.assign({},p,{name:v.name!=null?v.name:p.name,bars:nb});
-    np.parts=Object.assign({},p.parts,{[layer]:_stripView(v)});
-    // A bar-count change has to carry ALL THREE parts with it, or the untouched
-    // parts read as undefined past the old width at playback time.
-    if(nb!==p.bars){
-      for(const l of PART_LAYERS)
-        np.parts[l]=_stripView(resizePatBars(Object.assign({},np.parts[l],{bars:nb}),nb));
-    }
-    out.push(np);
+    const np=Object.assign({},p,{name:v.name!=null?v.name:p.name});
+    // A bar-count change touches ONLY this layer's part. The other two keep
+    // their own lengths and loop to fill. (The view normally arrives already
+    // resized — setEditPatBars goes through resizePatBars — so this is just a
+    // guard for a view that moved `bars` without moving its lanes.)
+    const nb=Math.max(1,Math.min(MAX_BARS,v.bars||partBars(v)));
+    np.parts=Object.assign({},p.parts,{[layer]:_stripView(
+      nb!==partBars(v)?resizePatBars(Object.assign({},v,{bars:nb}),nb):v)});
+    out.push(syncPatBars(np));
   }
   for(const v of (next||[])){                    // a new id in the view = a new pattern
     if((patterns||[]).some(p=>p.id===v.id))continue;
@@ -490,7 +508,7 @@ const mergeLayer=(patterns,layer,next)=>{
     const base=mkPattern(v.name,bars);
     base.id=v.id;
     base.parts[layer]=_stripView(v);
-    out.push(base);
+    out.push(syncPatBars(base));
   }
   return out;
 };
@@ -555,23 +573,24 @@ const unifyLegacyProject=(s)=>{
     if(!pat){
       if(patterns.length>=MAX_PATTERNS)continue;        // more sections than slots — drop the tail
       const src={};
-      let bars=1;
       for(const l of PART_LAYERS){
         let found=t[l]!=null?libs[l].find(x=>x&&x.id===t[l]):null;
         // Drum saves are positional; bring them to the current voice order
         // before they become a part, or the kit remaps silently.
         if(found&&l==="drums")found=migrateDrumPatRows(found);
-        if(found)bars=Math.max(bars,patBars(normalizePatBars(found)));
         src[l]=found||null;
       }
-      pat=mkPattern(String.fromCharCode(65+patterns.length),bars);
+      pat=mkPattern(String.fromCharCode(65+patterns.length));
+      // Each legacy layer looped at its own length, so each part keeps the bar
+      // count it actually had — padding them all out to the longest would turn
+      // a 1-bar drum loop into three bars of silence.
       for(const l of PART_LAYERS){
         if(!src[l])continue;
-        const np=normalizePatBars(resizePatBars(src[l],bars));
-        const part=Object.assign({},np);
+        const part=Object.assign({},normalizePatBars(src[l]));
         delete part.id;delete part.name;delete part.bars;
         pat.parts[l]=part;
       }
+      pat=syncPatBars(pat);
       byKey.set(k,pat);patterns.push(pat);
     }
     if(i>=0)song[i]=pat.id;
@@ -672,13 +691,14 @@ const resizePatBars=(p,bars)=>{
     }
     out.motion=m;
   }
-  void isDrum;void grew;
-  // A part keeps ITS OWN length when the pattern gets longer. That's what makes
-  // a part loop to fill: the scheduler wraps each part's cursor at its gridLen
-  // inside a pattern that is bars*COLS long, so a 1-bar drum part repeats
-  // through a 4-bar pattern instead of playing one bar and going silent.
-  // Snapping gridLen out to the full width on every ADD BAR is what killed it.
-  out.gridLen=Math.max(1,Math.min(w,p.gridLen||w));
+  void isDrum;
+  // Growing a PART gives it a real, empty, independently editable bar — its
+  // length grows with its allocation. Loop-to-fill does not come from a part
+  // being shorter than its own allocation (that would mean the editor shows
+  // you empty bars while you hear earlier ones repeating); it comes from parts
+  // inside a pattern having DIFFERENT bar counts, so a 1-bar drum part repeats
+  // through a 4-bar pattern and its editor honestly shows one bar.
+  out.gridLen=grew?w:Math.max(1,Math.min(w,p.gridLen||w));
   return out;
 };
 // Writing into a bar past the end of a part would be silent under that rule, so
@@ -3577,11 +3597,11 @@ export default function Tabula(){
   const removeBar = ()=>setEditPatBars(patBars(editPat)-1);
   // Copy the visible bar into a NEW bar appended right after it — the fastest
   // way to build a long pattern (lay down bar 1, extend, vary).
-  // DUP BAR inserts a copy of the visible bar right after it — in ALL THREE
-  // parts. Doing it through a per-layer view was wrong: mergeLayer would notice
-  // the bar count changed and resize the other two parts, which appends a blank
-  // bar at the END rather than inserting one, so the parts slid out of
-  // alignment with each other.
+  // DUP BAR inserts a copy of the visible bar right after it, in the part
+  // you're LOOKING AT — parts have independent lengths, so lengthening the
+  // drums has no business lengthening the synth. Still routed through
+  // setPatterns rather than a per-layer view: the view path would let
+  // mergeLayer's resize path run and it's clearer to write the part directly.
   const duplicateBar=()=>{
     if(!editPat)return;
     const n=patBars(editPat);
@@ -3614,26 +3634,21 @@ export default function Tabula(){
       delete out.bars;                       // bars lives on the pattern
       return out;
     };
+    const L=activeLayer;
     setPatterns(ps=>ps.map(p=>{
       if(p.id!==editPat.id)return p;
-      const parts={};
-      for(const l of PART_LAYERS)parts[l]=growPart(p.parts[l]);
-      return Object.assign({},p,{bars:n+1,parts});
+      const parts=Object.assign({},p.parts,{[L]:growPart(p.parts[L])});
+      return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the copy, for the same reason ADD BAR does.
     setFollowSeq(false);
     setBarPage(curBar+1);
   };
-  // DOUBLE — the pattern becomes twice as long and the new half is a copy of
-  // the old one, so "two nearly identical passes with small variations" is one
-  // button instead of DUP BAR n times. Like DUP BAR this has to go through
-  // setPatterns and touch all three parts at once.
-  //
-  // Every part's DATA is copied, but only a part whose loop already spanned the
-  // whole pattern gets its gridLen doubled. A shorter part was looping to fill
-  // and still is — doubling its length would turn a 1-bar drum loop into a
-  // half-empty 8-bar part. Its copied data sits past its loop end, inert, in
-  // the same way notes past a trimmed length always have.
+  // ×2 — the part you're looking at becomes twice as long and its new half is
+  // a copy of the old one, so "two nearly identical passes with small
+  // variations" is one button instead of DUP BAR n times. Like DUP BAR it acts
+  // on the ACTIVE part only: a 1-bar drum loop under a doubled melody doesn't
+  // want doubling, it wants to keep looping to fill.
   const doublePattern=()=>{
     if(!editPat)return;
     const n=patBars(editPat);
@@ -3662,11 +3677,11 @@ export default function Tabula(){
       delete out.bars;
       return out;
     };
+    const L=activeLayer;
     setPatterns(ps=>ps.map(p=>{
       if(p.id!==editPat.id)return p;
-      const parts={};
-      for(const l of PART_LAYERS)parts[l]=dbl(p.parts[l]);
-      return Object.assign({},p,{bars:n*2,parts});
+      const parts=Object.assign({},p.parts,{[L]:dbl(p.parts[L])});
+      return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the top of the copy — that's the half you're about to vary.
     setFollowSeq(false);
@@ -4887,7 +4902,7 @@ export default function Tabula(){
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
       if(!part)return null;
-      return Object.assign({},part,{id:curPat.id,name:curPat.name,bars:curPat.bars});
+      return Object.assign({},part,{id:curPat.id,name:curPat.name,bars:partBars(part)});
     };
 
     // ── PART SCHEDULING — each part runs its own cursor inside the pattern,
