@@ -516,6 +516,84 @@ const mkPattern=(name,bars=1)=>{
 // unified store — so the existing call sites keep working while the model
 // underneath is a single list. Delete these once the call sites are rewritten.
 const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pat.name,bars:partBars(pat.parts[layer])});
+
+// ── Collapse a song into one pattern ─────────────────────────────────────────
+// Writes the arrangement out flat: each song entry contributes its own bars,
+// and every part inside it is copied at the length it actually SOUNDS. A 1-bar
+// drum part sitting under a 4-bar entry gets written out four times, exactly as
+// loop-to-fill plays it — so five 1-bar patterns arranged over 8 bars become one
+// 8-bar pattern that sounds identical, and can then be edited as a whole.
+//
+// Only sound while every part runs at 1×. At any other speedMult a part
+// advances at its own rate against the master clock, so "column i of the song"
+// stops being "column i of the part" and this 1:1 copy would silently play
+// something other than what was arranged. collapseBlockers reports that (and
+// the two size limits) so the caller can refuse rather than quietly mangle it.
+const COLLAPSE_LAYERS=["synth","lead","drums"];
+const collapseBlockers=(entries,patternCount)=>{
+  const bad=[];
+  const totalBars=entries.reduce((n,e)=>n+patBars(e),0);
+  if(!entries.length)              bad.push("THE SONG IS EMPTY");
+  if(totalBars>MAX_BARS)           bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);
+  if(patternCount>=MAX_PATTERNS)   bad.push("PATTERN LIST IS FULL");
+  const speeds=new Set();
+  for(const e of entries)for(const l of COLLAPSE_LAYERS){
+    const m=(e.parts&&e.parts[l]&&e.parts[l].speedMult)||1;
+    if(m!==1)speeds.add(m);
+  }
+  if(speeds.size)                  bad.push("SET EVERY PART TO 1× FIRST");
+  return {blockers:bad,totalBars};
+};
+const collapseEntries=(entries,name)=>{
+  const totalBars=entries.reduce((n,e)=>n+patBars(e),0);
+  const out=mkPattern(name,totalBars);
+  for(const layer of COLLAPSE_LAYERS){
+    const dst=out.parts[layer];
+    const isDrum=layer==="drums";
+    let off=0;                                   // destination column
+    for(const e of entries){
+      const src=e.parts[layer];
+      const span=patBars(e)*COLS;                // absolute columns this entry occupies
+      const w=partWidth(src);
+      // The part loops over its OWN gridLen, which is what makes a short part
+      // fill a longer entry — the same modulo the scheduler applies.
+      const len=Math.max(1,Math.min(w,src.gridLen||w));
+      const vel=src.vel&&(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w));
+      const rat=src.rat&&(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w));
+      for(let i=0;i<span;i++){
+        const from=i%len, to=off+i;
+        for(let r=0;r<src.grid.length;r++){
+          dst.grid[r][to]=!!src.grid[r][from];
+          if(!isDrum&&src.durs&&dst.durs)dst.durs[r][to]=src.durs[r][from]||1;
+          if(isDrum){
+            if(vel&&dst.vel)dst.vel[r][to]=vel[r][from];
+            if(rat&&dst.rat)dst.rat[r][to]=rat[r][from];
+          }
+        }
+        if(!isDrum&&src.params&&dst.params)dst.params[to]=Object.assign({},src.params[from]);
+        if(isDrum&&src.motion&&typeof src.motion==="object"){
+          dst.motion=dst.motion||{};
+          for(const k of Object.keys(src.motion)){
+            const lane=src.motion[k];if(!Array.isArray(lane))continue;
+            if(!dst.motion[k])dst.motion[k]=lane.map(()=>new Array(totalBars*COLS).fill(null));
+            for(let r=0;r<lane.length;r++)dst.motion[k][r][to]=(lane[r]&&lane[r][from]!=null)?lane[r][from]:null;
+          }
+        }
+      }
+      off+=span;
+    }
+    dst.gridLen=totalBars*COLS;                  // the whole thing plays
+    dst.speedMult=1;
+  }
+  // The drum bus settings aren't per-column, so they come from the first entry.
+  const first=entries[0];
+  if(first&&first.parts.drums){
+    const d=first.parts.drums;
+    Object.assign(out.parts.drums,{mix:JSON.parse(JSON.stringify(d.mix||defaultDrumMix())),
+      vRhythm:d.vRhythm||0,vVelocity:d.vVelocity||0,vo:d.vo?d.vo.slice():DRUM_ORDER_V});
+  }
+  return syncPatBars(out);
+};
 const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
 const _stripView=(v)=>{const o=Object.assign({},v);delete o.id;delete o.name;delete o.bars;return o;};
 const mergeLayer=(patterns,layer,next)=>{
@@ -4164,11 +4242,22 @@ export default function Tabula(){
           show all 64 at once. Starts at two rows and grows a row at a time as
           you fill it, up to the full 64. */}
       <div style={{width:"100%",maxWidth:640,flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
-        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,display:"flex",gap:8}}>
+        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
           <span>SONG</span>
-          <span style={{color:"rgba(210,195,175,0.3)",letterSpacing:1,fontWeight:500}}>
+          <span style={{flex:1,minWidth:0,color:"rgba(210,195,175,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
           </span>
+          {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
+              selected chip, this acts on the arrangement. */}
+          {songSeq.length>0&&(
+            <div role="button" aria-label="Collapse the song into one pattern"
+              onClick={()=>collapseSong()}
+              style={{flexShrink:0,height:24,padding:"0 9px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
+                fontSize:8,letterSpacing:1,fontWeight:600,lineHeight:1,userSelect:"none",cursor:"pointer",
+                border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.6)"}}>
+              ⤓ COLLAPSE
+            </div>
+          )}
         </div>
         <div style={{width:"100%",display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
           {Array.from({length:_songRows},(_,row)=>(
@@ -6186,6 +6275,19 @@ export default function Tabula(){
     const np=mkPattern(pickSym(patterns.map(x=>x.name)));
     setPatterns(ps=>[...ps,np]);
     setActivePatId(np.id);
+  };
+  // Flatten the arrangement into a single editable pattern. Non-destructive:
+  // the song and its patterns are left exactly as they are, and the collapsed
+  // copy is added and selected — so it's a fork, not a conversion.
+  const collapseSong=()=>{
+    const entries=songSeq.map(id=>patterns.find(p2=>p2.id===id)).filter(Boolean);
+    const {blockers,totalBars}=collapseBlockers(entries,patterns.length);
+    if(blockers.length){showFlash("CAN'T COLLAPSE — "+blockers[0],"warn");return;}
+    pushHistory();
+    const np=collapseEntries(entries,pickSym(patterns.map(x=>x.name)));
+    setPatterns(ps=>[...ps,np]);
+    setActivePatId(np.id);
+    showFlash("COLLAPSED "+entries.length+" STEPS INTO "+totalBars+" BARS");
   };
   const dupPatternId=(id)=>{
     if(patterns.length>=MAX_PATTERNS)return;
