@@ -67,7 +67,29 @@ const IS_MOBILE = (()=>{
   } catch(e) { return false; }
 })();
 const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#c9a96e","#6c9ad6","#7aaa96","#c4b07a","#a09ec4"];
-const SLOTS=["S1","S2","S3","S4"];
+// A saved project is {id,name,updated,data}. `id` is opaque and permanent —
+// it's what SAVE/LOAD/CLEAR address and, in the cloud table, what the `slot`
+// column holds; `name` is only ever a label and is free to change. This
+// replaced four fixed S1–S4 slots: naming a project is how you find it again,
+// and a fixed grid of slots forced a filing decision on every save.
+const PROJ_MAX=24; // localStorage is ~5MB and a 32-bar project packs to ~250KB
+const mkProjId=()=>"p"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+// Names are display-only, so the only rules are "not empty" and "fits a row".
+const cleanName=n=>String(n||"").replace(/\s+/g," ").trim().slice(0,40);
+// "Untitled 3" — first number not already taken.
+const nextName=(list,stem)=>{
+  const base=stem||"Untitled";
+  for(let i=1;i<999;i++){const n=base+" "+i;if(!list.some(p=>p.name===n))return n;}
+  return base;
+};
+// Old saves lived under one key as {S1:packed|null,...}. Carry them across as
+// four named projects rather than dropping them on the floor.
+const migrateSlotLibrary=raw=>{
+  let o=null;try{o=JSON.parse(raw);}catch(e){return null;}
+  if(Array.isArray(o))return o;                       // already the new shape
+  if(!o||typeof o!=="object")return null;
+  return ["S1","S2","S3","S4"].filter(k=>o[k]).map(k=>({id:mkProjId(),name:k,updated:Date.now(),data:o[k]}));
+};
 // Per-pattern playback speed (the label is the speed FACTOR; `mult` scales step
 // duration, so faster = smaller mult). Ordered fastest → slowest.
 const SPEED_OPTS=[
@@ -1064,7 +1086,6 @@ const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value
 const CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";
 const CLOUD_KEY="sb_publishable_pNOJu33uSeJ38sCEr1urNg_UtOExYNU";
 const CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);
-const CLOUD_SLOTS=["C1","C2","C3","C4"];
 // Supabase's "Email OTP Length" is a per-project setting spanning 6..10 digits,
 // and nothing in the API reports which one is in force — so accept the whole
 // range rather than baking a length in. Hardcoding 6 silently truncated an
@@ -2705,11 +2726,14 @@ export default function Tabula(){
   const [followSeq, setFollowSeq] = useState(false);
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
-  const [slotData,  setSlotData]  = useState({S1:null,S2:null,S3:null,S4:null});
-  // Most recently loaded/saved slot — shown highlighted so the user can see
-  // which slot's project is currently in memory and avoid overwriting the
-  // wrong one. Resets to null on page reload (not persisted).
-  const [activeSlot, setActiveSlot] = useState(null);
+  const [library,   setLibrary]   = useState([]); // local projects, newest-saved first
+  // Which project row is highlighted. The selection is the target of SAVE /
+  // LOAD / CLEAR — one set of buttons acting on whatever is picked, rather than
+  // three buttons per slot. Kept per tab so switching back doesn't lose it.
+  const [selDevId,  setSelDevId]  = useState(null);
+  const [selCloudId,setSelCloudId]= useState(null);
+  const [libTab,    setLibTab]    = useState("device"); // "device" | "cloud"
+  const [nameDraft, setNameDraft] = useState("");       // the selected row's name, editable
   const [flash,     setFlash]     = useState("");
   const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
@@ -2726,12 +2750,11 @@ export default function Tabula(){
   const [cloudSess,  setCloudSess]  = useState(null);
   const cloudSessR = useRef(null);
   useEffect(()=>{cloudSessR.current=cloudSess;},[cloudSess]);
-  const [cloudRows,  setCloudRows]  = useState({});      // slot → {name,updated_at}
+  const [cloudLib,   setCloudLib]   = useState([]);      // [{slot,name,updated_at}] — `slot` is the project id
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudCode,  setCloudCode]  = useState("");
   const [cloudStage, setCloudStage] = useState("email"); // "email" (ask) → "code" (a code is in flight)
   const [cloudBusy,  setCloudBusy]  = useState("");      // label of the request in flight, "" when idle
-  const [cloudSlotActive, setCloudSlotActive] = useState(null); // last cloud slot saved/loaded
   const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
   // VARY is per-layer now — each layer toggles independently. Normalizer
@@ -3284,7 +3307,12 @@ export default function Tabula(){
   },[drumMix]);
 
   useEffect(()=>{
-    (async()=>{const v=await storageGet("slots");if(v)try{setSlotData(JSON.parse(v));}catch(e){}})();
+    (async()=>{
+      const v=await storageGet("projects")||await storageGet("slots");
+      if(!v)return;
+      const list=migrateSlotLibrary(v);
+      if(list&&list.length)setLibrary(list);
+    })();
   },[]);
 
   // Restore the cloud session on mount. Only the refresh token is persisted —
@@ -3490,21 +3518,33 @@ export default function Tabula(){
     return()=>document.removeEventListener("keydown",onKey);
   });
 
-  const doSave=async slot=>{
+  const doSave=async(id,name)=>{
     // Reverb knobs + drumLevel were previously not in this snap → they never
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
     const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
-    const next=Object.assign({},slotData,{[slot]:packProject(snap)});
-    setSlotData(next);
-    const ok=await storageSet("slots",JSON.stringify(next));
-    if(ok){setActiveSlot(slot);showFlash("SAVED "+slot);}
-    else showFlash("SAVE FAILED — TOO LARGE"); // storage quota (recorded samples can be big)
+    const nm=cleanName(name)||nextName(library);
+    const pid=id||mkProjId();
+    const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
+    // Replace in place if it already exists (so a re-save keeps its position),
+    // otherwise put the new one at the top.
+    const next=library.some(p=>p.id===pid)
+      ? library.map(p=>p.id===pid?row:p)
+      : [row,...library];
+    setLibrary(next);setSelDevId(pid);setNameDraft(nm);
+    const ok=await storageSet("projects",JSON.stringify(next));
+    if(ok)showFlash("SAVED "+nm);
+    else{
+      // Quota. Put the library back so the list matches what's on disk.
+      setLibrary(library);
+      showFlash("SAVE FAILED — DEVICE FULL","warn"); // recorded samples can be big
+    }
   };
   // ── Load-time sanitizers ──────────────────────────────────────────────────
-  const doLoad=slot=>{
-    let s=slotData[slot];if(!s)return;
+  const doLoad=id=>{
+    const row=library.find(p=>p.id===id);if(!row)return;
+    let s=row.data;
     setBarPage(0);
     s=unifyLegacyProject(migrateLegacyBass(unpackProject(s)));
     const reroll=s.ver!==PROJ_VER; // old/un-versioned project → refresh icons to the current scheme
@@ -3566,8 +3606,8 @@ export default function Tabula(){
     setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
     setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
 
-    setActiveSlot(slot);
-    showFlash("LOADED "+slot);
+    setSelDevId(row.id);setNameDraft(row.name);
+    showFlash("LOADED "+row.name);
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
     // doLoad so the previous kit's samples are cleared before the new fetch.
     // Legacy saves carry activeKit:"synth" (or nothing) which is no longer a
@@ -3576,34 +3616,53 @@ export default function Tabula(){
     loadKit(savedKit).catch(()=>{});
     restoreUserSamples(s);
   };
-  const saveSlot=slot=>{
-    if(slotData[slot]){setConfirmAction({type:"save",slot,label:"OVERWRITE "+slot+"?"});return;}
-    doSave(slot);
+  const doClear=async id=>{
+    const row=library.find(p=>p.id===id);
+    const next=library.filter(p=>p.id!==id);
+    setLibrary(next);
+    if(selDevId===id){setSelDevId(null);setNameDraft("");}
+    const ok=await storageSet("projects",JSON.stringify(next));
+    showFlash(ok?"DELETED "+(row?row.name:""):"DELETE FAILED");
   };
-  const loadSlot=slot=>{
-    if(!slotData[slot])return;
-    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
-    if(hasContent){setConfirmAction({type:"load",slot,label:"LOAD "+slot+"? UNSAVED WORK LOST"});return;}
-    doLoad(slot);
+  // ── The one set of buttons ───────────────────────────────────────────────
+  // Each acts on the highlighted row. SAVE writes the live project into it
+  // under whatever the name field says, so renaming is just editing the name
+  // and saving; with nothing selected it creates a new project instead.
+  const hasWork=()=>pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
+  const saveProject=()=>{
+    const nm=cleanName(nameDraft);
+    const sel=library.find(p=>p.id===selDevId);
+    if(sel){
+      setConfirmAction({type:"save",id:sel.id,name:nm||sel.name,
+        label:"OVERWRITE "+(nm&&nm!==sel.name?sel.name+" → "+nm:sel.name)+"?"});
+      return;
+    }
+    if(library.length>=PROJ_MAX){showFlash("LIBRARY FULL — DELETE ONE","warn");return;}
+    // A name already in use would give you two identical rows to choose between.
+    if(nm&&library.some(p=>p.name===nm)){showFlash("NAME ALREADY USED","warn");return;}
+    doSave(null,nm);
   };
-  // ── Clear a saved slot back to empty ────────────────────────────────────
-  // Frees the slot so it shows as available again (unlike NEW, which resets the
-  // live working state but leaves slots untouched). Destructive → confirm first.
-  const clearSlot=slot=>{
-    if(!slotData[slot])return; // already empty
-    setConfirmAction({type:"clear",slot,label:"CLEAR "+slot+"?"});
+  const loadProject=()=>{
+    const sel=library.find(p=>p.id===selDevId);
+    if(!sel){showFlash("PICK A PROJECT FIRST","warn");return;}
+    if(hasWork()){setConfirmAction({type:"load",id:sel.id,label:"LOAD "+sel.name+"? UNSAVED WORK LOST"});return;}
+    doLoad(sel.id);
   };
-  const doClear=async slot=>{
-    const next=Object.assign({},slotData,{[slot]:null});
-    setSlotData(next);
-    if(activeSlot===slot)setActiveSlot(null); // drop the highlight — slot is empty now
-    const ok=await storageSet("slots",JSON.stringify(next));
-    showFlash(ok?"CLEARED "+slot:"CLEAR FAILED");
+  const clearProject=()=>{
+    const sel=library.find(p=>p.id===selDevId);
+    if(!sel){showFlash("PICK A PROJECT FIRST","warn");return;}
+    setConfirmAction({type:"clear",id:sel.id,label:"DELETE "+sel.name+"?"});
+  };
+  // Picking a row fills the name field, so SAVE targets what you can see.
+  const selectProject=(tab,row)=>{
+    if(tab==="cloud"){setSelCloudId(row?row.slot:null);}
+    else{setSelDevId(row?row.id:null);}
+    setNameDraft(row?(row.name||""):"");
   };
   // ── New project ─────────────────────────────────────────────────────────
   // Reset everything to default initial state. Save slots are NOT cleared
   // (that's persistent storage outside the session). Confirms before
-  // discarding any in-memory work, mirroring loadSlot's hasContent guard.
+  // discarding any in-memory work, mirroring loadProject's hasWork guard.
   const doNew=()=>{
     // Stop playback if running — discarding work mid-play would otherwise leave
     // the scheduler ticking against fresh state.
@@ -3647,7 +3706,7 @@ export default function Tabula(){
       }
     }
     setPatternDrag(null);
-    setActiveSlot(null);
+    setSelDevId(null);setSelCloudId(null);setNameDraft("");
     setPage("edit");
     // Stop any in-flight sample recording + clear stored samples.
     if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}
@@ -3667,13 +3726,13 @@ export default function Tabula(){
   };
   const confirmYes=()=>{
     if(!confirmAction)return;
-    if(confirmAction.type==="save")doSave(confirmAction.slot);
-    else if(confirmAction.type==="load")doLoad(confirmAction.slot);
-    else if(confirmAction.type==="clear")doClear(confirmAction.slot);
+    if(confirmAction.type==="save")doSave(confirmAction.id,confirmAction.name);
+    else if(confirmAction.type==="load")doLoad(confirmAction.id);
+    else if(confirmAction.type==="clear")doClear(confirmAction.id);
     else if(confirmAction.type==="new")doNew();
-    else if(confirmAction.type==="csave")doCloudSave(confirmAction.slot);
-    else if(confirmAction.type==="cload")doCloudLoad(confirmAction.slot);
-    else if(confirmAction.type==="cclear")doCloudClear(confirmAction.slot);
+    else if(confirmAction.type==="csave")doCloudSave(confirmAction.id,confirmAction.name);
+    else if(confirmAction.type==="cload")doCloudLoad(confirmAction.id);
+    else if(confirmAction.type==="cclear")doCloudClear(confirmAction.id);
     setConfirmAction(null);
   };
   const confirmNo=()=>setConfirmAction(null);
@@ -4570,14 +4629,14 @@ export default function Tabula(){
   const cloudLoadRows=async()=>{
     const [ok,rows]=await cloudRun("LIST",async()=>cloudList(await cloudTokenR.current()));
     if(!ok)return;
-    const bySlot={};(rows||[]).forEach(r=>{bySlot[r.slot]=r;});
-    setCloudRows(bySlot);
+    // Newest first, so the thing you were last working on is at the top.
+    setCloudLib((rows||[]).slice().sort((a,b)=>Date.parse(b.updated_at||0)-Date.parse(a.updated_at||0)));
   };
   // An account appearing (sign-in, or the mount restore) pulls the slot list so
   // the menu shows what's up there. Signing out empties it.
   useEffect(()=>{
     if(!CLOUD_ON)return;
-    if(cloudSess)cloudLoadRows();else setCloudRows({});
+    if(cloudSess)cloudLoadRows();else{setCloudLib([]);setSelCloudId(null);}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[cloudSess&&cloudSess.uid]);
 
@@ -4615,46 +4674,60 @@ export default function Tabula(){
   // Cloud save/load reuse getShareState / applyShareState — the same packed
   // payload a file export or a share link carries, samples included. That's the
   // whole point of the sparse codec: a 32-bar project is ~244KB, not ~2.4MB.
-  const doCloudSave=async slot=>{
+  // The cloud table's `slot` column carries the project id and `name` the
+  // label, which is why moving off fixed slots needed no schema change.
+  const doCloudSave=async(id,name)=>{
     const payload=JSON.stringify(getShareState(true));
     if(payload.length>CLOUD_MAX_BYTES){showFlash("TOO LARGE FOR CLOUD","warn");return;}
-    const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),slot,null,payload));
+    const nm=cleanName(name)||nextName(cloudLib.map(r=>({name:r.name})));
+    const pid=id||mkProjId();
+    const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),pid,nm,payload));
     if(!ok)return;
-    setCloudSlotActive(slot);showFlash("CLOUD SAVED "+slot);
+    setSelCloudId(pid);setNameDraft(nm);showFlash("SAVED "+nm+" TO CLOUD");
     cloudLoadRows();
   };
-  const doCloudLoad=async slot=>{
-    const [ok,raw]=await cloudRun("LOADING",async()=>cloudGetSlot(await cloudTokenR.current(),slot));
+  const doCloudLoad=async id=>{
+    const row=cloudLib.find(r=>r.slot===id);
+    const label=row?row.name:id;
+    const [ok,raw]=await cloudRun("LOADING",async()=>cloudGetSlot(await cloudTokenR.current(),id));
     if(!ok)return;
-    if(!raw){showFlash("CLOUD "+slot+" IS EMPTY","warn");cloudLoadRows();return;}
+    if(!raw){showFlash(label+" IS EMPTY","warn");cloudLoadRows();return;}
     let parsed=null;
-    try{parsed=JSON.parse(raw);}catch(e){showFlash("CLOUD "+slot+" UNREADABLE","warn");return;}
+    try{parsed=JSON.parse(raw);}catch(e){showFlash(label+" IS UNREADABLE","warn");return;}
     applyShareState(parsed);
-    setActiveSlot(null);setCloudSlotActive(slot);
-    showFlash("CLOUD LOADED "+slot);
+    setSelDevId(null);setSelCloudId(id);setNameDraft(label);
+    showFlash("LOADED "+label);
   };
-  const doCloudClear=async slot=>{
-    const [ok]=await cloudRun("CLEARING",async()=>cloudDelSlot(await cloudTokenR.current(),slot));
+  const doCloudClear=async id=>{
+    const row=cloudLib.find(r=>r.slot===id);
+    const [ok]=await cloudRun("DELETING",async()=>cloudDelSlot(await cloudTokenR.current(),id));
     if(!ok)return;
-    if(cloudSlotActive===slot)setCloudSlotActive(null);
-    showFlash("CLOUD CLEARED "+slot);
+    if(selCloudId===id){setSelCloudId(null);setNameDraft("");}
+    showFlash("DELETED "+(row?row.name:""));
     cloudLoadRows();
   };
-  // Guarded entry points — same confirm rules as the local slots, routed
-  // through the one confirmAction bar so there's a single yes/no in the menu.
-  const cloudSaveSlot=slot=>{
-    if(cloudRows[slot]){setConfirmAction({type:"csave",slot,label:"OVERWRITE CLOUD "+slot+"?"});return;}
-    doCloudSave(slot);
+  // Same three buttons, same rules — only the store differs.
+  const cloudSave=()=>{
+    const nm=cleanName(nameDraft);
+    const sel=cloudLib.find(r=>r.slot===selCloudId);
+    if(sel){
+      setConfirmAction({type:"csave",id:sel.slot,name:nm||sel.name,
+        label:"OVERWRITE "+(nm&&nm!==sel.name?sel.name+" → "+nm:sel.name)+" IN CLOUD?"});
+      return;
+    }
+    if(nm&&cloudLib.some(r=>r.name===nm)){showFlash("NAME ALREADY USED","warn");return;}
+    doCloudSave(null,nm);
   };
-  const cloudLoadSlot=slot=>{
-    if(!cloudRows[slot])return;
-    const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
-    if(hasContent){setConfirmAction({type:"cload",slot,label:"LOAD CLOUD "+slot+"? UNSAVED WORK LOST"});return;}
-    doCloudLoad(slot);
+  const cloudLoad=()=>{
+    const sel=cloudLib.find(r=>r.slot===selCloudId);
+    if(!sel){showFlash("PICK A PROJECT FIRST","warn");return;}
+    if(hasWork()){setConfirmAction({type:"cload",id:sel.slot,label:"LOAD "+sel.name+"? UNSAVED WORK LOST"});return;}
+    doCloudLoad(sel.slot);
   };
-  const cloudClearSlot=slot=>{
-    if(!cloudRows[slot])return;
-    setConfirmAction({type:"cclear",slot,label:"CLEAR CLOUD "+slot+"?"});
+  const cloudDelete=()=>{
+    const sel=cloudLib.find(r=>r.slot===selCloudId);
+    if(!sel){showFlash("PICK A PROJECT FIRST","warn");return;}
+    setConfirmAction({type:"cclear",id:sel.slot,label:"DELETE "+sel.name+" FROM CLOUD?"});
   };
 
   // ── Song export helpers (shared by MIDI + MP3) ────────────────────────────
@@ -6783,15 +6856,16 @@ export default function Tabula(){
   // Slot column — the same shape for a local slot and a cloud slot, so the two
   // banks read as one control with two homes. `caption` is the cloud's staleness
   // readout ("4h"); local slots have nothing useful to put there.
-  const mSlotCol=(key,label,has,accent,caption,onSave,onLoad,onClear,isActive)=>(
-    <div key={key} style={{display:"flex",flexDirection:"column",gap:3,alignItems:"stretch"}}>
-      <div style={{fontSize:10,letterSpacing:2,fontWeight:700,color:isActive?accent:"rgba(210,195,175,0.5)",textAlign:"center"}}>
-        {label}{has&&<span style={{color:accent,fontSize:9,marginLeft:2}}>●</span>}
-      </div>
-      <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",height:9,marginBottom:1}}>{caption||""}</div>
-      <button style={Object.assign({},mBtn,isActive?{border:"1px solid "+accent,color:accent,background:accent+"1f"}:{})} onClick={()=>onSave()}>SAVE</button>
-      <button style={Object.assign({},mBtn,has?mBtnLit:{},isActive&&has?{border:"1px solid "+accent,color:accent,background:accent+"1f"}:{})} onClick={()=>onLoad()} disabled={!has}>LOAD</button>
-      <button style={Object.assign({},mBtn,{color:has?"#c98a8a":undefined})} onClick={()=>onClear()} disabled={!has}>CLEAR</button>
+  // One row of the project list. The whole row is the hit target — selecting is
+  // the only thing a row does, because SAVE / LOAD / CLEAR live once, below.
+  const mProjRow=(key,name,when,accent,selected,onPick)=>(
+    <div key={key} onClick={onPick}
+      style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:6,cursor:"pointer",
+        border:"1px solid "+(selected?accent:"rgba(200,185,165,0.10)"),
+        background:selected?accent+"1f":"transparent"}}>
+      <span style={{flex:1,minWidth:0,fontSize:11,letterSpacing:0.5,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+        color:selected?accent:"rgba(232,224,213,0.8)"}}>{name}</span>
+      {when&&<span style={{flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)"}}>{when}</span>}
     </div>
   );
   const projectMenuBody=(
@@ -6807,80 +6881,125 @@ export default function Tabula(){
       {/* NEW PROJECT — discards in-memory work and resets to defaults */}
       <button style={{width:"100%",padding:"11px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:7,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>newProject()}>＋ NEW PROJECT</button>
 
-      {/* ── Local save slots ── */}
+      {/* ── Projects ─────────────────────────────────────────────────────────
+          A named list, not fixed slots. Pick a row and the one set of buttons
+          below acts on it; with nothing picked, SAVE creates a new project.
+          Renaming is just editing the name field and saving, because the row —
+          not its name — is the thing being addressed. DEVICE and CLOUD are the
+          same list against different stores, so there is one set of controls
+          rather than one per bank. */}
       <div>
-        <div style={mSecLbl}>THIS DEVICE</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-          {SLOTS.map(slot=>mSlotCol(slot,slot,!!slotData[slot],"#c9a96e","",
-            ()=>saveSlot(slot),()=>loadSlot(slot),()=>clearSlot(slot),activeSlot===slot))}
-        </div>
-      </div>
-
-      {/* ── Cloud slots — the same four slots, on the account instead of this
-          device. Hidden entirely until the Supabase project is configured. ── */}
-      {CLOUD_ON&&(
-        <div>
-          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-            <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>CLOUD{cloudBusy?" · "+cloudBusy:""}</div>
-            {cloudSess&&(
-              <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
-            )}
-          </div>
-          {!cloudSess&&(
-            <div style={{display:"flex",flexDirection:"column",gap:7}}>
-              <div style={{fontSize:9,lineHeight:1.5,color:"rgba(210,195,175,0.45)"}}>
-                {cloudStage==="code"
-                  ?"Enter the code sent to "+cloudEmail.trim()+"."
-                  :"Sign in with your email to save projects to the cloud and pick them up on another device. We'll send a one-time code — no password."}
-              </div>
-              {cloudStage==="email"?(
-                <div style={{display:"flex",gap:6}}>
-                  <input style={mInput} type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                    placeholder="you@example.com" value={cloudEmail}
-                    onChange={e=>setCloudEmail(e.target.value)}
-                    onKeyDown={e=>{if(e.key==="Enter")cloudSignIn();}}/>
-                  <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
-                    disabled={!!cloudBusy} onClick={()=>cloudSignIn()}>SEND CODE</button>
-                </div>
-              ):(
-                <div style={{display:"flex",gap:6}}>
-                  <input style={Object.assign({},mInput,{letterSpacing:6,textAlign:"center"})} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={CLOUD_OTP_MAX}
-                    placeholder="––––––" value={cloudCode}
-                    onChange={e=>setCloudCode(e.target.value.replace(/\D/g,""))}
-                    onKeyDown={e=>{if(e.key==="Enter")cloudEnterCode();}}/>
-                  <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
-                    disabled={!!cloudBusy} onClick={()=>cloudEnterCode()}>SIGN IN</button>
-                </div>
-              )}
-              {/* A code is good for an hour, so asking for a new email is the wrong
-                  and rate-limited way back to the box when one is already sitting
-                  in your inbox. */}
-              {cloudStage==="email"&&(
-                <button style={{alignSelf:"flex-start",padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}
-                  onClick={()=>{
-                    if(!CLOUD_EMAIL_RE.test(cloudEmail.trim())){showFlash("ENTER YOUR EMAIL FIRST","warn");return;}
-                    setCloudCode("");setCloudStage("code");
-                  }}>ALREADY HAVE A CODE?</button>
-              )}
-              {cloudStage==="code"&&(
-                <div style={{display:"flex",gap:10}}>
-                  <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
-                  <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>{setCloudStage("email");setCloudCode("");}}>USE A DIFFERENT EMAIL</button>
-                </div>
-              )}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>PROJECTS{cloudBusy?" · "+cloudBusy:""}</div>
+          {CLOUD_ON&&(
+            <div style={{display:"flex",gap:0,border:"1px solid rgba(200,185,165,0.15)",borderRadius:6,overflow:"hidden"}}>
+              {[["device","DEVICE","#c9a96e"],["cloud","CLOUD",C_CLOUD]].map(([k,lbl,col])=>(
+                <button key={k} onClick={()=>setLibTab(k)}
+                  style={{padding:"4px 10px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:8,letterSpacing:1.5,fontWeight:700,
+                    background:libTab===k?col+"22":"transparent",color:libTab===k?col:"rgba(210,195,175,0.4)"}}>{lbl}</button>
+              ))}
             </div>
           )}
-          {cloudSess&&(
+        </div>
+
+        {libTab==="cloud"&&!cloudSess?(
+          /* Signed out — the sign-in form stands in for the list. */
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            <div style={{fontSize:9,lineHeight:1.5,color:"rgba(210,195,175,0.45)"}}>
+              {cloudStage==="code"
+                ?"Enter the code sent to "+cloudEmail.trim()+"."
+                :"Sign in with your email to keep projects in the cloud and pick them up on another device. We'll send a one-time code — no password."}
+            </div>
+            {cloudStage==="email"?(
+              <div style={{display:"flex",gap:6}}>
+                <input style={mInput} type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                  placeholder="you@example.com" value={cloudEmail}
+                  onChange={e=>setCloudEmail(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter")cloudSignIn();}}/>
+                <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
+                  disabled={!!cloudBusy} onClick={()=>cloudSignIn()}>SEND CODE</button>
+              </div>
+            ):(
+              <div style={{display:"flex",gap:6}}>
+                <input style={Object.assign({},mInput,{letterSpacing:6,textAlign:"center"})} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={CLOUD_OTP_MAX}
+                  placeholder="––––––" value={cloudCode}
+                  onChange={e=>setCloudCode(e.target.value.replace(/\D/g,""))}
+                  onKeyDown={e=>{if(e.key==="Enter")cloudEnterCode();}}/>
+                <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
+                  disabled={!!cloudBusy} onClick={()=>cloudEnterCode()}>SIGN IN</button>
+              </div>
+            )}
+            {/* A code is good for an hour, so asking for a new email is the wrong
+                and rate-limited way back to the box when one is already in your
+                inbox. */}
+            {cloudStage==="email"&&(
+              <button style={{alignSelf:"flex-start",padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}
+                onClick={()=>{
+                  if(!CLOUD_EMAIL_RE.test(cloudEmail.trim())){showFlash("ENTER YOUR EMAIL FIRST","warn");return;}
+                  setCloudCode("");setCloudStage("code");
+                }}>ALREADY HAVE A CODE?</button>
+            )}
+            {cloudStage==="code"&&(
+              <div style={{display:"flex",gap:10}}>
+                <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
+                <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>{setCloudStage("email");setCloudCode("");}}>USE A DIFFERENT EMAIL</button>
+              </div>
+            )}
+          </div>
+        ):(()=>{
+          const onCloud=libTab==="cloud";
+          const accent=onCloud?C_CLOUD:"#c9a96e";
+          const rows=onCloud
+            ? cloudLib.map(r=>({key:r.slot,id:r.slot,name:r.name||"Untitled",when:cloudAgo(r.updated_at)}))
+            : library.map(r=>({key:r.id,id:r.id,name:r.name,when:r.updated?cloudAgo(new Date(r.updated).toISOString()):""}));
+          const selId=onCloud?selCloudId:selDevId;
+          const picked=rows.some(r=>r.id===selId);
+          return(
             <>
-              <div style={{fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",marginBottom:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-                {CLOUD_SLOTS.map(slot=>mSlotCol(slot,slot,!!cloudRows[slot],C_CLOUD,cloudRows[slot]?cloudAgo(cloudRows[slot].updated_at):"",
-                  ()=>cloudSaveSlot(slot),()=>cloudLoadSlot(slot),()=>cloudClearSlot(slot),cloudSlotActive===slot))}
+              {onCloud&&cloudSess&&(
+                <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+                  <span style={{flex:1,minWidth:0,fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</span>
+                  <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
+                </div>
+              )}
+              {/* The list. Scrolls once it outgrows the box rather than pushing
+                  the buttons off a phone screen. */}
+              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:210,overflowY:"auto",marginBottom:8,
+                border:"1px solid rgba(200,185,165,0.08)",borderRadius:8,padding:4}}>
+                {rows.length===0
+                  ?<div style={{padding:"18px 10px",textAlign:"center",fontSize:9,lineHeight:1.6,letterSpacing:1,color:"rgba(210,195,175,0.3)"}}>
+                     NO PROJECTS {onCloud?"IN THE CLOUD":"ON THIS DEVICE"}<br/>NAME ONE BELOW AND SAVE
+                   </div>
+                  :rows.map(r=>mProjRow(r.key,r.name,r.when,accent,selId===r.id,
+                      ()=>selectProject(libTab,selId===r.id?null
+                        :(onCloud?cloudLib.find(x=>x.slot===r.id):library.find(x=>x.id===r.id)))))}
+              </div>
+              {/* Name field: the selected row's name, editable. Saving with it
+                  changed is how a project gets renamed. */}
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                <input style={mInput} type="text" maxLength={40} spellCheck={false}
+                  placeholder={picked?"Name":"Name a new project"} value={nameDraft}
+                  onChange={e=>setNameDraft(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter")(onCloud?cloudSave:saveProject)();}}/>
+                {picked&&(
+                  <button style={{flexShrink:0,padding:"9px 12px",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                    onClick={()=>{selectProject(libTab,null);}}>DESELECT</button>
+                )}
+              </div>
+              {/* One set of buttons. SAVE always works (new, or into the pick);
+                  LOAD and CLEAR need something picked. */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                <button style={Object.assign({},mBtn,{border:"1px solid "+accent+"88",color:accent})}
+                  onClick={()=>(onCloud?cloudSave:saveProject)()}>{picked?"SAVE":"SAVE NEW"}</button>
+                <button style={Object.assign({},mBtn,picked?mBtnLit:{opacity:0.4})}
+                  onClick={()=>(onCloud?cloudLoad:loadProject)()}>LOAD</button>
+                <button style={Object.assign({},mBtn,{color:picked?"#c98a8a":undefined,opacity:picked?1:0.4})}
+                  onClick={()=>(onCloud?cloudDelete:clearProject)()}>DELETE</button>
               </div>
             </>
-          )}
-        </div>
-      )}
+          );
+        })()}
+      </div>
 
       {/* ── Share / export ── */}
       <div>

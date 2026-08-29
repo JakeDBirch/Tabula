@@ -76,8 +76,8 @@ Notes on the shape:
   as `getShareState()` produced it — the same bytes a file export or share link
   carries. Round-tripping it through `jsonb` would re-key and re-order it for no
   benefit, and the app never queries inside it.
-- `name` is unused in v1. It's there so a future "named projects" list doesn't
-  need a migration.
+- **`name` is the project's label and `slot` its permanent id.** Renaming
+  rewrites `name` only, so it never orphans the row or its data.
 
 ### 3. Put the code in **both** email templates
 
@@ -135,9 +135,11 @@ expire in an hour, so on every launch the app trades the refresh token for a
 fresh pair; if that fails — revoked, expired — it drops the session and shows
 signed-out rather than leaving a dead account on screen.
 
-**Storage** is four cloud slots (C1–C4) sitting beside the four local ones
-(S1–S4), same SAVE / LOAD / CLEAR, same confirm-before-overwrite rules. The
-payload is `getShareState(true)` — the full project including recorded samples.
+**Storage** is a named project list, the same one the DEVICE tab shows, against
+the account instead of the device. The `slot` column holds the project's opaque
+id and `name` its label — which is why moving off fixed slots needed no schema
+change. The payload is `getShareState(true)` — the full project including
+recorded samples.
 This is only viable because of the sparse codec: a 32-bar project is ~244KB
 packed against ~2.4MB dense. Anything over 6MB (`CLOUD_MAX_BYTES`) is refused
 before it leaves the device, so a phone on cellular doesn't find out mid-save.
@@ -176,5 +178,7 @@ click; the alternative is a paid plan, which is not worth it for four slots.
 - **Not conflict-aware.** Last write to a slot wins. With one person on two
   devices and a manual save, the `updated_at` caption is enough to see which end
   is newer before you overwrite it.
-- **Not a project browser.** Four slots, no names. The `name` column is there
-  for when that changes.
+- **Not quota'd.** Nothing yet limits how many projects an account can store.
+  That's the hook the premium gate goes on, and it belongs in an RLS policy
+  rather than in the app — the publishable key is in the client, so a
+  client-side check gates nothing.
