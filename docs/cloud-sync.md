@@ -79,12 +79,20 @@ Notes on the shape:
 - `name` is unused in v1. It's there so a future "named projects" list doesn't
   need a migration.
 
-### 3. Put the code in the magic-link email
+### 3. Put the code in **both** email templates
 
-Dashboard → Authentication → Emails → **Magic Link** template. Supabase's
-default template only has the `{{ .ConfirmationURL }}` link, and Tabula asks for
-a **six-digit code** instead (a link would open a new browser tab, which on iOS
-means leaving the home-screen PWA). Add the token to the template body:
+Dashboard → Authentication → Emails. Supabase's default templates carry only the
+`{{ .ConfirmationURL }}` link, and Tabula asks for a **six-digit code** instead
+(a link would open a new browser tab, which on iOS means leaving the home-screen
+PWA). Whichever variable is present decides what gets sent: `{{ .Token }}` sends
+a code, `{{ .ConfirmationURL }}` sends a link.
+
+**Two templates need it, not one.** The OTP endpoint signs a user *up* when they
+don't exist yet, and a signup sends **Confirm signup** — not **Magic Link**. Edit
+Magic Link alone and a first-ever sign-in gets the stock "Confirm your email
+address" link instead of a code, which is a confusing dead end (the link
+redirects to the default Site URL, `http://localhost:3000`, and the browser
+refuses to connect). So paste this into **Confirm signup** *and* **Magic Link**:
 
 ```html
 <h2>Tabula sign-in</h2>
@@ -92,6 +100,11 @@ means leaving the home-screen PWA). Add the token to the template body:
 <p style="font-size:28px;letter-spacing:6px"><b>{{ .Token }}</b></p>
 <p>It expires in an hour.</p>
 ```
+
+While you're there, set Authentication → URL Configuration → **Site URL** to
+`https://jakedbirch.github.io/Tabula`. Nothing in this flow follows a link, but
+it stops any stray confirmation link pointing at a localhost server that isn't
+running.
 
 Optional but worth it: Authentication → Providers → Email → turn **Confirm
 email** on and leave "Enable email provider" on; turn **off** any other provider
