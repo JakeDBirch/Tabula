@@ -76,10 +76,20 @@ const PROJ_MAX=24; // localStorage is ~5MB and a 32-bar project packs to ~250KB
 const mkProjId=()=>"p"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 // Names are display-only, so the only rules are "not empty" and "fits a row".
 const cleanName=n=>String(n||"").replace(/\s+/g," ").trim().slice(0,40);
-// "Untitled 3" — first number not already taken.
-const nextName=(list,stem)=>{
-  const base=stem||"Untitled";
-  for(let i=1;i<999;i++){const n=base+" "+i;if(!list.some(p=>p.name===n))return n;}
+// Every new project arrives already named. "Untitled 3" is a label you have to
+// replace before it means anything; a two-word name is one you can recognise in
+// a list a month later, and it's editable the moment it appears — so nobody has
+// to invent a name before they're allowed to save. Words are chosen to suit the
+// instrument: warm, dim, mechanical.
+const NAME_A=["Amber","Ashen","Bright","Copper","Dusty","Faint","Glass","Golden","Hollow","Idle","Ivory","Level","Loose","Marble","Mellow","Night","Open","Paper","Quiet","Rough","Slow","Soft","Still","Tidal","Velvet","Warm","Wide","Wound"];
+const NAME_B=["Anchor","Bloom","Cadence","Chamber","Current","Drift","Ember","Field","Groove","Harbour","Lantern","Loom","Machine","Meridian","Motion","Orbit","Parade","Pattern","Pulse","Ravine","Ribbon","Signal","Stutter","Thread","Tide","Vessel","Window"];
+const randomName=taken=>{
+  const used=new Set((taken||[]).map(n=>String(n||"")));
+  const pick=()=>NAME_A[Math.random()*NAME_A.length|0]+" "+NAME_B[Math.random()*NAME_B.length|0];
+  for(let i=0;i<40;i++){const n=pick();if(!used.has(n))return n;} // 756 combinations
+  // Everything collided (a very full library) — number it instead.
+  const base=pick();
+  for(let i=2;i<999;i++){if(!used.has(base+" "+i))return base+" "+i;}
   return base;
 };
 // Old saves lived under one key as {S1:packed|null,...}. Carry them across as
@@ -2733,7 +2743,7 @@ export default function Tabula(){
   const [selDevId,  setSelDevId]  = useState(null);
   const [selCloudId,setSelCloudId]= useState(null);
   const [libTab,    setLibTab]    = useState("device"); // "device" | "cloud"
-  const [nameDraft, setNameDraft] = useState("");       // the selected row's name, editable
+  const [nameDraft, setNameDraft] = useState(()=>randomName([])); // the selected row's name, editable
   const [flash,     setFlash]     = useState("");
   const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
@@ -3311,7 +3321,12 @@ export default function Tabula(){
       const v=await storageGet("projects")||await storageGet("slots");
       if(!v)return;
       const list=migrateSlotLibrary(v);
-      if(list&&list.length)setLibrary(list);
+      if(list&&list.length){
+        setLibrary(list);
+        // The first name was generated before the library was on disk-read;
+        // reroll it now that we know what's already in there.
+        setNameDraft(n=>list.some(p=>p.name===n)?randomName(list.map(p=>p.name)):n);
+      }
     })();
   },[]);
 
@@ -3524,7 +3539,7 @@ export default function Tabula(){
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
     const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
-    const nm=cleanName(name)||nextName(library);
+    const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
     // Replace in place if it already exists (so a re-save keeps its position),
@@ -3653,11 +3668,16 @@ export default function Tabula(){
     if(!sel){showFlash("PICK A PROJECT FIRST","warn");return;}
     setConfirmAction({type:"clear",id:sel.id,label:"DELETE "+sel.name+"?"});
   };
+  // Names already in use on whichever side we're looking at — so a generated
+  // name never lands on one that's taken.
+  const takenNames=tab=>(tab==="cloud"?cloudLib.map(r=>r.name):library.map(p=>p.name));
   // Picking a row fills the name field, so SAVE targets what you can see.
+  // Dropping the selection puts a fresh generated name there instead of an
+  // empty box: there's always something to save under, and it's always editable.
   const selectProject=(tab,row)=>{
     if(tab==="cloud"){setSelCloudId(row?row.slot:null);}
     else{setSelDevId(row?row.id:null);}
-    setNameDraft(row?(row.name||""):"");
+    setNameDraft(row?(row.name||""):randomName(takenNames(tab)));
   };
   // ── New project ─────────────────────────────────────────────────────────
   // Reset everything to default initial state. Save slots are NOT cleared
@@ -3706,7 +3726,8 @@ export default function Tabula(){
       }
     }
     setPatternDrag(null);
-    setSelDevId(null);setSelCloudId(null);setNameDraft("");
+    setSelDevId(null);setSelCloudId(null);
+    setNameDraft(randomName(library.map(p=>p.name)));
     setPage("edit");
     // Stop any in-flight sample recording + clear stored samples.
     if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}
@@ -4679,7 +4700,7 @@ export default function Tabula(){
   const doCloudSave=async(id,name)=>{
     const payload=JSON.stringify(getShareState(true));
     if(payload.length>CLOUD_MAX_BYTES){showFlash("TOO LARGE FOR CLOUD","warn");return;}
-    const nm=cleanName(name)||nextName(cloudLib.map(r=>({name:r.name})));
+    const nm=cleanName(name)||randomName(cloudLib.map(r=>r.name));
     const pid=id||mkProjId();
     const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),pid,nm,payload));
     if(!ok)return;
@@ -6981,10 +7002,14 @@ export default function Tabula(){
                   placeholder={picked?"Name":"Name a new project"} value={nameDraft}
                   onChange={e=>setNameDraft(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Enter")(onCloud?cloudSave:saveProject)();}}/>
-                {picked&&(
-                  <button style={{flexShrink:0,padding:"9px 12px",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                    onClick={()=>{selectProject(libTab,null);}}>DESELECT</button>
-                )}
+                {picked
+                  ?<button style={{flexShrink:0,padding:"9px 12px",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                     onClick={()=>{selectProject(libTab,null);}}>DESELECT</button>
+                  /* Nothing picked → the field holds a generated name, so offer
+                     another roll rather than making someone type to escape one
+                     they don't like. */
+                  :<button title="Another name" style={{flexShrink:0,width:38,padding:"9px 0",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
+                     onClick={()=>setNameDraft(randomName(takenNames(libTab)))}>⟲</button>}
               </div>
               {/* One set of buttons. SAVE always works (new, or into the pick);
                   LOAD and CLEAR need something picked. */}
