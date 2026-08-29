@@ -1065,6 +1065,11 @@ const CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";
 const CLOUD_KEY="sb_publishable_pNOJu33uSeJ38sCEr1urNg_UtOExYNU";
 const CLOUD_ON=!!(CLOUD_URL&&CLOUD_KEY);
 const CLOUD_SLOTS=["C1","C2","C3","C4"];
+// Supabase's "Email OTP Length" is a per-project setting spanning 6..10 digits,
+// and nothing in the API reports which one is in force — so accept the whole
+// range rather than baking a length in. Hardcoding 6 silently truncated an
+// 8-digit code to something the server would only ever reject.
+const CLOUD_OTP_MIN=6, CLOUD_OTP_MAX=10;
 // Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 const CLOUD_MAX_BYTES=6*1024*1024;
@@ -4548,7 +4553,10 @@ export default function Tabula(){
   };
   const cloudEnterCode=async()=>{
     const code=cloudCode.trim();
-    if(code.length<6){showFlash("6-DIGIT CODE");return;}
+    // Length is whatever the project's "Email OTP Length" is set to (Supabase
+    // allows 6..10 and doesn't report it), so the client only checks that
+    // something plausible was typed and lets the server be the judge.
+    if(code.length<CLOUD_OTP_MIN){showFlash("ENTER THE CODE");return;}
     const [ok,sess]=await cloudRun("VERIFY",()=>cloudVerify(cloudEmail.trim(),code));
     if(!ok)return;
     setCloudSess(sess);cloudSessR.current=sess;
@@ -6704,7 +6712,15 @@ export default function Tabula(){
   const mBtn={width:"100%",padding:"9px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",borderRadius:6,fontFamily:"inherit"};
   const mBtnLit={border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"};
   const C_CLOUD="#8fb0c9";
-  const mInput={flex:1,minWidth:0,padding:"9px 10px",borderRadius:6,border:"1px solid rgba(200,185,165,0.2)",background:"rgba(200,185,165,0.05)",color:"rgba(232,224,213,0.9)",fontSize:12,letterSpacing:1,fontFamily:"inherit",outline:"none"};
+  // S.root sets user-select:none and -webkit-touch-callout:none so dragging a
+  // knob never selects text or raises the iOS callout. Text inputs have to opt
+  // back OUT of both: WebKit honours an inherited -webkit-user-select:none on a
+  // form control and refuses to focus it, so the field looks live and simply
+  // can't be typed into — and the callout suppression kills long-press → Paste,
+  // which is how you'd enter a code you just received in Mail. Chromium ignores
+  // both on inputs, so this does not reproduce in a headless test.
+  const mInput={flex:1,minWidth:0,padding:"9px 10px",borderRadius:6,border:"1px solid rgba(200,185,165,0.2)",background:"rgba(200,185,165,0.05)",color:"rgba(232,224,213,0.9)",fontSize:12,letterSpacing:1,fontFamily:"inherit",outline:"none",
+    userSelect:"text",WebkitUserSelect:"text",WebkitTouchCallout:"default"};
   // Slot column — the same shape for a local slot and a cloud slot, so the two
   // banks read as one control with two homes. `caption` is the cloud's staleness
   // readout ("4h"); local slots have nothing useful to put there.
@@ -6755,7 +6771,7 @@ export default function Tabula(){
             <div style={{display:"flex",flexDirection:"column",gap:7}}>
               <div style={{fontSize:9,lineHeight:1.5,color:"rgba(210,195,175,0.45)"}}>
                 {cloudStage==="code"
-                  ?"Enter the 6-digit code sent to "+cloudEmail.trim()+"."
+                  ?"Enter the code sent to "+cloudEmail.trim()+"."
                   :"Sign in with your email to save projects to the cloud and pick them up on another device. We'll send a one-time code — no password."}
               </div>
               {cloudStage==="email"?(
@@ -6769,8 +6785,8 @@ export default function Tabula(){
                 </div>
               ):(
                 <div style={{display:"flex",gap:6}}>
-                  <input style={Object.assign({},mInput,{letterSpacing:6,textAlign:"center"})} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={8}
-                    placeholder="000000" value={cloudCode}
+                  <input style={Object.assign({},mInput,{letterSpacing:6,textAlign:"center"})} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={CLOUD_OTP_MAX}
+                    placeholder="––––––" value={cloudCode}
                     onChange={e=>setCloudCode(e.target.value.replace(/\D/g,""))}
                     onKeyDown={e=>{if(e.key==="Enter")cloudEnterCode();}}/>
                   <button style={{flexShrink:0,padding:"9px 14px",borderRadius:6,border:"1px solid "+C_CLOUD+"88",background:C_CLOUD+"1a",color:C_CLOUD,fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:cloudBusy?0.5:1}}
@@ -8858,6 +8874,20 @@ const CSS=`
     -webkit-touch-callout:none!important;
     -webkit-user-drag:none!important;
     user-select:none!important;
+  }
+  /* ...except text inputs. The blanket rule above exists so dragging a knob or
+     a grid cell never selects text or raises the iOS callout, but it is
+     !important on a universal selector, so it also beats any inline style and
+     lands on <input>. WebKit refuses to focus a form control it has been told
+     is unselectable: the field renders normally and simply cannot be typed
+     into, and the callout suppression removes long-press → Paste, which is how
+     you'd enter a code you just received in Mail. Chromium ignores both on form
+     controls, so this does NOT reproduce in a headless test — verify by hand.
+     A type selector outranks `*`, so these win. */
+  input,textarea{
+    -webkit-user-select:text!important;
+    user-select:text!important;
+    -webkit-touch-callout:default!important;
   }
   .pp{animation:pp .55s ease-in-out infinite;display:inline-block;margin-right:3px;font-size:7px;}
   @keyframes pp{0%,100%{opacity:1;transform:scale(1.3)}50%{opacity:.15;transform:scale(.65)}}
