@@ -155,7 +155,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 ## Workflow
 
-- **Push at will**: commit and push without asking (Jake lifted the old never-push rule on 2026-05-29). No force-push. Always actually run `git push` before claiming "deployed."
+- **Push at will, to `main`**: commit and push without asking (Jake lifted the old never-push rule on 2026-05-29; on 2026-08-29 he asked for work to land on `main` and stay there). Pages serves `index.html` from `main`, so **work parked on a feature branch has not shipped** — if a session is handed a working branch, still fast-forward `main` onto it and push before calling anything done. No force-push. Always actually run `git push`, and check `origin/main` after a `git fetch` rather than a stale local ref, before claiming "deployed."
 - **No backward-compat obligation inside the app**: a rescan, a lost automation, or a changed render of an old session are facts to report, not blockers — don't contort the code to preserve them unless asked.
 - Report outcomes honestly: if you couldn't verify audio by ear, say so; don't claim it "sounds right."
 - Direct, concise. Disagree when an ask is technically wrong — Jake has been burned by AI sycophancy and gives precise corrections; reread the original ask before retrying.
