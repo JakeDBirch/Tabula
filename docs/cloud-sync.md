@@ -51,7 +51,20 @@ create policy "own rows only" on public.projects
   for all
   using      (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- Reach the table through the Data API at all. Needed when the project was
+-- created with "Automatically expose new tables" off (the default for projects
+-- made after 2026-05-30); harmless when it was on. `authenticated` only —
+-- every request the app makes carries a signed-in user's JWT, so `anon` never
+-- needs to touch this table.
+grant select, insert, update, delete on public.projects to authenticated;
 ```
+
+Grants and RLS are two separate gates: the `grant` decides whether the
+`authenticated` role can see the table through the API at all, RLS decides which
+of its rows. You need both — a table with RLS but no grant returns a permission
+error, and a table with a grant but no RLS is readable by every signed-in user
+on the project.
 
 Notes on the shape:
 
