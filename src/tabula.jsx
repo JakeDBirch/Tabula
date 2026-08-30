@@ -4250,12 +4250,13 @@ export default function Tabula(){
           {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
               selected chip, this acts on the arrangement. */}
           {songSeq.length>0&&(
-            <div role="button" aria-label="Collapse the song into one pattern"
+            <div role="button" aria-label="Flatten the whole song into one new pattern"
+              title="Flatten the whole song into one new pattern"
               onClick={()=>collapseSong()}
-              style={{flexShrink:0,height:24,padding:"0 9px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
-                fontSize:8,letterSpacing:1,fontWeight:600,lineHeight:1,userSelect:"none",cursor:"pointer",
-                border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.6)"}}>
-              ⤓ COLLAPSE
+              style={{flexShrink:0,height:24,padding:"0 10px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
+                fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
+                border:"1px solid rgba(200,185,165,0.28)",background:"rgba(200,185,165,0.05)",color:"rgba(210,195,175,0.75)"}}>
+              SONG → PATTERN
             </div>
           )}
         </div>
@@ -6287,7 +6288,12 @@ export default function Tabula(){
     const np=collapseEntries(entries,pickSym(patterns.map(x=>x.name)));
     setPatterns(ps=>[...ps,np]);
     setActivePatId(np.id);
-    showFlash("COLLAPSED "+entries.length+" STEPS INTO "+totalBars+" BARS");
+    // Land ON the new pattern. Appending a chip and staying on the song page
+    // looked like nothing had happened — the one visible change was a new chip
+    // in a row you weren't looking at, and a flash that faded in under two
+    // seconds. Opening the result is the confirmation.
+    setSongView(false);setPage("edit");setBarPage(0);
+    showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS");
   };
   const dupPatternId=(id)=>{
     if(patterns.length>=MAX_PATTERNS)return;
