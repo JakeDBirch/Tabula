@@ -552,25 +552,31 @@ const collapseEntries=(entries,name)=>{
     const isDrum=layer==="drums";
     let off=0;                                   // destination column
     for(const e of entries){
-      const src=e.parts[layer];
       const span=patBars(e)*COLS;                // absolute columns this entry occupies
+      const src=e.parts&&e.parts[layer];
+      // A legacy project can reach here with a part missing or with rows that
+      // don't match today's shape. That's not a reason to fail the whole
+      // collapse — leave this part empty for this entry and carry on.
+      if(!src||!Array.isArray(src.grid)||!src.grid.length){off+=span;continue;}
       const w=partWidth(src);
       // The part loops over its OWN gridLen, which is what makes a short part
       // fill a longer entry — the same modulo the scheduler applies.
       const len=Math.max(1,Math.min(w,src.gridLen||w));
       const vel=src.vel&&(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w));
       const rat=src.rat&&(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w));
+      const rows=Math.min(src.grid.length,dst.grid.length);
       for(let i=0;i<span;i++){
         const from=i%len, to=off+i;
-        for(let r=0;r<src.grid.length;r++){
-          dst.grid[r][to]=!!src.grid[r][from];
-          if(!isDrum&&src.durs&&dst.durs)dst.durs[r][to]=src.durs[r][from]||1;
+        for(let r=0;r<rows;r++){
+          const sr=src.grid[r]; if(!sr)continue;
+          dst.grid[r][to]=!!sr[from];
+          if(!isDrum&&src.durs&&dst.durs&&src.durs[r])dst.durs[r][to]=src.durs[r][from]||1;
           if(isDrum){
-            if(vel&&dst.vel)dst.vel[r][to]=vel[r][from];
-            if(rat&&dst.rat)dst.rat[r][to]=rat[r][from];
+            if(vel&&dst.vel&&vel[r]&&vel[r][from]!=null)dst.vel[r][to]=vel[r][from];
+            if(rat&&dst.rat&&rat[r]&&rat[r][from]!=null)dst.rat[r][to]=rat[r][from];
           }
         }
-        if(!isDrum&&src.params&&dst.params)dst.params[to]=Object.assign({},src.params[from]);
+        if(!isDrum&&src.params&&dst.params&&src.params[from])dst.params[to]=Object.assign({},src.params[from]);
         if(isDrum&&src.motion&&typeof src.motion==="object"){
           dst.motion=dst.motion||{};
           for(const k of Object.keys(src.motion)){
@@ -4250,14 +4256,14 @@ export default function Tabula(){
           {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
               selected chip, this acts on the arrangement. */}
           {songSeq.length>0&&(
-            <div role="button" aria-label="Flatten the whole song into one new pattern"
+            <button type="button" aria-label="Flatten the whole song into one new pattern"
               title="Flatten the whole song into one new pattern"
               onClick={()=>collapseSong()}
               style={{flexShrink:0,height:24,padding:"0 10px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
-                fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
+                fontFamily:"inherit",fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
                 border:"1px solid rgba(200,185,165,0.28)",background:"rgba(200,185,165,0.05)",color:"rgba(210,195,175,0.75)"}}>
               SONG → PATTERN
-            </div>
+            </button>
           )}
         </div>
         <div style={{width:"100%",display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
@@ -6281,9 +6287,19 @@ export default function Tabula(){
   // the song and its patterns are left exactly as they are, and the collapsed
   // copy is added and selected — so it's a fork, not a conversion.
   const collapseSong=()=>{
+   // Everything in here is wrapped: this reads arbitrary saved data, and the
+   // first version threw somewhere inside the copy on a legacy project and
+   // therefore did *nothing at all* — no pattern, no message, indistinguishable
+   // from a dead button. A visible failure is worth more than a tidy one.
+   try{
     const entries=songSeq.map(id=>patterns.find(p2=>p2.id===id)).filter(Boolean);
+    if(songSeq.length&&entries.length<songSeq.length){
+      const missing=songSeq.length-entries.length;
+      showFlash("CAN'T DO IT — "+missing+" SONG STEP"+(missing===1?"":"S")+" POINT"+(missing===1?"S":"")+" AT A PATTERN THAT NO LONGER EXISTS","warn");
+      return;
+    }
     const {blockers,totalBars}=collapseBlockers(entries,patterns.length);
-    if(blockers.length){showFlash("CAN'T COLLAPSE — "+blockers[0],"warn");return;}
+    if(blockers.length){showFlash("CAN'T DO IT — "+blockers[0],"warn");return;}
     pushHistory();
     const np=collapseEntries(entries,pickSym(patterns.map(x=>x.name)));
     setPatterns(ps=>[...ps,np]);
@@ -6294,6 +6310,10 @@ export default function Tabula(){
     // seconds. Opening the result is the confirmation.
     setSongView(false);setPage("edit");setBarPage(0);
     showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS");
+   }catch(err){
+    console.error("SONG → PATTERN failed",err);
+    showFlash("SONG → PATTERN FAILED: "+String((err&&err.message)||err).toUpperCase().slice(0,70),"warn");
+   }
   };
   const dupPatternId=(id)=>{
     if(patterns.length>=MAX_PATTERNS)return;
