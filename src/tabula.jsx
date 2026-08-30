@@ -5805,6 +5805,10 @@ export default function Tabula(){
       g.state="shift";setShifting(true);
       g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
       g.shiftPointerID=e.pointerId;
+      // Pinned at gesture start, not read live during the drag — same reason
+      // LOOP pins its bar. A window that moved mid-drag would rotate one bar
+      // partway and then start rotating a different one.
+      g.shiftOff=synthBarOffR();
       if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
       const pat=patsR.current.find(p=>p.id===activeIdR.current);
       g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
@@ -5831,6 +5835,7 @@ export default function Tabula(){
         // Anchor shift to this (second) pointer's position and capture it
         g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
         g.shiftPointerID=e.pointerId;
+        g.shiftOff=synthBarOffR(); // pinned — see the desktop branch above
         if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
         const pat=patsR.current.find(p=>p.id===activeIdR.current);
         g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
@@ -6169,12 +6174,28 @@ export default function Tabula(){
       const ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);
       if(ndx!==g.appliedDX||ndy!==g.appliedDY){
         g.appliedDX=ndx;g.appliedDY=ndy;
-        // Rotation wraps around the whole pattern (all bars), not the visible
-        // page — shifting a 4-bar pattern right by one step should carry the
-        // last step of bar 4 around to the first step of bar 1.
+        // Scoped to the BAR you can see, and wrapping inside it — the same rule
+        // RAND / CLR / CPY / PST / MUT8 already follow. It used to rotate the
+        // whole pattern, so a nudge while looking at bar 1 of a 4-bar part also
+        // moved bars 2-4, off-screen, with nothing on the page to show it had
+        // happened until playback reached them. Columns outside the window are
+        // copied through untouched — vertically as well as horizontally, or a
+        // one-row drag would transpose the bars you can't see.
         const _W=gridW(g.baseGrid);
-        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>g.baseGrid[(r-ndy+ROWS)%ROWS][(c-ndx+_W)%_W]));
-        const sp=Array.from({length:_W},(_,c)=>g.baseParams[(c-ndx+_W)%_W]);
+        const off=Math.max(0,Math.min(g.shiftOff||0,Math.max(0,_W-1)));
+        const win=Math.max(1,Math.min(COLS,_W-off));
+        const inWin=c=>c>=off&&c<off+win;
+        // Modulo twice, because JS % keeps the sign of the dividend and both
+        // deltas go negative (dragging left / up). The old `(r-ndy+ROWS)%ROWS`
+        // form only normalised while |delta| stayed under one wrap: the drag
+        // delta is raw pixels from the gesture start and the pointer is
+        // captured, so a two-finger drag longer than ~16 cells — a flick across
+        // a phone screen — indexed a negative row and threw inside pointermove.
+        const wrap=(v,n)=>((v%n)+n)%n;
+        const srcC=c=>off+wrap(c-off-ndx,win);
+        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>
+          inWin(c)?g.baseGrid[wrap(r-ndy,ROWS)][srcC(c)]:g.baseGrid[r][c]));
+        const sp=Array.from({length:_W},(_,c)=>inWin(c)?g.baseParams[srcC(c)]:g.baseParams[c]);
         setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp})));
       }
     }
