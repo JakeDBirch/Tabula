@@ -6435,6 +6435,34 @@ export default function Tabula(){
     }
     return {grid:ng,vel:nv,rat:nr};
   };
+  // Two-finger drag = shift the pattern, the same gesture POLY/MONO have. The
+  // synth grid promotes paint→shift inside its container-level gesture machine;
+  // the drum grid's pointer handling is PER CELL, so there was nothing to
+  // promote and a second finger just started a second paint. This ref is that
+  // missing path: the first finger leaves a way to call itself off, and the
+  // second finger takes over.
+  const drumGestR = useRef(null);
+  // Shared by both drum grid mounts (portrait + landscape) so the gesture can't
+  // drift between them.
+  const beginDrumShift=(e,dPat,dLen)=>{
+    e.preventDefault();e.stopPropagation();
+    const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
+    const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
+    const live=drumGestR.current;
+    // Shift from where the pattern was BEFORE the first finger touched it: a
+    // two-finger drag is a shift, not a shift on top of an accidental note.
+    const base=live?live.base
+      :{grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
+    if(live){live.cancel();applyDrumShift(0,0,base);} // undo the paint; it already pushed history
+    else pushHistory();                              // no paint in flight → own undo entry
+    setShifting(true);
+    const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
+    const up=()=>{
+      document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);
+      setShifting(false);
+    };
+    document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+  };
   const applyDrumShift=(dCols,dRows,base)=>{
     const s=shiftDrumActive(dCols,dRows,base);
     setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{grid:s.grid,vel:s.vel,rat:s.rat})));
@@ -7769,7 +7797,7 @@ export default function Tabula(){
                     set its per-cell velocity (drag up = louder). Brightness of a
                     lit cell reflects its velocity. */}
                 <div style={{width:dw||"80%",flexShrink:0}}>{barStrip}</div>
-                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2}}>
+                <div style={Object.assign({},shifting?S.gridShifting:{},{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2})}>
                   {DRUM_VOICES.map((voice,r)=>{
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
@@ -7794,18 +7822,9 @@ export default function Tabula(){
                         return(
                           <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?dc:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
                             onPointerDown={e=>{
-                              // Shift+drag → move the whole pattern (grid+vel+rat).
-                              if(e.shiftKey){
-                                e.preventDefault();e.stopPropagation();
-                                const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
-                                const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
-                                const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
-                                pushHistory();
-                                const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
-                                const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                                document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                                return;
-                              }
+                              // Shift+drag (desktop) or a SECOND FINGER (touch)
+                              // → move the whole pattern (grid+vel+rat).
+                              if(e.shiftKey||!e.isPrimary){beginDrumShift(e,dPat,dLen);return;}
                               e.stopPropagation();if(inactive)return;
                               // Ctrl/Cmd+click → cycle this cell's ratchet count.
                               if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,ac);return;}
@@ -7819,6 +7838,9 @@ export default function Tabula(){
                               const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
                               let mode=null;const painted=new Set();
                               const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
+                              // Snapshot BEFORE anything is painted, so a second finger arriving
+                              // mid-gesture can restore this and shift from it instead.
+                              const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                               pushHistory();
                               if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
                               const onMove=ev=>{
@@ -7834,10 +7856,12 @@ export default function Tabula(){
                                   paint(rr,cc);
                                 }
                               };
+                              const detach=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
                               const onUp=()=>{
-                                document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
+                                detach();
                                 if(mode===null&&wasOn)setDrumCell(r,ac,false); // pure tap on existing note → clear
                               };
+                              drumGestR.current={base:snap,cancel:detach};
                               document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                             }}>
                             {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
@@ -8521,18 +8545,9 @@ export default function Tabula(){
                                 boxShadow:on&&isActive?"0 0 4px "+dc:"none",
                                 boxSizing:"border-box",
                               }} onPointerDown={e=>{
-                                // Shift+drag → move the whole pattern (grid+vel+rat).
-                                if(e.shiftKey){
-                                  e.preventDefault();e.stopPropagation();
-                                  const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
-                                  const cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;
-                                  const base={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
-                                  pushHistory();
-                                  const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
-                                  const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                                  document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                                  return;
-                                }
+                                // Shift+drag (desktop) or a SECOND FINGER (touch)
+                                // → move the whole pattern (grid+vel+rat).
+                                if(e.shiftKey||!e.isPrimary){beginDrumShift(e,dPat,dLen);return;}
                                 e.preventDefault();e.stopPropagation();if(inactive)return;
                                 // Ctrl/Cmd+click → cycle this cell's ratchet count.
                                 if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,ac);return;}
@@ -8543,6 +8558,9 @@ export default function Tabula(){
                                 const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
                                 let mode=null;const painted=new Set();
                                 const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
+                                // Snapshot BEFORE anything is painted, so a second finger arriving
+                                // mid-gesture can restore this and shift from it instead.
+                                const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                                 pushHistory();
                                 if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
                                 const onMove=ev=>{
@@ -8558,10 +8576,12 @@ export default function Tabula(){
                                     paint(rr,cc);
                                   }
                                 };
+                                const detach=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
                                 const onUp=()=>{
-                                  document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);
+                                  detach();
                                   if(mode===null&&wasOn)setDrumCell(r,ac,false);
                                 };
+                                drumGestR.current={base:snap,cancel:detach};
                                 document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",onUp);document.addEventListener("pointercancel",onUp);
                               }}>
                                 {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
