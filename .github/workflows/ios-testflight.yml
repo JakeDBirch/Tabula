@@ -1,0 +1,161 @@
+# Builds the iOS app and uploads it to App Store Connect, which is what puts a
+# build in front of TestFlight testers.
+#
+# Deliberately NOT on every push to main. A macOS runner is billed at ten times
+# the rate of a Linux one, App Store Connect rejects a build number it has seen
+# before, and every upload notifies your testers — none of which you want from a
+# one-line CSS fix. Ship a beta by hand (Actions ▸ iOS TestFlight ▸ Run workflow)
+# or by pushing a tag.
+#
+# Setup — three repository secrets, all from one App Store Connect API key
+# (Users and Access ▸ Integrations ▸ App Store Connect API ▸ Team Keys, role
+# "App Manager"). The .p8 downloads exactly once and cannot be re-downloaded.
+#
+#   APPSTORE_KEY_ID        the key's Key ID, e.g. ABC123DEFG
+#   APPSTORE_ISSUER_ID     the Issuer ID shown above the key list (a UUID)
+#   APPSTORE_PRIVATE_KEY   the .p8 file, base64'd:  base64 -i AuthKey_XXX.p8 | pbcopy
+#
+# The Team ID is not a secret and lives in ios/Config/Tabula.xcconfig with the
+# bundle identifier. Fill that in first or the archive step has nothing to sign
+# with. Signing assets themselves are created on the fly by
+# -allowProvisioningUpdates using the API key, so there is no certificate or
+# provisioning profile to export, store, or rotate.
+#
+# Full walkthrough, including the App Store Connect side: docs/ios-testflight.md
+
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "ios-v*"
+    branches:
+      - main
+
+jobs:
+  # Cheap Linux check on every push: does the offline payload still build, and
+  # is it still free of remote references? That audit is the only thing standing
+  # between a new CDN dependency in src/tabula.jsx and an app that white-screens
+  # on a plane, and it costs seconds here versus a round trip through a macOS
+  # runner.
+  payload:
+    name: Offline payload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:ios
+      - name: Check the payload is complete
+        run: |
+          set -euo pipefail
+          test -s ios/www/index.html
+          test -s ios/www/react.production.min.js
+          test -s ios/www/react-dom.production.min.js
+          test -s ios/www/lame.min.js
+          test -d ios/www/samples/808-kit
+          test -d ios/www/fonts
+          echo "payload ok — $(du -sh ios/www | cut -f1)"
+
+  upload:
+    name: Archive and upload
+    # Only for a deliberate release: the manual button, or an ios-v* tag.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ios-v')
+    needs: payload
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build the web payload
+        run: |
+          npm ci
+          npm run build:ios
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Check signing is configured
+        run: |
+          set -euo pipefail
+          if ! grep -qE '^DEVELOPMENT_TEAM *= *[A-Z0-9]{10}' ios/Config/Tabula.xcconfig; then
+            echo "::error::DEVELOPMENT_TEAM is not set in ios/Config/Tabula.xcconfig."
+            echo "Put your 10-character Apple Developer Team ID there and commit it."
+            exit 1
+          fi
+
+      - name: Write the App Store Connect API key
+        env:
+          KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ] || [ -z "$KEY_ID" ]; then
+            echo "::error::APPSTORE_PRIVATE_KEY / APPSTORE_KEY_ID are not set. See docs/ios-testflight.md."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+          chmod 600 "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+
+      - name: Archive
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project ios/Tabula.xcodeproj \
+            -scheme Tabula \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Tabula.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      # Uploads straight to App Store Connect — see destination:upload in
+      # ExportOptions.plist. Processing then takes ~5-15 minutes before the
+      # build appears in TestFlight.
+      - name: Export and upload to App Store Connect
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Tabula.xcarchive" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+
+      # The archive carries the dSYMs. If a beta build crashes, this is the
+      # difference between a readable stack and a column of hex.
+      - name: Keep the archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tabula-xcarchive-${{ github.run_number }}
+          path: ${{ runner.temp }}/Tabula.xcarchive
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Always shred the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

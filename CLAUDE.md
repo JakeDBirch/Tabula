@@ -17,6 +17,7 @@ A touch-first grid sequencer that runs as a **single static HTML file**. Built p
 ```bash
 npm ci            # or npm install — pulls Babel (@babel/core, cli, preset-env, preset-react)
 npm run build     # compiles src/tabula.jsx → index.html   (ALWAYS run after editing)
+npm run build:ios # additionally emits ios/www/ — the offline payload for the iOS app
 npm run audit     # standalone CJS return_react2 audit
 ```
 
@@ -135,6 +136,86 @@ Global delay + reverb buses; each layer has send amounts, and per-step `dly`/`re
 
 ---
 
+---
+
+## The iOS app
+
+A native shell around the same source, for TestFlight and eventually the App
+Store. `src/tabula.jsx` is still the only source; `build.mjs --ios` emits a
+**second target** beside `index.html`:
+
+```
+src/tabula.jsx ──┬── index.html   Pages: React from a CDN, service worker, PWA meta
+                 └── ios/www/     app bundle: everything local, nothing remote
+```
+
+`ios/www/` is generated and gitignored (it carries a ~9MB copy of `samples/`).
+Setup, the App Store Connect click-path and the on-device checklist are in
+`docs/ios-testflight.md`.
+
+**The offline payload is asserted, not hoped for.** The `--ios` pass rewrites the
+two runtime CDN references — the Google Fonts `@import` and the on-demand lamejs
+`<script src>` — to local files, and **fails the build** if either substitution
+misses or if any remote URL survives into the output (Supabase, the SVG
+namespace and Babel's own license comment are the three documented exemptions).
+Same spirit as the `return_react2` audit: a TestFlight build that white-screens
+without signal is the failure this exists to prevent, and it would only ever
+show up on a device you can't attach a debugger to. If you add a CDN dependency
+to the source, the iOS build breaks until you vendor it into `vendor/`.
+
+**The shell is ~150 lines of Swift, no Capacitor, no Cordova.** Three files in
+`ios/Tabula/`, doing only what a web page on iOS cannot do for itself:
+
+- **`BundleSchemeHandler`** serves the bundle over `tabula://app` rather than
+  `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
+  origin, so `localStorage` there is unreliable and has historically been dropped
+  between launches — and `localStorage` is where autosave and the entire project
+  library live. A custom scheme gives one stable origin for the life of the
+  install. It is the same reason Capacitor serves from `capacitor://localhost`.
+- **`WebAppViewController`** owns the `AVAudioSession` (`.playback` +
+  `.mixWithOthers`), defers the bottom screen-edge gesture so a drag on the
+  transport row isn't a swipe home, dims the home indicator, and reloads if the
+  web content process dies. Pinned to the view's edges, **not** the safe area —
+  the page already reads `env(safe-area-inset-*)`, so insetting here would apply
+  the notch padding twice.
+- **`BundleSchemeHandler` tracks stopped tasks.** Replying to a `WKURLSchemeTask`
+  after WebKit has called `stop` on it throws an ObjC exception that takes the
+  app down, and there is no way to ask a task whether it's still live.
+
+**Two source changes the shell needs, both guarded on `window.__TABULA_NATIVE__`
+(set by the iOS scaffold, absent on the web):**
+
+- The **install hint** must not fire. A WKWebView reports neither
+  `navigator.standalone` nor `display-mode: standalone`, so without the flag the
+  app tells someone who installed it from TestFlight to install it.
+- **`downloadBlob` routes through a native bridge.** An `<a download>` for a
+  `blob:` URL is a **silent no-op** in a WKWebView. MIDI export takes that path
+  unconditionally and MP3 falls back to it whenever `navigator.canShare` says no,
+  so both would look like dead buttons. The bytes go to the shell as base64 over
+  a `webkit.messageHandlers` channel, and it presents the iOS share sheet — which
+  is what "download" means on a phone anyway. Verified end to end headlessly by
+  shimming `window.webkit` and asserting the MIDI header bytes arrive.
+
+**The Xcode project is generated, never committed.** `ios/project.yml` (XcodeGen)
+is the reviewable form of a `.pbxproj`. Consequence to remember: **anything
+changed in Xcode's project or target inspector is destroyed by the next
+`xcodegen generate`** — signing and versioning therefore live in
+`ios/Config/Tabula.xcconfig`, which is committed. `www` is declared as a folder
+*reference*, not a group: as a group Xcode flattens every file into the bundle
+root and every sample 404s.
+
+**Unverified.** None of the Swift has ever been compiled — there is no Mac,
+Xcode or iPhone in the environment it was written in. The web payload *is*
+verified (renders headlessly, React and DM Sans load locally, zero network
+requests, install hint suppressed, export bridge round-trips). The on-device
+checklist in `docs/ios-testflight.md` is ordered by likelihood of biting; the
+two genuinely doubtful ones are the ring/silent switch and background audio,
+because **WKWebView runs an audio session of its own and does not reliably
+honour the category the host app sets**. If background audio doesn't hold,
+delete `UIBackgroundModes` — declaring a background mode the app doesn't use is
+itself a review rejection.
+
+
 ## Persistence — the multi-site rule
 
 When you add saved state, add it to EVERY site or saves/undo silently lose it:
@@ -181,5 +262,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
+- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and pushed; see "The iOS app" above. Blocked on Jake only for the Team ID and bundle identifier in `ios/Config/Tabula.xcconfig`, registering the app in App Store Connect, and a first archive from his Mac. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. **The name is the unresolved risk**, and the bundle ID is permanent.
+- **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Tabula loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is unresolved — "Tabula" collides with an open-source PDF tool and, worse for discovery, sits one letter from "tabla" in App Store search.
 - Long-form content beyond 64 bars is not planned.

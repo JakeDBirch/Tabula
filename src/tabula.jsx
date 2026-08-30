@@ -1317,6 +1317,22 @@ const buildSMF=(tracks)=>{
 };
 const downloadBlob=(data,filename,type)=>{
   const blob=(data instanceof Blob)?data:new Blob([data],{type:type||"application/octet-stream"});
+  // A WKWebView has no downloads directory, and clicking an <a download> for a
+  // blob: URL there is a silent no-op — so inside the iOS app this would look
+  // exactly like a dead button. MIDI export takes this path unconditionally,
+  // and MP3 falls back to it whenever navigator.canShare says no, so both would
+  // break. Hand the bytes to the shell instead; it presents the iOS share sheet
+  // (Save to Files, AirDrop, mail it to yourself), which is what "download"
+  // means on a phone anyway. Base64 because a message handler carries JSON, not
+  // binary — fine at export sizes, and export is never in the audio path.
+  const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.saveFile;
+  if(window.__TABULA_NATIVE__&&h){
+    const fr=new FileReader();
+    fr.onload=()=>{try{h.postMessage({name:filename,mime:blob.type,b64:String(fr.result).split(",")[1]||""});}catch(e){console.error("native save failed",e);}};
+    fr.onerror=()=>console.error("native save: could not read blob");
+    fr.readAsDataURL(blob);
+    return;
+  }
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 };
@@ -2891,7 +2907,12 @@ export default function Tabula(){
       if(!IS_MOBILE)return false;
       const iOS=/iphone|ipad|ipod/i.test(navigator.userAgent||"");
       const standalone=(navigator.standalone===true)||(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches);
-      return iOS&&!standalone&&!localStorage.getItem("tabula-nohint");
+      // The native iOS shell reports neither navigator.standalone nor
+      // display-mode:standalone, so without this it would tell someone who
+      // installed Tabula from TestFlight to install Tabula. The shell sets the
+      // flag before any app code runs.
+      const native=window.__TABULA_NATIVE__===true;
+      return iOS&&!native&&!standalone&&!localStorage.getItem("tabula-nohint");
     }catch(e){return false;}
   });
   // Mobile orientation — drives the landscape rail layout. Recomputed on

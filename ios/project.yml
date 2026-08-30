@@ -1,0 +1,76 @@
+# XcodeGen spec — the Xcode project is generated from this, never committed.
+#
+# A .pbxproj is a large, order-sensitive, merge-hostile file that no one reads;
+# this is the same information in a form you can review in a diff. Regenerate
+# after changing it:
+#
+#   npm run build:ios          # ios/www — the app payload MUST exist first
+#   cd ios && xcodegen generate
+#   open Tabula.xcodeproj
+#
+# Changes made in Xcode's project/target inspector are overwritten on the next
+# generate. Signing and versioning therefore live in Config/Tabula.xcconfig,
+# which is committed and survives.
+
+name: Tabula
+
+options:
+  bundleIdPrefix: com.tabula
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  # The generated project is a build artifact, not source.
+  generateEmptyDirectories: false
+
+configs:
+  Debug: debug
+  Release: release
+
+targets:
+  Tabula:
+    type: application
+    platform: iOS
+
+    sources:
+      - path: Tabula
+      # A folder REFERENCE, not a group: the whole www/ tree is copied into the
+      # bundle verbatim, keeping the directory layout the page's relative URLs
+      # (samples/808-kit/BD.wav, fonts/…) depend on. As a group, Xcode would
+      # flatten every file into the bundle root and every sample would 404.
+      # This directory is generated — `npm run build:ios` before generating.
+      - path: www
+        type: folder
+
+    configFiles:
+      Debug: Config/Tabula.xcconfig
+      Release: Config/Tabula.xcconfig
+
+    settings:
+      base:
+        INFOPLIST_FILE: Tabula/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # iPhone only. The web app has a phone layout and a desktop layout and
+        # nothing tuned for iPad; shipping an untested iPad build just gives
+        # review a second device to find bugs on.
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+        GCC_TREAT_WARNINGS_AS_ERRORS: NO
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+
+# Declared explicitly rather than left to Xcode's autocreation: an autocreated
+# scheme is per-user and not committed, so `xcodebuild -scheme Tabula` on a CI
+# runner would fail to find one.
+schemes:
+  Tabula:
+    build:
+      targets:
+        Tabula: all
+    run:
+      config: Debug
+    archive:
+      config: Release
