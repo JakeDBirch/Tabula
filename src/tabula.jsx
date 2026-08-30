@@ -562,8 +562,8 @@ const collapseEntries=(entries,name)=>{
       // The part loops over its OWN gridLen, which is what makes a short part
       // fill a longer entry — the same modulo the scheduler applies.
       const len=Math.max(1,Math.min(w,src.gridLen||w));
-      const vel=src.vel&&(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w));
-      const rat=src.rat&&(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w));
+      const vel=Array.isArray(src.vel)?(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w)):null;
+      const rat=Array.isArray(src.rat)?(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w)):null;
       const rows=Math.min(src.grid.length,dst.grid.length);
       for(let i=0;i<span;i++){
         const from=i%len, to=off+i;
@@ -596,7 +596,10 @@ const collapseEntries=(entries,name)=>{
   if(first&&first.parts.drums){
     const d=first.parts.drums;
     Object.assign(out.parts.drums,{mix:JSON.parse(JSON.stringify(d.mix||defaultDrumMix())),
-      vRhythm:d.vRhythm||0,vVelocity:d.vVelocity||0,vo:d.vo?d.vo.slice():DRUM_ORDER_V});
+      // `vo` is a voice-order SCHEMA VERSION — a number, not a list. Calling
+      // .slice() on it threw for every project that had one, which is every
+      // project, and took the whole collapse down with it.
+      vRhythm:d.vRhythm||0,vVelocity:d.vVelocity||0,vo:d.vo!=null?d.vo:DRUM_ORDER_V});
   }
   return syncPatBars(out);
 };
