@@ -2879,6 +2879,7 @@ export default function Tabula(){
   const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
   const exportBarR = useRef(null); // progress-bar DOM node — width driven directly (no re-render) during capture
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
+  const [mp3Arm,      setMp3Arm]      = useState(false); // MP3 tapped → asking for the pass count
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
@@ -3446,6 +3447,13 @@ export default function Tabula(){
   // so a failure looked like a success in the corner of your eye. Warnings also
   // sit longer — you can't act on a rate-limit message you didn't finish
   // reading.
+  // Leaving the menu by ANY route disarms the MP3 chooser — backdrop, ESC, the
+  // mobile sheet's own dismiss. One rule beats remembering every close path,
+  // and a chooser left armed behind a closed menu is a trap next time it opens.
+  useEffect(()=>{
+    if(!menuOpen&&activeSheet!=="project")setMp3Arm(false);
+  },[menuOpen,activeSheet]);
+
   const showFlash=(msg,tone)=>{
     const warn=tone==="warn";
     setFlash(msg);setFlashTone(warn?"warn":"ok");
@@ -4980,7 +4988,10 @@ export default function Tabula(){
     return new Blob(data,{type:"audio/mpeg"});
   };
   const exportingR=useRef(false);
-  const exportMP3=async()=>{
+  // `loops` is passed in, not read from state: the chooser sets exportLoops and
+  // starts the bounce in the same handler, and the state update isn't visible to
+  // this closure until the next render.
+  const exportMP3=async(loopsArg)=>{
     if(exportingR.current)return;
     exportingR.current=true;setExporting(true);setExportPhase("Preparing");
     let cap=null,sink=null,master=null,restore=null,progTmr=null;
@@ -5015,7 +5026,7 @@ export default function Tabula(){
       if(mGain)mGain.gain.setValueAtTime(0.55,ctx.currentTime);
       const lame=await loadLame();
       if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
-      const loops=Math.max(1,Math.min(16,exportLoops||1));
+      const loops=Math.max(1,Math.min(16,loopsArg||exportLoops||1));
       // Each song cell lasts as long as its SHORTEST pattern (gridLen × speedMult,
       // in absolute 16th steps), mirroring the live sync scheduler — so a song
       // with 1/2-speed patterns bounces at its true (longer) length, not 16/bar.
@@ -7144,24 +7155,42 @@ export default function Tabula(){
         })()}
       </div>
 
-      {/* ── Bounce ──────────────────────────────────────────────────────────
+      {/* ── Export ──────────────────────────────────────────────────────────
           Share link, JSON export and JSON import are gone: the named project
           library and the cloud cover keeping and moving work, and a preset file
           was a fourth way to do the same thing. What's left renders the song
           OUT of Tabula, into something another tool plays. */}
       <div>
-        <div style={mSecLbl}>BOUNCE</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-          <button style={mBtn} onClick={()=>exportMIDI()}>MIDI</button>
-          <button style={Object.assign({},mBtn,{opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={()=>exportMP3()}>{exporting?"…":"MP3"}</button>
-        </div>
-        {/* MP3 bounce length — how many passes through the song. */}
-        <div style={{display:"flex",alignItems:"center",gap:5,marginTop:8}}>
-          <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.35)",flexShrink:0}}>MP3 PASSES ×</span>
-          {[1,2,4,8].map(n=>(
-            <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:700,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.14)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
-          ))}
-        </div>
+        <div style={mSecLbl}>EXPORT</div>
+        {/* MP3 asks how long before it runs. The pass count used to sit here
+            permanently, which is a control you only care about in the two
+            seconds before a bounce — and a bounce is REAL TIME, so starting an
+            8-pass one by accident costs you minutes you can't cancel. */}
+        {mp3Arm?(
+          <div style={{border:"1px solid rgba(200,185,165,0.25)",borderRadius:7,padding:"9px 10px"}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+              <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(210,195,175,0.6)",fontWeight:600}}>HOW MANY PASSES THROUGH THE SONG?</span>
+              <button style={{padding:"2px 6px",border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
+                onClick={()=>setMp3Arm(false)}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+              {[1,2,4,8].map(n=>(
+                <button key={n} onClick={()=>{setMp3Arm(false);setExportLoops(n);exportMP3(n);}}
+                  style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:6,
+                    border:"1px solid rgba(200,185,165,0.3)",background:"rgba(200,185,165,0.06)",color:"rgba(232,224,213,0.85)"}}>×{n}</button>
+              ))}
+            </div>
+            <div style={{marginTop:7,fontSize:8,letterSpacing:0.5,lineHeight:1.5,color:"rgba(210,195,175,0.3)"}}>
+              Recorded in real time — {songSeq.length?"one pass is the whole song":"one pass is the current pattern"}.
+            </div>
+          </div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+            <button style={mBtn} onClick={()=>exportMIDI()}>MIDI</button>
+            <button style={Object.assign({},mBtn,{opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})}
+              disabled={exporting} onClick={()=>setMp3Arm(true)}>{exporting?"…":"MP3"}</button>
+          </div>
+        )}
       </div>
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
