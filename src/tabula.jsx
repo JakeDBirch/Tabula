@@ -2836,7 +2836,6 @@ export default function Tabula(){
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
   const seqTrackRef=useRef(null);
-  const [shareFlash,setShareFlash]= useState("");
   // Save / load / share / cloud all live behind one PROJECT menu — none of it
   // is needed while you're playing. Desktop opens it as a modal; on mobile it's
   // the existing PROJECT bottom sheet, and both render the same body.
@@ -2852,7 +2851,6 @@ export default function Tabula(){
   const [cloudCode,  setCloudCode]  = useState("");
   const [cloudStage, setCloudStage] = useState("email"); // "email" (ask) → "code" (a code is in flight)
   const [cloudBusy,  setCloudBusy]  = useState("");      // label of the request in flight, "" when idle
-  const importRef  = useRef(null);
   const [shifting,  setShifting]  = useState(false);
   // VARY is per-layer now — each layer toggles independently. Normalizer
   // upgrades legacy boolean saves (apply to all layers) to the object shape.
@@ -4715,18 +4713,10 @@ export default function Tabula(){
     restoreUserSamples(s);
   };
 
-  const encodeState=s=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}catch(e){return null;}};
+  // No link is generated any more, but one already sent to someone still opens:
+  // the mount still reads a project out of a #hash. Decoding stays, encoding goes.
   const decodeState=str=>{try{return JSON.parse(decodeURIComponent(escape(atob(str))));}catch(e){return null;}};
 
-  const copyShareLink=()=>{
-    const url=window.location.origin+window.location.pathname+'#'+encodeState(getShareState(false)); // no samples in URL
-    navigator.clipboard.writeText(url).then(()=>{setShareFlash("LINK COPIED");setTimeout(()=>setShareFlash(""),2000);});
-  };
-
-  const exportJSON=()=>{
-    const blob=new Blob([JSON.stringify(getShareState(),null,2)],{type:"application/json"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tabula-preset.json";a.click();
-  };
 
   // ── Cloud sync actions ────────────────────────────────────────────────────
   // Every request goes through cloudRun so there's exactly one place that
@@ -5103,18 +5093,6 @@ export default function Tabula(){
       if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);loopR.current=restore.loop;setLoopMode(restore.loop);}
       exportingR.current=false;setExporting(false);
     }
-  };
-
-  const handleImport=e=>{
-    const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const s=decodeState(btoa(unescape(encodeURIComponent(ev.target.result))))||JSON.parse(ev.target.result||"null");
-      try{const parsed=JSON.parse(ev.target.result);applyShareState(parsed);setShareFlash("PRESET LOADED");setTimeout(()=>setShareFlash(""),2000);}
-      catch(err){setShareFlash("IMPORT FAILED");setTimeout(()=>setShareFlash(""),2000);}
-    };
-    reader.readAsText(file);
-    e.target.value="";
   };
 
   // Auto-save the working project (debounced) and restore it on mount, so an
@@ -7166,13 +7144,14 @@ export default function Tabula(){
         })()}
       </div>
 
-      {/* ── Share / export ── */}
+      {/* ── Bounce ──────────────────────────────────────────────────────────
+          Share link, JSON export and JSON import are gone: the named project
+          library and the cloud cover keeping and moving work, and a preset file
+          was a fourth way to do the same thing. What's left renders the song
+          OUT of Tabula, into something another tool plays. */}
       <div>
-        <div style={mSecLbl}>SHARE / EXPORT</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-          <button style={mBtn} onClick={()=>copyShareLink()}>LINK</button>
-          <button style={mBtn} onClick={()=>exportJSON()}>EXPORT</button>
-          <button style={mBtn} onClick={()=>importRef.current&&importRef.current.click()}>IMPORT</button>
+        <div style={mSecLbl}>BOUNCE</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
           <button style={mBtn} onClick={()=>exportMIDI()}>MIDI</button>
           <button style={Object.assign({},mBtn,{opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})} disabled={exporting} onClick={()=>exportMP3()}>{exporting?"…":"MP3"}</button>
         </div>
@@ -7183,7 +7162,6 @@ export default function Tabula(){
             <button key={n} onClick={()=>setExportLoops(n)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:700,border:"1px solid "+(exportLoops===n?"rgba(200,185,165,0.5)":"rgba(200,185,165,0.14)"),background:exportLoops===n?"rgba(200,185,165,0.1)":"transparent",color:exportLoops===n?"rgba(232,224,213,0.9)":"rgba(210,195,175,0.4)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>{n}</button>
           ))}
         </div>
-        <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
       </div>
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
@@ -7244,7 +7222,7 @@ export default function Tabula(){
           pinned open on desktop — now that the panel is a menu, "SAVED S1" /
           "UNDO" / "MIDI EXPORTED" need somewhere to land whether or not the
           menu is open, so it floats above everything (the modal included). */}
-      {(flash||shareFlash)&&(
+      {flash&&(
         <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get
               when something server-side refuses, and half a sentence is no use. */}
@@ -7253,7 +7231,7 @@ export default function Tabula(){
             pointerEvents:flashTone==="warn"?"auto":"none",cursor:flashTone==="warn"?"pointer":"default",
             border:"1px solid "+(flashTone==="warn"?"rgba(214,166,90,0.5)":"rgba(105,240,174,0.3)"),
             color:flashTone==="warn"?"#d6a65a":"#7aaa96"}}>
-            {flash||shareFlash}
+            {flash}
             {flashTone==="warn"&&flash&&<span style={{display:"block",marginTop:4,fontSize:8,letterSpacing:1,opacity:0.55,fontWeight:500}}>TAP TO DISMISS</span>}
           </div>
         </div>

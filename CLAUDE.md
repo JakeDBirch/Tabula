@@ -107,7 +107,7 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### The PROJECT menu
 
-Everything that isn't playing or editing — NEW PROJECT, the project library, LINK / EXPORT / IMPORT / MIDI / MP3 — lives behind **one menu**, `projectMenuBody`. It used to be a permanently-open column pinned to the bottom of the desktop sidebar; none of it is wanted mid-take. Desktop opens it as a modal (a `☰ PROJECT` button where the panel was; ESC or a backdrop tap closes, and the keydown handler hands the keyboard to the modal while it's open so space types a space instead of starting playback). Mobile keeps the existing PROJECT bottom sheet, which now renders MIX and then the same body. **One body, two mounts** — don't fork it, or the platforms drift.
+Everything that isn't playing or editing — NEW PROJECT, the project library, MIDI / MP3 — lives behind **one menu**, `projectMenuBody`. It used to be a permanently-open column pinned to the bottom of the desktop sidebar; none of it is wanted mid-take. Desktop opens it as a modal (a `☰ PROJECT` button where the panel was; ESC or a backdrop tap closes, and the keydown handler hands the keyboard to the modal while it's open so space types a space instead of starting playback). Mobile keeps the existing PROJECT bottom sheet, which now renders MIX and then the same body. **One body, two mounts** — don't fork it, or the platforms drift.
 
 ### The project library
 
@@ -117,7 +117,9 @@ Everything that isn't playing or editing — NEW PROJECT, the project library, L
 
 DEVICE and CLOUD are the same list against different stores, chosen by a segmented toggle, which is what keeps it to one set of buttons. Local lives at `storageSet("projects", …)`; `migrateSlotLibrary` carries a legacy `{S1..S4}` save across as four named projects (it also passes an already-migrated array straight through). `PROJ_MAX`=24 guards the ~5MB localStorage quota against ~250KB projects; a quota failure rolls the list back so what's on screen matches what's on disk.
 
-`showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) that shows `flash || shareFlash` for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
+**Sharing is gone.** The share LINK, JSON EXPORT and JSON IMPORT were removed once the named library and the cloud covered keeping and moving work — a preset file was a fourth way to do the same job. What's left is the **BOUNCE** section: MIDI and MP3, which render the song *out* of Tabula into something another tool plays. `encodeState` and `shareFlash` went with them; **`decodeState` stayed**, because the mount still reads a project out of a `#hash` and a link already sent to someone should still open. `getShareState` / `applyShareState` keep their names — they're the serialization pair for autosave, the library and the cloud, and renaming them would touch every persistence site for nothing.
+
+`showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
 
 ### Cloud sync (Supabase)
 
