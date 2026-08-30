@@ -4302,7 +4302,16 @@ export default function Tabula(){
                     style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
                       display:"flex",alignItems:"center",justifyContent:"center",
                       background:pat?col0:(isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)"),
-                      border:pat?"none":"1px solid rgba(220,200,180,0.09)",boxSizing:"border-box",
+                      // The border is always THERE and only changes colour.
+                      // These cells are flex:1 with flex-basis 0, and under
+                      // border-box a flex item's base size is floored at its
+                      // border — so dropping the border on a filled cell made it
+                      // 2px narrower than its empty neighbours, and with
+                      // aspect-ratio:1 that came back as 2px of height too, so
+                      // filling a slot knocked the whole grid out of alignment.
+                      // It also skewed the rects _songMeasure caches for drops.
+                      border:"1px solid "+(pat?"transparent":"rgba(220,200,180,0.09)"),
+                      boxSizing:"border-box",minWidth:0,
                       outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
                       outlineOffset:"-1px",
                       boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",

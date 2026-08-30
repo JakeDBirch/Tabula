@@ -452,7 +452,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-08-30 00:11Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-08-30 00:17Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -1364,7 +1364,15 @@ var rep=_rep(idx);var pbars=pat?patBars(pat):1;// A run's badge counts PLAYS, no
 var runStart=id!=null&&(idx===0||song[idx-1]!==id);var run=0,plays=0;if(runStart){var j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}var _ov=patternDrag&&patternDrag.overSongCell;var isHover=!!(_ov&&_ov.cell===idx);// Seam k draws as a caret on cell k's LEFT edge. A seam at the
 // end of a row has no cell to its right on that row, so it
 // draws on this cell's right edge instead.
-var seamL=!!(_ov&&_ov.seam===idx);var seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);return/*#__PURE__*/React.createElement("div",{key:col,"data-song-cell":"1","data-song-bar":idx,"data-song-cursor":isCursor?"1":undefined,style:{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",background:pat?col0:isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)",border:pat?"none":"1px solid rgba(220,200,180,0.09)",boxSizing:"border-box",outline:isHover?"2px solid rgba(232,220,205,0.9)":isCursor?"2.5px solid #fff":"none",outlineOffset:"-1px",boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",color:pat?"#1a1814":"transparent",fontSize:17,fontWeight:700,touchAction:"none",cursor:"pointer",userSelect:"none",transition:"background .08s, outline .08s"},onPointerDown:function onPointerDown(e){e.stopPropagation();var pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;var dragging=false,held=false;// Press and hold a filled slot to set its repeat count —
+var seamL=!!(_ov&&_ov.seam===idx);var seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);return/*#__PURE__*/React.createElement("div",{key:col,"data-song-cell":"1","data-song-bar":idx,"data-song-cursor":isCursor?"1":undefined,style:{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",background:pat?col0:isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)",// The border is always THERE and only changes colour.
+// These cells are flex:1 with flex-basis 0, and under
+// border-box a flex item's base size is floored at its
+// border — so dropping the border on a filled cell made it
+// 2px narrower than its empty neighbours, and with
+// aspect-ratio:1 that came back as 2px of height too, so
+// filling a slot knocked the whole grid out of alignment.
+// It also skewed the rects _songMeasure caches for drops.
+border:"1px solid "+(pat?"transparent":"rgba(220,200,180,0.09)"),boxSizing:"border-box",minWidth:0,outline:isHover?"2px solid rgba(232,220,205,0.9)":isCursor?"2.5px solid #fff":"none",outlineOffset:"-1px",boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",color:pat?"#1a1814":"transparent",fontSize:17,fontWeight:700,touchAction:"none",cursor:"pointer",userSelect:"none",transition:"background .08s, outline .08s"},onPointerDown:function onPointerDown(e){e.stopPropagation();var pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;var dragging=false,held=false;// Press and hold a filled slot to set its repeat count —
 // the same gesture that opens a step's params. Movement
 // past the drag threshold cancels it, so holding never
 // steals a drag.
