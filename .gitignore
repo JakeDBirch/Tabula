@@ -22,6 +22,7 @@ node_modules/
 test-landscape.html
 test-mobile.html
 _testserver.js
+_*.mjs
 
 # iOS — both generated. ios/www is re-emitted by `npm run build:ios` (it is a
 # ~9MB copy of samples/, so tracking it would double the repo for nothing), and
