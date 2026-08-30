@@ -452,7 +452,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-08-30 17:34Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-08-30 18:02Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -1293,22 +1293,32 @@ var _lenFrac=Math.max(0,Math.min(1,(((_editPat$gridLen=editPat===null||editPat==
 // through the bars.
 useEffect(function(){if(!followSeq||!playing)return;if(playingBar>=0&&playingBar!==barPage&&playingBar<barCount)setBarPage(playingBar);},[followSeq,playing,playingBar,barPage,barCount]);// Never leave the page pointing past the end of a pattern (switching pattern,
 // switching layer, or removing bars can all strand it).
-useEffect(function(){if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1));},[barCount,barPage]);// LOOP pins itself to the bar you are ON when you switch it on, and holds
-// there until you switch it off. Move it by turning LOOP off and on again
-// from the bar you want. Every LOOP button goes through here.
+useEffect(function(){if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1));},[barCount,barPage]);// LOOP starts on the bar you are ON when you switch it on, and from then on
+// it follows your bar selection (see goToBar). Every LOOP button goes here.
 var toggleLoop=function toggleLoop(){if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}};// Switching to a different pattern while LOOP is on moves the loop with you —
 // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
 // which the pin deliberately ignores.
 useEffect(function(){if(loopMode)setLoopPat(activePatternId);},[loopMode,activePatternId]);// A pattern that shrank (DEL BAR, or switching to a shorter one) must not
 // leave the loop pinned past the end.
-useEffect(function(){if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1));},[loopMode,loopBar,barCount]);// ── ADD / REMOVE BAR ───────────────────────────────────────────────────
+useEffect(function(){if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1));},[loopMode,loopBar,barCount]);// The one way a DELIBERATE bar change happens — a chip tap or drag, ADD BAR,
+// DUP BAR, ×2. Three things travel together, and they went out of step as
+// soon as each caller did its own thing:
+//   • land on the bar
+//   • drop FOLLOW, or the playhead drags the page straight back off the bar
+//     you just chose (this is why the chips felt like they did nothing while
+//     the transport was following)
+//   • carry LOOP with you, because LOOP loops the bar you are looking at
+// Note what does NOT come through here: the FOLLOW effect's own setBarPage,
+// and the clamps. That distinction is the whole point — the page moving
+// because the music moved must never drag the loop along behind it, which is
+// the crawl the old pin existed to prevent. Only a bar YOU picked moves it.
+var goToBar=function goToBar(bi){setBarPage(bi);setFollowSeq(false);if(loopMode)setLoopBar(bi);};// ── ADD / REMOVE BAR ───────────────────────────────────────────────────
 // Resizing invalidates the cached VARY grids for that pattern (they're keyed
 // by pat id and sized to the old width), so drop them and let the scheduler
 // re-roll at the next bar boundary.
-var _dropVaryCache=function _dropVaryCache(id){try{variedGrids.current["delete"](id);variedDrumGrids.current["delete"](id);variedDrumVels.current["delete"](id);}catch(e){}};var setEditPatBars=function setEditPatBars(n){var target=Math.max(1,Math.min(MAX_BARS,n));if(!editPat||target===patBars(editPat))return;var grew=target>patBars(editPat);pushHistory();_dropVaryCache(editPat.id);if(activeLayer==="drums")setDrumPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});else setPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});if(grew){// Adding a bar means you want to write in it — land there. FOLLOW has to
-// go or the playhead would drag the page straight back off it, same as
-// any other edit clearing follow.
-setFollowSeq(false);setBarPage(target-1);}else{setBarPage(function(bp){return Math.min(bp,target-1);});}};var addBar=function addBar(){return setEditPatBars(patBars(editPat)+1);};var removeBar=function removeBar(){return setEditPatBars(patBars(editPat)-1);};// Copy the visible bar into a NEW bar appended right after it — the fastest
+var _dropVaryCache=function _dropVaryCache(id){try{variedGrids.current["delete"](id);variedDrumGrids.current["delete"](id);variedDrumVels.current["delete"](id);}catch(e){}};var setEditPatBars=function setEditPatBars(n){var target=Math.max(1,Math.min(MAX_BARS,n));if(!editPat||target===patBars(editPat))return;var grew=target>patBars(editPat);pushHistory();_dropVaryCache(editPat.id);if(activeLayer==="drums")setDrumPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});else setPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});if(grew){// Adding a bar means you want to write in it — land there, and take
+// FOLLOW and LOOP with you.
+goToBar(target-1);}else{setBarPage(function(bp){return Math.min(bp,target-1);});}};var addBar=function addBar(){return setEditPatBars(patBars(editPat)+1);};var removeBar=function removeBar(){return setEditPatBars(patBars(editPat)-1);};// Copy the visible bar into a NEW bar appended right after it — the fastest
 // way to build a long pattern (lay down bar 1, extend, vary).
 // DUP BAR inserts a copy of the visible bar right after it, in the part
 // you're LOOKING AT — parts have independent lengths, so lengthening the
@@ -1322,13 +1332,13 @@ var out=Object.assign({},g,{grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCol
 // length is left alone and it keeps looping to fill.
 var oldLen=Math.max(1,Math.min(oldW,part.gridLen||oldW));out.gridLen=oldLen>off?Math.min(newW,oldLen+COLS):oldLen;delete out.bars;// bars lives on the pattern
 return out;};var L=activeLayer;setPatterns(function(ps){return ps.map(function(p){if(p.id!==editPat.id)return p;var parts=Object.assign({},p.parts,_defineProperty({},L,growPart(p.parts[L])));return syncPatBars(Object.assign({},p,{parts:parts}));});});// Land on the copy, for the same reason ADD BAR does.
-setFollowSeq(false);setBarPage(curBar+1);};// ×2 — the part you're looking at becomes twice as long and its new half is
+goToBar(curBar+1);};// ×2 — the part you're looking at becomes twice as long and its new half is
 // a copy of the old one, so "two nearly identical passes with small
 // variations" is one button instead of DUP BAR n times. Like DUP BAR it acts
 // on the ACTIVE part only: a 1-bar drum loop under a doubled melody doesn't
 // want doubling, it wants to keep looping to fill.
 var doublePattern=function doublePattern(){if(!editPat)return;var n=patBars(editPat);if(n*2>MAX_BARS){showFlash("MAX "+MAX_BARS+" BARS");return;}pushHistory();_dropVaryCache(editPat.id);var oldW=n*COLS,W=oldW*2;var dbl=function dbl(part){if(!part||!Array.isArray(part.grid))return part;var srcW=gridW(part.grid);var oldLen=Math.max(1,Math.min(srcW,part.gridLen||srcW));var g=resizePatBars(Object.assign({},part,{bars:n}),n*2);var out=Object.assign({},g,{grid:spliceCols(g.grid,sliceCols(part.grid,0,oldW),oldW,0,oldW)});if(g.durs)out.durs=spliceCols(g.durs,sliceCols(part.durs||[],0,oldW,function(){return 1;}),oldW,0,oldW,function(){return 1;});if(g.params)out.params=spliceFlat(g.params,sliceFlat(part.params||[],0,oldW),oldW,0,oldW);if(g.vel)out.vel=spliceCols(g.vel,sliceCols(toDrumVel2D(part.vel,srcW),0,oldW,function(){return 100;}),oldW,0,oldW,function(){return 100;});if(g.rat)out.rat=spliceCols(g.rat,sliceCols(toDrumRat2D(part.rat,srcW),0,oldW,function(){return 1;}),oldW,0,oldW,function(){return 1;});if(out.motion&&_typeof(out.motion)==="object"){var m={};for(var _i20=0,_Object$keys1=Object.keys(out.motion);_i20<_Object$keys1.length;_i20++){var k=_Object$keys1[_i20];m[k]=spliceCols(out.motion[k],sliceCols(out.motion[k],0,oldW,function(){return null;}),oldW,0,oldW,function(){return null;});}out.motion=m;}out.gridLen=oldLen>=oldW?W:oldLen;delete out.bars;return out;};var L=activeLayer;setPatterns(function(ps){return ps.map(function(p){if(p.id!==editPat.id)return p;var parts=Object.assign({},p.parts,_defineProperty({},L,dbl(p.parts[L])));return syncPatBars(Object.assign({},p,{parts:parts}));});});// Land on the top of the copy — that's the half you're about to vary.
-setFollowSeq(false);setBarPage(n);};// ── SONG PAGE ──────────────────────────────────────────────────────────
+goToBar(n);};// ── SONG PAGE ──────────────────────────────────────────────────────────
 // One lane, because a pattern is all three parts. The palette at the top is
 // the pattern selector for the whole app — picking one here is what the part
 // pages then edit, which is what frees the pill row from those pages.
@@ -1419,9 +1429,10 @@ var _barHasNotes=function _barHasNotes(bi){if(!editPat||!editPat.grid)return fal
 // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
 // ops, where the buttons can be a real touch size — a row of 18px glyphs above
 // the grid was too small to hit on the phone.
-var _scrubTo=function _scrubTo(clientX,el){var rect=el.getBoundingClientRect();var i=Math.floor((clientX-rect.left)/rect.width*barCount);var bi=Math.max(0,Math.min(barCount-1,i));// Deliberately does NOT switch FOLLOW off — that's the transport's toggle
-// and a grid edit is what clears it, same as it always was.
-setBarPage(bi);};// Tap or drag anywhere along the chips to move. The row is deliberately tall
+var _scrubTo=function _scrubTo(clientX,el){var rect=el.getBoundingClientRect();var i=Math.floor((clientX-rect.left)/rect.width*barCount);var bi=Math.max(0,Math.min(barCount-1,i));// Picking a bar is a deliberate "work on this one": it drops FOLLOW and
+// takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
+// you can slide the loop from bar to bar without leaving the grid.
+goToBar(bi);};// Tap or drag anywhere along the chips to move. The row is deliberately tall
 // so a thin chip on a long pattern is still an easy target. Held separately
 // from barStrip because the drawer repeats the chips on their own: the sheet
 // covers the strip above the grid, and DUP BAR / DEL BAR act on the VISIBLE

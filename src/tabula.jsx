@@ -3909,9 +3909,8 @@ export default function Tabula(){
   // Never leave the page pointing past the end of a pattern (switching pattern,
   // switching layer, or removing bars can all strand it).
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
-  // LOOP pins itself to the bar you are ON when you switch it on, and holds
-  // there until you switch it off. Move it by turning LOOP off and on again
-  // from the bar you want. Every LOOP button goes through here.
+  // LOOP starts on the bar you are ON when you switch it on, and from then on
+  // it follows your bar selection (see goToBar). Every LOOP button goes here.
   const toggleLoop=()=>{
     if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}
     else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}
@@ -3923,6 +3922,23 @@ export default function Tabula(){
   // A pattern that shrank (DEL BAR, or switching to a shorter one) must not
   // leave the loop pinned past the end.
   useEffect(()=>{ if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1)); },[loopMode,loopBar,barCount]);
+  // The one way a DELIBERATE bar change happens — a chip tap or drag, ADD BAR,
+  // DUP BAR, ×2. Three things travel together, and they went out of step as
+  // soon as each caller did its own thing:
+  //   • land on the bar
+  //   • drop FOLLOW, or the playhead drags the page straight back off the bar
+  //     you just chose (this is why the chips felt like they did nothing while
+  //     the transport was following)
+  //   • carry LOOP with you, because LOOP loops the bar you are looking at
+  // Note what does NOT come through here: the FOLLOW effect's own setBarPage,
+  // and the clamps. That distinction is the whole point — the page moving
+  // because the music moved must never drag the loop along behind it, which is
+  // the crawl the old pin existed to prevent. Only a bar YOU picked moves it.
+  const goToBar=(bi)=>{
+    setBarPage(bi);
+    setFollowSeq(false);
+    if(loopMode)setLoopBar(bi);
+  };
 
   // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
   // Resizing invalidates the cached VARY grids for that pattern (they're keyed
@@ -3940,11 +3956,9 @@ export default function Tabula(){
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     if(grew){
-      // Adding a bar means you want to write in it — land there. FOLLOW has to
-      // go or the playhead would drag the page straight back off it, same as
-      // any other edit clearing follow.
-      setFollowSeq(false);
-      setBarPage(target-1);
+      // Adding a bar means you want to write in it — land there, and take
+      // FOLLOW and LOOP with you.
+      goToBar(target-1);
     } else {
       setBarPage(bp=>Math.min(bp,target-1));
     }
@@ -3997,8 +4011,7 @@ export default function Tabula(){
       return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the copy, for the same reason ADD BAR does.
-    setFollowSeq(false);
-    setBarPage(curBar+1);
+    goToBar(curBar+1);
   };
   // ×2 — the part you're looking at becomes twice as long and its new half is
   // a copy of the old one, so "two nearly identical passes with small
@@ -4040,8 +4053,7 @@ export default function Tabula(){
       return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the top of the copy — that's the half you're about to vary.
-    setFollowSeq(false);
-    setBarPage(n);
+    goToBar(n);
   };
 
   // ── SONG PAGE ──────────────────────────────────────────────────────────
@@ -4551,9 +4563,10 @@ export default function Tabula(){
     const rect=el.getBoundingClientRect();
     const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
     const bi=Math.max(0,Math.min(barCount-1,i));
-    // Deliberately does NOT switch FOLLOW off — that's the transport's toggle
-    // and a grid edit is what clears it, same as it always was.
-    setBarPage(bi);
+    // Picking a bar is a deliberate "work on this one": it drops FOLLOW and
+    // takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
+    // you can slide the loop from bar to bar without leaving the grid.
+    goToBar(bi);
   };
   // Tap or drag anywhere along the chips to move. The row is deliberately tall
   // so a thin chip on a long pattern is still an easy target. Held separately
