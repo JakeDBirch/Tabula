@@ -7480,12 +7480,13 @@ export default function LoudLight(){
           {!IS_MOBILE&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:winW>900?8:5,marginBottom:6}}>
-                <div className="wordmark" style={{...S.brand,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15,marginBottom:0,minWidth:0}}>LOUD LIGHT</div>
-                {/* The mark sits beside the title at text size. icon-128.png,
-                    not icon.png — the full render is 1024px and a megabyte, and
-                    this draws at ~24. */}
-                <img src="icon-128.png" alt="" width={winW>900?26:winW>650?16:13} height={winW>900?26:winW>650?16:13}
-                  className="markglow" style={{flexShrink:0,borderRadius:winW>900?6:4,display:"block"}}/>
+                <div className="wordmark" style={{...S.brand,background:"none",WebkitBackgroundClip:"border-box",WebkitTextFillColor:"#ffc46a",color:"#ffc46a",fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15,marginBottom:0,minWidth:0}}>LOUD LIGHT</div>
+                {/* icon-mark.png is the icon with its navy tile flood-filled away,
+                    cropped to the bulb — so it sits ON the page rather than in a
+                    box, and can run taller than the cap height without crowding.
+                    Height-driven; width follows the bulb's own aspect. */}
+                <img src="icon-mark.png" alt="" height={winW>900?34:winW>650?21:17}
+                  className="markglow" style={{flexShrink:0,height:winW>900?34:winW>650?21:17,width:"auto",display:"block"}}/>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
                 <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
@@ -8420,8 +8421,8 @@ export default function LoudLight(){
           {!isLandscape&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
             <span style={{display:"inline-flex",alignItems:"center",gap:7}}>
-            <span className="wordmark" style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,background:"linear-gradient(135deg,#ffc46a,#ffe9b0)",WebkitBackgroundClip:"text",backgroundClip:"text",WebkitTextFillColor:"transparent",textTransform:"uppercase"}}>Loud Light</span>
-            <img src="icon-128.png" alt="" width={20} height={20} className="markglow" style={{flexShrink:0,borderRadius:5,display:"block"}}/>
+            <span className="wordmark" style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,color:"#ffc46a",textTransform:"uppercase"}}>Loud Light</span>
+            <img src="icon-mark.png" alt="" height={26} className="markglow" style={{flexShrink:0,height:26,width:"auto",display:"block"}}/>
           </span>
           </div>
           )}
@@ -9321,18 +9322,22 @@ const CSS=`
   .left-col select{min-width:0;}
   .grid-outer{container-type:size;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
   .grid-square{width:min(100cqw,100cqh);height:min(100cqw,100cqh);display:flex;flex-direction:column;flex-shrink:0;padding:8px;box-sizing:border-box;}
-  /* The wordmark glows like the icon's filament. The letters are painted with
-     background-clip:text, which text-shadow cannot reach, so the bloom is a
-     drop-shadow filter on the element and the breathe animates that filter.
-     Slow and shallow on purpose: a logo that pulses at you is a nuisance. */
-  .wordmark{filter:drop-shadow(0 0 5px rgba(255,190,105,0.45)) drop-shadow(0 0 16px rgba(255,166,66,0.22));animation:filament 5.5s ease-in-out infinite;}
+  /* The wordmark glows like the icon's filament. It has to be PAINTED text with
+     text-shadow, not a background-clip:text gradient with a drop-shadow filter:
+     drop-shadow takes its alpha from the element BOX on a clipped-background
+     element, so it smeared a rectangle of haze across the whole header instead
+     of following the letters. Slow, shallow breathe — a logo that pulses at you
+     is a nuisance. */
+  .wordmark{color:#ffc46a;-webkit-text-fill-color:#ffc46a;background:none;
+    text-shadow:0 0 6px rgba(255,190,105,0.55),0 0 18px rgba(255,166,66,0.30);
+    animation:filament 5.5s ease-in-out infinite;}
   @keyframes filament{
-    0%,100%{filter:drop-shadow(0 0 5px rgba(255,190,105,0.42)) drop-shadow(0 0 16px rgba(255,166,66,0.20));}
-    50%    {filter:drop-shadow(0 0 8px rgba(255,200,125,0.62)) drop-shadow(0 0 24px rgba(255,176,80,0.34));}
+    0%,100%{text-shadow:0 0 6px rgba(255,190,105,0.50),0 0 18px rgba(255,166,66,0.26);}
+    50%    {text-shadow:0 0 10px rgba(255,205,135,0.72),0 0 26px rgba(255,176,80,0.40);}
   }
   /* The mark beside the title carries a steady, quieter bloom than the type —
      it already contains a lit filament, so animating it too reads as flicker. */
-  .markglow{filter:drop-shadow(0 0 4px rgba(255,178,80,0.30));}
+  .markglow{filter:drop-shadow(0 0 5px rgba(255,178,80,0.34)) drop-shadow(0 0 14px rgba(255,166,66,0.16));}
   @media (prefers-reduced-motion:reduce){.wordmark{animation:none;}}
 `;
 

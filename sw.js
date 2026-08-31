@@ -15,7 +15,7 @@ const CACHE = "loudlight-v1";
 
 // Must-have, small, same-origin. If any of these fail the install still
 // proceeds (we catch) — the fetch handler will fill gaps on first online use.
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.png", "./icon-128.png", "./icon.svg"];
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.png", "./icon-mark.png", "./icon.svg"];
 
 // Best-effort: third-party libs + both shipped kits. Cached individually so one
 // failure (e.g. a flaky CDN) doesn't abort the whole precache. ~8MB total — a
