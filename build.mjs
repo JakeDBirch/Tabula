@@ -76,6 +76,37 @@ try {
   console.error(err.stderr?.toString() || err.message);
   process.exit(1);
 }
+// 4b. CSS audit. The stylesheet is one template literal, so a stray BACKTICK
+// inside it (or a `${`) ends the literal early and the remainder parses as
+// `tpl * tpl`, which evaluates to NaN. The app then renders <style>NaN</style>
+// and every rule silently stops applying — no box-sizing, no container
+// queries, no keyframes — while the build stays green. That cost three commits
+// of confusion once. Check the outcome, not a guessed cause.
+{
+  const open = "const CSS=`";
+  const a = raw.indexOf(open);
+  const b = raw.indexOf("\n`;", a);
+  if (a < 0 || b < 0) {
+    console.error("!! AUDIT FAIL: couldn't delimit the CSS template literal.");
+    process.exit(1);
+  }
+  const block = raw.slice(a + open.length, b);
+  const bad = block.includes("`") ? "a backtick" : block.includes("${") ? "a ${ interpolation" : null;
+  if (bad) {
+    const line = block.split("\n").find((l) => l.includes("`") || l.includes("${"));
+    console.error("!! AUDIT FAIL: " + bad + " inside the CSS block.");
+    console.error("   It ends the template literal early and CSS becomes NaN,");
+    console.error("   which silently disables the whole stylesheet at runtime.");
+    console.error("   Offending line: " + line.trim());
+    process.exit(1);
+  }
+  if (!block.includes("box-sizing:border-box")) {
+    console.error("!! AUDIT FAIL: the CSS block lost its box-sizing reset.");
+    process.exit(1);
+  }
+  console.log("CSS audit: clean");
+}
+
 if (cjsOut.includes("return_react2")) {
   console.error("!! AUDIT FAIL: 'return_react2' found in CJS output.");
   console.error("   This means there's a module-level arrow function returning JSX.");

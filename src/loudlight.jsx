@@ -66,6 +66,14 @@ const IS_MOBILE = (()=>{
       || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch(e) { return false; }
 })();
+
+// Gap between grid cells. Declared AFTER IS_MOBILE on purpose: Babel lowers
+// const to var, so reading it above this line yields undefined and silently
+// gives the phone the desktop gap.
+// Gap between grid cells. Shared by the row layout and the note-rect maths —
+// they position against the same track, so a mismatch shows up as notes a pixel
+// or two wider than the cells they sit in.
+const CELL_GAP=IS_MOBILE?2:3;
 const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#e6b872","#79b8f2","#7aaa96","#c4b07a","#a09ec4"];
 // A saved project is {id,name,updated,data}. `id` is opaque and permanent —
 // it's what SAVE/LOAD/CLEAR address and, in the cloud table, what the `slot`
@@ -7471,7 +7479,7 @@ export default function LoudLight(){
           {/* Brand + widgets */}
           {!IS_MOBILE&&(
             <>
-              <div style={{...S.brand,marginBottom:6,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15}}>LOUD LIGHT</div>
+              <div className="wordmark" style={{...S.brand,marginBottom:6,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15}}>LOUD LIGHT</div>
               <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
                 <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -7722,13 +7730,13 @@ export default function LoudLight(){
                           const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;
                           const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
-                          const L=`calc(${vs/COLS}*(100% + 2px))`;
-                          const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;
+                          const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;
+                          const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:bright,
                               boxShadow:isActive?glow:rest,
-                              pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>
+                              pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>
                               {!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
                               {!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
                               {!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>
@@ -8404,7 +8412,7 @@ export default function LoudLight(){
           {/* ── BRANDING ── */}
           {!isLandscape&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
-            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,color:"rgba(178,199,219,0.7)",textTransform:"uppercase"}}>Loud Light</span>
+            <span className="wordmark" style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,background:"linear-gradient(135deg,#ffc46a,#ffe9b0)",WebkitBackgroundClip:"text",backgroundClip:"text",WebkitTextFillColor:"transparent",textTransform:"uppercase"}}>Loud Light</span>
           </div>
           )}
 
@@ -8480,7 +8488,7 @@ export default function LoudLight(){
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=ci>=gridLen;const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + 2px))`;const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=ci>=gridLen;const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                         {vSGrid&&Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           if(ac>=gridLen)return null;
@@ -9285,7 +9293,7 @@ const CSS=`
      into, and the callout suppression removes long-press → Paste, which is how
      you'd enter a code you just received in Mail. Chromium ignores both on form
      controls, so this does NOT reproduce in a headless test — verify by hand.
-     A type selector outranks `*`, so these win. */
+     A type selector outranks the universal one, so these win. */
   input,textarea{
     -webkit-user-select:text!important;
     user-select:text!important;
@@ -9303,6 +9311,16 @@ const CSS=`
   .left-col select{min-width:0;}
   .grid-outer{container-type:size;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
   .grid-square{width:min(100cqw,100cqh);height:min(100cqw,100cqh);display:flex;flex-direction:column;flex-shrink:0;padding:8px;box-sizing:border-box;}
+  /* The wordmark glows like the icon's filament. The letters are painted with
+     background-clip:text, which text-shadow cannot reach, so the bloom is a
+     drop-shadow filter on the element and the breathe animates that filter.
+     Slow and shallow on purpose: a logo that pulses at you is a nuisance. */
+  .wordmark{filter:drop-shadow(0 0 5px rgba(255,190,105,0.45)) drop-shadow(0 0 16px rgba(255,166,66,0.22));animation:filament 5.5s ease-in-out infinite;}
+  @keyframes filament{
+    0%,100%{filter:drop-shadow(0 0 5px rgba(255,190,105,0.42)) drop-shadow(0 0 16px rgba(255,166,66,0.20));}
+    50%    {filter:drop-shadow(0 0 8px rgba(255,200,125,0.62)) drop-shadow(0 0 24px rgba(255,176,80,0.34));}
+  }
+  @media (prefers-reduced-motion:reduce){.wordmark{animation:none;}}
 `;
 
 const S={
@@ -9344,7 +9362,7 @@ const S={
   laneBar:   {width:"100%",borderRadius:"1px 1px 0 0",minHeight:1,transition:"height .05s"},
   laneCenterLine:{position:"absolute",left:0,right:0,borderTop:"1px solid",pointerEvents:"none"},
   gridShifting:{outline:"1px solid rgba(255,229,0,0.2)",borderRadius:4},
-  gridRow:     {display:"flex",gap:IS_MOBILE?2:3,alignItems:"stretch",touchAction:"none",flex:"1 1 0"},
+  gridRow:     {display:"flex",gap:CELL_GAP,alignItems:"stretch",touchAction:"none",flex:"1 1 0"},
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
