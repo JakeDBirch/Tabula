@@ -7479,7 +7479,14 @@ export default function LoudLight(){
           {/* Brand + widgets */}
           {!IS_MOBILE&&(
             <>
-              <div className="wordmark" style={{...S.brand,marginBottom:6,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15}}>LOUD LIGHT</div>
+              <div style={{display:"flex",alignItems:"center",gap:winW>900?8:5,marginBottom:6}}>
+                <div className="wordmark" style={{...S.brand,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15,marginBottom:0,minWidth:0}}>LOUD LIGHT</div>
+                {/* The mark sits beside the title at text size. icon-128.png,
+                    not icon.png — the full render is 1024px and a megabyte, and
+                    this draws at ~24. */}
+                <img src="icon-128.png" alt="" width={winW>900?26:winW>650?16:13} height={winW>900?26:winW>650?16:13}
+                  className="markglow" style={{flexShrink:0,borderRadius:winW>900?6:4,display:"block"}}/>
+              </div>
               <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
                 <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -8412,7 +8419,10 @@ export default function LoudLight(){
           {/* ── BRANDING ── */}
           {!isLandscape&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:7}}>
             <span className="wordmark" style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,background:"linear-gradient(135deg,#ffc46a,#ffe9b0)",WebkitBackgroundClip:"text",backgroundClip:"text",WebkitTextFillColor:"transparent",textTransform:"uppercase"}}>Loud Light</span>
+            <img src="icon-128.png" alt="" width={20} height={20} className="markglow" style={{flexShrink:0,borderRadius:5,display:"block"}}/>
+          </span>
           </div>
           )}
 
@@ -9320,6 +9330,9 @@ const CSS=`
     0%,100%{filter:drop-shadow(0 0 5px rgba(255,190,105,0.42)) drop-shadow(0 0 16px rgba(255,166,66,0.20));}
     50%    {filter:drop-shadow(0 0 8px rgba(255,200,125,0.62)) drop-shadow(0 0 24px rgba(255,176,80,0.34));}
   }
+  /* The mark beside the title carries a steady, quieter bloom than the type —
+     it already contains a lit filament, so animating it too reads as flicker. */
+  .markglow{filter:drop-shadow(0 0 4px rgba(255,178,80,0.30));}
   @media (prefers-reduced-motion:reduce){.wordmark{animation:none;}}
 `;
 

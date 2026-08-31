@@ -160,6 +160,8 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 The palette is the app icon: a **deep navy ground** (`#0e1c2b`) with **cool blue-grey** furniture, and **warm amber** (`rgba(255,214,150,…)`) for anything lit — a note, the current bar chip, the brand wordmark. That's the icon's lightbulb: dark glass, glowing filament. A note isn't a filled rectangle any more, it's an emissive one — every lit note carries a soft amber glow, brighter under the playhead, with velocity driving the ramp between.
 
+The app mark sits immediately right of the title in both header mounts, at text size (26px desktop, 20px mobile). It loads **`icon-128.png`**, not `icon.png` — the full render is 1024px and ~1MB, and this draws at ~24. It carries a steady `.markglow` bloom rather than `.wordmark`'s animated one: the mark already contains a lit filament, so breathing it too reads as flicker.
+
 The wordmark is a `.wordmark` class: `background-clip:text` for the amber gradient, and the glow is a **`drop-shadow` filter** because `text-shadow` cannot reach glyphs painted through a clipped background. A slow, shallow `filament` keyframe breathes that filter, disabled under `prefers-reduced-motion`.
 
 The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO blue, DRUMS rose) stay semantic; MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground.
