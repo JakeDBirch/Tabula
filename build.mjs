@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Tabula build pipeline.
-//   src/tabula.jsx   →   index.html
+// Loud Light build pipeline.
+//   src/loudlight.jsx   →   index.html
 //
 // 1. Strip import / export-default boilerplate so the file becomes a plain
 //    function declaration that mounts to <div id="root">.
@@ -18,13 +18,13 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const SRC = "src/tabula.jsx";
+const SRC = "src/loudlight.jsx";
 const OUT = "index.html";
 const auditOnly = process.argv.includes("--audit-only");
 
-const tmp = mkdtempSync(join(tmpdir(), "tabula-build-"));
-const srcStripped = join(tmp, "tabula.jsx");
-const compiled = join(tmp, "tabula.js");
+const tmp = mkdtempSync(join(tmpdir(), "loudlight-build-"));
+const srcStripped = join(tmp, "loudlight.jsx");
+const compiled = join(tmp, "loudlight.js");
 
 // 1. Prepare source — drop the React import line and the `export default`.
 const raw = readFileSync(SRC, "utf8");
@@ -34,9 +34,9 @@ const raw = readFileSync(SRC, "utf8");
 const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
 const prepped = raw
   .replace(/^import React.*$\n?/m, "")
-  .replace(/^export default function Tabula/m, "function Tabula")
+  .replace(/^export default function LoudLight/m, "function LoudLight")
   .replace(/__BUILD__/g, stamp) +
-  '\n\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Tabula));\n';
+  '\n\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(LoudLight));\n';
 writeFileSync(srcStripped, prepped);
 
 // 2. Babel compile.
@@ -99,13 +99,13 @@ const html = `<!DOCTYPE html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Tabula">
-  <meta name="theme-color" content="#1a1814">
+  <meta name="apple-mobile-web-app-title" content="Loud Light">
+  <meta name="theme-color" content="#0e1c2b">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
-  <title>Tabula</title>
-  <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#1a1814;overflow:hidden;}</style>
+  <link rel="icon" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <title>Loud Light</title>
+  <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#0e1c2b;overflow:hidden;}</style>
 </head>
 <body>
   <div id="root"></div>

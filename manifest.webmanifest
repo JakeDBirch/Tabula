@@ -1,14 +1,15 @@
 {
-  "name": "Tabula",
-  "short_name": "Tabula",
+  "name": "Loud Light",
+  "short_name": "Loud Light",
   "description": "Touch-first grid sequencer — POLY / MONO / DRUMS.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#1a1814",
-  "theme_color": "#1a1814",
+  "background_color": "#0e1c2b",
+  "theme_color": "#0e1c2b",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

@@ -66,7 +66,7 @@ const IS_MOBILE = (()=>{
       || /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent);
   } catch(e) { return false; }
 })();
-const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#c9a96e","#6c9ad6","#7aaa96","#c4b07a","#a09ec4"];
+const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#e6b872","#79b8f2","#7aaa96","#c4b07a","#a09ec4"];
 // A saved project is {id,name,updated,data}. `id` is opaque and permanent —
 // it's what SAVE/LOAD/CLEAR address and, in the cloud table, what the `slot`
 // column holds; `name` is only ever a label and is free to change. This
@@ -118,7 +118,7 @@ const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV
 const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
-const C_VARY="#c9a96e";
+const C_VARY="#e6b872";
 // LOOP's accent — same steel blue as the LOOP button, so the marked bar chip
 // reads as "this is the bar LOOP is holding".
 const C_LOOP="#9fb4c7";
@@ -1159,6 +1159,10 @@ const isDoubleTap=(e,key=null)=>{
   return false;
 };
 
+// The `tnori-` prefix and the `tabula-nohint` key are FOSSILS and stay that
+// way: they're where every existing install's projects and autosave already
+// live, and renaming them to match the app would orphan all of it for the sake
+// of tidiness nobody can see.
 const storageSet=async(k,v)=>{try{await window.storage.set(k,v);return true;}catch(e){}try{localStorage.setItem("tnori-"+k,v);return true;}catch(e){}return false;};
 const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value)return r.value;}catch(e){}try{const v=localStorage.getItem("tnori-"+k);if(v)return v;}catch(e){}return null;};
 
@@ -1169,7 +1173,7 @@ const storageGet=async k=>{try{const r=await window.storage.get(k);if(r&&r.value
 // phone. Auth is an emailed one-time code — no password to remember, and the
 // only thing kept on the device is a refresh token.
 //
-// Hand-rolled over `fetch` rather than pulling in supabase-js: Tabula ships as
+// Hand-rolled over `fetch` rather than pulling in supabase-js: the app ships as
 // ONE static file with two UMD script tags, and the six calls we need (send
 // code, verify, refresh, select/upsert/delete a row) are a page of code. An SDK
 // from a CDN would also have to be precached by the service worker to keep the
@@ -1477,7 +1481,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
         <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onDoubleClick={onReset}>
           {/* Track bg — inset 8px top/bottom for visual padding */}
-          <div style={{position:"absolute",top:8,bottom:8,width:4,borderRadius:3,background:"rgba(200,185,165,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
+          <div style={{position:"absolute",top:8,bottom:8,width:4,borderRadius:3,background:"rgba(168,190,212,0.1)",left:"50%",transform:"translateX(-50%)"}}/>
           {/* Fill — from bottom up within inset track */}
           <div style={{position:"absolute",bottom:8,width:4,borderRadius:3,height:`calc((100% - 16px) * ${pct/100})`,background:col+"77",left:"50%",transform:"translateX(-50%)"}}/>
           {/* Thumb — positioned within inset track */}
@@ -1600,9 +1604,9 @@ const LANES=[
   {key:"flt",  label:"FLT",  color:"#c97b8a",min:0,   max:100, def:50,  center:50,   bool:false},
   {key:"dly",  label:"DLY",  color:"#7aaa96",min:0,   max:100, def:0,   center:null, bool:false},
   {key:"rev",  label:"REV",  color:"#a8b8d0",min:0,   max:100, def:0,   center:null, bool:false},
-  {key:"rhy",  label:"RTCH", color:"#c9a96e",min:1,   max:4,   def:1,   center:null, bool:false},
+  {key:"rhy",  label:"RTCH", color:"#e6b872",min:1,   max:4,   def:1,   center:null, bool:false},
   {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
-  {key:"oct",  label:"OCT",  color:"#6c9ad6",min:0,   max:4,   def:2,   center:2,    bool:false},
+  {key:"oct",  label:"OCT",  color:"#79b8f2",min:0,   max:4,   def:2,   center:2,    bool:false},
   {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,   max:1,   def:0,   center:null, bool:true},
 ];
 // rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
@@ -1614,12 +1618,12 @@ const LANES=[
 // the radial picker can't confuse adjacent params (the old 10°/30° cluster let
 // an OCT drag bleed into RTCH/DLY).
 const PARAM_ARMS=[
-  {key:"rhy", label:"RTCH", color:"#c9a96e", angle:180, min:1,    max:4,   discrete:true,  def:1},
+  {key:"rhy", label:"RTCH", color:"#e6b872", angle:180, min:1,    max:4,   discrete:true,  def:1},
   {key:"dly", label:"DLY",  color:"#7aaa96", angle:150, min:0,    max:100, discrete:false, def:0},
   {key:"vel", label:"VEL",  color:"#c8bfb0", angle:90,  min:0,    max:127, discrete:false, def:100},
   {key:"dur", label:"DUR",  color:"#9fb4c7", angle:120, min:-100, max:100, discrete:false, def:0},
   {key:"flt", label:"FLT",  color:"#c97b8a", angle:60,  min:0,    max:100, discrete:false, def:50},
-  {key:"oct", label:"OCT",  color:"#6c9ad6", angle:30,  min:0,    max:4,   discrete:true,  def:2},
+  {key:"oct", label:"OCT",  color:"#79b8f2", angle:30,  min:0,    max:4,   discrete:true,  def:2},
   {key:"rev", label:"REV",  color:"#a98fd0", angle:0,   min:0,    max:100, discrete:false, def:0},
 ];
 // Defaults for the mobile VARY sliders (by label) so double-tap returns each to
@@ -1737,7 +1741,7 @@ function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,o
           const pct=isRhy ? Math.max(0.12, (rhyVal-1)/3) : (v-lane.min)/(lane.max-lane.min);
           const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
           return(
-            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(200,185,165,0.15)":"none"})}
+            <div key={c} style={Object.assign({},S.laneBarWrap,{opacity:locked?0.15:1,borderLeft:isQ?"1px solid rgba(168,190,212,0.15)":"none"})}
               onDoubleClick={e=>{e.stopPropagation();if(locked)return;onResetCol&&onResetCol(c);}}>
               {/* Always-visible per-step value — shown on programmed (non-default)
                   or currently-playing steps so you can read values without dragging. */}
@@ -2706,7 +2710,7 @@ function SynthSection({title,accent,children}){
 
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-export default function Tabula(){
+export default function LoudLight(){
   // ── THE STORE ──────────────────────────────────────────────────────────
   // One list of unified patterns; each holds all three parts. Everything below
   // (`pats`, `drumPats`, `activeId`, `activeDrumId`) is a VIEW onto this, kept
@@ -4124,7 +4128,7 @@ export default function Tabula(){
   };
   const _patColorOf=(id)=>{
     const i=patterns.findIndex(p=>p.id===id);
-    return i<0?"rgba(220,200,180,0.4)":patCol(i);
+    return i<0?"rgba(186,208,230,0.4)":patCol(i);
   };
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
@@ -4139,7 +4143,7 @@ export default function Tabula(){
             dupPatternId / delPatternId are declared further down and Babel
             lowers const to var, so binding them here installs undefined. */}
         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
-          <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PATTERNS</div>
+          <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>PATTERNS</div>
           {(()=>{
             const selName=(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name;
             const full=patterns.length>=MAX_PATTERNS;
@@ -4149,8 +4153,8 @@ export default function Tabula(){
               display:"flex",alignItems:"center",justifyContent:"center",gap:3,
               fontSize:9,letterSpacing:1,fontWeight:600,lineHeight:1,userSelect:"none",
               cursor:d?"default":"pointer",flexShrink:0,
-              border:"1px solid rgba(200,185,165,"+(d?"0.07":"0.2")+")",background:"transparent",
-              color:d?"rgba(200,185,165,0.16)":"rgba(210,195,175,0.6)"},extra||{});
+              border:"1px solid rgba(168,190,212,"+(d?"0.07":"0.2")+")",background:"transparent",
+              color:d?"rgba(168,190,212,0.16)":"rgba(178,199,219,0.6)"},extra||{});
             return(
               <Fragment>
                 {/* Names the chip DUP/DEL will act on — the highlighted chip
@@ -4229,9 +4233,9 @@ export default function Tabula(){
                 style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",
                   alignItems:"center",justifyContent:"center",gap:5,cursor:"grab",userSelect:"none",
                   touchAction:"none",
-                  border:"1px solid "+(sel?col:"rgba(200,185,165,0.16)"),
+                  border:"1px solid "+(sel?col:"rgba(168,190,212,0.16)"),
                   background:sel?col+"22":"transparent",
-                  color:sel?col:(empty?"rgba(210,195,175,0.3)":"rgba(210,195,175,0.7)"),
+                  color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)"),
                   opacity:dragging?0.35:1,
                   fontSize:13,fontWeight:700,lineHeight:1}}>
                 {p.name}
@@ -4246,8 +4250,8 @@ export default function Tabula(){
             <div onClick={()=>addPattern()}
               style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
                 justifyContent:"center",cursor:"pointer",userSelect:"none",
-                border:"1px dashed rgba(200,185,165,0.25)",background:"transparent",
-                color:"rgba(210,195,175,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
+                border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
+                color:"rgba(178,199,219,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
           )}
         </div>
       </div>
@@ -4257,9 +4261,9 @@ export default function Tabula(){
           show all 64 at once. Starts at two rows and grows a row at a time as
           you fill it, up to the full 64. */}
       <div style={{width:"100%",maxWidth:640,flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
-        <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
+        <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
           <span>SONG</span>
-          <span style={{flex:1,minWidth:0,color:"rgba(210,195,175,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+          <span style={{flex:1,minWidth:0,color:"rgba(178,199,219,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
           </span>
           {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
@@ -4270,7 +4274,7 @@ export default function Tabula(){
               onClick={()=>collapseSong()}
               style={{flexShrink:0,height:24,padding:"0 10px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
                 fontFamily:"inherit",fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
-                border:"1px solid rgba(200,185,165,0.28)",background:"rgba(200,185,165,0.05)",color:"rgba(210,195,175,0.75)"}}>
+                border:"1px solid rgba(168,190,212,0.28)",background:"rgba(168,190,212,0.05)",color:"rgba(178,199,219,0.75)"}}>
               SONG → PATTERN
             </button>
           )}
@@ -4307,7 +4311,7 @@ export default function Tabula(){
                   <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
                     style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
                       display:"flex",alignItems:"center",justifyContent:"center",
-                      background:pat?col0:(isCursor?"rgba(220,200,180,0.25)":"rgba(220,200,180,0.05)"),
+                      background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
                       // The border is always THERE and only changes colour.
                       // These cells are flex:1 with flex-basis 0, and under
                       // border-box a flex item's base size is floored at its
@@ -4316,12 +4320,12 @@ export default function Tabula(){
                       // aspect-ratio:1 that came back as 2px of height too, so
                       // filling a slot knocked the whole grid out of alignment.
                       // It also skewed the rects _songMeasure caches for drops.
-                      border:"1px solid "+(pat?"transparent":"rgba(220,200,180,0.09)"),
+                      border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
                       boxSizing:"border-box",minWidth:0,
                       outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
                       outlineOffset:"-1px",
                       boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
-                      color:pat?"#1a1814":"transparent",fontSize:17,fontWeight:700,
+                      color:pat?"#0e1c2b":"transparent",fontSize:17,fontWeight:700,
                       touchAction:"none",cursor:"pointer",userSelect:"none",
                       transition:"background .08s, outline .08s"}}
                     onPointerDown={(e)=>{
@@ -4409,7 +4413,7 @@ export default function Tabula(){
                     )}
                     {runStart&&run>1&&(
                       <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
-                        color:"rgba(26,24,20,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                        color:"rgba(10,20,32,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
                     )}
                     {/* Bar dots — one per bar of the pattern, above the symbol,
                         mirroring the repeat pips below it. On the playing cell
@@ -4429,7 +4433,7 @@ export default function Tabula(){
                               className={lit?"barpulse":undefined}
                               style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
                                 height:3,borderRadius:pbars<=8?2:0,
-                                background:lit?"rgba(255,255,255,0.95)":"rgba(26,24,20,0.4)"}}/>
+                                background:lit?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.4)"}}/>
                           );
                         })}
                       </div>
@@ -4442,7 +4446,7 @@ export default function Tabula(){
                         justifyContent:"center",gap:2,pointerEvents:"none"}}>
                         {Array.from({length:rep},(_,k)=>(
                           <div key={k} style={{width:4,height:4,borderRadius:2,
-                            background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(26,24,20,0.45)"}}/>
+                            background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.45)"}}/>
                         ))}
                       </div>
                     )}
@@ -4471,7 +4475,7 @@ export default function Tabula(){
               style={{position:"fixed",inset:0,zIndex:60,background:"transparent"}}/>
             <div style={{position:"fixed",left,top,zIndex:61,display:"flex",gap:6,padding:6,
               borderRadius:9,background:"rgba(28,25,21,0.97)",
-              border:"1px solid rgba(200,185,165,0.22)",
+              border:"1px solid rgba(168,190,212,0.22)",
               boxShadow:"0 6px 20px rgba(0,0,0,0.5)",touchAction:"none"}}
               onPointerDown={e=>e.stopPropagation()}>
               {Array.from({length:SONG_MAX_REP},(_,k)=>{
@@ -4484,14 +4488,14 @@ export default function Tabula(){
                     }}
                     style={{width:38,height:38,borderRadius:7,display:"flex",flexDirection:"column",
                       alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",userSelect:"none",
-                      border:"1px solid "+(on?acc:"rgba(200,185,165,0.18)"),
+                      border:"1px solid "+(on?acc:"rgba(168,190,212,0.18)"),
                       background:on?acc+"22":"transparent",
-                      color:on?acc:"rgba(210,195,175,0.7)",fontSize:13,fontWeight:700,lineHeight:1}}>
+                      color:on?acc:"rgba(178,199,219,0.7)",fontSize:13,fontWeight:700,lineHeight:1}}>
                     <span>{n}</span>
                     <div style={{display:"flex",gap:1.5}}>
                       {Array.from({length:n},(_,j)=>(
                         <div key={j} style={{width:3,height:3,borderRadius:1.5,
-                          background:on?acc:"rgba(210,195,175,0.4)"}}/>
+                          background:on?acc:"rgba(178,199,219,0.4)"}}/>
                       ))}
                     </div>
                   </div>
@@ -4558,9 +4562,9 @@ export default function Tabula(){
           return(
             <div key={bi} style={{position:"relative",flex:1,minWidth:2,borderRadius:3,
               display:"flex",alignItems:"center",justifyContent:"center",
-              background:isCur?"rgba(232,220,205,0.55)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(220,200,180,0.03)":has?"rgba(220,200,180,0.17)":"rgba(220,200,180,0.07)",
+              background:isCur?"rgba(255,206,130,0.62)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.17)":"rgba(186,208,230,0.07)",
               boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
-              color:isCur?"rgba(20,16,12,0.75)":isLoop?C_LOOP:"rgba(210,195,175,0.45)",
+              color:isCur?"rgba(10,20,32,0.8)":isLoop?C_LOOP:"rgba(178,199,219,0.45)",
               fontSize:9,fontWeight:700,lineHeight:1,pointerEvents:"none",
               transition:"background .08s"}}>
               {wide?bi+1:""}
@@ -4591,9 +4595,9 @@ export default function Tabula(){
             setActiveSheet(sh=>sh==="bars"?null:"bars");}}
           style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3,
             height:22,minWidth:66,padding:"0 8px",borderRadius:5,
-            border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),
+            border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),
             background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
-            color:activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",
+            color:activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.55)",
             fontSize:10,fontWeight:600,letterSpacing:0.5,lineHeight:1,
             cursor:"pointer",userSelect:"none",flexShrink:0}}>
           {/* Names the pattern you're editing — the pills that used to say so
@@ -4606,7 +4610,7 @@ export default function Tabula(){
       ):(
         <span style={{fontSize:9,letterSpacing:0.5,minWidth:52,textAlign:"center",pointerEvents:"none",display:"flex",gap:4,justifyContent:"center"}}>
           <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
-          <span style={{color:"rgba(210,195,175,0.4)"}}>{curBar+1}/{barCount}</span>
+          <span style={{color:"rgba(178,199,219,0.4)"}}>{curBar+1}/{barCount}</span>
         </span>
       )}
     </div>
@@ -4620,7 +4624,7 @@ export default function Tabula(){
         ["−BAR",removeBar,barCount<=1,true],
         ["×2",doublePattern,barCount*2>MAX_BARS,false]].map(([l,f,d,danger])=>(
         <button key={l} disabled={!!d} title={l==="⧉BAR"?"Duplicate the visible bar":(l==="×2"?"Double the pattern — the new half is a copy of the old one":undefined)}
-          style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}}
+          style={{padding:"4px 0",border:"1px solid rgba(168,190,212,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(168,190,212,0.18)":danger?"#c47a7a":"rgba(168,190,212,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}}
           onClick={d?undefined:f}>{l}</button>
       ))}
     </div>
@@ -4957,7 +4961,7 @@ export default function Tabula(){
         }
       }
     });
-    downloadBlob(buildSMF([[...meta],[tName("POLY"),...synthEv],[tName("MONO"),...leadEv],[tName("DRUMS"),...drumEv]]),"tabula-song.mid","audio/midi");
+    downloadBlob(buildSMF([[...meta],[tName("POLY"),...synthEv],[tName("MONO"),...leadEv],[tName("DRUMS"),...drumEv]]),"loudlight-song.mid","audio/midi");
     showFlash("MIDI EXPORTED");
   };
 
@@ -5085,11 +5089,11 @@ export default function Tabula(){
       // On mobile (where the OS share sheet is the point — text/email the
       // sketch), stash the file and surface a SHARE button instead of forcing a
       // download. Desktop, or anywhere file-sharing isn't supported, downloads.
-      const file=new File([blob],"tabula-song.mp3",{type:"audio/mpeg"});
+      const file=new File([blob],"loudlight-song.mp3",{type:"audio/mpeg"});
       if(IS_MOBILE&&navigator.canShare&&navigator.canShare({files:[file]})){
         setShareFile(file);showFlash("READY — TAP SHARE");
       }else{
-        downloadBlob(blob,"tabula-song.mp3","audio/mpeg");showFlash("MP3 EXPORTED");
+        downloadBlob(blob,"loudlight-song.mp3","audio/mpeg");showFlash("MP3 EXPORTED");
       }
     }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
     finally{
@@ -5148,7 +5152,7 @@ export default function Tabula(){
         // Never swallow this silently: a throw in here looks exactly like
         // "the project just didn't load", and autosave then never fires
         // because no state changed — which is how a restore bug hides.
-        try{console.error("Tabula: autosave restore failed —",e&&e.message,e);}catch(_){}
+        try{console.error("Loud Light: autosave restore failed —",e&&e.message,e);}catch(_){}
       }
       autosaveReadyR.current=true;
     })();
@@ -5562,8 +5566,8 @@ export default function Tabula(){
     if("mediaSession" in navigator){
       try{
         navigator.mediaSession.metadata=new MediaMetadata({
-          title:"Tabula",artist:"Sequencer",album:"",
-          artwork:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%231a1814'/%3E%3Ctext x='48' y='64' text-anchor='middle' font-size='44' fill='%23c4a882' font-family='Georgia%2Cserif' font-weight='bold'%3ET%3C/text%3E%3C/svg%3E",sizes:"96x96",type:"image/svg+xml"}]
+          title:"Loud Light",artist:"Sequencer",album:"",
+          artwork:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%230e1c2b'/%3E%3Cg stroke='%23ffd28a' stroke-width='7' stroke-linecap='round' stroke-linejoin='round' fill='none'%3E%3Cpath d='M30 30v26h14'/%3E%3Cpath d='M52 30h14v26'/%3E%3C/g%3E%3C/svg%3E",sizes:"96x96",type:"image/svg+xml"}]
         });
         navigator.mediaSession.playbackState="playing";
         navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)startStop();});
@@ -7018,8 +7022,8 @@ export default function Tabula(){
   // between platforms. On desktop this used to be a permanently-visible column
   // pinned to the bottom of the sidebar; none of it is wanted mid-take, so it
   // lives behind a single button now.
-  const mSecLbl={fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8};
-  const mBtn={width:"100%",padding:"9px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",borderRadius:6,fontFamily:"inherit"};
+  const mSecLbl={fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:8};
+  const mBtn={width:"100%",padding:"9px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(178,199,219,0.45)",fontSize:10,letterSpacing:1,fontWeight:600,cursor:"pointer",borderRadius:6,fontFamily:"inherit"};
   const mBtnLit={border:"1px solid rgba(105,240,174,0.45)",color:"#7aaa96",background:"rgba(105,240,174,0.04)"};
   const C_CLOUD="#8fb0c9";
   // S.root sets user-select:none and -webkit-touch-callout:none so dragging a
@@ -7029,7 +7033,7 @@ export default function Tabula(){
   // can't be typed into — and the callout suppression kills long-press → Paste,
   // which is how you'd enter a code you just received in Mail. Chromium ignores
   // both on inputs, so this does not reproduce in a headless test.
-  const mInput={flex:1,minWidth:0,padding:"9px 10px",borderRadius:6,border:"1px solid rgba(200,185,165,0.2)",background:"rgba(200,185,165,0.05)",color:"rgba(232,224,213,0.9)",fontSize:12,letterSpacing:1,fontFamily:"inherit",outline:"none",
+  const mInput={flex:1,minWidth:0,padding:"9px 10px",borderRadius:6,border:"1px solid rgba(168,190,212,0.2)",background:"rgba(168,190,212,0.05)",color:"rgba(226,236,247,0.9)",fontSize:12,letterSpacing:1,fontFamily:"inherit",outline:"none",
     userSelect:"text",WebkitUserSelect:"text",WebkitTouchCallout:"default"};
   // Slot column — the same shape for a local slot and a cloud slot, so the two
   // banks read as one control with two homes. `caption` is the cloud's staleness
@@ -7039,11 +7043,11 @@ export default function Tabula(){
   const mProjRow=(key,name,when,accent,selected,onPick)=>(
     <div key={key} onClick={onPick}
       style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:6,cursor:"pointer",
-        border:"1px solid "+(selected?accent:"rgba(200,185,165,0.10)"),
+        border:"1px solid "+(selected?accent:"rgba(168,190,212,0.10)"),
         background:selected?accent+"1f":"transparent"}}>
       <span style={{flex:1,minWidth:0,fontSize:11,letterSpacing:0.5,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
-        color:selected?accent:"rgba(232,224,213,0.8)"}}>{name}</span>
-      {when&&<span style={{flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)"}}>{when}</span>}
+        color:selected?accent:"rgba(226,236,247,0.8)"}}>{name}</span>
+      {when&&<span style={{flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.3)"}}>{when}</span>}
     </div>
   );
   const projectMenuBody=(
@@ -7052,7 +7056,7 @@ export default function Tabula(){
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6}}>
           <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(210,190,140,0.9)",fontWeight:500}}>{confirmAction.label}</span>
           <button style={{padding:"5px 12px",border:"1px solid rgba(210,190,140,0.5)",borderRadius:4,background:"rgba(196,150,80,0.2)",color:"rgba(220,200,150,0.95)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",fontWeight:600}} onClick={()=>confirmYes()}>YES</button>
-          <button style={{padding:"5px 12px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>confirmNo()}>NO</button>
+          <button style={{padding:"5px 12px",border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>confirmNo()}>NO</button>
         </div>
       )}
 
@@ -7070,11 +7074,11 @@ export default function Tabula(){
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
           <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>PROJECTS{cloudBusy?" · "+cloudBusy:""}</div>
           {CLOUD_ON&&(
-            <div style={{display:"flex",gap:0,border:"1px solid rgba(200,185,165,0.15)",borderRadius:6,overflow:"hidden"}}>
-              {[["device","DEVICE","#c9a96e"],["cloud","CLOUD",C_CLOUD]].map(([k,lbl,col])=>(
+            <div style={{display:"flex",gap:0,border:"1px solid rgba(168,190,212,0.15)",borderRadius:6,overflow:"hidden"}}>
+              {[["device","DEVICE","#e6b872"],["cloud","CLOUD",C_CLOUD]].map(([k,lbl,col])=>(
                 <button key={k} onClick={()=>setLibTab(k)}
                   style={{padding:"4px 10px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:8,letterSpacing:1.5,fontWeight:700,
-                    background:libTab===k?col+"22":"transparent",color:libTab===k?col:"rgba(210,195,175,0.4)"}}>{lbl}</button>
+                    background:libTab===k?col+"22":"transparent",color:libTab===k?col:"rgba(178,199,219,0.4)"}}>{lbl}</button>
               ))}
             </div>
           )}
@@ -7083,7 +7087,7 @@ export default function Tabula(){
         {libTab==="cloud"&&!cloudSess?(
           /* Signed out — the sign-in form stands in for the list. */
           <div style={{display:"flex",flexDirection:"column",gap:7}}>
-            <div style={{fontSize:9,lineHeight:1.5,color:"rgba(210,195,175,0.45)"}}>
+            <div style={{fontSize:9,lineHeight:1.5,color:"rgba(178,199,219,0.45)"}}>
               {cloudStage==="code"
                 ?"Enter the code sent to "+cloudEmail.trim()+"."
                 :"Sign in with your email to keep projects in the cloud and pick them up on another device. We'll send a one-time code — no password."}
@@ -7111,7 +7115,7 @@ export default function Tabula(){
                 and rate-limited way back to the box when one is already in your
                 inbox. */}
             {cloudStage==="email"&&(
-              <button style={{alignSelf:"flex-start",padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}
+              <button style={{alignSelf:"flex-start",padding:0,border:"none",background:"none",color:"rgba(178,199,219,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}
                 onClick={()=>{
                   if(!CLOUD_EMAIL_RE.test(cloudEmail.trim())){showFlash("ENTER YOUR EMAIL FIRST","warn");return;}
                   setCloudCode("");setCloudStage("code");
@@ -7119,14 +7123,14 @@ export default function Tabula(){
             )}
             {cloudStage==="code"&&(
               <div style={{display:"flex",gap:10}}>
-                <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
-                <button style={{padding:0,border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>{setCloudStage("email");setCloudCode("");}}>USE A DIFFERENT EMAIL</button>
+                <button style={{padding:0,border:"none",background:"none",color:"rgba(178,199,219,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>cloudSignIn()}>RESEND</button>
+                <button style={{padding:0,border:"none",background:"none",color:"rgba(178,199,219,0.4)",fontSize:9,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}} onClick={()=>{setCloudStage("email");setCloudCode("");}}>USE A DIFFERENT EMAIL</button>
               </div>
             )}
           </div>
         ):(()=>{
           const onCloud=libTab==="cloud";
-          const accent=onCloud?C_CLOUD:"#c9a96e";
+          const accent=onCloud?C_CLOUD:"#e6b872";
           const rows=onCloud
             ? cloudLib.map(r=>({key:r.slot,id:r.slot,name:r.name||"Untitled",when:cloudAgo(r.updated_at)}))
             : library.map(r=>({key:r.id,id:r.id,name:r.name,when:r.updated?cloudAgo(new Date(r.updated).toISOString()):""}));
@@ -7137,15 +7141,15 @@ export default function Tabula(){
               {onCloud&&cloudSess&&(
                 <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
                   <span style={{flex:1,minWidth:0,fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</span>
-                  <button style={{padding:"3px 8px",border:"1px solid rgba(200,185,165,0.2)",borderRadius:4,background:"transparent",color:"rgba(200,185,165,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
+                  <button style={{padding:"3px 8px",border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,background:"transparent",color:"rgba(168,190,212,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
                 </div>
               )}
               {/* The list. Scrolls once it outgrows the box rather than pushing
                   the buttons off a phone screen. */}
               <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:210,overflowY:"auto",marginBottom:8,
-                border:"1px solid rgba(200,185,165,0.08)",borderRadius:8,padding:4}}>
+                border:"1px solid rgba(168,190,212,0.08)",borderRadius:8,padding:4}}>
                 {rows.length===0
-                  ?<div style={{padding:"18px 10px",textAlign:"center",fontSize:9,lineHeight:1.6,letterSpacing:1,color:"rgba(210,195,175,0.3)"}}>
+                  ?<div style={{padding:"18px 10px",textAlign:"center",fontSize:9,lineHeight:1.6,letterSpacing:1,color:"rgba(178,199,219,0.3)"}}>
                      NO PROJECTS {onCloud?"IN THE CLOUD":"ON THIS DEVICE"}<br/>NAME ONE BELOW AND SAVE
                    </div>
                   :rows.map(r=>mProjRow(r.key,r.name,r.when,accent,selId===r.id,
@@ -7160,12 +7164,12 @@ export default function Tabula(){
                   onChange={e=>setNameDraft(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Enter")(onCloud?cloudSave:saveProject)();}}/>
                 {picked
-                  ?<button style={{flexShrink:0,padding:"9px 12px",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                  ?<button style={{flexShrink:0,padding:"9px 12px",borderRadius:6,border:"1px solid rgba(168,190,212,0.25)",background:"transparent",color:"rgba(178,199,219,0.55)",fontSize:9,letterSpacing:1.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                      onClick={()=>{selectProject(libTab,null);}}>DESELECT</button>
                   /* Nothing picked → the field holds a generated name, so offer
                      another roll rather than making someone type to escape one
                      they don't like. */
-                  :<button title="Another name" style={{flexShrink:0,width:38,padding:"9px 0",borderRadius:6,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.55)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
+                  :<button title="Another name" style={{flexShrink:0,width:38,padding:"9px 0",borderRadius:6,border:"1px solid rgba(168,190,212,0.25)",background:"transparent",color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
                      onClick={()=>setNameDraft(randomName(takenNames(libTab)))}>⟲</button>}
               </div>
               {/* One set of buttons. SAVE always works (new, or into the pick);
@@ -7187,7 +7191,7 @@ export default function Tabula(){
           Share link, JSON export and JSON import are gone: the named project
           library and the cloud cover keeping and moving work, and a preset file
           was a fourth way to do the same thing. What's left renders the song
-          OUT of Tabula, into something another tool plays. */}
+          OUT of the app, into something another tool plays. */}
       <div>
         <div style={mSecLbl}>EXPORT</div>
         {/* MP3 asks how long before it runs. The pass count used to sit here
@@ -7195,20 +7199,20 @@ export default function Tabula(){
             seconds before a bounce — and a bounce is REAL TIME, so starting an
             8-pass one by accident costs you minutes you can't cancel. */}
         {mp3Arm?(
-          <div style={{border:"1px solid rgba(200,185,165,0.25)",borderRadius:7,padding:"9px 10px"}}>
+          <div style={{border:"1px solid rgba(168,190,212,0.25)",borderRadius:7,padding:"9px 10px"}}>
             <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-              <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(210,195,175,0.6)",fontWeight:600}}>HOW MANY PASSES THROUGH THE SONG?</span>
-              <button style={{padding:"2px 6px",border:"none",background:"none",color:"rgba(210,195,175,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
+              <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(178,199,219,0.6)",fontWeight:600}}>HOW MANY PASSES THROUGH THE SONG?</span>
+              <button style={{padding:"2px 6px",border:"none",background:"none",color:"rgba(178,199,219,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>setMp3Arm(false)}>✕</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
               {[1,2,4,8].map(n=>(
                 <button key={n} onClick={()=>{setMp3Arm(false);setExportLoops(n);exportMP3(n);}}
                   style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:6,
-                    border:"1px solid rgba(200,185,165,0.3)",background:"rgba(200,185,165,0.06)",color:"rgba(232,224,213,0.85)"}}>×{n}</button>
+                    border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.06)",color:"rgba(226,236,247,0.85)"}}>×{n}</button>
               ))}
             </div>
-            <div style={{marginTop:7,fontSize:8,letterSpacing:0.5,lineHeight:1.5,color:"rgba(210,195,175,0.3)"}}>
+            <div style={{marginTop:7,fontSize:8,letterSpacing:0.5,lineHeight:1.5,color:"rgba(178,199,219,0.3)"}}>
               Recorded in real time — {songSeq.length?"one pass is the whole song":"one pass is the current pattern"}.
             </div>
           </div>
@@ -7220,7 +7224,7 @@ export default function Tabula(){
           </div>
         )}
       </div>
-      <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
+      <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
   );
 
@@ -7249,28 +7253,28 @@ export default function Tabula(){
           onPointerMove={e=>{e.preventDefault();e.stopPropagation();}}
           onClick={e=>{e.preventDefault();e.stopPropagation();}}
           onWheel={e=>e.preventDefault()}>
-          <div style={{width:"min(86vw,340px)",background:"rgba(26,24,20,0.98)",border:"1px solid rgba(196,168,130,0.45)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.7)",padding:"22px 22px 20px",textAlign:"center"}}>
+          <div style={{width:"min(86vw,340px)",background:"rgba(10,20,32,0.98)",border:"1px solid rgba(255,196,106,0.45)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.7)",padding:"22px 22px 20px",textAlign:"center"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:9,marginBottom:6}}>
               <span style={{width:11,height:11,borderRadius:"50%",background:"#e0705f",boxShadow:"0 0 10px #e0705f"}}/>
-              <span style={{fontSize:13,letterSpacing:3,fontWeight:700,color:"rgba(232,224,213,0.95)"}}>BOUNCING MP3</span>
+              <span style={{fontSize:13,letterSpacing:3,fontWeight:700,color:"rgba(226,236,247,0.95)"}}>BOUNCING MP3</span>
             </div>
-            <div style={{fontSize:10,letterSpacing:1.5,color:"rgba(210,195,175,0.55)",marginBottom:16}}>{(exportPhase||"Preparing")+(exportLoops>1?" · "+exportLoops+" passes":"")}</div>
-            <div style={{height:7,background:"rgba(220,200,180,0.1)",borderRadius:4,overflow:"hidden",marginBottom:14}}>
+            <div style={{fontSize:10,letterSpacing:1.5,color:"rgba(178,199,219,0.55)",marginBottom:16}}>{(exportPhase||"Preparing")+(exportLoops>1?" · "+exportLoops+" passes":"")}</div>
+            <div style={{height:7,background:"rgba(186,208,230,0.1)",borderRadius:4,overflow:"hidden",marginBottom:14}}>
               <div ref={exportBarR} style={{height:"100%",width:"0%",background:"linear-gradient(90deg,#c4a070,#e0a050)",borderRadius:4,transition:"width .15s linear"}}/>
             </div>
-            <div style={{fontSize:9,letterSpacing:0.5,color:"rgba(210,195,175,0.4)",lineHeight:1.5}}>Recording in real time — keep this screen open.<br/>Controls are locked until it finishes.</div>
+            <div style={{fontSize:9,letterSpacing:0.5,color:"rgba(178,199,219,0.4)",lineHeight:1.5}}>Recording in real time — keep this screen open.<br/>Controls are locked until it finishes.</div>
           </div>
         </div>
       )}
 
       {shareFile&&(
         <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:9999,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
-          <div style={{margin:"0 0 96px",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:14,background:"rgba(24,22,18,0.97)",border:"1px solid rgba(168,197,160,0.4)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)",pointerEvents:"auto"}}>
-            <span style={{fontSize:10,letterSpacing:1,color:"rgba(210,195,175,0.5)",fontWeight:600}}>MP3 READY</span>
-            <button onClick={async()=>{const f=shareFile;try{await navigator.share({files:[f],title:"Tabula",text:"Tabula sketch"});setShareFile(null);}catch(e){if(!(e&&e.name==="AbortError")){downloadBlob(f,"tabula-song.mp3","audio/mpeg");setShareFile(null);}}}}
+          <div style={{margin:"0 0 96px",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:14,background:"rgba(14,26,40,0.97)",border:"1px solid rgba(168,197,160,0.4)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)",pointerEvents:"auto"}}>
+            <span style={{fontSize:10,letterSpacing:1,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MP3 READY</span>
+            <button onClick={async()=>{const f=shareFile;try{await navigator.share({files:[f],title:"Loud Light",text:"Loud Light sketch"});setShareFile(null);}catch(e){if(!(e&&e.name==="AbortError")){downloadBlob(f,"loudlight-song.mp3","audio/mpeg");setShareFile(null);}}}}
               style={{padding:"10px 18px",borderRadius:10,border:"1px solid #a8c5a0",background:"rgba(168,197,160,0.18)",color:"#cfe3c8",fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}>↗ SHARE</button>
             <button onClick={()=>setShareFile(null)}
-              style={{padding:"10px 12px",borderRadius:10,border:"1px solid rgba(200,185,165,0.25)",background:"transparent",color:"rgba(210,195,175,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+              style={{padding:"10px 12px",borderRadius:10,border:"1px solid rgba(168,190,212,0.25)",background:"transparent",color:"rgba(178,199,219,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
           </div>
         </div>
       )}
@@ -7284,7 +7288,7 @@ export default function Tabula(){
           {/* Wraps rather than clipping: these carry the only diagnosis you get
               when something server-side refuses, and half a sentence is no use. */}
           <div onClick={()=>{if(flashTone==="warn"){clearTimeout(flashTmr.current);setFlash("");}}}
-            style={{maxWidth:"min(92vw,420px)",padding:"8px 14px",borderRadius:8,background:"rgba(26,24,20,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.2,lineHeight:1.5,fontWeight:600,textAlign:"center",
+            style={{maxWidth:"min(92vw,420px)",padding:"8px 14px",borderRadius:8,background:"rgba(10,20,32,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",fontSize:10,letterSpacing:1.2,lineHeight:1.5,fontWeight:600,textAlign:"center",
             pointerEvents:flashTone==="warn"?"auto":"none",cursor:flashTone==="warn"?"pointer":"default",
             border:"1px solid "+(flashTone==="warn"?"rgba(214,166,90,0.5)":"rgba(105,240,174,0.3)"),
             color:flashTone==="warn"?"#d6a65a":"#7aaa96"}}>
@@ -7299,11 +7303,11 @@ export default function Tabula(){
       {!IS_MOBILE&&menuOpen&&(
         <div style={{position:"fixed",inset:0,zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)",backdropFilter:"blur(3px)",WebkitBackdropFilter:"blur(3px)"}}
           onClick={()=>{setMenuOpen(false);setConfirmAction(null);}}>
-          <div style={{width:"min(92vw,460px)",maxHeight:"84vh",overflowY:"auto",background:"rgba(26,24,20,0.98)",border:"1px solid rgba(200,185,165,0.2)",borderRadius:16,boxShadow:"0 16px 50px rgba(0,0,0,0.65)",padding:"16px 18px 20px"}}
+          <div style={{width:"min(92vw,460px)",maxHeight:"84vh",overflowY:"auto",background:"rgba(10,20,32,0.98)",border:"1px solid rgba(168,190,212,0.2)",borderRadius:16,boxShadow:"0 16px 50px rgba(0,0,0,0.65)",padding:"16px 18px 20px"}}
             onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",alignItems:"center",marginBottom:14}}>
-              <span style={{flex:1,fontSize:11,letterSpacing:3,color:"rgba(210,195,175,0.5)",fontWeight:600}}>PROJECT</span>
-              <div onClick={()=>{setMenuOpen(false);setConfirmAction(null);}} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(210,195,175,0.45)",fontSize:18,cursor:"pointer",borderRadius:13}}>×</div>
+              <span style={{flex:1,fontSize:11,letterSpacing:3,color:"rgba(178,199,219,0.5)",fontWeight:600}}>PROJECT</span>
+              <div onClick={()=>{setMenuOpen(false);setConfirmAction(null);}} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(178,199,219,0.45)",fontSize:18,cursor:"pointer",borderRadius:13}}>×</div>
             </div>
             {projectMenuBody}
           </div>
@@ -7312,10 +7316,10 @@ export default function Tabula(){
 
       {/* One-time fullscreen nudge (iOS, in-browser only). */}
       {installHint&&(
-        <div style={{position:"fixed",left:8,right:8,bottom:8,zIndex:9998,display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:12,background:"rgba(24,22,18,0.98)",border:"1px solid rgba(200,185,165,0.25)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)"}}>
-          <span style={{flex:1,fontSize:11,lineHeight:1.35,color:"rgba(210,195,175,0.8)"}}>For fullscreen: <b style={{color:"#c4a882"}}>Share ▸ Add to Home Screen</b>, then open Tabula from your home screen.</span>
+        <div style={{position:"fixed",left:8,right:8,bottom:8,zIndex:9998,display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:12,background:"rgba(14,26,40,0.98)",border:"1px solid rgba(168,190,212,0.25)",boxShadow:"0 6px 28px rgba(0,0,0,0.6)"}}>
+          <span style={{flex:1,fontSize:11,lineHeight:1.35,color:"rgba(178,199,219,0.8)"}}>For fullscreen: <b style={{color:"#ffc46a"}}>Share ▸ Add to Home Screen</b>, then open Loud Light from your home screen.</span>
           <button onClick={()=>{try{localStorage.setItem("tabula-nohint","1");}catch(e){}setInstallHint(false);}}
-            style={{padding:"7px 12px",borderRadius:9,border:"1px solid rgba(200,185,165,0.3)",background:"rgba(200,185,165,0.08)",color:"rgba(220,205,180,0.9)",fontSize:11,fontWeight:600,letterSpacing:0.5,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Got it</button>
+            style={{padding:"7px 12px",borderRadius:9,border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.08)",color:"rgba(220,205,180,0.9)",fontSize:11,fontWeight:600,letterSpacing:0.5,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Got it</button>
         </div>
       )}
 
@@ -7328,15 +7332,15 @@ export default function Tabula(){
         return(
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}} onPointerMove={handleGridMove}>
             <div style={{position:"absolute",left:px,top:py,width:W,
-              background:"rgba(26,24,20,0.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",
-              borderRadius:14,border:"1px solid rgba(200,185,165,0.15)",
+              background:"rgba(10,20,32,0.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",
+              borderRadius:14,border:"1px solid rgba(168,190,212,0.15)",
               boxShadow:"0 12px 40px rgba(0,0,0,0.5)",
               padding:"10px 14px 12px",pointerEvents:"all"}}
               onPointerDown={e=>e.stopPropagation()}>
               {/* Header row */}
               <div style={{display:"flex",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:9,color:"rgba(210,195,175,0.4)",letterSpacing:2,flex:1}}>STEP {(popupR.current?.col??0)+1}</span>
-                <div onClick={commitAndClose} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(210,195,175,0.4)",fontSize:16,cursor:"pointer",borderRadius:11}}>×</div>
+                <span style={{fontSize:9,color:"rgba(178,199,219,0.4)",letterSpacing:2,flex:1}}>STEP {(popupR.current?.col??0)+1}</span>
+                <div onClick={commitAndClose} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(178,199,219,0.4)",fontSize:16,cursor:"pointer",borderRadius:11}}>×</div>
               </div>
               {/* Sliders */}
               {PARAM_ARMS.map(arm=>{
@@ -7370,11 +7374,11 @@ export default function Tabula(){
                       <span style={{fontSize:9,fontWeight:500,color:active?arm.color:arm.color+"88",letterSpacing:1}}>{arm.label}</span>
                       <span style={{fontSize:12,fontWeight:500,color:active?arm.color:arm.color+"99"}}>{displayVal}</span>
                     </div>
-                    <div style={{height:6,background:"rgba(200,185,165,0.1)",borderRadius:3,position:"relative",cursor:"ew-resize"}}>
+                    <div style={{height:6,background:"rgba(168,190,212,0.1)",borderRadius:3,position:"relative",cursor:"ew-resize"}}>
                       <div style={{position:"absolute",left:0,top:0,bottom:0,width:(pct*100)+"%",
                         background:active?arm.color:arm.color+"66",borderRadius:3,transition:"width .04s"}}/>
                       <div style={{position:"absolute",top:-3,bottom:-3,width:10,borderRadius:3,
-                        background:active?arm.color:"rgba(200,185,165,0.6)",
+                        background:active?arm.color:"rgba(168,190,212,0.6)",
                         left:`calc(${pct*100}% - 5px)`}}/>
                     </div>
                   </div>
@@ -7403,7 +7407,7 @@ export default function Tabula(){
               borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
               boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",
               pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(186,208,230,0.06)"}}>
                 {[
                   ["RAND",  ()=>act(()=>randPatId(targetId))],
                   ["CLR",   ()=>act(()=>clearPatId(targetId))],
@@ -7467,7 +7471,7 @@ export default function Tabula(){
           {/* Brand + widgets */}
           {!IS_MOBILE&&(
             <>
-              <div style={{...S.brand,marginBottom:6,fontSize:winW>900?undefined:winW>650?11:9,letterSpacing:winW>650?4:2}}>TABULA</div>
+              <div style={{...S.brand,marginBottom:6,fontSize:winW>900?21:winW>650?11:9,letterSpacing:winW>900?3:winW>650?2:1,lineHeight:1.15}}>LOUD LIGHT</div>
               <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
                 <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
                   {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -7479,15 +7483,15 @@ export default function Tabula(){
               <div style={{display:"flex",gap:3,marginBottom:winW>900?8:4}}>
                 <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{bpm}</span>
-                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>BPM</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>BPM</span>
                 </div>
                 <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{stLabel}</span>
-                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>ST</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>ST</span>
                 </div>
                 <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{swing}</span>
-                  <span style={{fontSize:winW>900?9:7,color:"rgba(210,195,175,0.35)",letterSpacing:1,display:"block"}}>SWG</span>
+                  <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>SWG</span>
                 </div>
               </div>
             </>
@@ -7495,16 +7499,16 @@ export default function Tabula(){
 
           {/* Layer boxes — select layer + pattern, replaces old pills + layer selector */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
               {/* POLY / MONO layer boxes — layer selection only; patterns are
                   chosen on the SONG page. */}
               {[
                 ["synth","POLY","#a8c5a0","168,197,160"],
-                ["lead", "MONO","#6c9ad6","108,154,214"]
+                ["lead", "MONO","#79b8f2","121,184,242"]
               ].map(([layer,label,accent,accentRgb])=>{
                 const isActive=activeLayer===layer;
                 return(
-                  <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
+                  <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
                     onClick={()=>{
                       // Clicking an already-active layer jumps into its sound page
                       // (mirrors mobile). Clicking a different one just switches.
@@ -7512,13 +7516,13 @@ export default function Tabula(){
                       if(isActive){setPage("sound");}
                       else{switchLayer(layer);}
                     }}>
-                    <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
+                    <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
                     {/* Pattern pills removed — selection lives on the SONG page now. */}
                   </div>
                 );
               })}
               {/* DRUMS layer box */}
-              <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(200,185,165,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
+              <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
                 onClick={()=>{
                   // Stepping into DRUMS lands on the grid editor (the main drum
                   // workspace). The mixer / kit live on the SOUND tab; global FX
@@ -7531,7 +7535,7 @@ export default function Tabula(){
                   // a parked STEP page back to EDIT; every other page is kept.
                   if(songView){setSongView(false);setPage("edit");}
                 }}>
-                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(210,195,175,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
+                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 {/* Pattern pills removed — selection lives on the SONG page now. */}
               </div>
               {/* Action buttons — context-sensitive to active layer.
@@ -7544,12 +7548,12 @@ export default function Tabula(){
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
                       {[["RAND",()=>randPatId(targetId),false,false],["CLR",()=>clearPatId(targetId),false,false],["MUT8",mutatePat1,false,false]].map(([l,f,d])=>(
-                        <button key={l} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,0.13)",borderRadius:5,background:"transparent",color:"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={f}>{l}</button>
+                        <button key={l} style={{padding:"4px 0",border:"1px solid rgba(168,190,212,0.13)",borderRadius:5,background:"transparent",color:"rgba(168,190,212,0.55)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={f}>{l}</button>
                       ))}
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
                       {[["CPY",()=>copyPatId(targetId),false,false],["PST",()=>pastePatId(targetId),!clipboard,false],["DUP",()=>dupPatId(targetId),pats.length>=MAX_PATTERNS,false],["DEL",()=>delPatId(targetId),isOnlyPat,true]].map(([l,f,d,danger])=>(
-                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(168,190,212,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(168,190,212,0.18)":danger?"#c47a7a":"rgba(168,190,212,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
                     {barOpsRow}
@@ -7569,12 +7573,12 @@ export default function Tabula(){
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2}}>
                       {[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["MUT8",mutateDrumPat1,false,false]].map(([l,f,d])=>(
-                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.04":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.15)":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(168,190,212,"+(d?"0.04":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(168,190,212,0.15)":"rgba(168,190,212,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
                       {[["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,isOnlyDrum,true]].map(([l,f,d,danger])=>(
-                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(200,185,165,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(200,185,165,0.18)":danger?"#c47a7a":"rgba(200,185,165,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
+                        <button key={l} disabled={!!d} style={{padding:"4px 0",border:"1px solid rgba(168,190,212,"+(d?"0.06":"0.13")+")",borderRadius:5,background:"transparent",color:d?"rgba(168,190,212,0.18)":danger?"#c47a7a":"rgba(168,190,212,0.55)",fontSize:8,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit"}} onClick={d?undefined:f}>{l}</button>
                       ))}
                     </div>
                     {barOpsRow}
@@ -7593,8 +7597,8 @@ export default function Tabula(){
 
           {/* SONG mode toggle — sits below the layer boxes */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6}}>
-              <button style={{width:"100%",padding:"8px 0",borderRadius:8,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),background:songView?"rgba(210,195,175,0.06)":"transparent",color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .12s"}}
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6}}>
+              <button style={{width:"100%",padding:"8px 0",borderRadius:8,border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.12)"),background:songView?"rgba(178,199,219,0.06)":"transparent",color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .12s"}}
                 onClick={()=>{if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);}}}>
                 <span style={{fontSize:14,lineHeight:1}}>▦</span> SONG
               </button>
@@ -7612,9 +7616,9 @@ export default function Tabula(){
             const msBtn=(label,active,color,onClick)=>(
               <button onClick={e=>{e.stopPropagation();onClick();}}
                 style={{width:16,height:14,fontSize:7,fontWeight:700,letterSpacing:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
-                  border:"1px solid "+(active?color:"rgba(200,185,165,0.2)"),
+                  border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
                   background:active?color+"22":"transparent",
-                  color:active?color:"rgba(210,195,175,0.45)"}}>{label}</button>
+                  color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
             );
             const fader=(label,val,color,onChange,layerKey)=>{
               const muted=!!trackMute[layerKey];
@@ -7624,7 +7628,7 @@ export default function Tabula(){
               return(
                 <div style={{display:"flex",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
                   <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                  <div style={{flex:1,height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                  <div style={{flex:1,height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                     onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
                     onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
@@ -7636,10 +7640,10 @@ export default function Tabula(){
               );
             };
             return(
-              <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-                <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIX</div>
+              <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
+                <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIX</div>
                 {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
-                {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
+                {fader("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
                 {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
                 {/* Output meters removed — a master limiter now prevents clipping,
                     so there's nothing for the user to watch for. */}
@@ -7653,8 +7657,8 @@ export default function Tabula(){
               and share used to be a permanently-open column here; none of it is
               wanted mid-take, and the space is better spent on the mixer. */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(200,185,165,0.08)",paddingTop:8,marginTop:4}}>
-              <button style={{width:"100%",padding:"9px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:6,border:"1px solid "+(menuOpen?"rgba(232,220,205,0.5)":"rgba(200,185,165,0.18)"),borderRadius:7,background:menuOpen?"rgba(232,220,205,0.1)":"transparent",color:menuOpen?"rgba(232,220,205,0.9)":"rgba(210,195,175,0.55)",fontSize:winW>650?10:8,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+            <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:8,marginTop:4}}>
+              <button style={{width:"100%",padding:"9px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:6,border:"1px solid "+(menuOpen?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),borderRadius:7,background:menuOpen?"rgba(232,220,205,0.1)":"transparent",color:menuOpen?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.55)",fontSize:winW>650?10:8,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>setMenuOpen(o=>!o)}>
                 <span style={{fontSize:11,lineHeight:1}}>☰</span>{winW>650&&<span>PROJECT</span>}
               </button>
@@ -7685,7 +7689,7 @@ export default function Tabula(){
                   // overlay below; re-renders each step via `step`.
                   const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                   return(
-                  <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
+                  <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
                       // c is the VIEW column; ac is the absolute pattern column.
                       const ac=barOff+c;
@@ -7693,7 +7697,7 @@ export default function Tabula(){
                       const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
                       const inactive=ac>=gridLen;
                       return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{
-                        background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
+                        background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                         outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px",
                       })}/>);
                     })}
@@ -7713,17 +7717,17 @@ export default function Tabula(){
                           const vs=Math.max(ci,A0)-A0;           // visible start, in view cols
                           const vw=Math.min(ci+span,A1)-A0-vs;   // visible width
                           const vel=p?(p.vel??100):100;
-                          const b=0.35+(vel/127)*0.65;
+                          const b=0.55+(vel/127)*0.45;
                           const inactive=ci>=gridLen;
-                          const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;
-                          const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;
+                          const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;
+                          const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
                           const L=`calc(${vs/COLS}*(100% + 2px))`;
                           const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
-                              background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,
-                              boxShadow:isActive?glow:"none",
+                              background:bright,
+                              boxShadow:isActive?glow:rest,
                               pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>
                               {!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
                               {!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
@@ -7760,7 +7764,7 @@ export default function Tabula(){
                   return(
                   <div key={c} style={S.stepColWrap}>
                     <div style={Object.assign({},S.stepDot,{
-                      background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",
+                      background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",
                       transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/>
                   </div>
                 );})}
@@ -7771,10 +7775,10 @@ export default function Tabula(){
                 {/* The slider is one BAR wide, so it shows this page's slice of
                     the playable length: full on bars before the loop end, empty
                     on bars past it, partial on the bar the end falls in. */}
-                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
-                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
+                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
                 {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:IS_MOBILE?-3:-3,bottom:IS_MOBILE?-3:-3,width:IS_MOBILE?3:12,left:`calc(${_lenFrac*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
+                <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
               </div>
               </div>
               </div>
@@ -7820,7 +7824,7 @@ export default function Tabula(){
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":dc+aHex;
                         return(
-                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(220,200,180,0.02)":on?onBg:isActive?"rgba(220,200,180,0.15)":isQ?"rgba(220,200,180,0.06)":"rgba(220,200,180,0.03)",border:"1px solid "+(inactive?"rgba(220,200,180,0.04)":on?dc:isQ?"rgba(220,200,180,0.12)":"rgba(220,200,180,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
+                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(186,208,230,0.02)":on?onBg:isActive?"rgba(186,208,230,0.15)":isQ?"rgba(186,208,230,0.06)":"rgba(186,208,230,0.03)",border:"1px solid "+(inactive?"rgba(186,208,230,0.04)":on?dc:isQ?"rgba(186,208,230,0.12)":"rgba(186,208,230,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
                             onPointerDown={e=>{
                               // Shift+drag (desktop) or a SECOND FINGER (touch)
                               // → move the whole pattern (grid+vel+rat).
@@ -7879,17 +7883,17 @@ export default function Tabula(){
                 <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
                   onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
                   onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
-                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
                   {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${_lenFrac*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                  <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
+                  <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
                 </div>
               </div>
               );
             })()}
             {activeLayer==="drums"&&page==="step"&&(
               <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:11,color:"rgba(210,195,175,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
+                <span style={{fontSize:11,color:"rgba(178,199,219,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
               </div>
             )}
             {activeLayer==="drums"&&page==="sound"&&(()=>{
@@ -7899,14 +7903,14 @@ export default function Tabula(){
               <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
                 {/* Kit selector — switch between curated sample packs or the synth engine */}
                 <div style={{flexShrink:0,marginBottom:8}}>
-                  <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
+                  <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
                   <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                     {DRUM_KITS.map(kit=>{
                       const on=activeKit===kit.id;
                       return(
                         <button key={kit.id} disabled={kitLoading}
                           onClick={()=>loadKit(kit.id)}
-                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(210,195,175,0.6)":"rgba(210,195,175,0.15)"),background:on?"rgba(210,195,175,0.1)":"transparent",color:on?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
                           {kitLoading&&on?"…":kit.label}
                         </button>
                       );
@@ -7914,25 +7918,25 @@ export default function Tabula(){
                   </div>
                 </div>
                 <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500}}>MIXER</div>
+                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIXER</div>
                   {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
                   {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
                     <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
-                      style={{padding:"3px 7px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(200,185,165,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(210,195,175,0.4)"}}>{"⛓ "+lbl}</button>
+                      style={{padding:"3px 7px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
                   ))}
                   <div style={{flex:1}}/>
                   {/* MOTION mode + record arm. In MOTION mode dragging a slider
                       is a live override; with REC armed during playback the hold
                       writes per-step automation. */}
                   <button onClick={()=>setMotionEnabled(v=>!v)}
-                    style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(200,185,165,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(210,195,175,0.45)"}}>MOTION</button>
+                    style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
                   {motionEnabled&&(
                     <button onClick={()=>setMotionRec(v=>!v)}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(200,185,165,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(210,195,175,0.45)"}}>{motionRec?"● REC":"REC"}</button>
+                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
                   )}
                   {motionEnabled&&(
                     <button onClick={clearMotion}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.45)"}}>CLR</button>
+                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
                   )}
                 </div>
                 {/* Channel strips — horizontal row of conventional vertical strips.
@@ -7951,7 +7955,7 @@ export default function Tabula(){
                     // Horizontal mini-slider builder. Drag routes through onMixDrag
                     // (base edit, or motion override/record), onMixUp on release.
                     const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                      <div style={{width:"100%",height:8,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                      <div style={{width:"100%",height:8,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
@@ -7966,7 +7970,7 @@ export default function Tabula(){
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                         }}
                         onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
+                        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
                         {bipolar
                           ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
                           :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
@@ -7979,7 +7983,7 @@ export default function Tabula(){
                     const hasSample=!!voiceSamples[voice.key];
                     const filtMode=m.filt||"off";
                     const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                    const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
+                    const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                     return(
                       <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
                         {/* Hit flash — a uniform full-strip glow that pulses on
@@ -7993,9 +7997,9 @@ export default function Tabula(){
                         <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
                         {/* PITCH (semitones, bipolar) */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
                           {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                         </div>
                         {/* FILTER — type chip on its own row above, then a
                             full-width cutoff slider + numeric readout (matches the
@@ -8003,44 +8007,44 @@ export default function Tabula(){
                         <div style={cell}>
                           <button onClick={e=>{e.stopPropagation();cycleFilt();}}
                             style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                              border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
+                              border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
                               background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                              color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
+                              color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
                           <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
                         </div>
                         {/* ENV — sample playback length (full right = whole sample) */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
                           {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.env!=null?md.env:100}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
                         </div>
                         {/* SAT — per-voice saturation/drive */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
                           {miniSlider("sat",md.sat||0,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.sat||0}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
                         </div>
                         {/* PAN */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
                           {miniSlider("pan",md.pan,-100,100,true)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
                         </div>
                         {/* REV send */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
                           {miniSlider("rvSend",md.rvSend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.rvSend}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
                         </div>
                         {/* DLY send */}
                         <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
+                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
                           {miniSlider("dlySend",md.dlySend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
+                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
                         </div>
                         {/* Vertical level fader */}
-                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0",touchAction:"none"}}
+                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0",touchAction:"none"}}
                           onPointerDown={e=>{
                             e.stopPropagation();
                             const rect=e.currentTarget.getBoundingClientRect();
@@ -8059,18 +8063,18 @@ export default function Tabula(){
                           {/* Thumb */}
                           <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
                           {/* Center notch */}
-                          <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
+                          <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
                         </div>
-                        <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+                        <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
                         {/* REC / sample — only on the USER kit (curated presets
                             don't expose the sampler). */}
                         {activeKit==="user"&&(
                         <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                             onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
                             {isRec?"STOP":hasSample?"●":"REC"}
                           </button>
-                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                         </div>
                         )}
                       </div>
@@ -8088,10 +8092,10 @@ export default function Tabula(){
               const SliderRow=({label,value,onChange,accent})=>(
                 <div style={{marginBottom:16}}>
                   <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}>
-                    <span style={{fontSize:9,letterSpacing:2,color:accent||"rgba(210,195,175,0.5)",fontWeight:500}}>{label}</span>
-                    <span style={{fontSize:11,color:"rgba(210,195,175,0.7)",fontWeight:300,marginLeft:"auto"}}>{value}<span style={{fontSize:8,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                    <span style={{fontSize:9,letterSpacing:2,color:accent||"rgba(178,199,219,0.5)",fontWeight:500}}>{label}</span>
+                    <span style={{fontSize:11,color:"rgba(178,199,219,0.7)",fontWeight:300,marginLeft:"auto"}}>{value}<span style={{fontSize:8,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
                   </div>
-                  <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                  <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                     onPointerDown={e=>{
                       e.stopPropagation();
                       const rect=e.currentTarget.getBoundingClientRect();
@@ -8101,8 +8105,8 @@ export default function Tabula(){
                       const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
                       document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                     }}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(210,195,175,0.4)")+"99",borderRadius:3}}/>
-                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(210,195,175,0.5)")}}/>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(178,199,219,0.4)")+"99",borderRadius:3}}/>
+                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(178,199,219,0.5)")}}/>
                   </div>
                 </div>
               );
@@ -8111,17 +8115,17 @@ export default function Tabula(){
                 <div style={{maxWidth:420}}>
                   {/* VARY enable toggle — per layer; this page is DRUMS. */}
                   <button onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}
-                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode.drums?"#c9a96e":"rgba(200,185,165,0.18)"),background:varyMode.drums?"rgba(201,169,110,0.14)":"transparent",color:varyMode.drums?"#c9a96e":"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode.drums?"#c9a96e":"rgba(210,195,175,0.25)",boxShadow:varyMode.drums?"0 0 6px #c9a96e":"none"}}/>
+                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode.drums?"#e6b872":"rgba(168,190,212,0.18)"),background:varyMode.drums?"rgba(230,184,114,0.14)":"transparent",color:varyMode.drums?"#e6b872":"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode.drums?"#e6b872":"rgba(178,199,219,0.25)",boxShadow:varyMode.drums?"0 0 6px #e6b872":"none"}}/>
                     DRUMS VARY {varyMode.drums?"ON":"OFF"}
                   </button>
-                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
-                  <div style={{padding:"14px 16px",background:"rgba(220,200,180,0.04)",borderRadius:8,border:"1px solid rgba(220,200,180,0.08)",marginBottom:8}}>
-                    <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.25)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
+                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
+                  <div style={{padding:"14px 16px",background:"rgba(186,208,230,0.04)",borderRadius:8,border:"1px solid rgba(186,208,230,0.08)",marginBottom:8}}>
+                    <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
                     {SliderRow({label:"RHYTHM",value:vRhythm,onChange:v=>setDrumVary("vRhythm",v),accent:"#c8a840"})}
                     {SliderRow({label:"VELOCITY",value:vVelocity,onChange:v=>setDrumVary("vVelocity",v),accent:"#7888d0"})}
                   </div>
-                  <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.2)",lineHeight:1.6,marginTop:10}}>
+                  <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.2)",lineHeight:1.6,marginTop:10}}>
                     RHYTHM randomly drops existing hits and adds ghosts each loop cycle. VELOCITY jitters hit strengths around their set values.
                   </div>
                 </div>
@@ -8185,8 +8189,8 @@ export default function Tabula(){
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 {/* Enable / disable — per layer; this page is POLY or MONO. */}
                 <button onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}
-                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode[activeLayer]?C_VARY:"rgba(200,185,165,0.18)"),background:varyMode[activeLayer]?"rgba(201,169,110,0.14)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(210,195,175,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode[activeLayer]?C_VARY:"rgba(210,195,175,0.25)",boxShadow:varyMode[activeLayer]?"0 0 6px "+C_VARY:"none"}}/>
+                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode[activeLayer]?C_VARY:"rgba(168,190,212,0.18)"),background:varyMode[activeLayer]?"rgba(230,184,114,0.14)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode[activeLayer]?C_VARY:"rgba(178,199,219,0.25)",boxShadow:varyMode[activeLayer]?"0 0 6px "+C_VARY:"none"}}/>
                   {activeLayer==="lead"?"MONO":"POLY"} VARY {varyMode[activeLayer]?"ON":"OFF"}
                 </button>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
@@ -8239,12 +8243,12 @@ export default function Tabula(){
                         {/* OSC velocity knob = global VCA velocity sensitivity. */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                          <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                          <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                         </div>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
-                            <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                            <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
                               {WF_LABELS[i]}
                             </button>
                           ))}
@@ -8252,11 +8256,11 @@ export default function Tabula(){
                       </div>
                       {/* OCTAVE — per-layer transposition: -2..+2 */}
                       <div style={{padding:"0 12px 10px",display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",minWidth:36}}>OCT</div>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:36}}>OCT</div>
                         <div style={{flex:1,display:"flex",gap:3}}>
                           {[-2,-1,0,1,2].map(o=>(
                             <button key={o} onClick={()=>setOctaveLP(o)}
-                              style={{flex:1,height:26,padding:0,fontSize:11,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(210,195,175,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                              style={{flex:1,height:26,padding:0,fontSize:11,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
                               {o>0?"+"+o:o}
                             </button>
                           ))}
@@ -8271,7 +8275,7 @@ export default function Tabula(){
                         {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                          <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                          <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                         </div>
                       </div>
                     </SynthSection>
@@ -8283,7 +8287,7 @@ export default function Tabula(){
                         {/* FILTER velocity = scales filter envelope amount with velocity. */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                          <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                          <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                         </div>
                       </div>
                     </SynthSection>
@@ -8292,13 +8296,13 @@ export default function Tabula(){
                     <SynthSection title="DELAY" accent={C_DLY}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
                         <KnobSlider label="SEND"   value={dlySend}   min={0} max={100} def={50} onChange={setDlySend}   display={dlySend+"%"} accent={C_DLY}/>
-                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
+                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
                     <SynthSection title="REVERB" accent={C_REV}>
                       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
                         <KnobSlider label="SEND"   value={rvSend}    min={0} max={100} def={30} onChange={setRvSend}    display={rvSend+"%"}  accent={C_REV}/>
-                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
+                        <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.3)",textAlign:"center",paddingTop:2}}>design → FX tab</div>
                       </div>
                     </SynthSection>
                 </div>
@@ -8308,7 +8312,7 @@ export default function Tabula(){
                 for every layer (these buses are shared), drums included. */}
             {page==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
                   {globalFxSections}
                 </div>
@@ -8326,7 +8330,7 @@ export default function Tabula(){
           </div>
           {/* Transport — always visible, centered. VARY toggle removed; it lives
               inside the VARY page now (tab still glows orange while enabled). */}
-          <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(200,185,165,0.08)"}}>
+          <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(168,190,212,0.08)"}}>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
             <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
@@ -8336,7 +8340,7 @@ export default function Tabula(){
         </div>
         {/* DRAG GHOST — floating pill that follows pointer (desktop) */}
         {patternDrag&&(
-          <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:(patternDrag.overSongCell||patternDrag.overLayerBox)?1:0.85,transform:(patternDrag.overSongCell||patternDrag.overLayerBox)?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+          <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#0e1c2b",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:(patternDrag.overSongCell||patternDrag.overLayerBox)?1:0.85,transform:(patternDrag.overSongCell||patternDrag.overLayerBox)?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
             {patternDrag.name}
           </div>
         )}
@@ -8345,7 +8349,7 @@ export default function Tabula(){
 
       {/* ══ MOBILE LAYOUT ══ */}
       {IS_MOBILE&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:isLandscape?"row":"column",background:"#1a1814",overflow:"hidden",
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:isLandscape?"row":"column",background:"#0e1c2b",overflow:"hidden",
             // Keep all content clear of the notch / Dynamic Island / home indicator
             // in the installed fullscreen app (viewport-fit=cover). Portrait: inset top;
             // landscape: inset whichever side the camera sits on. Bottom inset always.
@@ -8357,8 +8361,8 @@ export default function Tabula(){
 
           {/* ══ LANDSCAPE LEFT RAIL — layer + pattern selection ══ */}
           {isLandscape&&(
-            <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+            <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} style={{flexShrink:0,padding:"8px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                   onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}>{lbl}</button>
               ))}
@@ -8367,9 +8371,9 @@ export default function Tabula(){
                 {(activeLayer==="drums"?drumPats:pats).map(p=>{
                   const isDrums=activeLayer==="drums";const isSynth=!isDrums;
                   const isA=isDrums?p.id===activeDrumId:p.id===activeId;
-                  const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
+                  const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#79b8f2":"#c4727a";
                   return(
-                    <button key={p.id} style={{flexShrink:0,padding:"9px 4px",borderRadius:14,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#1a1814":accent,fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}
+                    <button key={p.id} style={{flexShrink:0,padding:"9px 4px",borderRadius:14,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#0e1c2b":accent,fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}
                       onClick={()=>{
                         const wasActive=isSynth?activeId===p.id:activeDrumId===p.id;
                         if(songView){ if(!wasActive)isSynth?setActiveId(p.id):setActiveDrumId(p.id); setSongView(false); setActiveSheet(null); }
@@ -8378,16 +8382,16 @@ export default function Tabula(){
                       }}>{p.name}</button>
                   );
                 })}
-                {(activeLayer==="drums"?drumPats:pats).length<8&&<button style={{flexShrink:0,padding:"7px 4px",borderRadius:14,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(108,154,214,0.35)":"rgba(196,114,122,0.35)"),background:"transparent",color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(108,154,214,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{activeLayer==="drums"?addDrumPat():addPat();}}>＋</button>}
+                {(activeLayer==="drums"?drumPats:pats).length<8&&<button style={{flexShrink:0,padding:"7px 4px",borderRadius:14,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(121,184,242,0.35)":"rgba(196,114,122,0.35)"),background:"transparent",color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(121,184,242,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{activeLayer==="drums"?addDrumPat():addPat();}}>＋</button>}
               </div>
               {/* per-layer function pills — STEP / SOUND / VARY */}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
                 <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                   style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
-                    border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
-                    background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
-                    color:on?(key==="vary"?"#c9a96e":"rgba(232,224,213,0.9)"):"rgba(210,195,175,0.5)"}}>
+                    border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
+                    background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
+                    color:on?(key==="vary"?"#e6b872":"rgba(226,236,247,0.9)"):"rgba(178,199,219,0.5)"}}>
                   {lbl}
                 </button>
               ))}
@@ -8397,17 +8401,17 @@ export default function Tabula(){
           {/* ══ CENTER COLUMN — the grid lives here in both orientations ══ */}
           <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
-          {/* ── TABULA BRANDING ── */}
+          {/* ── BRANDING ── */}
           {!isLandscape&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"10px 16px 4px",flexShrink:0}}>
-            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:18,fontWeight:300,letterSpacing:6,color:"rgba(210,195,175,0.7)",textTransform:"uppercase"}}>Tabula</span>
+            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:300,letterSpacing:3,color:"rgba(178,199,219,0.7)",textTransform:"uppercase"}}>Loud Light</span>
           </div>
           )}
 
           {/* ── PERSISTENT LAYER BAR — top of screen (portrait) ── */}
           {!isLandscape&&(
           <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
-            {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#6c9ad6","rgba(108,154,214,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+            {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
               <button key={lyr} data-layer-box={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF)":activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:patternDrag?.overLayerBox===lyr?cf+"0.18)":activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1.2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>{
                   if(activeLayer===lyr){
@@ -8436,9 +8440,9 @@ export default function Tabula(){
             {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
               <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                 style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
-                  border:"1px solid "+(on?(key==="vary"?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.5)"):"rgba(200,185,165,0.14)"),
-                  background:on?(key==="vary"?"rgba(201,169,110,0.12)":"rgba(200,185,165,0.1)"):"transparent",
-                  color:on?(key==="vary"?"#c9a96e":"rgba(232,224,213,0.9)"):"rgba(210,195,175,0.5)"}}>
+                  border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
+                  background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
+                  color:on?(key==="vary"?"#e6b872":"rgba(226,236,247,0.9)"):"rgba(178,199,219,0.5)"}}>
                 {lbl}
               </button>
             ))}
@@ -8446,7 +8450,7 @@ export default function Tabula(){
           )}
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
-            <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#1a1814",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
+            <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#0e1c2b",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
               {patternDrag.name}
             </div>
           )}
@@ -8467,16 +8471,16 @@ export default function Tabula(){
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
                       const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
-                      return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(200,185,165,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
+                      return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
                           const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=ac>=gridLen;
                           return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
-                            background:inactive?"rgba(220,200,180,0.008)":isCol?"rgba(220,200,180,0.09)":isQ?"rgba(220,200,180,0.035)":"rgba(220,200,180,0.015)",
+                            background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.35+(vel/127)*0.65;const inactive=ci>=gridLen;const bright=inactive?`rgba(220,200,180,0.12)`:`rgba(230,215,195,${b})`;const glow=inactive?"none":`0 0 4px rgba(230,215,195,${b*0.5}),0 0 10px rgba(230,215,195,${b*0.22})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + 2px))`;const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:isActive?bright:inactive?bright:`rgba(230,215,195,${b*0.75})`,boxShadow:isActive?glow:"none",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=ci>=gridLen;const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + 2px))`;const W=`calc(${vw/COLS}*(100% + 2px) - 2px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                         {vSGrid&&Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           if(ac>=gridLen)return null;
@@ -8491,12 +8495,12 @@ export default function Tabula(){
                       </div>);
                     })}
                   </div>
-                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(220,200,180,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(210,195,175,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
                   <div ref={lenSliderRef} style={S.lenSlider} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(220,200,180,0.035)",borderRadius:"0 3px 3px 0"}}/>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
+                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
                     {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${_lenFrac*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(210,195,175,0.3)",pointerEvents:"none"}}>{gridLen}</span>
+                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",pointerEvents:"none"}}>{gridLen}</span>
                   </div>
                 </div>
               </div>
@@ -8540,8 +8544,8 @@ export default function Tabula(){
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":dc+aHex;
                               return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
-                                background:inactive?"rgba(220,200,180,0.015)":on?onBg:isActive?"rgba(220,200,180,0.1)":isQ?"rgba(220,200,180,0.05)":"rgba(220,200,180,0.03)",
-                                border:"1px solid "+(inactive?"rgba(220,200,180,0.03)":on?dc:"rgba(220,200,180,0.07)"),
+                                background:inactive?"rgba(186,208,230,0.015)":on?onBg:isActive?"rgba(186,208,230,0.1)":isQ?"rgba(186,208,230,0.05)":"rgba(186,208,230,0.03)",
+                                border:"1px solid "+(inactive?"rgba(186,208,230,0.03)":on?dc:"rgba(186,208,230,0.07)"),
                                 boxShadow:on&&isActive?"0 0 4px "+dc:"none",
                                 boxSizing:"border-box",
                               }} onPointerDown={e=>{
@@ -8595,7 +8599,7 @@ export default function Tabula(){
                         )})}
                       </div>
                       {/* Horizontal length slider (matches synth grid orientation) */}
-                      <div style={{width:SIZE,height:10,background:"rgba(220,200,180,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
+                      <div style={{width:SIZE,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
@@ -8604,9 +8608,9 @@ export default function Tabula(){
                           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
                           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
                         }}>
-                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${_lenFrac*100}%`,background:"rgba(210,195,175,0.18)",borderRadius:"5px 0 0 5px"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.18)",borderRadius:"5px 0 0 5px"}}/>
                         {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${_lenFrac*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>}
-                        <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:6,color:"rgba(210,195,175,0.4)",pointerEvents:"none"}}>{dLen}</span>
+                        <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:6,color:"rgba(178,199,219,0.4)",pointerEvents:"none"}}>{dLen}</span>
                       </div>
                     </div>
                   );
@@ -8620,40 +8624,40 @@ export default function Tabula(){
 
           {/* ── BOTTOM CHROME: chips row + persistent transport (portrait) ── */}
           {!isLandscape&&(
-          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.98)"}}>
+          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.98)"}}>
             {/* Row 1: global chips — TEMPO / SONG / FX / PROJECT.
                  (VARY moved up to the per-layer pill row; four chips here gives
                  each more width and lets the labels be legible.) */}
             <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(200,185,165,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
                 <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{bpm}</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>TEMPO</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>TEMPO</span>
               </button>
               {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
                    stays on once enabled; LOOP holds the song's place rather than
                    overriding it. */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.12)"),borderRadius:9,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.12)"),borderRadius:9,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>{
                   if(songView){ setSongView(false); }
                   else{ setSongMode(true);setSongView(true); }
                   setActiveSheet(null);
                 }}>
-                <span style={{fontSize:16,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1}}>▦</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>SONG</span>
+                <span style={{fontSize:16,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1}}>▦</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>SONG</span>
               </button>
               {/* FX chip — global reverb/delay design */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.4)"}}>FX</span>
+                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.4)"}}>FX</span>
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                <span style={{fontSize:15,lineHeight:1,color:"rgba(210,195,175,0.5)"}}>⋯</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.4)"}}>PROJECT</span>
+                <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
               </button>
             </div>
             {/* Row 2: persistent transport */}
@@ -8672,7 +8676,7 @@ export default function Tabula(){
 
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
-            <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(24,22,18,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
+            <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
@@ -8684,21 +8688,21 @@ export default function Tabula(){
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(200,185,165,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
                   <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>TEMPO</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>TEMPO</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(210,195,175,0.5)":songMode?"rgba(210,195,175,0.25)":"rgba(200,185,165,0.1)"),borderRadius:8,background:songView?"rgba(210,195,175,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);} setActiveSheet(null); }}>
-                  <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(210,195,175,0.9)":songMode?"rgba(210,195,175,0.7)":"rgba(210,195,175,0.5)",lineHeight:1.1}}>▦</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>SONG</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.1)"),borderRadius:8,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);} setActiveSheet(null); }}>
+                  <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.5)"}}>≋</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(210,195,175,0.35)"}}>FX</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.35)"}}>FX</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(200,185,165,0.45)":"rgba(200,185,165,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(200,185,165,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:"rgba(210,195,175,0.45)"}}>⋯</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(210,195,175,0.35)"}}>PROJECT</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:"rgba(178,199,219,0.45)"}}>⋯</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>PROJECT</span>
                 </button>
               </div>
             </div>
@@ -8709,12 +8713,12 @@ export default function Tabula(){
             <>
               {/* Backdrop — full screen so ANY tap outside the sheet closes it. */}
               <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
-              <div style={{position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(24,22,18,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
+              <div style={{position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
                 {/* TEMPO sheet */}
                 {activeSheet==="tempo"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>TEMPO</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>TEMPO</div>
                     <select style={{...S.sel,width:"100%",marginBottom:12,fontSize:13}} value={scale} onChange={e=>setScale(e.target.value)}>
                       {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                     </select>
@@ -8740,8 +8744,8 @@ export default function Tabula(){
                   <div style={{paddingBottom:8}}>
                     {(()=>{
                       const isDrum=activeLayer==="drums";
-                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#6c9ad6":"#c4727a";
-                      const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(108,154,214,":"rgba(196,114,122,";
+                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#79b8f2":"#c4727a";
+                      const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(121,184,242,":"rgba(196,114,122,";
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
                         :[["RAND",()=>randPatId(activeId),false,false],["CLR",()=>clearPatId(activeId),false,false],["DUP",()=>dupPatId(activeId),pats.length>=MAX_PATTERNS,false],["DEL",()=>delPatId(activeId),pats.length<=1,true],["CPY",()=>copyPatId(activeId),false,false],["PST",()=>pastePatId(activeId),!clipboard,false],["MUT8",mutatePat1,false,false]];
@@ -8756,8 +8760,8 @@ export default function Tabula(){
                         // to get a second nearly-identical pass to vary.
                         ["×2",       doublePattern, barCount*2>MAX_BARS,   false],
                       ];
-                      const opBtn=(d,danger)=>({padding:"13px 0",border:"1px solid "+(d?"rgba(200,185,165,0.06)":accentF+"0.3)"),borderRadius:8,background:"transparent",color:d?"rgba(200,185,165,0.2)":danger?"#c47a7a":accent,fontSize:10,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600});
-                      const grpLabel={fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginBottom:5,display:"flex",alignItems:"center",gap:6};
+                      const opBtn=(d,danger)=>({padding:"13px 0",border:"1px solid "+(d?"rgba(168,190,212,0.06)":accentF+"0.3)"),borderRadius:8,background:"transparent",color:d?"rgba(168,190,212,0.2)":danger?"#c47a7a":accent,fontSize:10,letterSpacing:1,cursor:d?"default":"pointer",fontFamily:"inherit",fontWeight:600});
+                      const grpLabel={fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,marginBottom:5,display:"flex",alignItems:"center",gap:6};
                       return(
                         <div style={{marginBottom:12}}>
                           <div style={grpLabel}>PATTERN</div>
@@ -8768,7 +8772,7 @@ export default function Tabula(){
                           </div>
                           <div style={grpLabel}>
                             <span>BARS</span>
-                            <span style={{color:"rgba(210,195,175,0.32)",letterSpacing:1}}>{curBar+1} / {barCount}</span>
+                            <span style={{color:"rgba(178,199,219,0.32)",letterSpacing:1}}>{curBar+1} / {barCount}</span>
                           </div>
                           {/* The sheet covers the strip above the grid, so the
                               chips repeat here — ADD / DUP / DEL BAR act on
@@ -8792,12 +8796,12 @@ export default function Tabula(){
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
                         {/* Playback speed */}
                         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,flexShrink:0}}>
-                          <div style={{fontSize:8,letterSpacing:2,color:"rgba(210,195,175,0.5)",fontWeight:600,marginRight:4}}>SPEED</div>
+                          <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,marginRight:4}}>SPEED</div>
                           {SPEED_OPTS.map(opt=>{
                             const sel=Math.abs(activePatSpeed-opt.mult)<0.001;
                             return(
                               <div key={opt.label} onPointerDown={e=>{e.stopPropagation();setActivePatSpeed(opt.mult);}}
-                                style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+(sel?"rgba(168,197,160,0.7)":"rgba(168,197,160,0.18)"),background:sel?"rgba(168,197,160,0.15)":"transparent",color:sel?"#a8c5a0":"rgba(210,195,175,0.5)",fontSize:11,fontWeight:600,cursor:"pointer",userSelect:"none",lineHeight:1,flexShrink:0}}>
+                                style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+(sel?"rgba(168,197,160,0.7)":"rgba(168,197,160,0.18)"),background:sel?"rgba(168,197,160,0.15)":"transparent",color:sel?"#a8c5a0":"rgba(178,199,219,0.5)",fontSize:11,fontWeight:600,cursor:"pointer",userSelect:"none",lineHeight:1,flexShrink:0}}>
                                 {opt.label}
                               </div>
                             );
@@ -8858,7 +8862,7 @@ export default function Tabula(){
                 )}
                 {activeSheet==="sound"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
                     {activeLayer!=="drums"&&(
                       <div style={{overflowY:"auto"}}>
                         {/* Portrait is too narrow for two columns (knobs shrink and
@@ -8882,21 +8886,21 @@ export default function Tabula(){
                               )}
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                                <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                                <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                               </div>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
-                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(210,195,175,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
+                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
                                 ))}
                               </div>
                             </div>
                             {/* OCTAVE — per-layer transposition: -2..+2 */}
                             <div style={{padding:"0 8px 8px",display:"flex",alignItems:"center",gap:6}}>
-                              <div style={{fontSize:7,letterSpacing:1.5,color:"rgba(210,195,175,0.4)",minWidth:32}}>OCT</div>
+                              <div style={{fontSize:7,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:32}}>OCT</div>
                               <div style={{flex:1,display:"flex",gap:2}}>
                                 {[-2,-1,0,1,2].map(o=>(
                                   <button key={o} onClick={()=>setOctaveLP(o)}
-                                    style={{flex:1,height:22,padding:0,fontSize:10,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(210,195,175,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                                    style={{flex:1,height:22,padding:0,fontSize:10,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
                                     {o>0?"+"+o:o}
                                   </button>
                                 ))}
@@ -8910,7 +8914,7 @@ export default function Tabula(){
                               <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                                <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                                <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                               </div>
                             </div>
                           </SynthSection>
@@ -8921,7 +8925,7 @@ export default function Tabula(){
                               <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                                <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(210,195,175,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
+                                <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
                               </div>
                             </div>
                           </SynthSection>
@@ -8929,13 +8933,13 @@ export default function Tabula(){
                           <SynthSection title="DELAY" accent={C_DLY}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
                               <KnobSlider label="SEND" value={dlySend} min={0} max={100} def={50} onChange={setDlySend} display={dlySend+"%"} accent={C_DLY}/>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
                           <SynthSection title="REVERB" accent={C_REV}>
                             <div style={{padding:"4px 8px 8px",display:"flex",flexDirection:"column",gap:5}}>
                               <KnobSlider label="SEND" value={rvSend} min={0} max={100} def={30} onChange={setRvSend} display={rvSend+"%"} accent={C_REV}/>
-                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(210,195,175,0.3)",textAlign:"center"}}>design → FX</div>
+                              <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.3)",textAlign:"center"}}>design → FX</div>
                             </div>
                           </SynthSection>
                         </div>
@@ -8950,11 +8954,11 @@ export default function Tabula(){
                       return(<div>
                       {/* KIT selector (mobile) */}
                       <div style={{marginBottom:6}}>
-                        <div style={{fontSize:7,letterSpacing:2,color:"rgba(210,195,175,0.3)",fontWeight:500,marginBottom:3}}>KIT</div>
+                        <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:3}}>KIT</div>
                         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                           {DRUM_KITS.map(kit=>{const on=activeKit===kit.id;return(
                             <button key={kit.id} disabled={kitLoading} onClick={()=>loadKit(kit.id)}
-                              style={{padding:"5px 12px",borderRadius:5,border:"1px solid "+(on?"rgba(210,195,175,0.6)":"rgba(210,195,175,0.15)"),background:on?"rgba(210,195,175,0.1)":"transparent",color:on?"rgba(210,195,175,0.9)":"rgba(210,195,175,0.4)",fontSize:10,letterSpacing:1,fontWeight:on?700:500,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                              style={{padding:"5px 12px",borderRadius:5,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:10,letterSpacing:1,fontWeight:on?700:500,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
                               {kitLoading&&on?"…":kit.label}
                             </button>);})}
                         </div>
@@ -8962,25 +8966,25 @@ export default function Tabula(){
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
                         {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
                           <button key={lbl} onClick={()=>set(v=>!v)}
-                            style={{padding:"4px 8px",borderRadius:5,fontSize:8,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(200,185,165,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(210,195,175,0.4)"}}>{"⛓ "+lbl}</button>
+                            style={{padding:"4px 8px",borderRadius:5,fontSize:8,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
                         ))}
                         <button onClick={()=>setMotionEnabled(v=>!v)}
-                          style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(200,185,165,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(210,195,175,0.45)"}}>MOTION</button>
+                          style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
                         {motionEnabled&&(
                           <button onClick={()=>setMotionRec(v=>!v)}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(200,185,165,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(210,195,175,0.45)"}}>{motionRec?"● REC":"REC"}</button>
+                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
                         )}
                         {motionEnabled&&(
                           <button onClick={clearMotion}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(200,185,165,0.2)",background:"transparent",color:"rgba(210,195,175,0.45)"}}>CLR</button>
+                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
                         )}
                       </div>
                       {/* Drag-scrollbar — reliable horizontal scroll for the strips
                           (their sliders capture touch, blocking native swipe). */}
-                      <div style={{height:16,marginBottom:5,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:8,touchAction:"none",cursor:"ew-resize",overflow:"hidden"}}
+                      <div style={{height:16,marginBottom:5,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:8,touchAction:"none",cursor:"ew-resize",overflow:"hidden"}}
                         onPointerDown={e=>{try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}const track=e.currentTarget;mixScrollTo(e.clientX,track);const mv=ev=>mixScrollTo(ev.clientX,track);const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                        <div style={{position:"absolute",top:2,bottom:2,width:"32%",left:`calc(${mixScrollPct}*(100% - 32%))`,background:"rgba(210,195,175,0.4)",borderRadius:7,pointerEvents:"none"}}/>
-                        <span style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",fontSize:7,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:600,pointerEvents:"none",whiteSpace:"nowrap"}}>◂ DRAG TO SCROLL ▸</span>
+                        <div style={{position:"absolute",top:2,bottom:2,width:"32%",left:`calc(${mixScrollPct}*(100% - 32%))`,background:"rgba(178,199,219,0.4)",borderRadius:7,pointerEvents:"none"}}/>
+                        <span style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",fontSize:7,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:600,pointerEvents:"none",whiteSpace:"nowrap"}}>◂ DRAG TO SCROLL ▸</span>
                       </div>
                       <div ref={mixScrollRef} onScroll={mixScrollSync} style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
                         {DRUM_VOICES.map((voice,r)=>{
@@ -8992,10 +8996,10 @@ export default function Tabula(){
                           const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
                           const dc=drumColor(r,linkHat,linkTom);
                           const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                            <div style={{width:"100%",height:10,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
+                            <div style={{width:"100%",height:10,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
                               onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                              {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(220,200,180,0.25)"}}/>}
+                              {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
                               {bipolar
                                 ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
                                 :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
@@ -9004,65 +9008,65 @@ export default function Tabula(){
                           );
                           const filtMode=m.filt||"off";
                           const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                          const filtColors={off:"rgba(200,185,165,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
+                          const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
                           return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
                             {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
                               <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
                             );})()}
                             <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PITCH</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
                               {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
                             </div>
                             <div style={cell}>
                               <button onClick={e=>{e.stopPropagation();cycleFilt();}}
                                 style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                                  border:"1px solid "+(filtMode==="off"?"rgba(200,185,165,0.2)":filtColors[filtMode]),
+                                  border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
                                   background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                                  color:filtMode==="off"?"rgba(210,195,175,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
+                                  color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
                               <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>ENV</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
                               {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.env!=null?md.env:100}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>SAT</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
                               {miniSlider("sat",md.sat||0,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.sat||0}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>PAN</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
                               {miniSlider("pan",md.pan,-100,100,true)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>REV</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
                               {miniSlider("rvSend",md.rvSend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.rvSend}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
                             </div>
                             <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(210,195,175,0.4)",alignSelf:"flex-start"}}>DLY</div>
+                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
                               {miniSlider("dlySend",md.dlySend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(210,195,175,0.55)"}}>{md.dlySend}</div>
+                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
                             </div>
-                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(220,200,180,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
+                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                               <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
                               <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
-                              <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(220,200,180,0.18)"}}/>
+                              <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
                             </div>
-                            <div style={{fontSize:7,color:"rgba(210,195,175,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+                            <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
                             {activeKit==="user"&&(
                             <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(200,185,165,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(200,185,165,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                                 onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
                                 {isRec?"STOP":hasSample?"●":"REC"}
                               </button>
-                              {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(200,185,165,0.18)",background:"transparent",color:"rgba(200,185,165,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                              {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                             </div>
                             )}
                           </div>);
@@ -9075,7 +9079,7 @@ export default function Tabula(){
                 {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="fx"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                       {globalFxSections}
                     </div>
@@ -9084,7 +9088,7 @@ export default function Tabula(){
                 {/* PROJECT sheet */}
                 {activeSheet==="project"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
                     {/* MIXER — per-layer level balancing */}
                     {(()=>{
                       const polyMix=layerParams.synth?.mix??85;
@@ -9096,9 +9100,9 @@ export default function Tabula(){
                       const msBtn=(label,active,color,onClick)=>(
                         <button onClick={e=>{e.stopPropagation();onClick();}}
                           style={{width:22,height:22,fontSize:9,fontWeight:700,letterSpacing:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
-                            border:"1px solid "+(active?color:"rgba(200,185,165,0.2)"),
+                            border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
                             background:active?color+"22":"transparent",
-                            color:active?color:"rgba(210,195,175,0.45)"}}>{label}</button>
+                            color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
                       );
                       const fader=(label,val,color,onChange,layerKey)=>{
                         const muted=!!trackMute[layerKey];
@@ -9108,7 +9112,7 @@ export default function Tabula(){
                         return(
                           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,opacity:dim?0.4:1}}>
                             <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                            <div style={{flex:1,height:8,background:"rgba(220,200,180,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                            <div style={{flex:1,height:8,background:"rgba(186,208,230,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
                               onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                               <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
@@ -9121,9 +9125,9 @@ export default function Tabula(){
                       };
                       return(
                         <div style={{marginBottom:16}}>
-                          <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:8}}>MIX</div>
+                          <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:8}}>MIX</div>
                           {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
-                          {fader("MONO",monoMix,"#6c9ad6",setLeadMix,"lead")}
+                          {fader("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
                           {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
                           {/* Output meters intentionally desktop-only (they were
                               unreliable on mobile WebKit; removed here per design). */}
@@ -9136,22 +9140,22 @@ export default function Tabula(){
                 {/* VARY sheet */}
                 {activeSheet==="vary"&&(
                   <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(210,195,175,0.35)",fontWeight:500,marginBottom:14}}>VARY</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>VARY</div>
                     {activeLayer!=="drums"&&(
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode[activeLayer]?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode[activeLayer]?"rgba(201,169,110,0.12)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}>{(activeLayer==="lead"?"MONO":"POLY")+" VARY "+(varyMode[activeLayer]?"ON":"OFF")}</button>
+                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode[activeLayer]?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.2)"),background:varyMode[activeLayer]?"rgba(230,184,114,0.12)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(168,190,212,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}>{(activeLayer==="lead"?"MONO":"POLY")+" VARY "+(varyMode[activeLayer]?"ON":"OFF")}</button>
                         </div>
                         <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8}}>RHYTHM</div>
                         {[["DROP",vDropRate,setVDropRate,60],["SHIFT",vShiftRate,setVShiftRate,60],["RANGE",vShiftRange,setVShiftRange,8,"st"]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
-                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
@@ -9160,12 +9164,12 @@ export default function Tabula(){
                         {[["PITCH",vPitchRate,setVPitchRate,60],["RANGE",vPitchRange,setVPitchRange,12,"st"],["GHOST",vGhostRate,setVGhostRate,60]].map(([label,val,setter,max,unit])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
                             </div>
-                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
@@ -9174,12 +9178,12 @@ export default function Tabula(){
                         {[["VEL",vVelJitter,setVVelJitter],["FLT",vFltJitter,setVFltJitter],["DLY",vDlyJitter,setVDlyJitter],["RHY",vRhyJitter,setVRhyJitter],["OCT",vOctJitter,setVOctJitter],["GLIDE",vGlideJitter,setVGlideJitter],["DUR",vDurJitter,setVDurJitter]].map(([label,val,setter])=>(
                           <div key={label} style={{marginBottom:10}}>
                             <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
+                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
                             </div>
-                            <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                               onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(201,169,110,0.45)",borderRadius:3}}/>
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
                               <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
                             </div>
                           </div>
@@ -9194,9 +9198,9 @@ export default function Tabula(){
                         <div key={label} style={{marginBottom:12}}>
                           <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
                             <span style={{fontSize:8,letterSpacing:1.5,color:accent,fontWeight:600,width:70}}>{label}</span>
-                            <span style={{fontSize:10,color:"rgba(210,195,175,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(210,195,175,0.35)",marginLeft:2}}>%</span></span>
+                            <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
                           </div>
-                          <div style={{height:6,background:"rgba(220,200,180,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
+                          <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
                             onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumVary(key,0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setDrumVary(key,Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
                             <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:accent+"99",borderRadius:3}}/>
                             <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
@@ -9206,9 +9210,9 @@ export default function Tabula(){
                       return(
                         <div>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                            <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode.drums?"rgba(201,169,110,0.6)":"rgba(200,185,165,0.2)"),background:varyMode.drums?"rgba(201,169,110,0.12)":"transparent",color:varyMode.drums?C_VARY:"rgba(200,185,165,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}>{"DRUMS VARY "+(varyMode.drums?"ON":"OFF")}</button>
+                            <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode.drums?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.2)"),background:varyMode.drums?"rgba(230,184,114,0.12)":"transparent",color:varyMode.drums?C_VARY:"rgba(168,190,212,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}>{"DRUMS VARY "+(varyMode.drums?"ON":"OFF")}</button>
                           </div>
-                          <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(210,195,175,0.3)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
+                          <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
                           {Row("RHYTHM",vRhythm,"vRhythm","#c8a840")}
                           {Row("VELOCITY",vVelocity,"vVelocity","#7888d0")}
                         </div>
@@ -9228,7 +9232,7 @@ export default function Tabula(){
             const close=()=>setPatMenu(null);const act=(fn)=>{fn();close();};const targetId=pm.id;const isOnlyPat=pats.length<=1;
             return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
               <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(186,208,230,0.06)"}}>
                   {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=MAX_PATTERNS],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
                     <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onClick={disabled?undefined:fn}>{label}</button>
@@ -9245,7 +9249,7 @@ export default function Tabula(){
             const close=()=>setDrumMenu(null);const act=(fn)=>{fn();close();};const isOnly=drumPats.length<=1;
             return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
               <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(220,200,180,0.06)"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(186,208,230,0.06)"}}>
                   {[["RAND",()=>act(randDrumVel)],["CLR",()=>act(clearDrums)],["CPY",()=>act(copyDrumPatFn)],["PST",()=>act(pasteDrumPatFn),!drumClipboard],["DUP",()=>act(dupDrumPat),drumPats.length>=MAX_PATTERNS],["DEL",()=>act(delDrumPat),isOnly,true]].map(([label,fn,disabled,danger])=>(
                     <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
                       onClick={disabled?undefined:fn}>{label}</button>
@@ -9302,37 +9306,37 @@ const CSS=`
 `;
 
 const S={
-  root:      {fontFamily:"'DM Sans',sans-serif",background:"#1a1814",color:"#e8e0d5",height:"100dvh",overflowY:IS_MOBILE?"hidden":"hidden",overscrollBehavior:"contain",maxWidth:"none",margin:"0 auto",padding:IS_MOBILE?0:"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
+  root:      {fontFamily:"'DM Sans',sans-serif",background:"#0e1c2b",color:"#e3ecf5",height:"100dvh",overflowY:IS_MOBILE?"hidden":"hidden",overscrollBehavior:"contain",maxWidth:"none",margin:"0 auto",padding:IS_MOBILE?0:"16px 20px 20px",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"},
   hdr:       {display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:IS_MOBILE?14:20,gap:4},
-  brand:     {fontFamily:"'DM Sans',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:300,letterSpacing:6,background:"linear-gradient(135deg,#c4a882,#9bbfaa)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
+  brand:     {fontFamily:"'DM Sans',sans-serif",fontSize:IS_MOBILE?22:28,fontWeight:300,letterSpacing:6,background:"linear-gradient(135deg,#ffc46a,#ffe9b0)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",flexShrink:0},
   hdrR:      {display:"flex",alignItems:"center",gap:IS_MOBILE?6:10},
-  sel:       {background:"rgba(200,185,165,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:1,minWidth:0},
+  sel:       {background:"rgba(168,190,212,0.05)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.7)",fontSize:IS_MOBILE?10:13,padding:"7px 8px",borderRadius:6,cursor:"pointer",flexShrink:1,minWidth:0},
   hdrWidget: {display:"flex",alignItems:"center",gap:2,flexShrink:0},
   widgetBox: {textAlign:"center",minWidth:26},
   widgetN:   {fontSize:IS_MOBILE?20:22,fontWeight:700,display:"block",lineHeight:1.1},
-  widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(210,195,175,0.3)",letterSpacing:1,display:"block"},
-  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"8px 10px",borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"rgba(200,185,165,0.04)",minWidth:IS_MOBILE?52:40,touchAction:"none",userSelect:"none",flexShrink:1},
+  widgetU:   {fontSize:IS_MOBILE?8:11,color:"rgba(178,199,219,0.3)",letterSpacing:1,display:"block"},
+  bpmDragTarget: {display:"flex",flexDirection:"column",alignItems:"center",cursor:"ns-resize",padding:IS_MOBILE?"8px 14px":"8px 10px",borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"rgba(168,190,212,0.04)",minWidth:IS_MOBILE?52:40,touchAction:"none",userSelect:"none",flexShrink:1},
   bpmOverlay:    {position:"fixed",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.88)",zIndex:999,pointerEvents:"none"},
-  bpmOverlayNum: {fontFamily:"'DM Sans',sans-serif",fontSize:88,fontWeight:300,color:"#e8e0d5",lineHeight:1,letterSpacing:-2},
-  bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(210,195,175,0.4)",marginTop:6},
+  bpmOverlayNum: {fontFamily:"'DM Sans',sans-serif",fontSize:88,fontWeight:300,color:"#e3ecf5",lineHeight:1,letterSpacing:-2},
+  bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(178,199,219,0.4)",marginTop:6},
   bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:1},
-  loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(210,195,175,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
+  loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(178,199,219,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
   loopOn:    {border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"},
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
-  playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(210,195,175,0.25)",background:"rgba(200,185,165,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
-  playOn:    {border:"2px solid #fff",background:"rgba(220,200,180,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
-  loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(200,185,165,0.15)",background:"transparent",color:"rgba(200,185,165,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
+  playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
+  playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
+  loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
-  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
+  tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
-  stepVaryDivider:{height:1,background:"rgba(220,200,180,0.06)",margin:"16px 0 8px"},
+  stepVaryDivider:{height:1,background:"rgba(186,208,230,0.06)",margin:"16px 0 8px"},
   speedRow:  {display:"flex",flexWrap:"wrap",gap:4,marginBottom:IS_MOBILE?10:14},
-  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(200,185,165,0.12)",background:"transparent",color:"rgba(200,185,165,0.4)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:10,transition:"all .12s"},
+  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:10,transition:"all .12s"},
   speedBtnOn:{border:"1px solid rgba(255,255,255,0.5)",color:"#fff",background:"rgba(255,255,255,0.08)"},
 
   pill:      {padding:IS_MOBILE?"5px 13px":"7px 16px",borderRadius:20,fontSize:IS_MOBILE?11:12,fontWeight:700,letterSpacing:2,cursor:"pointer",flexShrink:0,transition:"all .12s",display:"flex",alignItems:"center",gap:2},
-  newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(210,195,175,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
+  newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(178,199,219,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
   laneRow:   {display:"flex",alignItems:"stretch",gap:4,height:22},
   laneLabel: {width:20,flexShrink:0,fontSize:6,fontWeight:700,letterSpacing:1,display:"flex",alignItems:"center",justifyContent:"flex-end"},
   laneBars:  {flex:1,display:"flex",gap:1,alignItems:"flex-end",cursor:"pointer",touchAction:"none",position:"relative"},
@@ -9344,20 +9348,20 @@ const S={
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
   stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
   stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(220,200,180,0.06)",touchAction:"none",cursor:"ew-resize",overflow:"visible"},
+  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(186,208,230,0.06)",touchAction:"none",cursor:"ew-resize",overflow:"visible"},
   stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
   chainStrip:     {display:"flex",flexDirection:"row",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"8px 4px",marginTop:6,borderTop:"1px solid rgba(255,255,255,0.06)",minHeight:46,alignItems:"center",transition:"background .12s",borderRadius:6},
-  chainStripHot:  {background:"rgba(220,200,180,0.035)",borderTop:"1px solid rgba(255,255,255,0.18)"},
-  chainStripEmpty:{fontSize:IS_MOBILE?7:11,color:"rgba(210,195,175,0.15)",letterSpacing:2,whiteSpace:"nowrap"},
+  chainStripHot:  {background:"rgba(186,208,230,0.035)",borderTop:"1px solid rgba(255,255,255,0.18)"},
+  chainStripEmpty:{fontSize:IS_MOBILE?7:11,color:"rgba(178,199,219,0.15)",letterSpacing:2,whiteSpace:"nowrap"},
   chainChip:      {flexShrink:0,minWidth:30,height:30,borderRadius:8,border:"1px solid",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,letterSpacing:1,touchAction:"none",cursor:"grab",transition:"opacity .1s"},
   chainInsertLine:{width:2,height:30,background:"rgba(255,255,255,0.6)",borderRadius:1,flexShrink:0},
 
   // SOUND — classic synth panel look
   soundPage:      {paddingTop:4,display:"flex",flexDirection:"column",gap:6},
-  synthSection:   {background:"#201e1a",borderRadius:12,border:"1px solid rgba(200,185,165,0.1)",padding:"0 0 12px",overflow:"hidden"},
-  synthSectionHdr:{fontSize:IS_MOBILE?7:11,fontWeight:500,letterSpacing:1,padding:"7px 12px",borderBottom:"1px solid rgba(200,185,165,0.1)",marginBottom:10},
+  synthSection:   {background:"#201e1a",borderRadius:12,border:"1px solid rgba(168,190,212,0.1)",padding:"0 0 12px",overflow:"hidden"},
+  synthSectionHdr:{fontSize:IS_MOBILE?7:11,fontWeight:500,letterSpacing:1,padding:"7px 12px",borderBottom:"1px solid rgba(168,190,212,0.1)",marginBottom:10},
   wfRow:          {display:"flex",gap:4,padding:"0 12px",marginBottom:6},
   wfBtn:          {flex:1,padding:"7px 0",border:"1px solid",background:"transparent",fontSize:8,letterSpacing:1,cursor:"pointer",borderRadius:5,textAlign:"center",fontWeight:700,transition:"all .12s"},
   synthRow:       {padding:"0 12px"},
@@ -9381,12 +9385,12 @@ const S={
 
   spRow:          {display:"flex",alignItems:"center",justifyContent:"space-between",height:44},
   spValLg:        {fontSize:28,fontWeight:700,letterSpacing:2},
-  spBtnLg:        {width:44,height:44,background:"rgba(220,200,180,0.035)",border:"1px solid",color:"rgba(255,255,255,0.7)",fontSize:16,cursor:"pointer",borderRadius:10,padding:0,display:"flex",alignItems:"center",justifyContent:"center"},
+  spBtnLg:        {width:44,height:44,background:"rgba(186,208,230,0.035)",border:"1px solid",color:"rgba(255,255,255,0.7)",fontSize:16,cursor:"pointer",borderRadius:10,padding:0,display:"flex",alignItems:"center",justifyContent:"center"},
 
   // Dropdown menu
-  menuBtn:      {padding:"5px 12px",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(210,195,175,0.45)",fontSize:18,cursor:"pointer",borderRadius:6,lineHeight:1,flexShrink:0},
+  menuBtn:      {padding:"5px 12px",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(178,199,219,0.45)",fontSize:18,cursor:"pointer",borderRadius:6,lineHeight:1,flexShrink:0},
   menuOverlay:  {position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,background:"rgba(0,0,0,0.5)"},
-  menuPanel:    {position:"absolute",bottom:110,left:10,right:10,maxWidth:410,margin:"0 auto",background:"#111",borderRadius:14,border:"1px solid rgba(220,200,180,0.12)",padding:"16px",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"},
+  menuPanel:    {position:"absolute",bottom:110,left:10,right:10,maxWidth:410,margin:"0 auto",background:"#111",borderRadius:14,border:"1px solid rgba(186,208,230,0.12)",padding:"16px",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"},
   menuGrid:     {display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14},
   mBtn:         {padding:"12px 0",border:"1px solid rgba(255,255,255,0.14)",background:"transparent",color:"rgba(255,255,255,0.55)",fontSize:10,letterSpacing:1,cursor:"pointer",borderRadius:7,textAlign:"center"},
   mBtnLit:      {border:"1px solid rgba(255,255,255,0.45)",color:"#fff"},
@@ -9398,10 +9402,10 @@ const S={
   // STEP page
   stepPage:     {paddingTop:4,display:"flex",flexDirection:"column",gap:14},
   stepPageHdr:  {display:"flex",alignItems:"center",gap:10},
-  stepPagePat:  {fontSize:14,fontWeight:700,color:"rgba(210,195,175,0.4)",letterSpacing:1,flex:1},
+  stepPagePat:  {fontSize:14,fontWeight:700,color:"rgba(178,199,219,0.4)",letterSpacing:1,flex:1},
   stepPageBtns: {display:"flex",gap:8},
-  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(210,195,175,0.5)",fontSize:IS_MOBILE?9:12,letterSpacing:2,cursor:"pointer",borderRadius:6},
-  stepPageBtnRand:{border:"1px solid rgba(255,229,0,0.4)",color:"#c9a96e",background:"rgba(255,229,0,0.05)"},
+  stepPageBtn:  {padding:"8px 14px",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(178,199,219,0.5)",fontSize:IS_MOBILE?9:12,letterSpacing:2,cursor:"pointer",borderRadius:6},
+  stepPageBtnRand:{border:"1px solid rgba(255,229,0,0.4)",color:"#e6b872",background:"rgba(255,229,0,0.05)"},
   stepLaneSection:{display:"flex",flexDirection:"column",gap:6},
   stepLaneHdr:  {display:"flex",alignItems:"center",gap:8},
   stepLaneName: {fontSize:IS_MOBILE?9:12,fontWeight:700,letterSpacing:1,minWidth:32},

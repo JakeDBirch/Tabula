@@ -1,12 +1,14 @@
-# Tabula — handoff notes for Claude Code
+# Loud Light — handoff notes for Claude Code
 
 Project memory. Read before touching code. Live: https://jakedbirch.github.io/Tabula · Repo: https://github.com/JakeDBirch/Tabula
+
+**The app is called Loud Light** (renamed from Tabula on 2026-08-31). The repo, the Pages URL and the storage keys still say `Tabula`/`tnori-` — renaming the repo would move the live URL, and renaming the storage keys would orphan every existing project. Neither is worth doing for tidiness; both are Jake's call.
 
 Author is Jake Birch — production-audio professional, tech-literate (Python, Apps Script, hardware) but not a JS dev. Wants the proper/native solution over wrappers or hacks, even if slower. Judges audio and touch feel **by ear / by hand on his iPhone** — headless tests can't replace that.
 
 ---
 
-## What Tabula is
+## What Loud Light is
 
 A touch-first grid sequencer that runs as a **single static HTML file**. Built primarily for iPhone (added to home screen as a PWA); works on desktop too. Web Audio API, React 18 (UMD), no framework/bundler beyond a Babel build.
 
@@ -16,14 +18,14 @@ A touch-first grid sequencer that runs as a **single static HTML file**. Built p
 
 ```bash
 npm ci            # or npm install — pulls Babel (@babel/core, cli, preset-env, preset-react)
-npm run build     # compiles src/tabula.jsx → index.html   (ALWAYS run after editing)
+npm run build     # compiles src/loudlight.jsx → index.html   (ALWAYS run after editing)
 npm run audit     # standalone CJS return_react2 audit
 ```
 
-- **`src/tabula.jsx` is THE source.** `index.html` is a generated artifact — never edit it by hand.
+- **`src/loudlight.jsx` is THE source.** `index.html` is a generated artifact — never edit it by hand.
 - `build.mjs` strips the React import + `export default`, appends the mount call, runs Babel (preset-env + preset-react, `--compact`), wraps the output in an HTML scaffold with React 18 UMD CDN + PWA meta, then runs a **CJS audit pass** that greps for `return_react2` and fails the build if found (see Critical lessons). Keep the audit.
 - GitHub Pages serves `index.html` from `main` — a push auto-deploys in ~30s.
-- Preview locally: `.claude/launch.json` defines a `tabula` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
+- Preview locally: `.claude/launch.json` defines a `loudlight` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
 
 **Verifying changes:** the build validates syntax. For grid/paging/codec work, a headless Playwright pass over the built `index.html` is worth the setup (`npm i --no-save playwright react@18.2.0 react-dom@18.2.0`, serve a copy with the CDN `<script src>`s pointed at the local UMD builds, then drive the DOM and read back `localStorage["tnori-autosave"]` to assert on real pattern data). That's how the duplicate-bar overwrite bug was caught. Filter resource 404s out of the console check — a bare static server has no samples/manifest/lamejs. Logic (scheduler math, the pattern randomizer, range-slider frequency mapping) is best checked by extracting the pure function into a tiny Node harness and running Monte-Carlo/round-trip asserts — do NOT rely on headless AudioContext (gesture-gated, non-deterministic) and **do not auto-start playback** (Jake often has other audio running). UI/layout changes: verify in the browser preview (read the DOM / console, not just screenshots — screenshots have been flaky).
 
@@ -153,6 +155,14 @@ Autosave is separate (`storageSet("autosave", …)` — `window.storage`, fallin
 User samples serialize as base64 in saves (`serializeSamples`); kits load via `loadKit`. Samples ARE wired up now (older doc said otherwise).
 
 ---
+
+## Look and feel
+
+The palette is the app icon: a **deep navy ground** (`#0e1c2b`) with **cool blue-grey** furniture, and **warm amber** (`rgba(255,214,150,…)`) for anything lit — a note, the current bar chip, the brand wordmark. That's the icon's lightbulb: dark glass, glowing filament. A note isn't a filled rectangle any more, it's an emissive one — every lit note carries a soft amber glow, brighter under the playhead, with velocity driving the ramp between.
+
+The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO blue, DRUMS rose) stay semantic; MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground.
+
+One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The note fill originally kept its old `0.35 + vel*0.65` alpha ramp and looked muddy; it needed a higher floor (`0.55 + vel*0.45`) plus the glow to read as lit. Expect the same wherever a warm accent sits at low alpha.
 
 ## Critical lessons (don't relearn)
 

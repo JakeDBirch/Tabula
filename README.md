@@ -1,4 +1,4 @@
-# Tabula
+# Loud Light
 
 A touch-first grid sequencer that runs as a single static HTML file. Built primarily for iPhone (added to home screen as a PWA), works on desktop too.
 
@@ -17,8 +17,8 @@ Notes have true per-row polyphony with editable durations — drag a note rightw
 ## Repo layout
 
 ```
-tabula/
-├── src/tabula.jsx       ← source — edit this
+loudlight/
+├── src/loudlight.jsx    ← source — edit this
 ├── index.html           ← compiled artifact (generated, don't edit by hand)
 ├── build.mjs            ← compile pipeline
 ├── babel.config.json
@@ -45,7 +45,7 @@ npm install
 npm run build
 ```
 
-This compiles `src/tabula.jsx` into a self-contained `index.html` with a CDN-hosted React runtime. No bundler, no dev server. Open `index.html` directly in a browser to test, or commit and push to deploy.
+This compiles `src/loudlight.jsx` into a self-contained `index.html` with a CDN-hosted React runtime. No bundler, no dev server. Open `index.html` directly in a browser to test, or commit and push to deploy.
 
 ### Audit standalone
 
@@ -71,7 +71,7 @@ git push
 
 1. Open the live URL in Safari on iPhone
 2. Share → Add to Home Screen
-3. Name it Tabula
+3. Name it Loud Light
 
 Runs full-screen with no browser chrome.
 

@@ -1,4 +1,4 @@
-/* Tabula service worker — offline support for the installed PWA.
+/* Loud Light service worker — offline support for the installed PWA.
  *
  * Strategy:
  *   • Navigation (index.html): network-first, fall back to cache. So an online
@@ -11,11 +11,11 @@
  *
  * Bump CACHE when the shell/precache list changes to force a clean re-cache.
  */
-const CACHE = "tabula-v2";
+const CACHE = "loudlight-v1";
 
 // Must-have, small, same-origin. If any of these fail the install still
 // proceeds (we catch) — the fetch handler will fill gaps on first online use.
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.png", "./icon.svg"];
 
 // Best-effort: third-party libs + both shipped kits. Cached individually so one
 // failure (e.g. a flaky CDN) doesn't abort the whole precache. ~8MB total — a
