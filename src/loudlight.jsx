@@ -4513,6 +4513,73 @@ export default function LoudLight(){
           </Fragment>
         );
       })()}
+      {/* MIX — vertical faders. Lives on the SONG page because that's the view
+          you balance a whole arrangement from; it used to sit in the desktop
+          sidebar and again inside the PROJECT menu, which is two places to keep
+          in step and neither of them where you're listening. */}
+      {(()=>{
+        const polyMix=layerParams.synth?.mix??85;
+        const monoMix=layerParams.lead?.mix??85;
+        const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
+        const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
+        const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
+        const msBtn=(label,active,color,onClick)=>(
+          <button onClick={e=>{e.stopPropagation();onClick();}}
+            style={{flex:1,minWidth:0,height:19,fontSize:8,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+              border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
+              background:active?color+"22":"transparent",
+              color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
+        );
+        const strip=(label,val,color,onChange,layerKey)=>{
+          const muted=!!trackMute[layerKey], solo=!!trackSolo[layerKey];
+          const dim=muted||(anySolo&&!solo);
+          return(
+            <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:dim?0.4:1}}>
+              <span style={{fontSize:8,letterSpacing:1.5,fontWeight:700,color}}>{label}</span>
+              {/* Vertical travel: up is louder. Ballistic like every other
+                  control here, and a double-tap returns it to unity. */}
+              <div style={{width:"100%",flex:1,minHeight:0,display:"flex",justifyContent:"center"}}>
+                <div style={{width:14,height:"100%",background:"rgba(186,208,230,0.07)",borderRadius:7,position:"relative",cursor:"ns-resize",touchAction:"none"}}
+                  onPointerDown={e=>{
+                    e.stopPropagation();
+                    if(isDoubleTap(e,"mix"+layerKey)){onChange(85);return;}
+                    const h=e.currentTarget.getBoundingClientRect().height;
+                    let cur=val,ly=e.clientY;
+                    const update=ev=>{
+                      const pd=ly-ev.clientY; ly=ev.clientY;   // drag up = louder
+                      cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,h,100)));
+                      onChange(Math.round(cur));
+                    };
+                    const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+                    document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+                  }}
+                  onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
+                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${val}%`,background:color+"99",borderRadius:7}}/>
+                  <div style={{position:"absolute",left:-4,right:-4,height:7,bottom:`calc(${val}% - 3.5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
+                </div>
+              </div>
+              <span style={{fontSize:8,color:"rgba(178,199,219,0.4)",fontVariantNumeric:"tabular-nums"}}>{val}</span>
+              <div style={{display:"flex",gap:3,width:"100%"}}>
+                {msBtn("M",muted,"#c47a7a",()=>setTrackMute(t=>({...t,[layerKey]:!t[layerKey]})))}
+                {msBtn("S",solo,"#d4a850",()=>setTrackSolo(t=>({...t,[layerKey]:!t[layerKey]})))}
+              </div>
+            </div>
+          );
+        };
+        return(
+          <div style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
+            <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MIX</div>
+            {/* Strips are capped and left-aligned so three channels read as a
+                mixer rather than three faders stranded across the page. */}
+            <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?116:132}}>
+              {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
+              {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
+              {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 
@@ -7621,51 +7688,6 @@ export default function LoudLight(){
             </div>
           )}
 
-          {/* MIXER — per-layer level balancing (poly/mono in layerParams.mix, drums global) */}
-          {!IS_MOBILE&&(()=>{
-            const polyMix=layerParams.synth?.mix??85;
-            const monoMix=layerParams.lead?.mix??85;
-            const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
-            const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
-            const toggleMute=key=>setTrackMute(t=>({...t,[key]:!t[key]}));
-            const toggleSolo=key=>setTrackSolo(t=>({...t,[key]:!t[key]}));
-            const msBtn=(label,active,color,onClick)=>(
-              <button onClick={e=>{e.stopPropagation();onClick();}}
-                style={{width:16,height:14,fontSize:7,fontWeight:700,letterSpacing:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
-                  border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
-                  background:active?color+"22":"transparent",
-                  color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
-            );
-            const fader=(label,val,color,onChange,layerKey)=>{
-              const muted=!!trackMute[layerKey];
-              const solo=!!trackSolo[layerKey];
-              const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
-              const dim=muted||(anySolo&&!solo);
-              return(
-                <div style={{display:"flex",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
-                  <span style={{width:32,fontSize:8,letterSpacing:1.5,fontWeight:600,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                  <div style={{flex:1,height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
-                    onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
-                    onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:3,transition:"width .04s"}}/>
-                    <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${val}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+color+"88"}}/>
-                  </div>
-                  {msBtn("M",muted,"#c47a7a",()=>toggleMute(layerKey))}
-                  {msBtn("S",solo,"#d4a850",()=>toggleSolo(layerKey))}
-                </div>
-              );
-            };
-            return(
-              <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-                <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIX</div>
-                {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
-                {fader("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
-                {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
-                {/* Output meters removed — a master limiter now prevents clipping,
-                    so there's nothing for the user to watch for. */}
-              </div>
-            );
-          })()}
 
           {!IS_MOBILE&&<div style={{flex:1,minHeight:0}}/>}
 
@@ -9108,51 +9130,6 @@ export default function LoudLight(){
                 {activeSheet==="project"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>PROJECT</div>
-                    {/* MIXER — per-layer level balancing */}
-                    {(()=>{
-                      const polyMix=layerParams.synth?.mix??85;
-                      const monoMix=layerParams.lead?.mix??85;
-                      const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
-                      const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
-                      const toggleMute=key=>setTrackMute(t=>({...t,[key]:!t[key]}));
-                      const toggleSolo=key=>setTrackSolo(t=>({...t,[key]:!t[key]}));
-                      const msBtn=(label,active,color,onClick)=>(
-                        <button onClick={e=>{e.stopPropagation();onClick();}}
-                          style={{width:22,height:22,fontSize:9,fontWeight:700,letterSpacing:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",flexShrink:0,
-                            border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
-                            background:active?color+"22":"transparent",
-                            color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
-                      );
-                      const fader=(label,val,color,onChange,layerKey)=>{
-                        const muted=!!trackMute[layerKey];
-                        const solo=!!trackSolo[layerKey];
-                        const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
-                        const dim=muted||(anySolo&&!solo);
-                        return(
-                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,opacity:dim?0.4:1}}>
-                            <span style={{width:42,fontSize:9,letterSpacing:1.5,fontWeight:700,color,textAlign:"right",flexShrink:0}}>{label}</span>
-                            <div style={{flex:1,height:8,background:"rgba(186,208,230,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){onChange(85);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
-                              onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${val}%`,background:color+"99",borderRadius:4}}/>
-                              <div style={{position:"absolute",top:-3,bottom:-3,width:10,left:`calc(${val}% - 5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
-                            </div>
-                            {msBtn("M",muted,"#c47a7a",()=>toggleMute(layerKey))}
-                            {msBtn("S",solo,"#d4a850",()=>toggleSolo(layerKey))}
-                          </div>
-                        );
-                      };
-                      return(
-                        <div style={{marginBottom:16}}>
-                          <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:8}}>MIX</div>
-                          {fader("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
-                          {fader("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
-                          {fader("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
-                          {/* Output meters intentionally desktop-only (they were
-                              unreliable on mobile WebKit; removed here per design). */}
-                        </div>
-                      );
-                    })()}
                     {projectMenuBody}
                   </div>
                 )}

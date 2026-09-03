@@ -107,6 +107,10 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 - **Ballistic drag helper** = `ballisticDelta(pd, dim, range)`. Double-tap detection = `isDoubleTap(e, key?)` (custom, because DOM `dblclick` is unreliable on touch).
 - **STEP lanes**, **autosave**, **MP3/MIDI export**, and the **project library** (named projects, persisted via `storageSet("projects", …)`) all exist.
 
+### The mixer
+
+**Vertical faders, on the SONG page.** POLY / MONO / DRUMS, each a track you drag (up is louder, ballistic like every other control, double-tap back to unity) with its own M and S beneath. It used to exist **twice** — once in the desktop sidebar and again inside the PROJECT menu — which is two copies to keep in step and neither of them where you're listening. Both are gone; the song page is the one place it lives, so desktop and mobile share it for free. Values still land where they always did: POLY/MONO in `layerParams[layer].mix`, DRUMS in the global `drumLevel`. The per-drum-voice MIXER on the drums SOUND page is a different control and stays put.
+
 ### The PROJECT menu
 
 Everything that isn't playing or editing — NEW PROJECT, the project library, MIDI / MP3 — lives behind **one menu**, `projectMenuBody`. It used to be a permanently-open column pinned to the bottom of the desktop sidebar; none of it is wanted mid-take. Desktop opens it as a modal (a `☰ PROJECT` button where the panel was; ESC or a backdrop tap closes, and the keydown handler hands the keyboard to the modal while it's open so space types a space instead of starting playback). Mobile keeps the existing PROJECT bottom sheet, which now renders MIX and then the same body. **One body, two mounts** — don't fork it, or the platforms drift.
