@@ -1077,7 +1077,7 @@ const SESSION_DEFAULTS = Object.freeze({
   bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
-  drumLevel:85, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
+  drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   vDropRate:13, vShiftRate:17, vShiftRange:1,
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
@@ -2270,14 +2270,20 @@ class Bell{
     // sp.rev > 0 overrides it (matching the dly-send convention).
     const stepRev = sp ? (sp.rev??0)/100 : 0;
     const layerRev = (p && p.rvSend!=null) ? p.rvSend/100 : 0;
-    const revMul = (sp && (sp.rev??0) > 0) ? stepRev : layerRev;
+    // Channel FX trim: one post-fader scaler over BOTH sends, so you can dial
+    // the layer and its steps to taste and then pull the whole channel's wet
+    // signal back without unpicking every send. Defaults to 100 (no change),
+    // and legacy saves without the key read as 100 for the same reason.
+    const fxTrim = (p && p.fxTrim!=null) ? Math.max(0,Math.min(100,p.fxTrim))/100 : 1;
+    const revMul = ((sp && (sp.rev??0) > 0) ? stepRev : layerRev) * fxTrim;
     if(revMul>0){
       const revG=this.ctx.createGain();revG.gain.value=revMul;
       vca.connect(revG);revG.connect(this.rev);
     }
     // Delay send: additive (global + step), capped at 1 — computed in dlyMul
-    if(dlyMul>0){
-      const stepSend=this.ctx.createGain();stepSend.gain.value=dlyMul;
+    const dlyOut = dlyMul * fxTrim;
+    if(dlyOut>0){
+      const stepSend=this.ctx.createGain();stepSend.gain.value=dlyOut;
       vca.connect(stepSend);stepSend.connect(this.dly);
     }
   }
@@ -2298,6 +2304,11 @@ class DrumEngine{
     this.ctx=null;this.master=null;this.masterIn=null;this.ready=false;
     // Bell FX inputs (set in init) — per-voice rvSend/dlySend tap into these.
     this.revNode=null;this.dlyNode=null;
+    // Channel FX trim (0..1) — one scaler over every voice's rev/dly send, the
+    // drum-bus equivalent of layerParams.fxTrim. Each strip keeps its untrimmed
+    // send as rvBase/dlyBase so changing the trim rescales without the base
+    // values having to be re-sent from React.
+    this.fxTrim=1;
     // Active open-hat gain ref for CH choke. Cleared when CH cuts it or the
     // sample ends naturally. Holds {g, endT}.
     this.activeOH=null;
@@ -2362,7 +2373,7 @@ class DrumEngine{
       // pitch is in semitones; cached on the strip so play() can read it
       // without traversing React state. Filter type is stored separately so
       // setVoiceMix only re-assigns when it actually changes.
-      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,shaper,pitch:0,filtMode:"off",env:100,sat:0};
+      this.voiceStrips[v.key]={lvlGain,panner,revSend,dlySend,filter,shaper,pitch:0,filtMode:"off",env:100,sat:0,rvBase:0,dlyBase:0};
     }
     this.ready=true;
   }
@@ -2386,8 +2397,8 @@ class DrumEngine{
     const setP=(p,v)=>{ if(at!=null){try{p.setValueAtTime(v,at);}catch(e){p.value=v;}} else p.setTargetAtTime(v,t,TAU); };
     if(mix.level!=null)setP(strip.lvlGain.gain,Math.max(0,Math.min(2,mix.level/100)));
     if(mix.pan!=null&&strip.panner)setP(strip.panner.pan,Math.max(-1,Math.min(1,mix.pan/100)));
-    if(mix.rvSend!=null)setP(strip.revSend.gain,Math.max(0,Math.min(1,mix.rvSend/100)));
-    if(mix.dlySend!=null)setP(strip.dlySend.gain,Math.max(0,Math.min(1,mix.dlySend/100)));
+    if(mix.rvSend!=null){strip.rvBase=Math.max(0,Math.min(1,mix.rvSend/100));setP(strip.revSend.gain,strip.rvBase*this.fxTrim);}
+    if(mix.dlySend!=null){strip.dlyBase=Math.max(0,Math.min(1,mix.dlySend/100));setP(strip.dlySend.gain,strip.dlyBase*this.fxTrim);}
     if(mix.pitch!=null)strip.pitch=Math.max(-12,Math.min(12,mix.pitch));
     if(mix.env!=null)strip.env=Math.max(0,Math.min(100,mix.env));
     // Saturation — regenerate the shaper curve only when the amount changes.
@@ -2416,6 +2427,20 @@ class DrumEngine{
   }
   setMasterLevel(pct){
     if(this.ready&&this.masterIn)this.masterIn.gain.setTargetAtTime(Math.max(0,Math.min(150,pct))/100,this.ctx.currentTime,0.02);
+  }
+  // Channel FX trim for the whole drum bus. Rescales every live strip from the
+  // send values it was last given, so a trim drag doesn't need React to re-push
+  // the base mix (and doesn't fight the per-step MOTION writes, which go
+  // through setVoiceMix and pick the new trim up on their next hit).
+  setFxTrim(pct){
+    this.fxTrim=Math.max(0,Math.min(100,pct))/100;
+    if(!this.ready)return;
+    const t=this.ctx.currentTime;
+    for(const k in this.voiceStrips){
+      const st=this.voiceStrips[k];if(!st)continue;
+      if(st.revSend)st.revSend.gain.setTargetAtTime((st.rvBase||0)*this.fxTrim,t,0.008);
+      if(st.dlySend)st.dlySend.gain.setTargetAtTime((st.dlyBase||0)*this.fxTrim,t,0.008);
+    }
   }
   // Audio-domain mute for the whole drum layer — ramp the mute bus 0↔1.
   setMute(v){if(this.ready&&this.muteGain)this.muteGain.gain.setTargetAtTime(Math.max(0,Math.min(1,v)),this.ctx.currentTime,0.012);}
@@ -2847,6 +2872,11 @@ export default function LoudLight(){
   const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
   const [activeSheet,   setActiveSheet]   = useState(null); // "tempo"|"pattern"|"sound"|"project"|"vary"
+  // Timestamp of a sheet opened mid-gesture (a press-and-hold). The backdrop
+  // mounts under the finger, so the trailing click of that same press would
+  // dismiss the sheet the instant it appeared; the backdrop ignores clicks for
+  // a beat after this stamp.
+  const sheetGuardR = useRef(0);
   const seqTrackRef=useRef(null);
   // Save / load / share / cloud all live behind one PROJECT menu — none of it
   // is needed while you're playing. Desktop opens it as a modal; on mobile it's
@@ -2993,6 +3023,9 @@ export default function LoudLight(){
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
     rvSend: 30,        // 0..100; per-layer send into the global reverb bus
     mix: 85,           // 0..100; mixer level multiplier on this layer's voices
+    fxTrim: 100,       // 0..100; post-fader scaler over BOTH FX sends. Full by
+                       // default: it exists to pull a channel's wet signal back
+                       // after the sends are set, not to be dialled up.
     subLevel: 0,       // 0..100; MONO-only sub-oscillator (1 octave down)
     spread: 50,        // 0..100; POLY-only stereo spread of detune stack
     // Per-section velocity tracking. 0 = velocity has no effect on that
@@ -3077,6 +3110,9 @@ export default function LoudLight(){
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
+  // Drum-bus FX send trim — the drums' counterpart to layerParams.fxTrim. A
+  // global (not per-pattern) scaler, same as drumLevel and the base drum mix.
+  const [drumFxTrim, setDrumFxTrim] = useState(100);
   // Per-layer mute / solo. Solo wins over mute the usual way: any solo'd
   // layer silences non-solo'd ones, even if they aren't muted. Stored as
   // {synth,lead,drums} maps so the scheduler can do a cheap lookup.
@@ -3403,6 +3439,7 @@ export default function LoudLight(){
   useEffect(()=>{bell.current.setRvMod&&bell.current.setRvMod(rvMod);},[rvMod]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
+  useEffect(()=>{drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);},[drumFxTrim]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
   // and shared across patterns, so this is the single source of truth for the
   // strips. (MOTION automation, when on, overlays per-step in playDrumStep.)
@@ -3496,7 +3533,7 @@ export default function LoudLight(){
     activeLayer,
     bpm,scale,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     varyMode,loopMode,loopBar,loopPat,
@@ -3566,7 +3603,7 @@ export default function LoudLight(){
     setLayerParams(s.layerParams?fillLayerParams(s.layerParams):{synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
-     ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+     ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3643,7 +3680,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -3704,7 +3741,7 @@ export default function LoudLight(){
     // Default-fallback on load: every key gets either the saved value or the
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -3812,7 +3849,7 @@ export default function LoudLight(){
     setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
-    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumMixArr(defaultDrumMix());
+    setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
     setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
     setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
     setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
@@ -4529,46 +4566,76 @@ export default function LoudLight(){
         const monoMix=layerParams.lead?.mix??85;
         const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
         const setLeadMix=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,mix:v}}));
+        // FX trim per channel. POLY/MONO live in layerParams (read per note in
+        // Bell.play); DRUMS is a bus-wide scaler on the drum engine. Missing on
+        // a legacy save reads as 100 — full, i.e. exactly what it did before.
+        const polyFx=layerParams.synth?.fxTrim??100;
+        const monoFx=layerParams.lead?.fxTrim??100;
+        const setSynthFx=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,fxTrim:v}}));
+        const setLeadFx=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,fxTrim:v}}));
         const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
         const msBtn=(label,active,color,onClick)=>(
           <button onClick={e=>{e.stopPropagation();onClick();}}
-            style={{flex:1,minWidth:0,height:19,fontSize:8,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+            style={{width:"100%",height:24,flexShrink:0,fontSize:9,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",padding:0,
               border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
               background:active?color+"22":"transparent",
               color:active?color:"rgba(178,199,219,0.45)"}}>{label}</button>
         );
-        const strip=(label,val,color,onChange,layerKey)=>{
+        // Shared ballistic drag for both the fader (vertical) and the trim
+        // (horizontal) — same feel as every other control in here, including
+        // double-tap-to-default.
+        const dragStart=(e,val,onChange,axis,def)=>{
+          e.stopPropagation();
+          if(isDoubleTap(e,axis)){onChange(def);return;}
+          const r=e.currentTarget.getBoundingClientRect();
+          const dim=axis[0]==="v"?r.height:r.width;
+          let cur=val,last=axis[0]==="v"?e.clientY:e.clientX;
+          const update=ev=>{
+            const now=axis[0]==="v"?ev.clientY:ev.clientX;
+            const pd=axis[0]==="v"?(last-now):(now-last);   // up / right = more
+            last=now;
+            cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            onChange(Math.round(cur));
+          };
+          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+        };
+        const strip=(label,val,color,onChange,layerKey,fxVal,onFx)=>{
           const muted=!!trackMute[layerKey], solo=!!trackSolo[layerKey];
           const dim=muted||(anySolo&&!solo);
           return(
-            <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:dim?0.4:1}}>
+            <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
               <span style={{fontSize:8,letterSpacing:1.5,fontWeight:700,color}}>{label}</span>
-              {/* Vertical travel: up is louder. Ballistic like every other
-                  control here, and a double-tap returns it to unity. */}
-              <div style={{width:"100%",flex:1,minHeight:0,display:"flex",justifyContent:"center"}}>
-                <div style={{width:14,height:"100%",background:"rgba(186,208,230,0.07)",borderRadius:7,position:"relative",cursor:"ns-resize",touchAction:"none"}}
-                  onPointerDown={e=>{
-                    e.stopPropagation();
-                    if(isDoubleTap(e,"mix"+layerKey)){onChange(85);return;}
-                    const h=e.currentTarget.getBoundingClientRect().height;
-                    let cur=val,ly=e.clientY;
-                    const update=ev=>{
-                      const pd=ly-ev.clientY; ly=ev.clientY;   // drag up = louder
-                      cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,h,100)));
-                      onChange(Math.round(cur));
-                    };
-                    const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                    document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                  }}
+              {/* Fader and its M/S side by side: the buttons stacked beside the
+                  travel rather than under it, which is dead space either way
+                  and gives the fader back the height it was spending on them. */}
+              <div style={{width:"100%",flex:1,minHeight:0,display:"flex",justifyContent:"center",alignItems:"stretch",gap:6}}>
+                {/* Vertical travel: up is louder. Ballistic like every other
+                    control here, and a double-tap returns it to unity. */}
+                <div style={{width:14,height:"100%",background:"rgba(186,208,230,0.07)",borderRadius:7,position:"relative",cursor:"ns-resize",touchAction:"none",flexShrink:0}}
+                  onPointerDown={e=>dragStart(e,val,onChange,"v"+layerKey,85)}
                   onDoubleClick={e=>{e.stopPropagation();onChange(85);}}>
                   <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${val}%`,background:color+"99",borderRadius:7}}/>
                   <div style={{position:"absolute",left:-4,right:-4,height:7,bottom:`calc(${val}% - 3.5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
                 </div>
+                <div style={{width:24,flexShrink:0,display:"flex",flexDirection:"column",gap:4,justifyContent:"flex-end"}}>
+                  {msBtn("M",muted,"#c47a7a",()=>setTrackMute(t=>({...t,[layerKey]:!t[layerKey]})))}
+                  {msBtn("S",solo,"#d4a850",()=>setTrackSolo(t=>({...t,[layerKey]:!t[layerKey]})))}
+                </div>
               </div>
               <span style={{fontSize:8,color:"rgba(178,199,219,0.4)",fontVariantNumeric:"tabular-nums"}}>{val}</span>
-              <div style={{display:"flex",gap:3,width:"100%"}}>
-                {msBtn("M",muted,"#c47a7a",()=>setTrackMute(t=>({...t,[layerKey]:!t[layerKey]})))}
-                {msBtn("S",solo,"#d4a850",()=>setTrackSolo(t=>({...t,[layerKey]:!t[layerKey]})))}
+              {/* FX send trim — one scaler over this channel's delay AND reverb
+                  sends. Full by default: set the sends where you want them, then
+                  pull the whole channel's wet back from here. */}
+              <div style={{width:"100%",display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:7,letterSpacing:0.5,color:"rgba(178,199,219,0.35)",fontWeight:600,flexShrink:0}}>FX</span>
+                <div style={{flex:1,minWidth:0,height:8,background:"rgba(186,208,230,0.07)",borderRadius:4,position:"relative",cursor:"ew-resize",touchAction:"none"}}
+                  onPointerDown={e=>dragStart(e,fxVal,onFx,"x"+layerKey,100)}
+                  onDoubleClick={e=>{e.stopPropagation();onFx(100);}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${fxVal}%`,background:color+"77",borderRadius:4}}/>
+                  <div style={{position:"absolute",top:-2,bottom:-2,width:3,left:`calc(${fxVal}% - 1.5px)`,background:"rgba(255,255,255,0.8)",borderRadius:1.5}}/>
+                </div>
+                <span style={{fontSize:7,color:"rgba(178,199,219,0.4)",fontVariantNumeric:"tabular-nums",flexShrink:0,minWidth:16,textAlign:"right"}}>{fxVal}</span>
               </div>
             </div>
           );
@@ -4578,10 +4645,10 @@ export default function LoudLight(){
             <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MIX</div>
             {/* Strips are capped and left-aligned so three channels read as a
                 mixer rather than three faders stranded across the page. */}
-            <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?172:236}}>
-              {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
-              {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
-              {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
+            <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?176:236}}>
+              {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
+              {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead",monoFx,setLeadFx)}
+              {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
             </div>
           </div>
         );
@@ -4658,43 +4725,61 @@ export default function LoudLight(){
         })}
       </div>
   );
+  // The + beside the bar readout: a TAP adds a bar, a HOLD (or right-click)
+  // opens the full pattern/bar sheet. Adding a bar is the thing you reach for
+  // constantly and it used to cost two taps through the drawer; the drawer is
+  // the rarer trip, so it gets the deliberate gesture.
+  const barPlusR=useRef({tmr:0,held:false});
+  const _barPlusEnd=()=>{
+    if(barPlusR.current.tmr){clearTimeout(barPlusR.current.tmr);barPlusR.current.tmr=0;}
+  };
+  const _openBarSheet=()=>{
+    // Opened mid-gesture (finger still down), so the trailing click of this
+    // same press would otherwise land on the backdrop that just mounted under
+    // it and dismiss the sheet instantly. sheetGuardR makes the backdrop
+    // ignore clicks for a beat after a hold-open — the same trap the
+    // onClick-not-onPointerDown rule guards against for tap-opened sheets.
+    sheetGuardR.current=Date.now();
+    setActiveSheet(sh=>sh==="bars"?null:"bars");
+  };
   const barStrip=(
     <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
-      {/* The bar count doubles as the handle for the pattern drawer — the bar
-          controls it holds belong to what this readout is describing, so that's
-          where you reach for them. (Mobile only: on desktop the same controls
-          are always visible in the sidebar, so there's no drawer to open.) */}
-      {IS_MOBILE?(
-        <div role="button" aria-label="Pattern and bar controls"
-          onClick={e=>{
-            // onClick, NOT onPointerDown: opening the sheet from pointerdown
-            // mounts the full-screen backdrop under the finger, and the same
-            // tap's trailing click then lands on it and dismisses the sheet
-            // instantly — the handle just looks dead. Every other sheet opener
-            // in here is onClick for the same reason.
-            e.stopPropagation();
-            setActiveSheet(sh=>sh==="bars"?null:"bars");}}
-          style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3,
-            height:22,minWidth:66,padding:"0 8px",borderRadius:5,
-            border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),
-            background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
-            color:activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.55)",
-            fontSize:10,fontWeight:600,letterSpacing:0.5,lineHeight:1,
-            cursor:"pointer",userSelect:"none",flexShrink:0}}>
-          {/* Names the pattern you're editing — the pills that used to say so
-              are gone from the part pages. */}
-          <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
-          <span style={{opacity:0.35}}>·</span>
-          <span>{curBar+1}/{barCount}</span>
-          <span style={{fontSize:7,opacity:0.7,transform:activeSheet==="bars"?"rotate(180deg)":"none"}}>▾</span>
-        </div>
-      ):(
-        <span style={{fontSize:9,letterSpacing:0.5,minWidth:52,textAlign:"center",pointerEvents:"none",display:"flex",gap:4,justifyContent:"center"}}>
-          <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
-          <span style={{color:"rgba(178,199,219,0.4)"}}>{curBar+1}/{barCount}</span>
-        </span>
-      )}
+      {/* Bar readout — which pattern you're editing and where you are in it.
+          The pattern pills that used to name it are gone from the part pages. */}
+      <span style={{fontSize:IS_MOBILE?10:9,letterSpacing:0.5,pointerEvents:"none",display:"flex",gap:4,alignItems:"center",flexShrink:0,whiteSpace:"nowrap"}}>
+        <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
+        <span style={{color:"rgba(178,199,219,0.4)"}}>{curBar+1}/{barCount}</span>
+      </span>
+      <div role="button" aria-label="Add bar (hold for pattern and bar controls)"
+        onPointerDown={e=>{
+          e.stopPropagation();
+          barPlusR.current.held=false;
+          _barPlusEnd();
+          if(!IS_MOBILE)return;   // desktop has the sidebar; hold opens nothing
+          barPlusR.current.tmr=setTimeout(()=>{
+            barPlusR.current.tmr=0;barPlusR.current.held=true;_openBarSheet();
+          },450);
+        }}
+        onPointerMove={e=>{if(e.buttons)_barPlusEnd();}}
+        onPointerUp={()=>{_barPlusEnd();if(barPlusR.current.held)sheetGuardR.current=Date.now();}}
+        onPointerCancel={()=>{_barPlusEnd();barPlusR.current.held=false;}}
+        onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barPlusEnd();barPlusR.current.held=true;_openBarSheet();}}
+        onClick={e=>{
+          e.stopPropagation();
+          // The hold already did its work; swallow its trailing click so the
+          // sheet doesn't come with a surprise extra bar.
+          if(barPlusR.current.held){barPlusR.current.held=false;return;}
+          if(barCount>=MAX_BARS)return;
+          addBar();
+        }}
+        style={{display:"flex",alignItems:"center",justifyContent:"center",
+          height:IS_MOBILE?24:22,width:IS_MOBILE?30:26,borderRadius:5,
+          border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),
+          background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
+          color:barCount>=MAX_BARS&&activeSheet!=="bars"?"rgba(178,199,219,0.2)":activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.6)",
+          fontSize:IS_MOBILE?15:13,fontWeight:400,lineHeight:1,
+          cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",flexShrink:0,touchAction:"none"}}>+</div>
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -4737,7 +4822,7 @@ export default function LoudLight(){
     ver:PROJ_VER,
     bpm,scale,transpose,swing,speedMult,
     layerParams,
-    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,
+    dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -4791,7 +4876,7 @@ export default function LoudLight(){
     // Global mix: saved global drumMix, else seed from the first pattern's drums.
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
-    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],
+    [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
      ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
      ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
      ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
@@ -5251,7 +5336,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -5636,6 +5721,7 @@ export default function LoudLight(){
     bell.current.setRvMod&&bell.current.setRvMod(rvMod);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
+    drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
     // the engine is ready on a cold start).
     {const _m=fillDrumMix(drumMix);for(let r=0;r<DRUM_ROWS;r++)drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,_m[r]);}
@@ -8760,7 +8846,7 @@ export default function LoudLight(){
           {activeSheet&&(
             <>
               {/* Backdrop — full screen so ANY tap outside the sheet closes it. */}
-              <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>setActiveSheet(null)}/>
+              <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>{if(Date.now()-sheetGuardR.current<400)return;setActiveSheet(null);}}/>
               <div style={{position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
 
                 {/* TEMPO sheet */}
