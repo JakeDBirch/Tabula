@@ -109,7 +109,9 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### The mixer
 
-**Vertical faders, on the SONG page.** POLY / MONO / DRUMS, each a track you drag (up is louder, ballistic like every other control, double-tap back to unity) with its own M and S beneath. It used to exist **twice** — once in the desktop sidebar and again inside the PROJECT menu — which is two copies to keep in step and neither of them where you're listening. Both are gone; the song page is the one place it lives, so desktop and mobile share it for free. Values still land where they always did: POLY/MONO in `layerParams[layer].mix`, DRUMS in the global `drumLevel`. The per-drum-voice MIXER on the drums SOUND page is a different control and stays put.
+**Vertical faders, on the SONG page.** POLY / MONO / DRUMS, each a track you drag (up is louder, ballistic like every other control, double-tap back to unity) with its own M and S beneath. It used to exist **twice** — once in the desktop sidebar and again inside the PROJECT menu — which is two copies to keep in step and neither of them where you're listening. Both are gone; the song page is the one place it lives, so desktop and mobile share it for free. Values still land where they always did: POLY/MONO in `layerParams[layer].mix`, DRUMS in the global `drumLevel`.
+
+The song lane above it is `flex:"0 0 auto"`, **not** `flex:1`. Its rows can't shrink, so a lane that grows into free space and then runs out simply overflowed its box and painted over the mixer — a full 64-slot song did exactly that. Sizing the lane to its content puts the mixer directly beneath it and lets the mixer be the thing that gives: the fader row shrinks toward a floor, and past that the whole song page scrolls (the draggable chips and slots set `touch-action:none`, so a drag never becomes a scroll). The per-drum-voice MIXER on the drums SOUND page is a different control and stays put.
 
 ### The PROJECT menu
 

@@ -4139,8 +4139,12 @@ export default function LoudLight(){
     return i<0?"rgba(186,208,230,0.4)":patCol(i);
   };
   const songPage=(
+    // Scrolls as a safety net: a 64-slot song on a short phone is taller than
+    // the page even with the mixer at its floor. The draggable chips and slots
+    // set touch-action:none, so a drag never turns into a scroll by accident.
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
-      justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
+      justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0,
+      overflowY:"auto",overscrollBehavior:"contain"}}>
       {/* PATTERNS — the selector. Tap a chip to make it active (what the part
           pages edit); DRAG one onto a song slot to place it there, which is the
           workflow the old pattern pills had. Both, because tapping is easier on
@@ -4268,7 +4272,7 @@ export default function LoudLight(){
           whole pattern now (up to MAX_BARS long), so there was never any need to
           show all 64 at once. Starts at two rows and grows a row at a time as
           you fill it, up to the full 64. */}
-      <div style={{width:"100%",maxWidth:640,flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
+      <div style={{width:"100%",maxWidth:640,flex:"0 0 auto",minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
         <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
           <span>SONG</span>
           <span style={{flex:1,minWidth:0,color:"rgba(178,199,219,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -4567,11 +4571,13 @@ export default function LoudLight(){
           );
         };
         return(
-          <div style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
+          <div style={{width:"100%",maxWidth:640,flex:"0 1 auto",display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
             <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MIX</div>
             {/* Strips are capped and left-aligned so three channels read as a
                 mixer rather than three faders stranded across the page. */}
-            <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?116:132}}>
+            {/* Shrinks toward the floor rather than being overlapped when a long
+                song leaves little room. */}
+            <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?172:236,minHeight:88}}>
               {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth")}
               {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead")}
               {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums")}
