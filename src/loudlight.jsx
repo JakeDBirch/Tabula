@@ -4606,12 +4606,12 @@ export default function LoudLight(){
           return(
             <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
               <span style={{fontSize:8,letterSpacing:1.5,fontWeight:700,color}}>{label}</span>
-              {/* One tall band holds everything: the fader, the FX trim beside
-                  it, and M/S beside those. All three want vertical travel or
-                  nothing, and the height is where the room is — stacking any of
-                  them under the fader spends the travel on a control that
-                  doesn't need it. */}
-              <div style={{width:"100%",flex:1,minHeight:0,display:"flex",justifyContent:"center",alignItems:"stretch",gap:5}}>
+              {/* One tall band holds everything: the fader, then M/S, then the
+                  FX trim on the far side of them. All three want vertical
+                  travel or nothing, and the height is where the room is —
+                  stacking any of them under the fader spends the travel on a
+                  control that doesn't need it. */}
+              <div style={{width:"100%",flex:1,minHeight:0,display:"flex",justifyContent:"center",alignItems:"stretch",gap:6}}>
                 {/* Vertical travel: up is louder. Ballistic like every other
                     control here, and a double-tap returns it to unity. */}
                 <div style={{width:14,height:"100%",background:"rgba(186,208,230,0.07)",borderRadius:7,position:"relative",cursor:"ns-resize",touchAction:"none",flexShrink:0}}
@@ -4620,20 +4620,22 @@ export default function LoudLight(){
                   <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${val}%`,background:color+"99",borderRadius:7}}/>
                   <div style={{position:"absolute",left:-4,right:-4,height:7,bottom:`calc(${val}% - 3.5px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+color+"88"}}/>
                 </div>
+                <div style={{width:24,flexShrink:0,display:"flex",flexDirection:"column",gap:4,justifyContent:"flex-end"}}>
+                  {msBtn("M",muted,"#c47a7a",()=>setTrackMute(t=>({...t,[layerKey]:!t[layerKey]})))}
+                  {msBtn("S",solo,"#d4a850",()=>setTrackSolo(t=>({...t,[layerKey]:!t[layerKey]})))}
+                </div>
                 {/* FX send trim — one scaler over this channel's delay AND
                     reverb sends. Full by default: set the sends where you want
                     them, then pull the whole channel's wet back from here.
                     Narrower than the fader and dimmer, so the two read as
-                    level-then-trim rather than a stereo pair. */}
-                <div style={{width:9,height:"100%",background:"rgba(186,208,230,0.05)",borderRadius:5,position:"relative",cursor:"ns-resize",touchAction:"none",flexShrink:0}}
+                    level-then-trim rather than a stereo pair — and sat on the
+                    far side of M/S, so the button column separates the two
+                    tracks and neither is a thumb-width from the other. */}
+                <div style={{width:11,height:"100%",background:"rgba(186,208,230,0.05)",borderRadius:6,position:"relative",cursor:"ns-resize",touchAction:"none",flexShrink:0}}
                   onPointerDown={e=>dragStart(e,fxVal,onFx,"vfx"+layerKey,100)}
                   onDoubleClick={e=>{e.stopPropagation();onFx(100);}}>
-                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${fxVal}%`,background:color+"55",borderRadius:5}}/>
+                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${fxVal}%`,background:color+"55",borderRadius:6}}/>
                   <div style={{position:"absolute",left:-3,right:-3,height:5,bottom:`calc(${fxVal}% - 2.5px)`,background:"rgba(255,255,255,0.6)",borderRadius:1.5}}/>
-                </div>
-                <div style={{width:24,flexShrink:0,display:"flex",flexDirection:"column",gap:4,justifyContent:"flex-end"}}>
-                  {msBtn("M",muted,"#c47a7a",()=>setTrackMute(t=>({...t,[layerKey]:!t[layerKey]})))}
-                  {msBtn("S",solo,"#d4a850",()=>setTrackSolo(t=>({...t,[layerKey]:!t[layerKey]})))}
                 </div>
               </div>
               {/* Both readouts on one line — the FX one carries its label,
