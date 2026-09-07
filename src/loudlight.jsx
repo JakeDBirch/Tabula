@@ -4791,6 +4791,82 @@ export default function LoudLight(){
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
   // thumb-sized set; this one matches the density of the ops rows it sits under.
+  // ── PATTERN CHIPS — the selector, on the pages you edit on ─────────────
+  // A pattern is the whole app's selection (all three parts), so switching one
+  // is something you do mid-edit; it used to cost a trip to SONG and back. One
+  // row of chips under the layer labels, mounted in all three layouts. Tap
+  // switches, + adds. The song page keeps its own palette because there the
+  // chips are also the DRAG SOURCE for placing a pattern into a slot — that's
+  // arranging, not switching, and it can't move here.
+  // Deferred calls (()=>addPattern()), not bare references: addPattern is
+  // declared further down and Babel lowers const to var, so binding it here
+  // would silently install onClick={undefined}.
+  const patChipData=patterns.map((p,i)=>({
+    p,col:patCol(i),sel:p.id===activePatternId,
+    // Ring the pattern the song is currently sounding when it isn't the one
+    // you're looking at — that's the cue for "jump to what I can hear".
+    lit:playing&&songMode&&p.id===playId&&p.id!==activePatternId,
+    empty:PART_LAYERS.every(l=>{
+      const g=p.parts[l]&&p.parts[l].grid;
+      return !g||!g.some(row=>row&&row.some(Boolean));
+    }),
+  }));
+  const _patChipBase={display:"flex",alignItems:"center",justifyContent:"center",gap:4,
+    borderRadius:6,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",
+    flexShrink:0,fontWeight:700,lineHeight:1,fontFamily:"inherit",boxSizing:"border-box"};
+  // Horizontal row — desktop sidebar and mobile portrait. Wraps rather than
+  // scrolls: 16 chips is the ceiling and a hidden chip is a chip you can't
+  // reach, which is the whole complaint this row exists to fix.
+  const patternChipsRow=(
+    <div style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
+      {patChipData.map(({p,col,sel,lit,empty})=>(
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name} aria-pressed={sel}
+          onClick={()=>setActivePatId(p.id)}
+          style={Object.assign({},_patChipBase,{
+            minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
+            fontSize:IS_MOBILE?13:11,
+            border:"1px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.16)"),
+            background:sel?col+"22":"transparent",
+            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+          {p.name}
+          <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+        </div>
+      ))}
+      {patterns.length<MAX_PATTERNS&&(
+        <div role="button" aria-label="New pattern" onClick={()=>addPattern()}
+          style={Object.assign({},_patChipBase,{
+            minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
+            fontSize:IS_MOBILE?15:13,fontWeight:600,
+            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
+            color:"rgba(178,199,219,0.45)"})}>+</div>
+      )}
+    </div>
+  );
+  // Vertical variant for the landscape rail (74px wide), which stacks its
+  // controls. Scrolls, because the rail's height is the screen's short side.
+  const patternChipsRail=(
+    <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
+      {patChipData.map(({p,col,sel,lit,empty})=>(
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name} aria-pressed={sel}
+          onClick={()=>setActivePatId(p.id)}
+          style={Object.assign({},_patChipBase,{
+            padding:"9px 4px",borderRadius:14,fontSize:13,
+            border:"1.5px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.18)"),
+            background:sel?col+"22":"transparent",
+            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+          {p.name}
+          <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+        </div>
+      ))}
+      {patterns.length<MAX_PATTERNS&&(
+        <div role="button" aria-label="New pattern" onClick={()=>addPattern()}
+          style={Object.assign({},_patChipBase,{
+            padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,
+            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
+            color:"rgba(178,199,219,0.45)"})}>+</div>
+      )}
+    </div>
+  );
   const barOpsRow=(
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
       {[["+BAR",addBar,barCount>=MAX_BARS,false],
@@ -7683,8 +7759,8 @@ export default function LoudLight(){
           {/* Layer boxes — select layer + pattern, replaces old pills + layer selector */}
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-              {/* POLY / MONO layer boxes — layer selection only; patterns are
-                  chosen on the SONG page. */}
+              {/* POLY / MONO layer boxes — layer selection only; the pattern
+                  chips sit under all three. */}
               {[
                 ["synth","POLY","#a8c5a0","168,197,160"],
                 ["lead", "MONO","#79b8f2","121,184,242"]
@@ -7700,7 +7776,7 @@ export default function LoudLight(){
                       else{switchLayer(layer);}
                     }}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
-                    {/* Pattern pills removed — selection lives on the SONG page now. */}
+                    {/* Pattern selection is the chip row below these boxes. */}
                   </div>
                 );
               })}
@@ -7719,7 +7795,14 @@ export default function LoudLight(){
                   if(songView){setSongView(false);setPage("edit");}
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
-                {/* Pattern pills removed — selection lives on the SONG page now. */}
+                {/* Pattern selection is the chip row below the layer boxes. */}
+              </div>
+              {/* PATTERN — directly under the layer labels, because switching
+                  pattern is something you do while editing a part, not a trip
+                  to SONG and back. */}
+              <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:1}}>
+                <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500}}>PATTERN</div>
+                {patternChipsRow}
               </div>
               {/* Action buttons — context-sensitive to active layer.
                   SPEED selector sits inside this block because it's a per-pattern
@@ -8505,23 +8588,12 @@ export default function LoudLight(){
                   onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}>{lbl}</button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
-              <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
-                {(activeLayer==="drums"?drumPats:pats).map(p=>{
-                  const isDrums=activeLayer==="drums";const isSynth=!isDrums;
-                  const isA=isDrums?p.id===activeDrumId:p.id===activeId;
-                  const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#79b8f2":"#c4727a";
-                  return(
-                    <button key={p.id} style={{flexShrink:0,padding:"9px 4px",borderRadius:14,border:"1.5px solid "+accent,background:isA?accent:"transparent",color:isA?"#0e1c2b":accent,fontSize:13,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}
-                      onClick={()=>{
-                        const wasActive=isSynth?activeId===p.id:activeDrumId===p.id;
-                        if(songView){ if(!wasActive)isSynth?setActiveId(p.id):setActiveDrumId(p.id); setSongView(false); setActiveSheet(null); }
-                        else if(wasActive){ const k=activeLayer==="drums"?"bars":"pattern"; setActiveSheet(s=>s===k?null:k); }
-                        else { isSynth?setActiveId(p.id):setActiveDrumId(p.id); setActiveSheet(null); }
-                      }}>{p.name}</button>
-                  );
-                })}
-                {(activeLayer==="drums"?drumPats:pats).length<8&&<button style={{flexShrink:0,padding:"7px 4px",borderRadius:14,border:"1px dashed "+(activeLayer==="synth"?"rgba(168,197,160,0.35)":activeLayer==="lead"?"rgba(121,184,242,0.35)":"rgba(196,114,122,0.35)"),background:"transparent",color:activeLayer==="synth"?"rgba(168,197,160,0.45)":activeLayer==="lead"?"rgba(121,184,242,0.45)":"rgba(196,114,122,0.45)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{activeLayer==="drums"?addDrumPat():addPat();}}>＋</button>}
-              </div>
+              {/* PATTERN CHIPS — the same selector as portrait and desktop,
+                  stacked for the rail. This was a per-layer pattern list, which
+                  outlived the model: a pattern is all three parts now, so it
+                  selected through the compat views and its ＋ added a part
+                  rather than a pattern. */}
+              {patternChipsRail}
               {/* per-layer function pills — STEP / SOUND / VARY */}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
@@ -8567,11 +8639,18 @@ export default function LoudLight(){
             ))}
           </div>
           )}
-          {/* The pattern pills used to live here. Pattern selection moved to
-              the SONG page — a pattern is now all three parts, so choosing one
-              is a whole-arrangement decision rather than a per-layer one, and
-              the part pages get the space back. The bar strip's handle shows
-              which pattern you're in. */}
+          {/* ── PATTERN CHIPS — immediately under the layer labels ──
+               A pattern is all three parts, so this is one selector for the
+               whole app rather than the old per-layer pills. It lives here
+               because switching pattern is a thing you do mid-edit; it used to
+               mean going to SONG and coming back. Hidden on the song page,
+               which has its own palette (and that one is also the drag source
+               for placing patterns into slots). */}
+          {!isLandscape&&!songView&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0}}>
+            {patternChipsRow}
+          </div>
+          )}
           {/* ── PER-LAYER FUNCTION PILLS — STEP / SOUND / VARY (portrait) ──
                First-class home-screen access to the pattern's step drawer, the
                layer's sound page, and per-layer variation. (These were formerly
