@@ -108,11 +108,11 @@ macOS runner: build the payload, generate the project, archive, upload. Useful
 once the first build is working, so shipping a beta is a button rather than an
 afternoon.
 
-Create an API key: App Store Connect → **Users and Access → Integrations →
-App Store Connect API → Team Keys → +**, role **App Manager**. The `.p8`
-downloads **once and only once** — Apple will not let you download it again.
+### 1. App Store Connect API key
 
-Add three repository secrets (Settings → Secrets and variables → Actions):
+App Store Connect → **Users and Access → Integrations → App Store Connect API →
+Team Keys → +**, role **App Manager**. The `.p8` downloads **once and only
+once** — Apple will not let you download it again.
 
 | Secret | Where it comes from |
 |---|---|
@@ -120,9 +120,44 @@ Add three repository secrets (Settings → Secrets and variables → Actions):
 | `APPSTORE_ISSUER_ID` | the Issuer ID above the key list, a UUID |
 | `APPSTORE_PRIVATE_KEY` | `base64 -i AuthKey_ABC123DEFG.p8 \| pbcopy` |
 
-There is no certificate or provisioning profile to export: `xcodebuild
--allowProvisioningUpdates` creates them on the runner using that key. One less
-set of secrets to rotate, and no `.p12` sitting in a password manager.
+### 2. Apple Distribution certificate
+
+This one is not optional, and the reason is worth understanding rather than
+copying: **a signing certificate's private key never leaves the machine that
+generated it.** Apple stores only the public half, so it cannot be downloaded.
+On a fresh CI runner with an empty keychain, automatic signing therefore does
+not *fetch* your certificate — it mints a **brand new one**. Apple caps you at
+three Apple Distribution certificates per account, so a workflow that relies on
+that exhausts the account's signing after three runs. Importing the existing
+certificate is what makes the runs idempotent.
+
+If you don't have a distribution certificate yet (a development build doesn't
+create one), make it in Xcode: **Settings → Accounts →** select the team →
+**Manage Certificates… → + → Apple Distribution**.
+
+Then export it, **with its private key**:
+
+1. Open **Keychain Access** → **login** keychain → **My Certificates**
+2. Find **Apple Distribution: Jacob Birch (KP6QHVP8GY)**
+3. Expand the arrow — it must show a private key underneath. If it doesn't,
+   you're on the wrong Mac or the wrong certificate.
+4. Right-click the certificate → **Export** → format **Personal Information
+   Exchange (.p12)** → save as `dist.p12` → set a password
+
+| Secret | Where it comes from |
+|---|---|
+| `APPLE_DIST_CERT_P12` | `base64 -i dist.p12 \| pbcopy` |
+| `APPLE_DIST_CERT_PASSWORD` | the password you just set on the export |
+
+Delete `dist.p12` afterwards. It is your signing identity — anyone holding it
+and the password can sign software as you.
+
+The workflow imports it into a **throwaway keychain** created for that one job,
+unlocked with a password that exists only for that run, and deleted when the job
+ends whether it passed or failed. It never touches a login keychain.
+
+The Team ID is not a secret and lives in `ios/Config/LoudLight.xcconfig`
+alongside the bundle identifier.
 
 Then **Actions → iOS TestFlight → Run workflow**, or push a tag:
 
