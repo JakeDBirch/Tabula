@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "tabula",
+      "name": "loudlight",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["-e", "const http=require('http'),fs=require('fs'),p=require('path');const root=process.cwd();const mime={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wav':'audio/wav','.aiff':'audio/aiff','.svg':'image/svg+xml','.webmanifest':'application/manifest+json','.css':'text/css'};http.createServer((req,res)=>{let u=decodeURIComponent(req.url.split('?')[0]);if(u==='/')u='/index.html';const f=p.join(root,u);fs.readFile(f,(e,d)=>{if(e){res.writeHead(404);res.end('nf');return;}res.writeHead(200,{'content-type':mime[p.extname(f)]||'application/octet-stream'});res.end(d);});}).listen(8137,()=>console.log('tabula preview on 8137'));"],
+      "runtimeArgs": ["-e", "const http=require('http'),fs=require('fs'),p=require('path');const root=process.cwd();const mime={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.wav':'audio/wav','.aiff':'audio/aiff','.svg':'image/svg+xml','.png':'image/png','.webmanifest':'application/manifest+json','.css':'text/css'};http.createServer((req,res)=>{let u=decodeURIComponent(req.url.split('?')[0]);if(u==='/')u='/index.html';const f=p.join(root,u);fs.readFile(f,(e,d)=>{if(e){res.writeHead(404);res.end('nf');return;}res.writeHead(200,{'content-type':mime[p.extname(f)]||'application/octet-stream'});res.end(d);});}).listen(8137,()=>console.log('loudlight preview on 8137'));"],
       "port": 8137
     }
   ]

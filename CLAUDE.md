@@ -1,12 +1,14 @@
-# Tabula — handoff notes for Claude Code
+# Loud Light — handoff notes for Claude Code
 
 Project memory. Read before touching code. Live: https://jakedbirch.github.io/Tabula · Repo: https://github.com/JakeDBirch/Tabula
+
+**The app is called Loud Light** (renamed from Tabula on 2026-08-31). The repo, the Pages URL and the storage keys still say `Tabula`/`tnori-` — renaming the repo would move the live URL, and renaming the storage keys would orphan every existing project. Neither is worth doing for tidiness; both are Jake's call.
 
 Author is Jake Birch — production-audio professional, tech-literate (Python, Apps Script, hardware) but not a JS dev. Wants the proper/native solution over wrappers or hacks, even if slower. Judges audio and touch feel **by ear / by hand on his iPhone** — headless tests can't replace that.
 
 ---
 
-## What Tabula is
+## What Loud Light is
 
 A touch-first grid sequencer that runs as a **single static HTML file**. Built primarily for iPhone (added to home screen as a PWA); works on desktop too. Web Audio API, React 18 (UMD), no framework/bundler beyond a Babel build.
 
@@ -16,15 +18,15 @@ A touch-first grid sequencer that runs as a **single static HTML file**. Built p
 
 ```bash
 npm ci            # or npm install — pulls Babel (@babel/core, cli, preset-env, preset-react)
-npm run build     # compiles src/tabula.jsx → index.html   (ALWAYS run after editing)
+npm run build     # compiles src/loudlight.jsx → index.html   (ALWAYS run after editing)
 npm run build:ios # additionally emits ios/www/ — the offline payload for the iOS app
 npm run audit     # standalone CJS return_react2 audit
 ```
 
-- **`src/tabula.jsx` is THE source.** `index.html` is a generated artifact — never edit it by hand.
+- **`src/loudlight.jsx` is THE source.** `index.html` is a generated artifact — never edit it by hand.
 - `build.mjs` strips the React import + `export default`, appends the mount call, runs Babel (preset-env + preset-react, `--compact`), wraps the output in an HTML scaffold with React 18 UMD CDN + PWA meta, then runs a **CJS audit pass** that greps for `return_react2` and fails the build if found (see Critical lessons). Keep the audit.
 - GitHub Pages serves `index.html` from `main` — a push auto-deploys in ~30s.
-- Preview locally: `.claude/launch.json` defines a `tabula` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
+- Preview locally: `.claude/launch.json` defines a `loudlight` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
 
 **Verifying changes:** the build validates syntax. For grid/paging/codec work, a headless Playwright pass over the built `index.html` is worth the setup (`npm i --no-save playwright react@18.2.0 react-dom@18.2.0`, serve a copy with the CDN `<script src>`s pointed at the local UMD builds, then drive the DOM and read back `localStorage["tnori-autosave"]` to assert on real pattern data). That's how the duplicate-bar overwrite bug was caught. Filter resource 404s out of the console check — a bare static server has no samples/manifest/lamejs. Logic (scheduler math, the pattern randomizer, range-slider frequency mapping) is best checked by extracting the pure function into a tiny Node harness and running Monte-Carlo/round-trip asserts — do NOT rely on headless AudioContext (gesture-gated, non-deterministic) and **do not auto-start playback** (Jake often has other audio running). UI/layout changes: verify in the browser preview (read the DOM / console, not just screenshots — screenshots have been flaky).
 
@@ -74,15 +76,15 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **×2** (`doublePattern`, in `barOpsRow` and the SEQUENCE drawer) doubles the ACTIVE part and copies its data into the new half — the fast way to get a second nearly-identical pass to vary. A 1-bar drum loop under a doubled melody doesn't want doubling; it wants to keep looping to fill.
 - **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the playable loop length in steps, now `1..bars*16` — it is the single source of truth for length; bar count is just its allocation. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
-- **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **chips only** (`barChips`) — tap or drag them to page — plus a bar-count handle that opens the pattern drawer on mobile. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
-- **Adding a bar lands you on it.** ADD BAR pages to the new last bar, DUP BAR to the copy and ×2 to the top of the new half — all three go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off the bar you just made) and LOOP travels with you.
+- **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **chips only** (`barChips`) — tap or drag them to page — then a bar readout (pattern name · visible/total) and a **`+`**. A tap on the `+` adds a bar; a **press-and-hold (~450ms) or right-click** opens the pattern drawer on mobile. Adding a bar is the constant gesture and it used to cost a trip through the drawer, so it got the tap and the drawer got the deliberate one. The readout is now a plain label — it stopped being the drawer handle. The hold is the one sheet opener that isn't `onClick`, so it needs `sheetGuardR`: the sheet opens with the finger still down, the backdrop mounts under it, and that press's trailing click would dismiss the sheet instantly (the same trap the onClick-not-onPointerDown rule guards against). The backdrop ignores clicks for 400ms after the stamp. The `+` swallows its own trailing click after a hold too, or the drawer would arrive with a surprise extra bar. On desktop the hold is not wired at all — the sidebar's `+BAR` is always visible — so a long press there is just a slow tap. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
+- **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
 - **LOOP cycles one bar**, not the whole pattern: `patLen` becomes `COLS` and each part's cursor runs `loopOff + step%COLS`. The bar belongs to whatever is playing — the song's current entry in song mode, the pattern you're editing otherwise.
 - **LOOP loops the bar you're looking at.** `loopBar` starts on the visible bar when LOOP is switched on and thereafter follows your **bar selection** — tap or drag the chips and the loop goes with you, so you can slide the loop from bar to bar without leaving the grid. The distinction that matters, and the reason this isn't the old crawl bug: only a bar *you picked* moves it. It is set in `goToBar` (chips, ADD/DUP BAR, ×2) and nowhere else, so the FOLLOW effect's own `setBarPage`, the clamps and the project resets all move the page without touching the loop. The scheduler still reads `loopBarR`, never `barPageR` — reading the page every tick is what made the loop crawl around under you, and that coupling stays severed. The pinned chip is marked with a steel underline (`C_LOOP`, the LOOP button's colour) — deliberately a different channel from the current-page fill and the gold `C_VARY` playing ring, so all three states read at once on a 2px-wide chip. `loopBar` is persisted at every `loopMode` site and clamped when the pattern shrinks. It pins the **pattern** too (`loopPat`): a bar index alone got applied to whatever the song was playing, so looping bar 4 of pattern B while the song sat in A sounded A's bar 4. Switching to a different pattern while LOOP is on moves the loop with you — that's explicit, unlike paging or FOLLOW.
 - **LOOP holds the song's place instead of overriding it.** In song mode LOOP parks `songPosR` on the current entry and cycles one bar of *that* pattern; switching LOOP off carries on from where it was held. `inSong` is now just `songModeR.current` — the loop gate moved onto the song-advance step in the master clock. `loopBar` is a bar *index*, so it clamps into a shorter song entry.
 - **Page-follow rides the EXISTING `followSeq`** (the transport's FOLLOW), not a toggle of its own — FOLLOW already means "keep the editor on what's playing" and the visible bar is the finer grain of that. A separate `barFollow` was tried and rejected. Picking a bar from the chips clears FOLLOW, as does a grid edit: choosing a bar while the playhead is dragging the page is a contradiction, and the chips read as doing nothing if the page snaps straight back.
 - **Two mobile sheets, not one.** `activeSheet==="bars"` (opened by the bar-count handle) holds the pattern ops + bar ops; `activeSheet==="pattern"` (the STEP chip) holds SPEED + the step lanes. Drums have no step lanes, so STEP routes to `"bars"` there. Sheet openers must be `onClick`, never `onPointerDown` — the backdrop mounts under the finger and the same tap's trailing click dismisses the sheet instantly. In render, `c` is the view column and `ac = barOff+c` is the data column. In the pointer handlers, `synthBarOffR()` / `drumBarOffR()` convert a hit-tested view column to absolute — they read live refs so the `[]`-dep useCallbacks don't bake in a stale page. **Paged, not scrolled**, deliberately: a scrolling grid needs a parent `overflow-x`, which is the iOS gesture-interception trap below.
 - **Bar-scoped ops.** RAND / CLR / CPY / PST / MUT8, the STEP-lane RST/RAND and the **two-finger shift** all act on the **visible bar**, not the whole pattern (`sliceCols`/`spliceCols`/`sliceFlat`/`spliceFlat`). DUP/DEL stay pattern-level and must carry `bars`. `⧉` (duplicate bar) *inserts* after the visible bar — it opens a gap with `openBarGap` and slides later bars right; overwriting the next bar instead is a bug that was caught once already. It must go through `setPatterns` and insert into **all three parts**: doing it through a per-layer view makes `mergeLayer` resize the other two, which appends a blank bar at the END rather than inserting one, and the parts slide out of alignment.
-- **The two-finger shift is bar-scoped and wraps inside the bar.** Dragging two fingers (shift+drag on desktop) rotates the notes and their step params, and it moves only the bar on screen — a nudge on bar 1 of a 4-bar part used to rotate all four, off-screen, with nothing on the page to show it until playback got there. Columns outside the window are copied through untouched **vertically as well as horizontally**, or a one-row drag would transpose the bars you can't see. The window offset is pinned at gesture start (`g.shiftOff`), not read live — same reason LOOP pins its bar. Note it rotates `grid` and `params` but **not `durs`**, so a shifted long note keeps the duration of whatever used to sit in its new column; pre-existing, unfixed.
+- **The two-finger shift is bar-scoped and wraps inside the bar — on BOTH grids.** Dragging two fingers (shift+drag on desktop) rotates the notes and their step params (drums: grid + vel + rat), and it moves only the bar on screen — a nudge on bar 1 of a 4-bar part used to rotate all four, off-screen, with nothing on the page to show it until playback got there. Columns outside the window are copied through untouched **vertically as well as horizontally**, or a one-row drag would transpose the bars you can't see. The window offset is pinned at gesture start — `g.shiftOff` on the synth grid, `base.off` on the drums — not read live, or a page mid-drag would rotate one bar partway and then start on a different one. The two grids have separate implementations (`handleGridMove` vs `shiftDrumActive`) because their pointer handling differs, so **a fix to one is not a fix to the other** — that asymmetry is exactly how drums kept whole-pattern scoping for a while after synth stopped. Note it rotates `grid` and `params` but **not `durs`**, so a shifted long note keeps the duration of whatever used to sit in its new column; pre-existing, unfixed.
 - **Wrap indices with `((v%n)+n)%n`, never `(v-d+n)%n`.** The latter only normalises while `|d| < n`, and the shift delta is raw pixels from the gesture start with the pointer captured — so a two-finger drag longer than 16 cells (a flick across a phone screen, trivially reachable on a 1-bar pattern) indexed a negative row or column and threw inside `pointermove`. Confirmed by driving the pre-change build headlessly; it throws, the fixed one doesn't.
 - **VARY rerolls per bar** (`s % COLS === 0`), scoped to that bar's column window, so shifts/ghosts wrap inside the bar and earlier bars keep their roll. On a 1-bar pattern this is identical to the old per-loop behaviour.
 
@@ -107,6 +109,14 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
 - **Ballistic drag helper** = `ballisticDelta(pd, dim, range)`. Double-tap detection = `isDoubleTap(e, key?)` (custom, because DOM `dblclick` is unreliable on touch).
 - **STEP lanes**, **autosave**, **MP3/MIDI export**, and the **project library** (named projects, persisted via `storageSet("projects", …)`) all exist.
+
+### The mixer
+
+**Vertical faders, on the SONG page.** POLY / MONO / DRUMS, each a track you drag (up is louder, ballistic like every other control, double-tap back to unity) with its **M and S stacked beside the fader**, bottom-aligned — that's dead space either way, and putting them there gives the travel back the height it was spending on a button row. It used to exist **twice** — once in the desktop sidebar and again inside the PROJECT menu — which is two copies to keep in step and neither of them where you're listening. Both are gone; the song page is the one place it lives, so desktop and mobile share it for free. Values still land where they always did: POLY/MONO in `layerParams[layer].mix`, DRUMS in the global `drumLevel`.
+
+Beside each fader is an **FX send trim** — a second, narrower vertical track scaling that channel's delay AND reverb sends together, **defaulting to 100 (full)**. It sits in the same tall band as the fader and M/S rather than under them: all three want vertical travel or none at all, and the height is the only real estate a phone-width strip has, so anything stacked below the fader is spending travel on a control that doesn't need it. Order across the band is fader, then M/S, then the trim — the button column is the gap that keeps the two tracks from being a thumb-width apart (36px of separation on a phone). Level and trim share one readout line (`85 · FX 100`), which is also what tells the two tracks apart. It exists to be pulled back, not pushed up: set the layer and per-step sends where you want them, then trim the whole channel's wet signal from one place. POLY/MONO live in `layerParams[layer].fxTrim` and are read per note inside `Bell.play` (multiplying `revMul` and `dlyMul`), so no engine method and no play-start re-apply are needed. DRUMS is `drumFxTrim`, a bus-wide scaler on `DrumEngine.setFxTrim` — the per-voice sends are persistent AudioParams, so each strip keeps its untrimmed `rvBase`/`dlyBase` and the trim rescales from those; otherwise a trim drag would need React to re-push the whole base mix, and the per-step MOTION writes (which go through `setVoiceMix`) would fight it. A missing `fxTrim` / `drumFxTrim` on an old save reads as 100, i.e. exactly what the app did before it existed.
+
+The mixer is `flexShrink:0` at a fixed height and the **song lane takes what's left and scrolls inside it**. That ordering matters: the lane's rows can't shrink, so when the lane was `flex:1` a long song overflowed its own box and painted straight over the mixer — a full 64-slot song did exactly that, and it was invisible in testing until measured against a filled song rather than an empty one. The lane's scroll container carries a `paddingRight` gutter on purpose: the slots set `touch-action:none` so a drag can move a pattern anywhere in 2D, which means a touch starting on a slot can never scroll, and without a strip of non-slot the lane would be unscrollable by touch. The per-drum-voice MIXER on the drums SOUND page is a different control and stays put.
 
 ### The PROJECT menu
 
@@ -143,11 +153,11 @@ Global delay + reverb buses; each layer has send amounts, and per-step `dly`/`re
 ## The iOS app
 
 A native shell around the same source, for TestFlight and eventually the App
-Store. `src/tabula.jsx` is still the only source; `build.mjs --ios` emits a
+Store. `src/loudlight.jsx` is still the only source; `build.mjs --ios` emits a
 **second target** beside `index.html`:
 
 ```
-src/tabula.jsx ──┬── index.html   Pages: React from a CDN, service worker, PWA meta
+src/loudlight.jsx ──┬── index.html   Pages: React from a CDN, service worker, PWA meta
                  └── ios/www/     app bundle: everything local, nothing remote
 ```
 
@@ -166,9 +176,9 @@ show up on a device you can't attach a debugger to. If you add a CDN dependency
 to the source, the iOS build breaks until you vendor it into `vendor/`.
 
 **The shell is ~150 lines of Swift, no Capacitor, no Cordova.** Three files in
-`ios/Tabula/`, doing only what a web page on iOS cannot do for itself:
+`ios/LoudLight/`, doing only what a web page on iOS cannot do for itself:
 
-- **`BundleSchemeHandler`** serves the bundle over `tabula://app` rather than
+- **`BundleSchemeHandler`** serves the bundle over `loudlight://app` rather than
   `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
   origin, so `localStorage` there is unreliable and has historically been dropped
   between launches — and `localStorage` is where autosave and the entire project
@@ -184,7 +194,7 @@ to the source, the iOS build breaks until you vendor it into `vendor/`.
   after WebKit has called `stop` on it throws an ObjC exception that takes the
   app down, and there is no way to ask a task whether it's still live.
 
-**Two source changes the shell needs, both guarded on `window.__TABULA_NATIVE__`
+**Two source changes the shell needs, both guarded on `window.__LOUDLIGHT_NATIVE__`
 (set by the iOS scaffold, absent on the web):**
 
 - The **install hint** must not fire. A WKWebView reports neither
@@ -208,11 +218,30 @@ from ~21px on a phone to ~48px on an 11" iPad. Do **not** reach for
 ignored from iPadOS 26, where every app is a resizable window, so the layout
 holding at any size is the only real answer.
 
+**iPhone and iPad from one target** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
+app needed no changes for it: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad
+gets the touch layout rather than the desktop one, and the layout is flex/`dvh`
+with `isLandscape` recomputed on resize. Verified from 400×700 to 1194×834 and
+across a live resize — no overflow in either axis, and cells grow from ~22px on
+a phone to ~48px on an 11" iPad. Do **not** reach for `UIRequiresFullScreen` if
+iPad windowing ever looks wrong: it is deprecated and ignored from iPadOS 26,
+where every app is a resizable window, so the layout holding at any size is the
+only real answer.
+
+**The app icon is derived from `icon.png`, not copied.** `ios/tools/make-icon.mjs`
+squares off its baked rounded corners, which are painted over **white** — iOS
+applies its own mask, so shipping it verbatim would put four white wedges around
+a navy icon on the home screen. The fill is a least-squares plane fitted per
+corner from the surrounding background: a flat fill bands against the ground's
+gradient, and resampling the nearest solid pixel per-pixel streaks into a
+starburst (both were tried). The script fails rather than writing an icon with
+any near-white left in the corners. Re-run it if `icon.png` changes.
+
 **The Xcode project is generated, never committed.** `ios/project.yml` (XcodeGen)
 is the reviewable form of a `.pbxproj`. Consequence to remember: **anything
 changed in Xcode's project or target inspector is destroyed by the next
 `xcodegen generate`** — signing and versioning therefore live in
-`ios/Config/Tabula.xcconfig`, which is committed. `www` is declared as a folder
+`ios/Config/LoudLight.xcconfig`, which is committed. `www` is declared as a folder
 *reference*, not a group: as a group Xcode flattens every file into the bundle
 root and every sample 404s.
 
@@ -247,14 +276,28 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 ---
 
+## Look and feel
+
+The palette is the app icon: a **deep navy ground** (`#0e1c2b`) with **cool blue-grey** furniture, and **warm amber** (`rgba(255,214,150,…)`) for anything lit — a note, the current bar chip, the brand wordmark. That's the icon's lightbulb: dark glass, glowing filament. A note isn't a filled rectangle any more, it's an emissive one — every lit note carries a soft amber glow, brighter under the playhead, with velocity driving the ramp between.
+
+The app mark sits immediately right of the title in both header mounts — **`icon-mark.png`**, the icon with its navy tile flood-filled away and cropped to the bulb, so it sits *on* the page rather than in a box and can run taller than the cap height (34px desktop, 26px mobile; height-driven, width follows its own aspect). It's generated from `icon.png` by a two-pass flood: region-growing across the navy gradient, then a second pass eating anything at or below the field's brightness to take the tile's vignette, then keeping only the largest connected blob so no stray remnant feeds the CSS glow as a rounded square. It carries a steady `.markglow` bloom rather than `.wordmark`'s animated one: the mark already contains a lit filament, so breathing it too reads as flicker.
+
+The wordmark is a `.wordmark` class: **solid amber `#ffc46a` with `text-shadow`**, breathed by a slow, shallow `filament` keyframe and disabled under `prefers-reduced-motion`. It was a `background-clip:text` gradient with a `drop-shadow` filter first, and that was wrong — on a clipped-background element Chromium takes drop-shadow's alpha from the element BOX, so it smeared a rectangle of haze across the whole header instead of following the letters. `text-shadow` does follow glyphs, but only on text that is actually painted, so the gradient had to go. Note `S.brand` still carries the gradient and a transparent fill; the mounts override both inline, because an inline style beats the class.
+
+The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO blue, DRUMS rose) stay semantic; MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground.
+
+One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The note fill originally kept its old `0.35 + vel*0.65` alpha ramp and looked muddy; it needed a higher floor (`0.55 + vel*0.45`) plus the glow to read as lit. Expect the same wherever a warm accent sits at low alpha.
+
 ## Critical lessons (don't relearn)
 
 - **`return_react2`**: module-level arrow functions returning JSX broke the old artifact viewer's CJS transform. Inline JSX; never extract to a top-level `const X = () => <jsx>`. The build audit guards this — keep it.
 - **useCallback empty-deps trap**: `useCallback(fn, [])` baked first-render closures over `pushHistory` etc. Fix is ref-based: `pushHistoryR.current` reassigned each render, stable callbacks invoke `.current()`. Same for `captureSnapshotR`. Don't collapse back to direct closures.
 - **Never swap a border for `none` on a flex item.** Song cells are `flex:1` (basis 0) with `box-sizing:border-box`, and under border-box a flex item's base size is floored at its own border — so a filled cell that dropped its border came out 2px narrower than its empty neighbours, and `aspect-ratio:1` turned that into 2px of height as well, knocking whole rows out of line and skewing the rects `_songMeasure` caches for drop targeting. Change the border's **colour** (`transparent`), never its presence. Measure `getBoundingClientRect()` across a row rather than eyeballing it — 2px is invisible until it accumulates.
+- **A stray backtick in the `CSS` template literal silently kills the whole stylesheet.** A `` ` `` (or a `${`) anywhere in that block — a code comment counts — ends the literal early, the remainder parses as `` tpl * tpl ``, and `CSS` evaluates to **NaN**. The app then renders `<style>NaN</style>` and *every rule stops applying*: no `box-sizing:border-box`, no container queries, no keyframes. The build stays green and nothing throws; you just get baffling layout — notes wider than their cells, because `padding` lands outside the width under content-box. It survived three commits. `npm run build` now runs a **CSS audit** that fails on a backtick or a `${` in that block, and on losing the box-sizing reset. Don't remove it, and don't put backticks in CSS comments.
+- **The note rects are positioned in ROW coordinates, so they must use the row's own gap.** Cell pitch is `(100% + gap)/COLS`, width is `pitch - gap`; `CELL_GAP` is the single source of truth for both the row layout and that maths. It used to be hardcoded to `2px`, which is right on mobile and a pixel out on desktop. `CELL_GAP` is declared *after* `IS_MOBILE` deliberately — Babel lowers `const` to `var`, so reading it any earlier yields `undefined` and hands the phone the desktop gap.
 - **A hand-written test fixture only tests the fields you remembered.** `SONG → PATTERN` called `.slice()` on a drum part's `vo`, which is a schema-version **number** (`DRUM_ORDER_V`), not a list — so it threw for every project that had one, which is every project. Five headless runs passed because the fixtures I wrote by hand omitted `vo` entirely. When testing anything that consumes saved state, build the fixture **with the app** (drive the UI, or go through `mkPattern`/`mkDrumPart`) rather than typing an object that looks about right. Green tests over invented data are worth very little.
 - **Wrap anything that reads arbitrary saved data, and surface what it throws.** The same bug reported as "the button does nothing": no pattern, no message, indistinguishable from a dead control. Same lesson as the silent `catch(e){}` around project restore — an error you can see is worth far more than a tidy failure.
-- **Grid pointer events** live on the parent `gridRef` container, not per-cell. If you change grid event handling, test on iPhone immediately.
+- **Grid pointer events** live on the parent `gridRef` container, not per-cell — **except the drum grid, whose handlers are per-cell.** That asymmetry is why two-finger shift silently didn't exist on drums for so long: the synth grid promotes paint→shift inside its container-level gesture machine, and there was nothing on the drum side to promote, so a second finger just began a second paint. `drumGestR` is that missing path — the first finger registers `{base,cancel}`, and `beginDrumShift` (shared by the portrait and landscape mounts) calls it off, restores the snapshot with `applyDrumShift(0,0,base)`, and shifts from where the pattern was before any finger touched it. A gesture the synth grid has is not automatically a gesture the drums have; check both. If you change grid event handling, test on iPhone immediately.
 - **iOS gesture interception**: parent `touch-action: pan-x` / `overflow-x: auto` makes Safari swallow gestures at the OS level — vertical drags don't propagate. If a drag feels "stuck horizontally," check the parent's `touch-action`.
 - **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building. Worse in JSX values: `const songPage = (<div onClick={addPattern}/>)` defined *above* `addPattern` silently binds `onClick={undefined}` (Babel lowers `const` to `var`, so there's no TDZ error and no crash — the control just does nothing). Defer the lookup: `onClick={()=>addPattern()}`.
 - **A silent `catch(e){}` around project restore hides everything.** The mount restore used to swallow its exception, so a throw inside `applyShareState` looked exactly like "the project didn't load" — and because no state changed, autosave never fired either, leaving the old save in place to be re-read next time. It now logs. That is how a deleted-but-still-called `migrateLegacyBass` was found; without the log there was no symptom to chase.
@@ -274,7 +317,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
-- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and pushed; see "The iOS app" above. Blocked on Jake only for the Team ID and bundle identifier in `ios/Config/Tabula.xcconfig`, registering the app in App Store Connect, and a first archive from his Mac. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. **The name is the unresolved risk**, and the bundle ID is permanent.
-- **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Tabula loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
-- **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is unresolved — "Tabula" collides with an open-source PDF tool and, worse for discovery, sits one letter from "tabla" in App Store search.
+- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and on `main`; see "The iOS app" above. Builds for **iPhone and iPad** from one target. Blocked on Jake only for the Team ID and the bundle identifier in `ios/Config/LoudLight.xcconfig`, registering the app in App Store Connect, and a first archive from his Mac. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. The app name is settled (Loud Light); **the bundle ID is the permanent one** and is still a placeholder (`com.loudlight.sequencer`).
+- **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
+- **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.

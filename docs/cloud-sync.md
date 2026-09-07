@@ -1,9 +1,9 @@
 # Cloud sync — setup
 
-Tabula can save projects to a Supabase project instead of (as well as) this
+Loud Light can save projects to a Supabase project instead of (as well as) this
 device's localStorage, so a sketch started on the desktop can be picked up on
 the phone. The code is written and shipped; it stays **completely hidden** until
-the two constants at the top of `src/tabula.jsx` are filled in:
+the two constants at the top of `src/loudlight.jsx` are filled in:
 
 ```js
 const CLOUD_URL="";   // https://<project-ref>.supabase.co
@@ -82,7 +82,7 @@ Notes on the shape:
 ### 3. Put the code in **both** email templates
 
 Dashboard → Authentication → Emails. Supabase's default templates carry only the
-`{{ .ConfirmationURL }}` link, and Tabula asks for a **six-digit code** instead
+`{{ .ConfirmationURL }}` link, and Loud Light asks for a **six-digit code** instead
 (a link would open a new browser tab, which on iOS means leaving the home-screen
 PWA). Whichever variable is present decides what gets sent: `{{ .Token }}` sends
 a code, `{{ .ConfirmationURL }}` sends a link.
@@ -95,14 +95,14 @@ redirects to the default Site URL, `http://localhost:3000`, and the browser
 refuses to connect). So paste this into **Confirm signup** *and* **Magic Link**:
 
 ```html
-<h2>Tabula sign-in</h2>
+<h2>Loud Light sign-in</h2>
 <p>Your code is:</p>
 <p style="font-size:28px;letter-spacing:6px"><b>{{ .Token }}</b></p>
 <p>It expires in an hour.</p>
 ```
 
 While you're there, set Authentication → URL Configuration → **Site URL** to
-`https://jakedbirch.github.io/Tabula`. Nothing in this flow follows a link, but
+`https://jakedbirch.github.io/Loud Light`. Nothing in this flow follows a link, but
 it stops any stray confirmation link pointing at a localhost server that isn't
 running.
 
@@ -118,7 +118,7 @@ to be allowed).
 ## How it works
 
 **Auth** is email one-time-code, hand-rolled over `fetch` against Supabase's
-REST endpoints rather than pulling in `supabase-js` — Tabula is one static file
+REST endpoints rather than pulling in `supabase-js` — Loud Light is one static file
 with two UMD script tags, and the six calls needed here are a page of code. An
 SDK from a CDN would also have to be precached by the service worker to keep the
 installed PWA offline-clean.
@@ -154,7 +154,7 @@ a stale project list forever.
 
 ## Two operational limits worth knowing
 
-Neither is a bug in Tabula, and both look exactly like "cloud sync is broken".
+Neither is a bug in Loud Light, and both look exactly like "cloud sync is broken".
 
 **The built-in email sender allows 2 messages per hour.** Supabase's default SMTP
 is explicitly a demo service. Signing in on the desktop and then the phone is

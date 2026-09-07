@@ -1,13 +1,13 @@
 import Foundation
 import WebKit
 
-/// Serves the bundled web app to the WKWebView over a custom `tabula://` scheme.
+/// Serves the bundled web app to the WKWebView over a custom `loudlight://` scheme.
 ///
 /// Why not `loadFileURL` / `file://`: WebKit gives `file://` documents an opaque,
 /// per-load origin, so `localStorage` is unreliable there and has historically
-/// been dropped between launches. Tabula's autosave and its whole project
+/// been dropped between launches. Loud Light's autosave and its whole project
 /// library live in `localStorage`, so losing it means losing the user's work.
-/// A custom scheme gives the app one stable origin (`tabula://app`) for the life
+/// A custom scheme gives the app one stable origin (`loudlight://app`) for the life
 /// of the install, which is the same reason Capacitor and modern Cordova serve
 /// from a scheme rather than from files.
 ///
@@ -16,7 +16,7 @@ import WebKit
 /// remote references left in it.
 final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
 
-    static let scheme = "tabula"
+    static let scheme = "loudlight"
     static let host = "app"
     static var indexURL: URL { URL(string: "\(scheme)://\(host)/index.html")! }
 

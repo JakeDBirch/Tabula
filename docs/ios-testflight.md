@@ -1,4 +1,4 @@
-# Tabula on iOS — native app and TestFlight
+# Loud Light on iOS — native app and TestFlight
 
 How the web app becomes something you can install from TestFlight, what has to
 happen on Apple's side, and what is still unverified.
@@ -7,16 +7,16 @@ happen on Apple's side, and what is still unverified.
 
 ## The shape of it
 
-Tabula is one static HTML file. The iOS app is that same file, plus the samples
+Loud Light is one static HTML file. The iOS app is that same file, plus the samples
 and every library it used to pull from a CDN, bundled inside a ~150-line native
 shell: a full-screen `WKWebView` that owns the audio session, serves the payload
 from a custom URL scheme, and hands finished exports to the iOS share sheet.
 
-Nothing is duplicated. `src/tabula.jsx` is still the only source, and
+Nothing is duplicated. `src/loudlight.jsx` is still the only source, and
 `npm run build:ios` emits a second target next to `index.html`:
 
 ```
-src/tabula.jsx ──┬── index.html   (GitHub Pages: React from CDN, service worker)
+src/loudlight.jsx ──┬── index.html   (GitHub Pages: React from CDN, service worker)
                  └── ios/www/     (the app bundle: everything local, no network)
 ```
 
@@ -47,11 +47,11 @@ You need the Team ID and a bundle identifier before anything will build.
 
 **1. Team ID.** [developer.apple.com/account](https://developer.apple.com/account)
 → Membership details → Team ID. Ten characters. Put it in
-`ios/Config/Tabula.xcconfig` and commit — it is not a secret, it appears in
+`ios/Config/LoudLight.xcconfig` and commit — it is not a secret, it appears in
 every provisioning profile.
 
-**2. Bundle identifier.** Also in `ios/Config/Tabula.xcconfig`, currently
-`com.tabula.sequencer`. **Choose carefully: a bundle ID is permanent.** It can
+**2. Bundle identifier.** Also in `ios/Config/LoudLight.xcconfig`, currently
+`com.loudlight.sequencer`. **Choose carefully: a bundle ID is permanent.** It can
 never be renamed or reused once a build has been uploaded. Reverse-domain form
 of a domain you control is the convention.
 
@@ -59,11 +59,10 @@ of a domain you control is the convention.
 → Apps → **+** → New App. Platform iOS, your bundle ID, SKU anything (`tabula`),
 name — and here is the one thing worth deciding now rather than later:
 
-> **The name is a problem.** "Tabula" collides with an open-source PDF tool, and
-> in App Store search it sits one letter from "tabla", which is a drum. For a
-> drum machine that is close to worst case. App Store names are unique across
-> the store, so the name you want may be gone. You can rename freely until your
-> first App Store release; the *bundle ID* is the part you cannot change.
+> **The name.** Settled — the app is Loud Light, and that is what goes in App
+> Store Connect. The *bundle identifier* is the part that is permanent: it can
+> never be renamed or reused once a build has been uploaded, so get it right on
+> the first attempt. It is set in `ios/Config/LoudLight.xcconfig`.
 
 ---
 
@@ -77,8 +76,8 @@ npm ci
 npm run build:ios            # emits ios/www — must exist before generating
 
 brew install xcodegen        # once
-cd ios && xcodegen generate  # writes Tabula.xcodeproj from project.yml
-open Tabula.xcodeproj
+cd ios && xcodegen generate  # writes LoudLight.xcodeproj from project.yml
+open LoudLight.xcodeproj
 ```
 
 Then in Xcode:
@@ -94,9 +93,9 @@ Then in Xcode:
 4. Wait 5–15 minutes for processing, then App Store Connect → your app →
    TestFlight.
 
-`Tabula.xcodeproj` is generated and gitignored. Anything you change in Xcode's
+`LoudLight.xcodeproj` is generated and gitignored. Anything you change in Xcode's
 project or target inspector is **lost on the next `xcodegen generate`** — signing
-and versioning live in `Config/Tabula.xcconfig` for exactly that reason, and
+and versioning live in `Config/Loud Light.xcconfig` for exactly that reason, and
 anything structural belongs in `project.yml`.
 
 ---
@@ -193,7 +192,7 @@ Store review, but it is where the real risk sits:
 > web view pointed at a website is the textbook case, and it is what Apple calls
 > a "web clipping".
 
-Tabula is not in the worst part of that bracket, and the shell was written with
+Loud Light is not in the worst part of that bracket, and the shell was written with
 this in mind. What is already on its side:
 
 - **It is not a website in a box.** The payload is bundled and the app is fully
@@ -206,7 +205,7 @@ this in mind. What is already on its side:
   bar, and a sequencer clears the *useful* and *unique* parts easily.
 
 If it does get bounced, the substantive answers are native ones: **Audio Unit
-(AUv3) or Inter-App Audio**, so Tabula appears as an instrument inside
+(AUv3) or Inter-App Audio**, so Loud Light appears as an instrument inside
 GarageBand and Logic; **Ableton Link** for tempo sync; **Core MIDI** in and out
 so it drives hardware. Any one of those is unarguably not a web page — and each
 is a thing you would want anyway. Which is the honest read: shipping the wrapper
@@ -230,7 +229,7 @@ they are to bite:
    and home-indicator insets in the right places (not doubled).
 2. **Does a project survive a force-quit.** This is the important one. The whole
    project library and autosave live in `localStorage`; the shell serves the app
-   from a custom `tabula://app` origin specifically so that store is stable
+   from a custom `loudlight://app` origin specifically so that store is stable
    across launches. Make a pattern, force-quit from the app switcher, reopen.
 3. **Ring/silent switch.** The shell asks for an `AVAudioSession` `.playback`
    category, which should mean the sequencer keeps sounding on silent — but
@@ -243,7 +242,7 @@ they are to bite:
 5. **MIDI and MP3 export.** `<a download>` is a silent no-op in a WKWebView, so
    `downloadBlob` now posts the bytes to the shell, which presents the share
    sheet. Untested end to end.
-6. **Cloud sync.** Requests now carry an `Origin` of `tabula://app` rather than
+6. **Cloud sync.** Requests now carry an `Origin` of `loudlight://app` rather than
    an `https://` one. Supabase's CORS should accept it, but sign-in is the place
    to find out if it does not.
 7. **iPad specifically:** drag the window narrow and wide with the app running.
@@ -252,6 +251,6 @@ they are to bite:
 8. **Latency and touch feel**, which is the only part of this no test can answer.
 
 To attach Safari's Web Inspector to a Debug build: run from Xcode, then
-Safari → Develop → *your iPhone* → Tabula. For a TestFlight build, add
-`TBWebInspectorEnabled = YES` to `ios/Tabula/Info.plist` first — it is off in
+Safari → Develop → *your device* → Loud Light. For a TestFlight build, add
+`LLWebInspectorEnabled = YES` to `ios/LoudLight/Info.plist` first — it is off in
 Release builds by default, and should stay off for anything you ship publicly.

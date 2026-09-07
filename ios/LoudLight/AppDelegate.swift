@@ -1,6 +1,6 @@
 import UIKit
 
-/// Deliberately not a scene-based app. Tabula is one full-screen instrument with
+/// Deliberately not a scene-based app. Loud Light is one full-screen instrument with
 /// one audio engine and one autosave; multiple windows would mean two schedulers
 /// writing the same localStorage key, which is a data-loss bug waiting to be
 /// filed. A plain window-based delegate keeps that impossible.

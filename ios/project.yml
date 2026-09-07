@@ -6,16 +6,16 @@
 #
 #   npm run build:ios          # ios/www — the app payload MUST exist first
 #   cd ios && xcodegen generate
-#   open Tabula.xcodeproj
+#   open LoudLight.xcodeproj
 #
 # Changes made in Xcode's project/target inspector are overwritten on the next
-# generate. Signing and versioning therefore live in Config/Tabula.xcconfig,
+# generate. Signing and versioning therefore live in Config/LoudLight.xcconfig,
 # which is committed and survives.
 
-name: Tabula
+name: LoudLight
 
 options:
-  bundleIdPrefix: com.tabula
+  bundleIdPrefix: com.loudlight
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -27,12 +27,12 @@ configs:
   Release: release
 
 targets:
-  Tabula:
+  LoudLight:
     type: application
     platform: iOS
 
     sources:
-      - path: Tabula
+      - path: LoudLight
       # A folder REFERENCE, not a group: the whole www/ tree is copied into the
       # bundle verbatim, keeping the directory layout the page's relative URLs
       # (samples/808-kit/BD.wav, fonts/…) depend on. As a group, Xcode would
@@ -42,12 +42,12 @@ targets:
         type: folder
 
     configFiles:
-      Debug: Config/Tabula.xcconfig
-      Release: Config/Tabula.xcconfig
+      Debug: Config/LoudLight.xcconfig
+      Release: Config/LoudLight.xcconfig
 
     settings:
       base:
-        INFOPLIST_FILE: Tabula/Info.plist
+        INFOPLIST_FILE: LoudLight/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # iPhone and iPad. Nothing in the web app needed changing for it:
         # IS_MOBILE keys off maxTouchPoints, so an iPad already gets the
@@ -70,13 +70,13 @@ targets:
           SWIFT_COMPILATION_MODE: wholemodule
 
 # Declared explicitly rather than left to Xcode's autocreation: an autocreated
-# scheme is per-user and not committed, so `xcodebuild -scheme Tabula` on a CI
+# scheme is per-user and not committed, so `xcodebuild -scheme LoudLight` on a CI
 # runner would fail to find one.
 schemes:
-  Tabula:
+  LoudLight:
     build:
       targets:
-        Tabula: all
+        LoudLight: all
     run:
       config: Debug
     archive:

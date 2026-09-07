@@ -1,4 +1,4 @@
-// Signing and versioning for the Tabula iOS app.
+// Signing and versioning for the Loud Light iOS app.
 //
 // This file is committed and is the one place to edit; everything else in the
 // Xcode project is generated from project.yml and will be overwritten.
@@ -14,7 +14,7 @@
 // domain form, letters/numbers/hyphens/dots only.
 
 DEVELOPMENT_TEAM =
-PRODUCT_BUNDLE_IDENTIFIER = com.tabula.sequencer
+PRODUCT_BUNDLE_IDENTIFIER = com.loudlight.sequencer
 
 // Automatic signing lets Xcode (and, in CI, xcodebuild -allowProvisioningUpdates)
 // create and download the certificate and provisioning profile for you, so

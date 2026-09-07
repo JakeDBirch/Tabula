@@ -2,7 +2,7 @@ import UIKit
 import WebKit
 import AVFoundation
 
-/// The whole app: one full-bleed WKWebView running the bundled Tabula payload,
+/// The whole app: one full-bleed WKWebView running the bundled Loud Light payload,
 /// plus the handful of things a web page on iOS cannot do for itself — own the
 /// audio session, hand a finished export to the share sheet, and keep the system
 /// edge gestures out of the way of the grid.
@@ -29,7 +29,7 @@ final class WebAppViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.102, green: 0.094, blue: 0.078, alpha: 1) // #1a1814
+        view.backgroundColor = UIColor(red: 0.055, green: 0.110, blue: 0.169, alpha: 1) // #0e1c2b
         configureAudioSession()
         buildWebView()
         webView.load(URLRequest(url: BundleSchemeHandler.indexURL))
@@ -53,7 +53,7 @@ final class WebAppViewController: UIViewController {
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
     // Require a second swipe from the bottom edge before the system takes it.
-    // Tabula's transport row and drum grid run right to the bottom of the
+    // Loud Light's transport row and drum grid run right to the bottom of the
     // screen, and a drag that starts there should be a drag, not a trip home.
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { [.bottom] }
 
@@ -93,14 +93,14 @@ final class WebAppViewController: UIViewController {
 
         // Safari Web Inspector. Off in Release unless the plist opts in, because
         // an inspectable production build hands anyone with a cable a debugger.
-        // To inspect a TestFlight build, add TBWebInspectorEnabled = YES to
+        // To inspect a TestFlight build, add LLWebInspectorEnabled = YES to
         // Info.plist for that build and connect via Safari ▸ Develop.
         if #available(iOS 16.4, *) {
             #if DEBUG
             webView.isInspectable = true
             #else
             webView.isInspectable =
-                Bundle.main.object(forInfoDictionaryKey: "TBWebInspectorEnabled") as? Bool ?? false
+                Bundle.main.object(forInfoDictionaryKey: "LLWebInspectorEnabled") as? Bool ?? false
             #endif
         }
 
@@ -124,10 +124,10 @@ final class WebAppViewController: UIViewController {
     }
 
     private func showFailure(_ message: String) {
-        failureLabel.text = "Tabula could not start.\n\n\(message)"
+        failureLabel.text = "Loud Light could not start.\n\n\(message)"
         failureLabel.isHidden = false
         webView.isHidden = true
-        NSLog("[Tabula] load failed: %@", message)
+        NSLog("[LoudLight] load failed: %@", message)
     }
 
     // MARK: - Audio
@@ -145,15 +145,15 @@ final class WebAppViewController: UIViewController {
     @objc private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            // .mixWithOthers so Tabula plays over whatever is already running
+            // .mixWithOthers so Loud Light plays over whatever is already running
             // instead of stopping it — you should be able to jam along with a
-            // reference track. Drop the option to make Tabula exclusive.
+            // reference track. Drop the option to make Loud Light exclusive.
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             // Not fatal: audio still routes through WebKit's own session. Log so
             // a silent app on a device has somewhere to start.
-            NSLog("[Tabula] audio session setup failed: %@", error.localizedDescription)
+            NSLog("[LoudLight] audio session setup failed: %@", error.localizedDescription)
         }
     }
 }
@@ -205,7 +205,7 @@ extension WebAppViewController: WKNavigationDelegate, WKUIDelegate {
     /// A web-content crash leaves a live but permanently blank web view. Reload
     /// rather than leave the user staring at nothing.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        NSLog("[Tabula] web content process terminated — reloading")
+        NSLog("[LoudLight] web content process terminated — reloading")
         webView.load(URLRequest(url: BundleSchemeHandler.indexURL))
     }
 }
@@ -225,7 +225,7 @@ extension WebAppViewController: WKScriptMessageHandler {
               let name = body["name"] as? String,
               let b64 = body["b64"] as? String,
               let data = Data(base64Encoded: b64) else {
-            NSLog("[Tabula] saveFile: malformed message")
+            NSLog("[LoudLight] saveFile: malformed message")
             return
         }
 
@@ -233,7 +233,7 @@ extension WebAppViewController: WKScriptMessageHandler {
         // web layer. Keep the leaf component only.
         let safeName = (name as NSString).lastPathComponent
         guard !safeName.isEmpty, safeName != ".", safeName != ".." else {
-            NSLog("[Tabula] saveFile: refused filename %@", name)
+            NSLog("[LoudLight] saveFile: refused filename %@", name)
             return
         }
 
@@ -247,7 +247,7 @@ extension WebAppViewController: WKScriptMessageHandler {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("[Tabula] saveFile: write failed: %@", error.localizedDescription)
+            NSLog("[LoudLight] saveFile: write failed: %@", error.localizedDescription)
             return
         }
 

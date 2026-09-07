@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Tabula build pipeline.
-//   src/tabula.jsx   →   index.html
+// Loud Light build pipeline.
+//   src/loudlight.jsx   →   index.html
 //
 // 1. Strip import / export-default boilerplate so the file becomes a plain
 //    function declaration that mounts to <div id="root">.
@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, cpSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const SRC = "src/tabula.jsx";
+const SRC = "src/loudlight.jsx";
 const OUT = "index.html";
 const auditOnly = process.argv.includes("--audit-only");
 // --ios additionally emits ios/www/ — the same app, but self-contained: every
@@ -30,9 +30,9 @@ const auditOnly = process.argv.includes("--audit-only");
 // at launch. See docs/ios-testflight.md.
 const ios = process.argv.includes("--ios");
 
-const tmp = mkdtempSync(join(tmpdir(), "tabula-build-"));
-const srcStripped = join(tmp, "tabula.jsx");
-const compiled = join(tmp, "tabula.js");
+const tmp = mkdtempSync(join(tmpdir(), "loudlight-build-"));
+const srcStripped = join(tmp, "loudlight.jsx");
+const compiled = join(tmp, "loudlight.js");
 
 // 1. Prepare source — drop the React import line and the `export default`.
 const raw = readFileSync(SRC, "utf8");
@@ -42,9 +42,9 @@ const raw = readFileSync(SRC, "utf8");
 const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
 const prepped = raw
   .replace(/^import React.*$\n?/m, "")
-  .replace(/^export default function Tabula/m, "function Tabula")
+  .replace(/^export default function LoudLight/m, "function LoudLight")
   .replace(/__BUILD__/g, stamp) +
-  '\n\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Tabula));\n';
+  '\n\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(LoudLight));\n';
 writeFileSync(srcStripped, prepped);
 
 // 2. Babel compile.
@@ -84,6 +84,37 @@ try {
   console.error(err.stderr?.toString() || err.message);
   process.exit(1);
 }
+// 4b. CSS audit. The stylesheet is one template literal, so a stray BACKTICK
+// inside it (or a `${`) ends the literal early and the remainder parses as
+// `tpl * tpl`, which evaluates to NaN. The app then renders <style>NaN</style>
+// and every rule silently stops applying — no box-sizing, no container
+// queries, no keyframes — while the build stays green. That cost three commits
+// of confusion once. Check the outcome, not a guessed cause.
+{
+  const open = "const CSS=`";
+  const a = raw.indexOf(open);
+  const b = raw.indexOf("\n`;", a);
+  if (a < 0 || b < 0) {
+    console.error("!! AUDIT FAIL: couldn't delimit the CSS template literal.");
+    process.exit(1);
+  }
+  const block = raw.slice(a + open.length, b);
+  const bad = block.includes("`") ? "a backtick" : block.includes("${") ? "a ${ interpolation" : null;
+  if (bad) {
+    const line = block.split("\n").find((l) => l.includes("`") || l.includes("${"));
+    console.error("!! AUDIT FAIL: " + bad + " inside the CSS block.");
+    console.error("   It ends the template literal early and CSS becomes NaN,");
+    console.error("   which silently disables the whole stylesheet at runtime.");
+    console.error("   Offending line: " + line.trim());
+    process.exit(1);
+  }
+  if (!block.includes("box-sizing:border-box")) {
+    console.error("!! AUDIT FAIL: the CSS block lost its box-sizing reset.");
+    process.exit(1);
+  }
+  console.log("CSS audit: clean");
+}
+
 if (cjsOut.includes("return_react2")) {
   console.error("!! AUDIT FAIL: 'return_react2' found in CJS output.");
   console.error("   This means there's a module-level arrow function returning JSX.");
@@ -104,7 +135,7 @@ const js = readFileSync(compiled, "utf8");
 // two builds can't drift on layout — only the asset sourcing differs.
 const VIEWPORT = `<meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">`;
-const RESET = `<style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#1a1814;overflow:hidden;}</style>`;
+const RESET = `<style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#0e1c2b;overflow:hidden;}</style>`;
 
 const html = `<!DOCTYPE html>
 <html lang="en">
@@ -113,12 +144,12 @@ const html = `<!DOCTYPE html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Tabula">
-  <meta name="theme-color" content="#1a1814">
+  <meta name="apple-mobile-web-app-title" content="Loud Light">
+  <meta name="theme-color" content="#0e1c2b">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
-  <title>Tabula</title>
+  <link rel="icon" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <title>Loud Light</title>
   ${RESET}
 </head>
 <body>
@@ -183,7 +214,7 @@ if (ios) {
 <html lang="en">
 <head>
   ${VIEWPORT}
-  <title>Tabula</title>
+  <title>Loud Light</title>
   <style>
     ${fontFace}
   </style>
@@ -195,7 +226,7 @@ if (ios) {
     // Read by the install hint, which must not fire inside the app it is
     // telling you to install. Set here rather than injected by the shell so
     // the payload is self-describing and testable in a plain browser.
-    window.__TABULA_NATIVE__ = true;
+    window.__LOUDLIGHT_NATIVE__ = true;
   </script>
   <script src="react.production.min.js"></script>
   <script src="react-dom.production.min.js"></script>
@@ -219,6 +250,7 @@ ${nativeJs}
   cpSync("samples", join(WWW, "samples"), { recursive: true });
   cpSync("kits.json", join(WWW, "kits.json"));
   cpSync("icon.svg", join(WWW, "icon.svg"));
+  cpSync("icon.png", join(WWW, "icon.png"));
 
   // Guard the whole payload, not just the HTML: a stray CDN URL in a vendored
   // file or a sample path would fail the same way, at the same altitude.

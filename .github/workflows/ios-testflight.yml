@@ -15,7 +15,7 @@
 #   APPSTORE_ISSUER_ID     the Issuer ID shown above the key list (a UUID)
 #   APPSTORE_PRIVATE_KEY   the .p8 file, base64'd:  base64 -i AuthKey_XXX.p8 | pbcopy
 #
-# The Team ID is not a secret and lives in ios/Config/Tabula.xcconfig with the
+# The Team ID is not a secret and lives in ios/Config/LoudLight.xcconfig with the
 # bundle identifier. Fill that in first or the archive step has nothing to sign
 # with. Signing assets themselves are created on the fly by
 # -allowProvisioningUpdates using the API key, so there is no certificate or
@@ -36,7 +36,7 @@ on:
 jobs:
   # Cheap Linux check on every push: does the offline payload still build, and
   # is it still free of remote references? That audit is the only thing standing
-  # between a new CDN dependency in src/tabula.jsx and an app that white-screens
+  # between a new CDN dependency in src/loudlight.jsx and an app that white-screens
   # on a plane, and it costs seconds here versus a round trip through a macOS
   # runner.
   payload:
@@ -89,8 +89,8 @@ jobs:
       - name: Check signing is configured
         run: |
           set -euo pipefail
-          if ! grep -qE '^DEVELOPMENT_TEAM *= *[A-Z0-9]{10}' ios/Config/Tabula.xcconfig; then
-            echo "::error::DEVELOPMENT_TEAM is not set in ios/Config/Tabula.xcconfig."
+          if ! grep -qE '^DEVELOPMENT_TEAM *= *[A-Z0-9]{10}' ios/Config/LoudLight.xcconfig; then
+            echo "::error::DEVELOPMENT_TEAM is not set in ios/Config/LoudLight.xcconfig."
             echo "Put your 10-character Apple Developer Team ID there and commit it."
             exit 1
           fi
@@ -116,11 +116,11 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild archive \
-            -project ios/Tabula.xcodeproj \
-            -scheme Tabula \
+            -project ios/LoudLight.xcodeproj \
+            -scheme LoudLight \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Tabula.xcarchive" \
+            -archivePath "$RUNNER_TEMP/LoudLight.xcarchive" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
             -authenticationKeyID "$KEY_ID" \
@@ -137,7 +137,7 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/Tabula.xcarchive" \
+            -archivePath "$RUNNER_TEMP/LoudLight.xcarchive" \
             -exportOptionsPlist ios/ExportOptions.plist \
             -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates \
@@ -151,8 +151,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Tabula-xcarchive-${{ github.run_number }}
-          path: ${{ runner.temp }}/Tabula.xcarchive
+          name: LoudLight-xcarchive-${{ github.run_number }}
+          path: ${{ runner.temp }}/LoudLight.xcarchive
           retention-days: 14
           if-no-files-found: ignore
 
