@@ -3100,6 +3100,16 @@ export default function LoudLight(){
   // Which row key is lit from a just-played audition (drum rows are offset by
   // 100 so one piece of state covers both columns). Cleared on a timer — it's
   // a flash of feedback, not a selection.
+  // Whether the row-key column is showing. A VIEW preference, not project
+  // state, so it is NOT in SESSION_DEFAULTS or any of the save sites — loading
+  // someone's project should not fold your gutter away. Read synchronously in
+  // the initializer (plain localStorage, the `tnori-` prefix storageSet falls
+  // back to) because the async storageGet would land a frame late and the grid
+  // would visibly resize on every launch.
+  const [rowKeysOpen, setRowKeysOpen] = useState(()=>{
+    try{return localStorage.getItem("tnori-rowkeys")!=="0";}catch(e){return true;}
+  });
+  useEffect(()=>{try{localStorage.setItem("tnori-rowkeys",rowKeysOpen?"1":"0");}catch(e){}},[rowKeysOpen]);
   const [audRow, setAudRow] = useState(-1);
   const audRowTmrR=useRef(0);
   const flashRowKey=k=>{
@@ -4900,6 +4910,21 @@ export default function LoudLight(){
         <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
         <span style={{color:"rgba(178,199,219,0.4)"}}>{curBar+1}/{barCount}</span>
       </span>
+      {/* Row-key toggle. It lives here rather than on the column itself because
+          a collapsed column has nowhere to put a handle that isn't width you
+          were trying to get back — and the bar strip is on screen on every part
+          page, drums included, with nothing column-aligned depending on it. */}
+      <div role="button" aria-label={rowKeysOpen?"Hide the row keys":"Show the row keys"}
+        aria-pressed={rowKeysOpen}
+        title={rowKeysOpen?"Hide the note keys beside the grid":"Show the note keys beside the grid"}
+        onClick={e=>{e.stopPropagation();setRowKeysOpen(o=>!o);}}
+        style={{display:"flex",alignItems:"center",justifyContent:"center",
+          height:IS_MOBILE?24:22,width:IS_MOBILE?26:24,borderRadius:5,
+          border:"1px solid "+(rowKeysOpen?"rgba(255,214,150,0.45)":"rgba(168,190,212,0.18)"),
+          background:rowKeysOpen?"rgba(255,214,150,0.12)":"transparent",
+          color:rowKeysOpen?"#ffd28a":"rgba(178,199,219,0.5)",
+          fontSize:IS_MOBILE?13:12,lineHeight:1,
+          cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",flexShrink:0,touchAction:"none"}}>♪</div>
       <div role="button" aria-label="Add bar (hold for pattern and bar controls)"
         onPointerDown={e=>{
           e.stopPropagation();
@@ -5018,6 +5043,13 @@ export default function LoudLight(){
   // are too and the two columns line up by construction.
   // Deferred calls: auditionRow is declared further down and Babel lowers
   // const to var, so a bare reference here binds undefined.
+  // Collapsed all the way to nothing, not to a thin stub: the column costs 24px
+  // of a 370px phone grid and a stub would hand back only half of it. The toggle
+  // lives in the bar strip instead, which is always on screen and which no
+  // column alignment depends on. Every offset below reads this, so the two
+  // states can't drift apart.
+  const rowKeyPad=rowKeysOpen?ROWKEY_W+CELL_GAP:0;
+  const drumKeyPad=rowKeysOpen?ROWKEY_W+2:0;
   const _rowKeyStyle=(lit,accent)=>({flex:1,minHeight:0,display:"flex",alignItems:"center",
     justifyContent:"center",borderRadius:IS_MOBILE?2:3,cursor:"pointer",userSelect:"none",
     WebkitUserSelect:"none",touchAction:"none",fontFamily:"inherit",lineHeight:1,
@@ -5027,7 +5059,7 @@ export default function LoudLight(){
     color:lit?"#ffd28a":"rgba(178,199,219,0.45)",
     boxShadow:lit?"0 0 6px rgba(255,214,150,0.35)":"none",
     transition:"background .12s, box-shadow .12s, color .12s"});
-  const rowKeys=(
+  const rowKeys=!rowKeysOpen?null:(
     <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",
       marginRight:CELL_GAP,touchAction:"none"}}>
       {Array.from({length:ROWS},(_,r)=>{
@@ -5053,7 +5085,7 @@ export default function LoudLight(){
   // Same idea on the drum page: the voice under your finger, at the level its
   // mixer strip is set to. The drum grid spaces its rows by 2, so this column
   // does too or the labels walk away from the rows they name.
-  const drumRowKeys=(
+  const drumRowKeys=!rowKeysOpen?null:(
     <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",gap:2,
       marginRight:2,touchAction:"none"}}>
       {DRUM_VOICES.map((voice,r)=>{
@@ -8309,7 +8341,7 @@ export default function LoudLight(){
                   column does — the chips are a scrubber over the pattern, and
                   hanging them out to the left of the grid just reads as a
                   misalignment. */}
-              <div style={{display:"flex",width:"100%"}}><div style={{width:ROWKEY_W+CELL_GAP,flexShrink:0}}/>{barStrip}</div>
+              <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
               {/* Row keys sit OUTSIDE the grid container: the grid's pointer
                   handlers live on that container and hit-test a column from its
                   own width, so a key column inside it would be read as column 0. */}
@@ -8399,7 +8431,7 @@ export default function LoudLight(){
                 );})}
               </div>
               </div>
-              <div style={Object.assign({},S.stepBar,{marginLeft:ROWKEY_W+CELL_GAP})}>
+              <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>
                 {Array.from({length:COLS},(_,c)=>{
                   const ac=barOff+c;
                   const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;
@@ -8411,7 +8443,7 @@ export default function LoudLight(){
                   </div>
                 );})}
               </div>
-              <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:ROWKEY_W+CELL_GAP})}
+              <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:rowKeyPad})}
                 onPointerDown={handleLenDown} onPointerMove={handleLenMove}
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                 {/* The slider is one BAR wide, so it shows this page's slice of
@@ -8442,7 +8474,7 @@ export default function LoudLight(){
                     Tap a cell to toggle; click-and-drag vertically on a cell to
                     set its per-cell velocity (drag up = louder). Brightness of a
                     lit cell reflects its velocity. */}
-                <div style={{width:dw||"80%",flexShrink:0,display:"flex"}}><div style={{width:ROWKEY_W+2,flexShrink:0}}/>{barStrip}</div>
+                <div style={{width:dw||"80%",flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                 {/* Voice keys down the side — tap one to hear that drum at its
                     mixer level, without running the sequencer. The drum grid's
                     handlers are PER CELL rather than on the container, so this
@@ -8530,7 +8562,7 @@ export default function LoudLight(){
                 </div>
                 </div>
                 {/* Length slider */}
-                <div style={{...S.lenSlider,flexShrink:0,marginLeft:ROWKEY_W+2,width:dw?dw-(ROWKEY_W+2):"80%"}}
+                <div style={{...S.lenSlider,flexShrink:0,marginLeft:drumKeyPad,width:dw?dw-drumKeyPad:"80%"}}
                   onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
                   onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
                   <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
@@ -9113,7 +9145,7 @@ export default function LoudLight(){
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
               <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
-                  <div style={{display:"flex",width:"100%"}}><div style={{width:ROWKEY_W+CELL_GAP,flexShrink:0}}/>{barStrip}</div>
+                  <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex"}}>
                   {rowKeys}
@@ -9148,8 +9180,8 @@ export default function LoudLight(){
                     })}
                   </div>
                   </div>
-                  <div style={Object.assign({},S.stepBar,{marginLeft:ROWKEY_W+CELL_GAP})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
-                  <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:ROWKEY_W+CELL_GAP})} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
+                  <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:rowKeyPad})} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
                     <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
                     {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${_lenFrac*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
@@ -9176,7 +9208,7 @@ export default function LoudLight(){
                   const SIZE=isLandscape?`min(calc(100vw - 190px), calc(100dvh - 32px))`:`min(calc(100vw - 20px), calc(100dvh - 150px))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
-                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:ROWKEY_W+GAP,flexShrink:0}}/>{barStrip}</div>
+                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                       {/* Voice keys — tap to hear the drum on its own. */}
                       <div style={{width:SIZE,display:"flex",flexShrink:0}}>
                       {drumRowKeys}
@@ -9256,7 +9288,7 @@ export default function LoudLight(){
                       </div>
                       </div>
                       {/* Horizontal length slider (matches synth grid orientation) */}
-                      <div style={{width:`calc(${SIZE} - ${ROWKEY_W+GAP}px)`,marginLeft:ROWKEY_W+GAP,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
+                      <div style={{width:`calc(${SIZE} - ${drumKeyPad}px)`,marginLeft:drumKeyPad,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
