@@ -90,7 +90,28 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - `params[c]` keys: `vel, flt, dly, rev, rhy, dur, oct, glide` (see `defaultStepParams`). `rev`/`dur` were added after the first arch doc.
 - `rhy` is **ratchet only** (1–4 retriggers). rhy=0-as-tie is a dead semantic — durations live on `durs`.
 - **`speedMult`** = per-pattern step-duration multiplier. `stepDur = 60/bpm/4 * speedMult`. The button LABEL is the speed factor, the value is its inverse: `2×` (twice as fast) = `mult 0.5`; `½×` = `mult 2`. `SPEED_OPTS` order is value-ascending (2×,1×,⅔×,½×,⅓×,¼×). Duplicating a pattern must carry `speedMult` (it's part of the pattern).
-- Rows are scale degrees (pitch is already scale-quantized): `fromBot = ROWS-1-row`, tonic at `fromBot % 7 == 0`, triad tones (1/3/5) at `fromBot % 7 ∈ {0,2,4}`.
+- Rows are scale degrees (pitch is already scale-quantized): `fromBot = ROWS-1-row`, tonic at `fromBot % span == 0`, triad tones (1/3/5) at `fromBot % span ∈ {0,2,4}`. **`span` is the scale's own notes-per-octave, not a constant 7** — see "Scales and the user key".
+
+### Scales and the user key
+
+The eleven built-in scales are hand-written 16-frequency tables (index 0 highest, index 15 = C3). **USER KEY** is the twelfth option and is not a table: it's a 12-bit pitch-class mask (`userMask`) plus a tonic (`userRoot`), and `userFreqs` generates the same shape of table from them. Two integers rather than an array of flags, so every persistence site, the undo snapshot and the packed codec carry it for free — they're in `SESSION_DEFAULTS`/`doNew`, the snapshot pair, `getShareState`/`applyShareState`, and the `doSave`/`doLoad` pair, per the multi-site rule.
+
+`scaleFreqsOf` resolves whichever kind is selected into one array; **`curFreqs` memoizes it and `curFreqsR` is what the scheduler reads**, so a user key costs the per-note path nothing. MIDI export reads `curFreqs` (it converts frequency → note, so it never cared which scale it was).
+
+Sixteen rows of a 7-note scale is 2.2 octaves; of a 5-note scale it's 3, and of a 3-note scale it's 5. A fixed bottom note would put the top of a sparse key out of usable range, so `userFreqs` **drops the whole grid by whole octaves** (0–2) to keep its middle near C4. A 7-note key therefore starts at C3 exactly like the fixed tables, and a 5-note one starts at C2 — which is where the hand-written PENTA table starts, so the generator reproduces the built-ins rather than contradicting them. Output is clamped to 8 kHz: a one- or two-note key climbs an octave every row or two.
+
+**Notes-per-octave is no longer assumed to be 7.** `scaleShapeFor` returns `{span, fifth}` — 7/4 for the modes, 5/3 for PENTA (which had been shaded as if it had seven notes since it was added), and for a user key the number of lit notes plus the index of a perfect fifth if it has one (`-1` if not, and then no fifth row is marked). The grid shading and the RAND generators (`randMonoGrid`/`randPolyGrid`/`_isChordTone`, which take `span` with a default of `SCALE_SPAN`) all read it.
+
+The editor is `scalePicker(compact)` — **one body, two mounts** (desktop sidebar, mobile TEMPO sheet). Below the dropdown, when USER is selected, is a one-octave keyboard drawn as a keyboard (five black keys over the seams at real piano positions), because that is the thing being read at a glance. **Tap toggles a note in or out; press-and-hold (or right-click) makes it the tonic** — the rarer decision gets the deliberate gesture, the same split as the bar strip's `+`. Turning off the tonic is allowed and moves the root up to the next lit note (refusing the tap reads as a dead control); only the last note standing is refused. Adding a note auditions it. Switching *to* USER **seeds the key from the scale you were on** (`pcOfFreq` over its table), so it starts as the notes you were already playing. MAJ / MIN / PENT / ALL fill the mask from the current tonic.
+
+### Row keys (audition)
+
+A column of keys down the left of every grid — synth/lead show the note name (`noteNameOf`, which follows the global PITCH offset), drums show the voice. **Tap one to hear that row on its own, with the sequencer stopped or running.** They double as the grid's legend: with a user-defined key the row pitches aren't guessable, and beside the row is where the name means something.
+
+- They sit **outside** the `data-grid` container. The synth grid's pointer handlers live on that container and hit-test a column from its own width, so a column inside it would be read as column 0.
+- Rows are `flex:1` with no gap in the synth grid (and `gap:2` in the drum grid), so the key column matches — the two line up by construction rather than by a magic offset. The bar strip, step bar and length slider under the grid are pushed right by `ROWKEY_W + gap` so their columns still line up with the grid's. Note **padding does not move absolutely positioned children** — the length sliders draw their fill with `position:absolute`, so those take a margin and a narrower width, not padding.
+- `startEngines` was pulled out of `startStop`: bringing up Bell + DrumEngine and re-pushing every engine-side value is now one function, called by play-start and by an audition. `auditionFreq` plays through the **active layer's** voice (its waveform, filter, envelope, sends) — the question is "what does this row sound like in this part". `auditionDrum` has to pass an explicit time: `DrumEngine.play` uses its time argument raw, with no `currentTime` default the way `Bell.play` has, so `null` lands every envelope at NaN.
+- The cost is grid width: on an iPhone 13 the cells go from 23×21 to a square 19.6. Cells came out *squarer*, but they are smaller.
 
 ### Song + scheduler
 
@@ -149,7 +170,7 @@ Global delay + reverb buses; each layer has send amounts, and per-step `dly`/`re
 
 ## Persistence — the multi-site rule
 
-When you add saved state, add it to EVERY site or saves/undo silently lose it:
+When you add saved state, add it to EVERY site or saves/undo silently lose it (`userMask` / `userRoot` were the most recent walk through this list):
 
 1. `SESSION_DEFAULTS` (freeze) **and** the matching reset in `doNew`.
 2. `captureSnapshotR` / `applySnapshot` (undo/redo).

@@ -16,8 +16,16 @@ const SCALES = {
   locrian: { label:"LOCRIAN", freqs:[554.37,523.25,466.16,415.3,369.99,349.23,311.13,277.18,261.63,233.08,207.65,185,174.61,155.56,138.59,130.81] },
 };
 
-// All modes are 7 notes/octave. Root at row 15 → octave rows at 15,8,1; 5ths at 11,4
+// All the church modes are 7 notes/octave. Root at row 15 → octave rows at 15,8,1;
+// 5ths at 11,4. SCALE_SPAN is the default for those; PENTA is 5 and the USER
+// scale is however many keys are lit, so the row shading and the randomizer ask
+// scaleSpanOf() rather than assuming seven.
 const SCALE_SPAN=7;
+// Notes per octave, and which degree above the tonic is the fifth (the row the
+// grid marks faintly). PENTA is C D E G A, so its fifth is degree 3, not 4 —
+// it has been shaded as if it had seven notes since the scale was added.
+const SCALE_SHAPE={pent:{span:5,fifth:3}};
+const scaleShapeOf=k=>SCALE_SHAPE[k]||{span:SCALE_SPAN,fifth:4};
 
 
 // ─── Other constants ──────────────────────────────────────────────────────────
@@ -33,6 +41,65 @@ const ROWS=16,COLS=16;
 // "steps per bar" is what lets every bit of layout math (ci/COLS, rect.width/
 // COLS, the step bar) stay exactly as it was — the grid just draws a window
 // into a wider pattern.
+// ─── USER SCALE — the key you draw yourself ─────────────────────────────────
+// The fixed scales above are frequency tables; a user scale is a set of pitch
+// classes (which of the twelve notes are in the key) plus a root, and the table
+// is generated from it. Kept as two integers — a 12-bit mask and a root 0..11 —
+// rather than an array of flags: they're scalars, so every persistence site,
+// the undo snapshot and the packed codec carry them without a deep copy.
+const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const C3_HZ=130.81;                       // row 15 of every fixed table
+const USER_MASK_DEF=(1<<0)|(1<<2)|(1<<4)|(1<<5)|(1<<7)|(1<<9)|(1<<11);   // C major
+const popCount12=m=>{let n=0;for(let i=0;i<12;i++)if(m&(1<<i))n++;return n;};
+// The lit pitch classes as DEGREES above the root, ascending from 0. This is
+// the scale's shape; everything else (row pitches, octave shading, note names)
+// falls out of it. An empty mask can't make a scale, so it reads as the root
+// alone rather than throwing — the editor also refuses to unlight the last key.
+const userDegrees=(mask,root)=>{
+  const out=[];
+  for(let i=0;i<12;i++)if(mask&(1<<((root+i)%12)))out.push(i);
+  return out.length?out:[0];
+};
+// 16 rows, HIGHEST FIRST — the same shape and register as the fixed tables, so
+// the scheduler, the MIDI export and the row keys don't care which kind of
+// scale they're reading.
+//
+// Sixteen rows of a SEVEN-note scale is 2.2 octaves, but of a five-note scale
+// it's 3, and of a three-note scale it's five — so a fixed bottom note would
+// put the top rows of a sparse key somewhere only a bat could use it. The grid
+// is dropped by whole octaves instead, enough to keep the middle of it near C4.
+// A seven-note key therefore still starts at C3 exactly as the fixed tables do,
+// and a five-note one lands on C2 — which is where the hand-written PENTA table
+// starts, so this reproduces both of them rather than replacing them.
+const userFreqs=(mask,root)=>{
+  const deg=userDegrees(mask,root),n=deg.length;
+  const semis=deg[(ROWS-1)%n]+12*Math.floor((ROWS-1)/n);     // range of the 16 rows
+  const drop=Math.max(0,Math.min(2,Math.round((semis/2-12)/12)));
+  const base=C3_HZ*Math.pow(2,root/12)/Math.pow(2,drop),out=[];
+  // Clamped: a one- or two-note key climbs an octave every row or two, and the
+  // top of the grid would otherwise be an inaudible whistle.
+  for(let i=0;i<ROWS;i++)out.push(Math.min(8000,base*Math.pow(2,(deg[i%n]+12*Math.floor(i/n))/12)));
+  return out.reverse();
+};
+const scaleFreqsOf=(key,mask,root)=>key==="user"?userFreqs(mask,root):(SCALES[key]||SCALES.major).freqs;
+// Notes per octave and the fifth's degree, for the row shading and RAND. On a
+// user scale the fifth is only marked if a perfect fifth is actually in it.
+const scaleShapeFor=(key,mask,root)=>{
+  if(key!=="user")return scaleShapeOf(key);
+  const deg=userDegrees(mask,root);
+  return {span:deg.length,fifth:deg.indexOf(7)};
+};
+// Nearest equal-tempered note name for a played frequency (A4=440), used to
+// label the row keys. Octave numbering is scientific: C3 = 130.81 Hz.
+// Pitch class (0=C) of a frequency, for reading a fixed scale's table back as
+// a set of notes when you switch to a user key.
+const pcOfFreq=f=>{const m=Math.round(69+12*Math.log2(f/440));return ((m%12)+12)%12;};
+const noteNameOf=f=>{
+  if(!(f>0))return "";
+  const m=Math.round(69+12*Math.log2(f/440));
+  return NOTE_NAMES[((m%12)+12)%12]+(Math.floor(m/12)-1);
+};
+
 const MAX_BARS=32;
 const patBars=p=>Math.max(1,Math.min(MAX_BARS,(p&&p.bars)||1));
 const patW=p=>patBars(p)*COLS;
@@ -74,6 +141,11 @@ const IS_MOBILE = (()=>{
 // they position against the same track, so a mismatch shows up as notes a pixel
 // or two wider than the cells they sit in.
 const CELL_GAP=IS_MOBILE?2:3;
+// Width of the row-key column beside the grid. Declared here for the same
+// reason CELL_GAP is: the step bar and the length slider under the grid are
+// pushed right by exactly this much so their columns still line up with the
+// grid's, and both places have to read the same number.
+const ROWKEY_W=IS_MOBILE?24:30;
 const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#e6b872","#79b8f2","#7aaa96","#c4b07a","#a09ec4"];
 // A saved project is {id,name,updated,data}. `id` is opaque and permanent —
 // it's what SAVE/LOAD/CLEAR address and, in the cloud table, what the `slot`
@@ -147,10 +219,13 @@ const mkGrid=(w=COLS)=>Array.from({length:ROWS},()=>new Array(w).fill(false));
 // Both pick one implied chord per press (I 60% / IV 20% / V 20%) so the bar
 // has a single harmonic identity, and clamp density so every press is usable.
 const _clsBeat=c=>c%4===0?"down":(c%2===0?"off":"16th");           // metric class
-const _isChordTone=(fb,root)=>{const d=(((fb-root)%SCALE_SPAN)+SCALE_SPAN)%SCALE_SPAN;return d===0||d===2||d===4;};
+// span is the scale's notes-per-octave: seven for the modes, five for PENTA,
+// whatever is lit for a user key. Degrees 0/2/4 are the triad in any of them
+// (in a scale too small to have a degree 4, the test simply never matches it).
+const _isChordTone=(fb,root,span=SCALE_SPAN)=>{const d=(((fb-root)%span)+span)%span;return d===0||d===2||d===4;};
 const _pickRoot=()=>{const r=Math.random();return r<0.60?0:(r<0.80?3:4);};
 
-const randMonoGrid=()=>{
+const randMonoGrid=(span=SCALE_SPAN)=>{
   const g=mkGrid();
   const root=_pickRoot();
   // 1) Rhythm skeleton — metric-weighted trigger probability (monophonic: ≤1/col).
@@ -166,7 +241,7 @@ const randMonoGrid=()=>{
   // 3) Contour — chord-anchored stepwise walk inside a comfortable register.
   const LO=3,HI=12,clamp=fb=>Math.max(LO,Math.min(HI,fb));
   // nearest in-range chord tone to fb (guarantees strong beats land on 1/3/5)
-  const snapChord=fb=>{let best=fb,bd=99;for(let x=LO;x<=HI;x++)if(_isChordTone(x,root)){const d=Math.abs(x-fb);if(d<bd){bd=d;best=x;}}return best;};
+  const snapChord=fb=>{let best=fb,bd=99;for(let x=LO;x<=HI;x++)if(_isChordTone(x,root,span)){const d=Math.abs(x-fb);if(d<bd){bd=d;best=x;}}return best;};
   let cur=snapChord(clamp([7,9,11,4][Math.floor(Math.random()*4)]));
   for(let k=0;k<cols.length;k++){
     const c=cols[k];
@@ -189,12 +264,12 @@ const randMonoGrid=()=>{
   return g;
 };
 
-const randPolyGrid=()=>{
+const randPolyGrid=(span=SCALE_SPAN)=>{
   const g=mkGrid();
   const root=_pickRoot();
   // 1) Chord-tone ladder over ~1.75 octaves of the chosen triad.
   const lo=2+Math.floor(Math.random()*3),hi=Math.min(ROWS-1,lo+11),ladder=[];
-  for(let fb=lo;fb<=hi;fb++)if(_isChordTone(fb,root))ladder.push(fb);
+  for(let fb=lo;fb<=hi;fb++)if(_isChordTone(fb,root,span))ladder.push(fb);
   if(!ladder.length)ladder.push(root);                            // defensive (never empty in practice)
   // 2) Arp — random direction + starting rotation each press.
   const dir=Math.random()<0.5?1:-1;
@@ -1074,7 +1149,7 @@ const defaultDrums=()=>({
 //   feels broken (e.g. one project's reverb tail carries over to another).
 // Keep this in sync with the defaults set in `doNew`.
 const SESSION_DEFAULTS = Object.freeze({
-  bpm:120, scale:"major", transpose:0, swing:0, speedMult:1,
+  bpm:120, scale:"major", userMask:USER_MASK_DEF, userRoot:0, transpose:0, swing:0, speedMult:1,
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
@@ -2840,6 +2915,11 @@ export default function LoudLight(){
     return ()=>ro.disconnect();
   },[]);
   const [scale,     setScale]     = useState("major");
+  // USER scale — which of the twelve notes are in the key, and which is the
+  // tonic. Only read when scale==="user"; kept as plain integers so they cost
+  // nothing at the persistence sites (see SESSION_DEFAULTS and friends).
+  const [userMask,  setUserMask]  = useState(USER_MASK_DEF);
+  const [userRoot,  setUserRoot]  = useState(0);
   const [playing,   setPlaying]   = useState(false);
   const [step,      setStep]      = useState(-1);
   const [playId,    setPlayId]    = useState(null);
@@ -2996,6 +3076,21 @@ export default function LoudLight(){
   // hand a stray thumb on a phone. Holds the id it was armed for, so selecting
   // a different chip disarms it.
   const [delArm, setDelArm] = useState(null);
+  // Which row key is lit from a just-played audition (drum rows are offset by
+  // 100 so one piece of state covers both columns). Cleared on a timer — it's
+  // a flash of feedback, not a selection.
+  const [audRow, setAudRow] = useState(-1);
+  const audRowTmrR=useRef(0);
+  const flashRowKey=k=>{
+    setAudRow(k);
+    clearTimeout(audRowTmrR.current);
+    audRowTmrR.current=setTimeout(()=>setAudRow(-1),260);
+  };
+  useEffect(()=>()=>clearTimeout(audRowTmrR.current),[]);
+  // Deferred so the JSX above can call them before auditionRow / auditionDrum
+  // are declared (Babel lowers const to var — a bare reference binds undefined).
+  const hitRowKey=r=>{flashRowKey(r);auditionRow(r);};
+  const hitDrumKey=r=>{flashRowKey(100+r);auditionDrum(r);};
   // Long-press a filled song slot to set how many times it repeats.
   // {idx,x,y} while open.
   const [repPopup, setRepPopup] = useState(null);
@@ -3342,6 +3437,15 @@ export default function LoudLight(){
   useEffect(()=>{bpmR.current=bpm;bell.current.stepDur=60/bpm/4*speedMultR.current;},[bpm]);
   useEffect(()=>{speedMultR.current=speedMult;bell.current.stepDur=60/bpmR.current/4*speedMult;},[speedMult]);
   useEffect(()=>{scaleR.current=scale;},[scale]);
+  // The 16 row frequencies for whatever scale is selected — a fixed table, or
+  // one generated from the user key. Computed once per change rather than per
+  // note: the scheduler reads curFreqsR, so a user scale costs it nothing.
+  const curFreqs=useMemo(()=>scaleFreqsOf(scale,userMask,userRoot),[scale,userMask,userRoot]);
+  const curShape=useMemo(()=>scaleShapeFor(scale,userMask,userRoot),[scale,userMask,userRoot]);
+  const curFreqsR=useRef(curFreqs);
+  useEffect(()=>{curFreqsR.current=curFreqs;},[curFreqs]);
+  const curShapeR=useRef(curShape);
+  useEffect(()=>{curShapeR.current=curShape;},[curShape]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
   const loopBarR=useRef(-1);
   useEffect(()=>{loopBarR.current=loopBar;},[loopBar]);
@@ -3531,7 +3635,7 @@ export default function LoudLight(){
     song:[...song],songRep:[...songRep],
     songMode,songView,
     activeLayer,
-    bpm,scale,transpose,swing,speedMult,
+    bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
@@ -3597,6 +3701,8 @@ export default function LoudLight(){
     // leave new params at stale values from outside the snapshot's lifetime).
     setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
     setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setUserMask(s.userMask!=null?s.userMask:SESSION_DEFAULTS.userMask);
+    setUserRoot(s.userRoot!=null?s.userRoot:SESSION_DEFAULTS.userRoot);
     setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
     setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
@@ -3680,7 +3786,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -3712,6 +3818,8 @@ export default function LoudLight(){
     // fallback the previous project's value would leak into this load.
     setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
     setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setUserMask(s.userMask!=null?s.userMask:SESSION_DEFAULTS.userMask);
+    setUserRoot(s.userRoot!=null?s.userRoot:SESSION_DEFAULTS.userRoot);
     setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
     setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     setSpeedMult(s.speedMult!=null?s.speedMult:SESSION_DEFAULTS.speedMult);
@@ -3846,7 +3954,7 @@ export default function LoudLight(){
     setSong(Array(64).fill(null));setSongRep(Array(64).fill(1));
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
-    setBpm(120);setScale("major");setTranspose(0);setSwing(0);setSpeedMult(1);
+    setBpm(120);setScale("major");setUserMask(USER_MASK_DEF);setUserRoot(0);setTranspose(0);setSwing(0);setSpeedMult(1);
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
@@ -4867,6 +4975,196 @@ export default function LoudLight(){
       )}
     </div>
   );
+  // ── ROW KEYS — audition a row without running the sequencer ─────────────
+  // A column of keys down the left of the grid: tap one to hear that row's
+  // note through the layer you're editing. It doubles as the grid's legend —
+  // with a user-defined key the row pitches aren't guessable any more, so the
+  // note name has to be somewhere, and beside the row is where it means
+  // something. Rows are flex:1 with no gap in the grid itself, so the keys
+  // are too and the two columns line up by construction.
+  // Deferred calls: auditionRow is declared further down and Babel lowers
+  // const to var, so a bare reference here binds undefined.
+  const _rowKeyStyle=(lit,accent)=>({flex:1,minHeight:0,display:"flex",alignItems:"center",
+    justifyContent:"center",borderRadius:IS_MOBILE?2:3,cursor:"pointer",userSelect:"none",
+    WebkitUserSelect:"none",touchAction:"none",fontFamily:"inherit",lineHeight:1,
+    fontSize:IS_MOBILE?7.5:9,fontWeight:600,letterSpacing:0.2,overflow:"hidden",
+    border:"1px solid "+(lit?accent:"rgba(168,190,212,0.10)"),
+    background:lit?"rgba(255,214,150,0.22)":"rgba(186,208,230,0.04)",
+    color:lit?"#ffd28a":"rgba(178,199,219,0.45)",
+    boxShadow:lit?"0 0 6px rgba(255,214,150,0.35)":"none",
+    transition:"background .12s, box-shadow .12s, color .12s"});
+  const rowKeys=(
+    <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",
+      marginRight:CELL_GAP,touchAction:"none"}}>
+      {Array.from({length:ROWS},(_,r)=>{
+        const fromBot=ROWS-1-r;
+        const isOct=fromBot%curShape.span===0;
+        const lit=audRow===r;
+        // The name is what will actually sound: the scale row through the
+        // global PITCH offset, so it tracks transpose like the note does.
+        const name=noteNameOf(curFreqs[r]*stR(transpose));
+        return(
+          <div key={r} role="button" aria-label={"Hear row "+(r+1)+", "+name} data-rowkey={r}
+            onPointerDown={e=>{e.preventDefault();e.stopPropagation();hitRowKey(r);}}
+            onContextMenu={e=>e.preventDefault()}
+            style={Object.assign({},_rowKeyStyle(lit,"rgba(255,214,150,0.7)"),
+              lit?{}:{background:isOct?"rgba(186,208,230,0.10)":"rgba(186,208,230,0.04)",
+                     color:isOct?"rgba(200,218,236,0.7)":"rgba(178,199,219,0.42)"})}>
+            {name}
+          </div>
+        );
+      })}
+    </div>
+  );
+  // Same idea on the drum page: the voice under your finger, at the level its
+  // mixer strip is set to. The drum grid spaces its rows by 2, so this column
+  // does too or the labels walk away from the rows they name.
+  const drumRowKeys=(
+    <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",gap:2,
+      marginRight:2,touchAction:"none"}}>
+      {DRUM_VOICES.map((voice,r)=>{
+        const lit=audRow===100+r;
+        const dc=drumColor(r,linkHat,linkTom);
+        return(
+          <div key={voice.key} role="button" aria-label={"Hear "+(voice.full||voice.label)} data-drumkey={r}
+            onPointerDown={e=>{e.preventDefault();e.stopPropagation();hitDrumKey(r);}}
+            onContextMenu={e=>e.preventDefault()}
+            style={Object.assign({},_rowKeyStyle(lit,dc),lit?{background:dc+"33",color:dc,boxShadow:"0 0 6px "+dc+"66"}:{color:dc,opacity:0.75})}>
+            {voice.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+  // ── SCALE PICKER + USER KEY ─────────────────────────────────────────────
+  // The fixed scales are frequency tables; USER is a key you draw. The picker
+  // and the keyboard are one body mounted twice (desktop sidebar, mobile TEMPO
+  // sheet) — forking them is how the two platforms drift apart.
+  //
+  // Switching TO user seeds the key from whatever scale was showing, so it
+  // starts as the notes you were already playing rather than resetting to C.
+  const chooseScale=k=>{
+    if(k==="user"&&scale!=="user"){
+      const f=curFreqs;
+      let m=0;
+      for(const x of f)m|=1<<pcOfFreq(x);
+      setUserMask(m||USER_MASK_DEF);
+      setUserRoot(pcOfFreq(f[ROWS-1]));     // the bottom row is the tonic
+    }
+    setScale(k);
+  };
+  // Toggle a note in or out of the key. The tonic can be turned off — the root
+  // then moves up to the next note still in the key — because refusing the tap
+  // reads as a broken button; only the LAST note is refused, since a key with
+  // no notes isn't one.
+  const toggleUserNote=pc=>{
+    const on=!!(userMask&(1<<pc));
+    if(on){
+      if(popCount12(userMask)<=1){showFlash("A KEY NEEDS AT LEAST ONE NOTE","warn");return;}
+      const next=userMask&~(1<<pc);
+      setUserMask(next);
+      if(userRoot===pc){for(let i=1;i<12;i++){const c=(pc+i)%12;if(next&(1<<c)){setUserRoot(c);break;}}}
+    }else{
+      setUserMask(userMask|(1<<pc));
+      auditionFreq(261.63*Math.pow(2,pc/12));   // hear what you just added
+    }
+  };
+  // Press-and-hold (or right-click) makes a note the tonic — the note the rows
+  // are built from and the octave lines land on. It's the rarer decision, so it
+  // gets the deliberate gesture and the tap stays as toggling.
+  const setUserTonic=pc=>{
+    setUserRoot(pc);
+    setUserMask(m=>m|(1<<pc));
+    auditionFreq(261.63*Math.pow(2,pc/12));
+  };
+  const keyHoldR=useRef({tmr:0,held:false});
+  const _keyHoldEnd=()=>{if(keyHoldR.current.tmr){clearTimeout(keyHoldR.current.tmr);keyHoldR.current.tmr=0;}};
+  // White keys carry the naturals; the five black keys are drawn over the seams
+  // between them, at real piano positions, so the shape is a keyboard rather
+  // than twelve identical boxes — you read it the way you read a tuner.
+  const WHITE_PC=[0,2,4,5,7,9,11];
+  const BLACK_PC=[[1,1],[3,2],[6,4],[8,5],[10,6]];   // [pitch class, seam index]
+  const scalePicker=(compact)=>(
+    <div style={{width:"100%"}}>
+      <select style={{...S.sel,width:"100%",fontSize:compact?11:13}} value={scale} onChange={e=>chooseScale(e.target.value)}>
+        {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+        <option value="user">USER KEY</option>
+      </select>
+      {scale==="user"&&(
+        <div style={{marginTop:compact?5:8}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:4}}>
+            <span style={{fontSize:compact?7:9,letterSpacing:1.5,color:"rgba(178,199,219,0.35)",fontWeight:600}}>KEY</span>
+            <span style={{fontSize:compact?11:13,fontWeight:700,color:"#ffd28a"}}>{NOTE_NAMES[userRoot]}</span>
+            <span style={{fontSize:compact?7:9,color:"rgba(178,199,219,0.35)",letterSpacing:1}}>{popCount12(userMask)} NOTES</span>
+            <span style={{flex:1}}/>
+            <span style={{fontSize:compact?6:8,color:"rgba(178,199,219,0.25)",letterSpacing:0.5}}>HOLD = TONIC</span>
+          </div>
+          {/* One octave, C to B. Height is the touch target — a black key is
+              60% of it, like a real keyboard, and still a thumb wide. */}
+          <div style={{position:"relative",height:compact?52:64,display:"flex",gap:2,touchAction:"none",userSelect:"none",WebkitUserSelect:"none"}}>
+            {WHITE_PC.map(pc=>{
+              const on=!!(userMask&(1<<pc)),root=userRoot===pc;
+              return(
+                <div key={pc} role="button" aria-label={NOTE_NAMES[pc]} aria-pressed={on} data-keypc={pc}
+                  onPointerDown={e=>{e.preventDefault();keyHoldR.current.held=false;_keyHoldEnd();
+                    keyHoldR.current.tmr=setTimeout(()=>{keyHoldR.current.tmr=0;keyHoldR.current.held=true;setUserTonic(pc);},450);}}
+                  onPointerMove={e=>{if(e.buttons)_keyHoldEnd();}}
+                  onPointerUp={()=>_keyHoldEnd()}
+                  onPointerCancel={()=>{_keyHoldEnd();keyHoldR.current.held=false;}}
+                  onContextMenu={e=>{e.preventDefault();_keyHoldEnd();keyHoldR.current.held=true;setUserTonic(pc);}}
+                  onClick={()=>{if(keyHoldR.current.held){keyHoldR.current.held=false;return;}toggleUserNote(pc);}}
+                  style={{flex:1,minWidth:0,borderRadius:"3px 3px 5px 5px",cursor:"pointer",position:"relative",
+                    display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:3,
+                    border:"1px solid "+(root?"#ffd28a":on?"rgba(255,214,150,0.5)":"rgba(168,190,212,0.18)"),
+                    background:on?"rgba(255,214,150,0.5)":"rgba(186,208,230,0.07)",
+                    boxShadow:on?"0 0 8px rgba(255,214,150,0.35)":"none",
+                    color:on?"rgba(14,26,40,0.75)":"rgba(178,199,219,0.4)",
+                    fontSize:compact?7:9,fontWeight:700,lineHeight:1}}>
+                  {NOTE_NAMES[pc]}
+                  {root&&<div style={{position:"absolute",top:3,left:"50%",transform:"translateX(-50%)",width:4,height:4,borderRadius:"50%",background:"#0e1c2b"}}/>}
+                </div>
+              );
+            })}
+            {BLACK_PC.map(([pc,seam])=>{
+              const on=!!(userMask&(1<<pc)),root=userRoot===pc;
+              return(
+                <div key={pc} role="button" aria-label={NOTE_NAMES[pc]} aria-pressed={on} data-keypc={pc}
+                  onPointerDown={e=>{e.preventDefault();e.stopPropagation();keyHoldR.current.held=false;_keyHoldEnd();
+                    keyHoldR.current.tmr=setTimeout(()=>{keyHoldR.current.tmr=0;keyHoldR.current.held=true;setUserTonic(pc);},450);}}
+                  onPointerMove={e=>{if(e.buttons)_keyHoldEnd();}}
+                  onPointerUp={()=>_keyHoldEnd()}
+                  onPointerCancel={()=>{_keyHoldEnd();keyHoldR.current.held=false;}}
+                  onContextMenu={e=>{e.preventDefault();_keyHoldEnd();keyHoldR.current.held=true;setUserTonic(pc);}}
+                  onClick={e=>{e.stopPropagation();if(keyHoldR.current.held){keyHoldR.current.held=false;return;}toggleUserNote(pc);}}
+                  style={{position:"absolute",top:0,height:"62%",zIndex:2,
+                    left:`calc(${seam}*(100% + 2px)/7 - ${compact?7:9}px)`,width:compact?14:18,
+                    borderRadius:"2px 2px 4px 4px",cursor:"pointer",
+                    display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:2,
+                    border:"1px solid "+(root?"#ffd28a":on?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.22)"),
+                    background:on?"rgba(255,214,150,0.62)":"#101f30",
+                    boxShadow:on?"0 0 8px rgba(255,214,150,0.4)":"0 2px 4px rgba(0,0,0,0.4)",
+                    color:on?"rgba(14,26,40,0.8)":"rgba(178,199,219,0.35)",
+                    fontSize:compact?6:7,fontWeight:700,lineHeight:1}}>
+                  {NOTE_NAMES[pc]}
+                  {root&&<div style={{position:"absolute",top:2,left:"50%",transform:"translateX(-50%)",width:3,height:3,borderRadius:"50%",background:"#0e1c2b"}}/>}
+                </div>
+              );
+            })}
+          </div>
+          {/* Shapes, built from whatever the tonic currently is — a starting
+              point to bend, not a replacement for the keyboard. */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:3,marginTop:5}}>
+            {[["MAJ",[0,2,4,5,7,9,11]],["MIN",[0,2,3,5,7,8,10]],["PENT",[0,2,4,7,9]],["ALL",[0,1,2,3,4,5,6,7,8,9,10,11]]].map(([lbl,ivs])=>(
+              <button key={lbl} type="button"
+                onClick={()=>setUserMask(ivs.reduce((m,i)=>m|(1<<((userRoot+i)%12)),0))}
+                style={{padding:"4px 0",borderRadius:5,border:"1px solid rgba(168,190,212,0.16)",background:"transparent",
+                  color:"rgba(178,199,219,0.55)",fontSize:compact?7:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
   const barOpsRow=(
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:2}}>
       {[["+BAR",addBar,barCount>=MAX_BARS,false],
@@ -4903,7 +5201,7 @@ export default function LoudLight(){
   // grids. applyShareState unpacks, and pre-codec saves pass through untouched.
   const getShareState=(includeSamples=true)=>packProject({
     ver:PROJ_VER,
-    bpm,scale,transpose,swing,speedMult,
+    bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
@@ -4926,6 +5224,8 @@ export default function LoudLight(){
     // baseline for anything the link doesn't carry, same rule as doLoad.
     setBpm(s.bpm!=null?s.bpm:SESSION_DEFAULTS.bpm);
     setScale(s.scale!=null?s.scale:SESSION_DEFAULTS.scale);
+    setUserMask(s.userMask!=null?s.userMask:SESSION_DEFAULTS.userMask);
+    setUserRoot(s.userRoot!=null?s.userRoot:SESSION_DEFAULTS.userRoot);
     setTranspose(s.transpose!=null?s.transpose:SESSION_DEFAULTS.transpose);
     setSwing(s.swing!=null?s.swing:SESSION_DEFAULTS.swing);
     // s.gridLen was per-pattern in legacy shares; new shares carry it on
@@ -5144,7 +5444,7 @@ export default function LoudLight(){
   // is the underlying composition (the MP3 bounce captures the performance).
   const exportMIDI=()=>{
     const bars=_exportBars();
-    const freqs=(SCALES[scale]||SCALES.major).freqs;
+    const freqs=curFreqs;
     const usPerQ=Math.round(60000000/Math.max(1,bpm));
     const meta=[{tick:0,data:[0xFF,0x51,0x03,(usPerQ>>16)&255,(usPerQ>>8)&255,usPerQ&255]},
                 {tick:0,data:[0xFF,0x58,0x04,4,2,24,8]}];
@@ -5419,7 +5719,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -5445,7 +5745,7 @@ export default function LoudLight(){
   const playSynthLayerStep=(layer,pat,s,at,stepDur)=>{
     if(!pat||!pat.grid)return;
     const layerLP = layerParamsR.current[layer];
-    const freqs = SCALES[scaleR.current].freqs;
+    const freqs = curFreqsR.current;
     const ratio = stR(transpR.current);
     const vary = !!varyModeR.current[layer];
     const useGrid = vary ? (variedGrids.current.get(pat.id)||pat.grid) : pat.grid;
@@ -5766,28 +6066,15 @@ export default function LoudLight(){
   // ── (legacy unified sync scheduler removed in the per-layer rewrite) ──
   /* legacy unified sync scheduler — body removed in the per-layer rewrite */
 
-  const startStop=async()=>{
-    // Read/write the LIVE ref (not the `playing` state closure) so rapid
-    // programmatic start→stop calls (the MP3 bounce) resolve correctly within
-    // one render. Button clicks are unaffected (state is settled there).
-    if(playingR.current){
-      clearInterval(tmrR.current);
-      playingR.current=false;
-      setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
-      setSongBar(-1);songBarR.current=-1;
-      setSongPulse(-1);songPulseR.current=-1;
-      setSongBarLayer({synth:-1,lead:-1,drums:-1});
-      layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
-      setRecMode(false);recModeR.current=false;
-      if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
-      releaseWakeLock();
-      if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
-      return;
-    }
+  // Bring the audio engines up and push every engine-side value into them.
+  // Called on play-start and by the row-key auditions, which need a live engine
+  // without starting the transport — same warm-up either way, so it lives in
+  // one place rather than being half-repeated. Must be called from a user
+  // gesture (a tap or a click): iOS won't start an AudioContext otherwise.
+  const startEngines=async()=>{
     const dlyT=(60/bpm)*DLY_NOTES[dlyIdx].mult;
     if(!bell.current.ready)await bell.current.init(dlyT,dlyFbPct/100,50,dlyHpVal,dlyLpVal);
     else await bell.current.resume();
-    bell.current.stepDur=60/bpm/4*speedMult;
     // Pass Bell's reverb + delay inputs so DrumEngine voices can have per-
     // channel sends. Without these refs, send knobs in the drum mixer no-op.
     await drumEngine.current.init(bell.current.master, bell.current.rev, bell.current.dly);
@@ -5808,6 +6095,60 @@ export default function LoudLight(){
     // Push the global drum mix to the strips on play-start (effects fire before
     // the engine is ready on a cold start).
     {const _m=fillDrumMix(drumMix);for(let r=0;r<DRUM_ROWS;r++)drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,_m[r]);}
+  };
+  // ── AUDITION — hear a pitch without running the sequencer ────────────────
+  // The row keys down the side of the grid and the scale editor's keyboard both
+  // land here. It plays through the ACTIVE layer's voice (its waveform, filter,
+  // envelope and sends), because the question being asked is "what does this
+  // row sound like in this part", not "what does a sine at 220Hz sound like".
+  // Deliberately independent of the transport: it works stopped, and while
+  // playing it just adds a voice.
+  const auditionFreq=async(f)=>{
+    if(!(f>0))return;
+    try{
+      await startEngines();
+      const layer=activeLayerR.current==="drums"?"synth":activeLayerR.current;
+      const lp=layerParamsR.current[layer];
+      // A held-ish note: long enough to hear the filter and the tail, short
+      // enough that jabbing down the column doesn't turn into a chord.
+      bell.current.play(f*stR(transpR.current),null,null,0.45,lp?lp.dlySend:0,null,0,lp,layer);
+    }catch(e){console.error("audition failed",e);}
+  };
+  const auditionRow=r=>auditionFreq(curFreqsR.current[r]);
+  // Drums audition their own engine — the row keys on the drum page play the
+  // voice at the velocity its mixer strip is set to.
+  const auditionDrum=async(r)=>{
+    try{
+      await startEngines();
+      const v=DRUM_VOICES[r];if(!v)return;
+      const mix=fillDrumMix(drumMixR.current||drumMix)[r];
+      // DrumEngine.play uses its time argument raw (no currentTime default the
+      // way Bell.play has), so an audition has to name a real time or every
+      // envelope lands at NaN and nothing sounds.
+      const at=drumEngine.current.ctx.currentTime+0.01;
+      drumEngine.current.play(v.key,at,100,mix,voiceSamplesR.current[v.key],null);
+    }catch(e){console.error("drum audition failed",e);}
+  };
+  const startStop=async()=>{
+    // Read/write the LIVE ref (not the `playing` state closure) so rapid
+    // programmatic start→stop calls (the MP3 bounce) resolve correctly within
+    // one render. Button clicks are unaffected (state is settled there).
+    if(playingR.current){
+      clearInterval(tmrR.current);
+      playingR.current=false;
+      setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
+      setSongBar(-1);songBarR.current=-1;
+      setSongPulse(-1);songPulseR.current=-1;
+      setSongBarLayer({synth:-1,lead:-1,drums:-1});
+      layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
+      setRecMode(false);recModeR.current=false;
+      if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
+      releaseWakeLock();
+      if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
+      return;
+    }
+    await startEngines();
+    bell.current.stepDur=60/bpm/4*speedMult;
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
     if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
     if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
@@ -6629,7 +6970,7 @@ export default function LoudLight(){
   const randPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;
     const isMono=activeLayerR.current==="lead";
-    const bar=isMono?randMonoGrid():randPolyGrid();
+    const bar=isMono?randMonoGrid(curShapeR.current.span):randPolyGrid(curShapeR.current.span);
     return Object.assign({},p,{grid:spliceCols(p.grid,bar,barOffIn(p))});
   }));};
   const randPat=()=>mutatePat((g,p2)=>
@@ -7732,9 +8073,7 @@ export default function LoudLight(){
                   className="markglow" style={{flexShrink:0,height:winW>900?34:winW>650?21:17,width:"auto",display:"block"}}/>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:winW>750?4:3,marginBottom:winW>750?8:4}}>
-                <select style={{...S.sel,width:"100%",fontSize:winW>1000?13:winW>550?11:9}} value={scale} onChange={e=>setScale(e.target.value)}>
-                  {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                </select>
+                {scalePicker(true)}
               </div>
               {/* Global TEMPO / PITCH / SWING — vertical drag scrubbers, mirror
                   the mobile widgets. SPEED moved out of here because it's per-
@@ -7897,14 +8236,26 @@ export default function LoudLight(){
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
-              {barStrip}
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
+              {/* The bar strip starts where the grid does, not where the key
+                  column does — the chips are a scrubber over the pattern, and
+                  hanging them out to the left of the grid just reads as a
+                  misalignment. */}
+              <div style={{display:"flex",width:"100%"}}><div style={{width:ROWKEY_W+CELL_GAP,flexShrink:0}}/>{barStrip}</div>
+              {/* Row keys sit OUTSIDE the grid container: the grid's pointer
+                  handlers live on that container and hit-test a column from its
+                  own width, so a key column inside it would be read as column 0. */}
+              <div style={{flex:1,minHeight:0,display:"flex"}}>
+              {rowKeys}
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {Array.from({length:ROWS},(_,r)=>{
                   const fromBot=ROWS-1-r;
-                  const isOct=fromBot%SCALE_SPAN===0;
-                  const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
+                  // Octave and fifth rows come from the SCALE's own shape now —
+                  // seven notes for the modes, five for PENTA, however many are
+                  // lit for a user key (which may have no fifth at all).
+                  const isOct=fromBot%curShape.span===0;
+                  const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
                   // VARY visual feedback (synth/lead): the live varied grid for the
                   // active pattern while vary is on + playing. Drives the gold/dim
                   // overlay below; re-renders each step via `step`.
@@ -7978,7 +8329,8 @@ export default function LoudLight(){
                   </div>
                 );})}
               </div>
-              <div style={S.stepBar}>
+              </div>
+              <div style={Object.assign({},S.stepBar,{marginLeft:ROWKEY_W+CELL_GAP})}>
                 {Array.from({length:COLS},(_,c)=>{
                   const ac=barOff+c;
                   const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;
@@ -7990,7 +8342,7 @@ export default function LoudLight(){
                   </div>
                 );})}
               </div>
-              <div ref={lenSliderRef} style={S.lenSlider}
+              <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:ROWKEY_W+CELL_GAP})}
                 onPointerDown={handleLenDown} onPointerMove={handleLenMove}
                 onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                 {/* The slider is one BAR wide, so it shows this page's slice of
@@ -8021,8 +8373,15 @@ export default function LoudLight(){
                     Tap a cell to toggle; click-and-drag vertically on a cell to
                     set its per-cell velocity (drag up = louder). Brightness of a
                     lit cell reflects its velocity. */}
-                <div style={{width:dw||"80%",flexShrink:0}}>{barStrip}</div>
-                <div style={Object.assign({},shifting?S.gridShifting:{},{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:2})}>
+                <div style={{width:dw||"80%",flexShrink:0,display:"flex"}}><div style={{width:ROWKEY_W+2,flexShrink:0}}/>{barStrip}</div>
+                {/* Voice keys down the side — tap one to hear that drum at its
+                    mixer level, without running the sequencer. The drum grid's
+                    handlers are PER CELL rather than on the container, so this
+                    column could sit inside it; it stays outside anyway so both
+                    grids are built the same way. */}
+                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex"}}>
+                {drumRowKeys}
+                <div style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2})}>
                   {DRUM_VOICES.map((voice,r)=>{
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
@@ -8100,8 +8459,9 @@ export default function LoudLight(){
                     </div>
                   )})}
                 </div>
+                </div>
                 {/* Length slider */}
-                <div style={{...S.lenSlider,flexShrink:0,width:dw||"80%"}}
+                <div style={{...S.lenSlider,flexShrink:0,marginLeft:ROWKEY_W+2,width:dw?dw-(ROWKEY_W+2):"80%"}}
                   onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
                   onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
                   <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
@@ -8684,12 +9044,15 @@ export default function LoudLight(){
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
               <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
-                  {barStrip}
-                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,display:"flex",flexDirection:"column"})}
+                  <div style={{display:"flex",width:"100%"}}><div style={{width:ROWKEY_W+CELL_GAP,flexShrink:0}}/>{barStrip}</div>
+                  {/* Keys outside the grid container — see the desktop mount. */}
+                  <div style={{flex:1,minHeight:0,display:"flex"}}>
+                  {rowKeys}
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
                     {Array.from({length:ROWS},(_,r)=>{
-                      const fromBot=ROWS-1-r;const isOct=fromBot%SCALE_SPAN===0;const isFifth=!isOct&&fromBot%SCALE_SPAN===4;
+                      const fromBot=ROWS-1-r;const isOct=fromBot%curShape.span===0;const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
                       const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                       return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
@@ -8715,8 +9078,9 @@ export default function LoudLight(){
                       </div>);
                     })}
                   </div>
-                  <div style={S.stepBar}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
-                  <div ref={lenSliderRef} style={S.lenSlider} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
+                  </div>
+                  <div style={Object.assign({},S.stepBar,{marginLeft:ROWKEY_W+CELL_GAP})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:ROWKEY_W+CELL_GAP})} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
                     <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
                     {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${_lenFrac*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
@@ -8743,8 +9107,11 @@ export default function LoudLight(){
                   const SIZE=isLandscape?`min(calc(100vw - 190px), calc(100dvh - 32px))`:`min(calc(100vw - 20px), calc(100dvh - 150px))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
-                      <div style={{width:SIZE,flexShrink:0}}>{barStrip}</div>
-                      <div style={{width:SIZE,display:"flex",flexDirection:"column",gap:GAP,flexShrink:0,touchAction:"none"}}>
+                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:ROWKEY_W+GAP,flexShrink:0}}/>{barStrip}</div>
+                      {/* Voice keys — tap to hear the drum on its own. */}
+                      <div style={{width:SIZE,display:"flex",flexShrink:0}}>
+                      {drumRowKeys}
+                      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none"}}>
                         {DRUM_VOICES.map((voice,r)=>{
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
@@ -8818,8 +9185,9 @@ export default function LoudLight(){
                           </div>
                         )})}
                       </div>
+                      </div>
                       {/* Horizontal length slider (matches synth grid orientation) */}
-                      <div style={{width:SIZE,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
+                      <div style={{width:`calc(${SIZE} - ${ROWKEY_W+GAP}px)`,marginLeft:ROWKEY_W+GAP,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
                         onPointerDown={e=>{
                           e.stopPropagation();
                           const rect=e.currentTarget.getBoundingClientRect();
@@ -8939,9 +9307,7 @@ export default function LoudLight(){
                 {activeSheet==="tempo"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>TEMPO</div>
-                    <select style={{...S.sel,width:"100%",marginBottom:12,fontSize:13}} value={scale} onChange={e=>setScale(e.target.value)}>
-                      {Object.entries(SCALES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                    </select>
+                    <div style={{marginBottom:12}}>{scalePicker(false)}</div>
                     <div style={{display:"flex",gap:8,marginBottom:14}}>
                       <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
                         <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
