@@ -15,7 +15,7 @@
 //   node build.mjs --audit-only just run the CJS audit, no output
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, cpSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -251,6 +251,7 @@ ${nativeJs}
   cpSync("kits.json", join(WWW, "kits.json"));
   cpSync("icon.svg", join(WWW, "icon.svg"));
   cpSync("icon.png", join(WWW, "icon.png"));
+  cpSync("icon-mark.png", join(WWW, "icon-mark.png"));
 
   // Guard the whole payload, not just the HTML: a stray CDN URL in a vendored
   // file or a sample path would fail the same way, at the same altitude.
@@ -269,6 +270,31 @@ ${nativeJs}
   if (stray.length) {
     console.error("!! iOS BUILD FAIL: remote references left in the offline payload:");
     for (const s2 of stray) console.error("   " + s2);
+    process.exit(1);
+  }
+
+  // A local asset the app names but the bundle doesn't carry fails just as
+  // badly as a remote one, and the scan above can't see it: on the web the file
+  // sits next to index.html and is served anyway, so it only breaks inside the
+  // app. That is exactly how icon-mark.png — the header logo — shipped missing
+  // to a device, invisible until someone looked at the screen.
+  //
+  // Restricted to the extensions that are always bundled assets. Audio
+  // extensions are deliberately excluded: the only .mp3/.mid literals in the
+  // source are EXPORT filenames, and sample paths are built at runtime from
+  // kits.json, so neither is a static reference this could check.
+  const missing = [];
+  for (const body of [nativeJs, nativeHtml]) {
+    for (const m of body.matchAll(/["'`]([A-Za-z0-9._\-]+(?:\/[A-Za-z0-9._\-]+)*\.(?:png|svg|woff2|json))["'`]/g)) {
+      const ref = m[1];
+      if (ref.startsWith("/") || existsSync(join(WWW, ref))) continue;
+      if (!missing.includes(ref)) missing.push(ref);
+    }
+  }
+  if (missing.length) {
+    console.error("!! iOS BUILD FAIL: the payload references local files it does not contain:");
+    for (const f of missing) console.error("   " + f);
+    console.error("   Add a cpSync for each above, or the app ships with a broken asset.");
     process.exit(1);
   }
 
