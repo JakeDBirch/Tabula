@@ -216,6 +216,16 @@ to the source, the iOS build breaks until you vendor it into `vendor/`.
 - **`BundleSchemeHandler` tracks stopped tasks.** Replying to a `WKURLSchemeTask`
   after WebKit has called `stop` on it throws an ObjC exception that takes the
   app down, and there is no way to ask a task whether it's still live.
+- **`SceneDelegate` owns the window, and the app is single-SCENE, not
+  scene-less.** Those are different choices and conflating them was a mistake
+  worth not repeating: the real requirement is that two windows must never mean
+  two schedulers writing the same `localStorage` key, and
+  `UIApplicationSupportsMultipleScenes = false` states that directly. Avoiding
+  the UIScene lifecycle to get it was borrowed time — iOS 26 warns "`UIScene`
+  lifecycle will soon be required", and building against the **iOS 27 SDK turns
+  it into an assert that fires before any app-delegate method**, so the app
+  simply doesn't launch. The manifest lives in `Info.plist`; the delegate is
+  named there as `$(PRODUCT_MODULE_NAME).SceneDelegate`.
 
 **Two source changes the shell needs, both guarded on `window.__LOUDLIGHT_NATIVE__`
 (set by the iOS scaffold, absent on the web):**
