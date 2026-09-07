@@ -231,16 +231,6 @@ to the source, the iOS build breaks until you vendor it into `vendor/`.
   is what "download" means on a phone anyway. Verified end to end headlessly by
   shimming `window.webkit` and asserting the MIDI header bytes arrive.
 
-**iPhone and iPad from one build** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
-app needed no changes: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad gets the
-touch layout rather than the desktop one, and the layout is flex/`dvh` with
-`isLandscape` recomputed on resize. Verified headlessly from 400×700 to
-1194×834 and across a live resize — no overflow in either axis, and cells grow
-from ~21px on a phone to ~48px on an 11" iPad. Do **not** reach for
-`UIRequiresFullScreen` if iPad windowing ever looks wrong: it is deprecated and
-ignored from iPadOS 26, where every app is a resizable window, so the layout
-holding at any size is the only real answer.
-
 **iPhone and iPad from one target** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
 app needed no changes for it: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad
 gets the touch layout rather than the desktop one, and the layout is flex/`dvh`
@@ -340,7 +330,7 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
-- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and on `main`; see "The iOS app" above. Builds for **iPhone and iPad** from one target. Blocked on Jake only for the Team ID and the bundle identifier in `ios/Config/LoudLight.xcconfig`, registering the app in App Store Connect, and a first archive from his Mac. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. The app name is settled (Loud Light); **the bundle ID is the permanent one** and is still a placeholder (`com.loudlight.sequencer`).
+- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and on `main`; see "The iOS app" above. Builds for **iPhone and iPad** from one target. Signing is settled and committed — Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer` (reverse-DNS of loudlight.co, which Jake owns; permanent, and matching the registered App ID). The App Store Connect record exists. What's left is Jake's Mac: `npm run build:ios && cd ios && xcodegen generate`, run on device, archive, upload. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. **No Swift has ever been compiled**, so expect a round of build errors on the first attempt.
 - **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.
