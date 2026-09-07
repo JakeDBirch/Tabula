@@ -243,15 +243,27 @@ ${nativeJs}
   rmSync(WWW, { recursive: true, force: true });
   mkdirSync(WWW, { recursive: true });
   writeFileSync(join(WWW, "index.html"), nativeHtml);
-  for (const f of ["react.production.min.js", "react-dom.production.min.js", "lame.min.js"]) {
-    cpSync(join("vendor", f), join(WWW, f));
+  // Everything the bundle carries, in one list. A source file that has moved or
+  // been renamed reports itself here rather than throwing a raw ENOENT stack
+  // from inside cpSync, which says nothing about which build step wanted it.
+  const ASSETS = [
+    ["vendor/react.production.min.js", "react.production.min.js"],
+    ["vendor/react-dom.production.min.js", "react-dom.production.min.js"],
+    ["vendor/lame.min.js", "lame.min.js"],
+    ["vendor/fonts", "fonts"],
+    ["samples", "samples"],
+    ["kits.json", "kits.json"],
+    ["icon.svg", "icon.svg"],
+    ["icon.png", "icon.png"],
+    ["icon-mark.png", "icon-mark.png"],   // the header logo, in both mounts
+  ];
+  const absent = ASSETS.filter(([src]) => !existsSync(src)).map(([src]) => src);
+  if (absent.length) {
+    console.error("!! iOS BUILD FAIL: these are listed in the iOS payload but missing from the repo:");
+    for (const f of absent) console.error("   " + f);
+    process.exit(1);
   }
-  cpSync("vendor/fonts", join(WWW, "fonts"), { recursive: true });
-  cpSync("samples", join(WWW, "samples"), { recursive: true });
-  cpSync("kits.json", join(WWW, "kits.json"));
-  cpSync("icon.svg", join(WWW, "icon.svg"));
-  cpSync("icon.png", join(WWW, "icon.png"));
-  cpSync("icon-mark.png", join(WWW, "icon-mark.png"));
+  for (const [src, dst] of ASSETS) cpSync(src, join(WWW, dst), { recursive: true });
 
   // Guard the whole payload, not just the HTML: a stray CDN URL in a vendored
   // file or a sample path would fail the same way, at the same altitude.
