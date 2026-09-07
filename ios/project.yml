@@ -1,0 +1,83 @@
+# XcodeGen spec — the Xcode project is generated from this, never committed.
+#
+# A .pbxproj is a large, order-sensitive, merge-hostile file that no one reads;
+# this is the same information in a form you can review in a diff. Regenerate
+# after changing it:
+#
+#   npm run build:ios          # ios/www — the app payload MUST exist first
+#   cd ios && xcodegen generate
+#   open LoudLight.xcodeproj
+#
+# Changes made in Xcode's project/target inspector are overwritten on the next
+# generate. Signing and versioning therefore live in Config/LoudLight.xcconfig,
+# which is committed and survives.
+
+name: LoudLight
+
+options:
+  bundleIdPrefix: com.loudlight
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  # The generated project is a build artifact, not source.
+  generateEmptyDirectories: false
+
+configs:
+  Debug: debug
+  Release: release
+
+targets:
+  LoudLight:
+    type: application
+    platform: iOS
+
+    sources:
+      - path: LoudLight
+      # A folder REFERENCE, not a group: the whole www/ tree is copied into the
+      # bundle verbatim, keeping the directory layout the page's relative URLs
+      # (samples/808-kit/BD.wav, fonts/…) depend on. As a group, Xcode would
+      # flatten every file into the bundle root and every sample would 404.
+      # This directory is generated — `npm run build:ios` before generating.
+      - path: www
+        type: folder
+
+    configFiles:
+      Debug: Config/LoudLight.xcconfig
+      Release: Config/LoudLight.xcconfig
+
+    settings:
+      base:
+        INFOPLIST_FILE: LoudLight/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # iPhone and iPad. Nothing in the web app needed changing for it:
+        # IS_MOBILE keys off maxTouchPoints, so an iPad already gets the
+        # touch layout rather than the desktop one, and the layout is flex/dvh
+        # throughout with isLandscape recomputed on resize. Checked headlessly
+        # from 400x700 up to 1194x834 and through a live resize — no overflow in
+        # either axis at any size, and grid cells grow from 21px on a phone to
+        # 48px on an 11" iPad, which is the whole point of playing it there.
+        # Note that iPadOS 26 makes every app a resizable window regardless
+        # (UIRequiresFullScreen is deprecated and ignored), so "iPad support"
+        # is really "survives an arbitrary window size" — which it does.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+        GCC_TREAT_WARNINGS_AS_ERRORS: NO
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+
+# Declared explicitly rather than left to Xcode's autocreation: an autocreated
+# scheme is per-user and not committed, so `xcodebuild -scheme LoudLight` on a CI
+# runner would fail to find one.
+schemes:
+  LoudLight:
+    build:
+      targets:
+        LoudLight: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -507,7 +507,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-07 23:04Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-07 23:05Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -542,7 +542,15 @@ var freqToMidi=function freqToMidi(f){return Math.max(0,Math.min(127,Math.round(
 var _vlq=function _vlq(n){n=Math.max(0,Math.round(n));var b=[n&0x7f];n=Math.floor(n/128);while(n>0){b.unshift(n&0x7f|0x80);n=Math.floor(n/128);}return b;};var _str=function _str(s){return Array.from(s).map(function(c){return c.charCodeAt(0);});};var _u32=function _u32(n){return[n>>>24&255,n>>>16&255,n>>>8&255,n&255];};// events: [{tick, data:[status,...]}] — built into an MTrk chunk (sorted, delta-encoded).
 var _midiTrack=function _midiTrack(events){events.sort(function(a,b){return a.tick-b.tick||(a.order||0)-(b.order||0);});var body=[];var last=0;var _iterator7=_createForOfIteratorHelper(events),_step7;try{for(_iterator7.s();!(_step7=_iterator7.n()).done;){var e=_step7.value;body.push.apply(body,_toConsumableArray(_vlq(e.tick-last)).concat(_toConsumableArray(e.data)));last=e.tick;}}catch(err){_iterator7.e(err);}finally{_iterator7.f();}body.push(0x00,0xFF,0x2F,0x00);// End of Track
 return[].concat(_toConsumableArray(_str("MTrk")),_toConsumableArray(_u32(body.length)),body);};// tracks: array of event-arrays. Returns a Blob (format-1 SMF).
-var buildSMF=function buildSMF(tracks){var head=[].concat(_toConsumableArray(_str("MThd")),_toConsumableArray(_u32(6)),[0x00,0x01,tracks.length>>8&255,tracks.length&255,PPQ>>8&255,PPQ&255]);var bytes=_toConsumableArray(head);var _iterator8=_createForOfIteratorHelper(tracks),_step8;try{for(_iterator8.s();!(_step8=_iterator8.n()).done;){var t=_step8.value;bytes.push.apply(bytes,_toConsumableArray(_midiTrack(t)));}}catch(err){_iterator8.e(err);}finally{_iterator8.f();}return new Uint8Array(bytes);};var downloadBlob=function downloadBlob(data,filename,type){var blob=data instanceof Blob?data:new Blob([data],{type:type||"application/octet-stream"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();setTimeout(function(){return URL.revokeObjectURL(a.href);},2000);};// c0/w bound the column WINDOW this variation touches; shifts and ghost notes
+var buildSMF=function buildSMF(tracks){var head=[].concat(_toConsumableArray(_str("MThd")),_toConsumableArray(_u32(6)),[0x00,0x01,tracks.length>>8&255,tracks.length&255,PPQ>>8&255,PPQ&255]);var bytes=_toConsumableArray(head);var _iterator8=_createForOfIteratorHelper(tracks),_step8;try{for(_iterator8.s();!(_step8=_iterator8.n()).done;){var t=_step8.value;bytes.push.apply(bytes,_toConsumableArray(_midiTrack(t)));}}catch(err){_iterator8.e(err);}finally{_iterator8.f();}return new Uint8Array(bytes);};var downloadBlob=function downloadBlob(data,filename,type){var blob=data instanceof Blob?data:new Blob([data],{type:type||"application/octet-stream"});// A WKWebView has no downloads directory, and clicking an <a download> for a
+// blob: URL there is a silent no-op — so inside the iOS app this would look
+// exactly like a dead button. MIDI export takes this path unconditionally,
+// and MP3 falls back to it whenever navigator.canShare says no, so both would
+// break. Hand the bytes to the shell instead; it presents the iOS share sheet
+// (Save to Files, AirDrop, mail it to yourself), which is what "download"
+// means on a phone anyway. Base64 because a message handler carries JSON, not
+// binary — fine at export sizes, and export is never in the audio path.
+var h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.saveFile;if(window.__LOUDLIGHT_NATIVE__&&h){var fr=new FileReader();fr.onload=function(){try{h.postMessage({name:filename,mime:blob.type,b64:String(fr.result).split(",")[1]||""});}catch(e){console.error("native save failed",e);}};fr.onerror=function(){return console.error("native save: could not read blob");};fr.readAsDataURL(blob);return;}var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();setTimeout(function(){return URL.revokeObjectURL(a.href);},2000);};// c0/w bound the column WINDOW this variation touches; shifts and ghost notes
 // wrap inside it. Defaults to the whole grid, which for a 1-bar pattern is
 // exactly the old behaviour. Multi-bar patterns pass one bar at a time so VARY
 // keeps meaning what it always meant: a fresh roll every bar.
@@ -1054,7 +1062,11 @@ var _useState109=useState(false),_useState110=_slicedToArray(_useState109,2),mp3
 // stash the file and surface a SHARE button for the user to tap.
 var _useState111=useState(null),_useState112=_slicedToArray(_useState111,2),shareFile=_useState112[0],setShareFile=_useState112[1];// One-time "Add to Home Screen for fullscreen" nudge — iOS, in-browser only
 // (hidden once launched as a standalone home-screen app, or once dismissed).
-var _useState113=useState(function(){try{if(!IS_MOBILE)return false;var iOS=/iphone|ipad|ipod/i.test(navigator.userAgent||"");var standalone=navigator.standalone===true||window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches;return iOS&&!standalone&&!localStorage.getItem("tabula-nohint");}catch(e){return false;}}),_useState114=_slicedToArray(_useState113,2),installHint=_useState114[0],setInstallHint=_useState114[1];// Mobile orientation — drives the landscape rail layout. Recomputed on
+var _useState113=useState(function(){try{if(!IS_MOBILE)return false;var iOS=/iphone|ipad|ipod/i.test(navigator.userAgent||"");var standalone=navigator.standalone===true||window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches;// The native iOS shell reports neither navigator.standalone nor
+// display-mode:standalone, so without this it would tell someone who
+// installed Tabula from TestFlight to install Tabula. The shell sets the
+// flag before any app code runs.
+var _native=window.__LOUDLIGHT_NATIVE__===true;return iOS&&!_native&&!standalone&&!localStorage.getItem("tabula-nohint");}catch(e){return false;}}),_useState114=_slicedToArray(_useState113,2),installHint=_useState114[0],setInstallHint=_useState114[1];// Mobile orientation — drives the landscape rail layout. Recomputed on
 // resize / orientationchange. Desktop is always treated as "portrait" (the
 // landscape branch is mobile-only).
 var _useState115=useState(function(){try{return IS_MOBILE&&window.innerWidth>window.innerHeight;}catch(e){return false;}}),_useState116=_slicedToArray(_useState115,2),isLandscape=_useState116[0],setIsLandscape=_useState116[1];useEffect(function(){if(!IS_MOBILE)return;var onR=function onR(){try{setIsLandscape(window.innerWidth>window.innerHeight);}catch(e){}};window.addEventListener("resize",onR);window.addEventListener("orientationchange",onR);return function(){window.removeEventListener("resize",onR);window.removeEventListener("orientationchange",onR);};},[]);var recorderRef=useRef(null);var recordStreamRef=useRef(null);var _useState117=useState(0),_useState118=_slicedToArray(_useState117,2),swing=_useState118[0],setSwing=_useState118[1];// 0–100, 0=straight, 100=full triplet swing
@@ -1368,22 +1380,32 @@ var _lenFrac=Math.max(0,Math.min(1,(((_editPat$gridLen=editPat===null||editPat==
 // through the bars.
 useEffect(function(){if(!followSeq||!playing)return;if(playingBar>=0&&playingBar!==barPage&&playingBar<barCount)setBarPage(playingBar);},[followSeq,playing,playingBar,barPage,barCount]);// Never leave the page pointing past the end of a pattern (switching pattern,
 // switching layer, or removing bars can all strand it).
-useEffect(function(){if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1));},[barCount,barPage]);// LOOP pins itself to the bar you are ON when you switch it on, and holds
-// there until you switch it off. Move it by turning LOOP off and on again
-// from the bar you want. Every LOOP button goes through here.
+useEffect(function(){if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1));},[barCount,barPage]);// LOOP starts on the bar you are ON when you switch it on, and from then on
+// it follows your bar selection (see goToBar). Every LOOP button goes here.
 var toggleLoop=function toggleLoop(){if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}};// Switching to a different pattern while LOOP is on moves the loop with you —
 // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
 // which the pin deliberately ignores.
 useEffect(function(){if(loopMode)setLoopPat(activePatternId);},[loopMode,activePatternId]);// A pattern that shrank (DEL BAR, or switching to a shorter one) must not
 // leave the loop pinned past the end.
-useEffect(function(){if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1));},[loopMode,loopBar,barCount]);// ── ADD / REMOVE BAR ───────────────────────────────────────────────────
+useEffect(function(){if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1));},[loopMode,loopBar,barCount]);// The one way a DELIBERATE bar change happens — a chip tap or drag, ADD BAR,
+// DUP BAR, ×2. Three things travel together, and they went out of step as
+// soon as each caller did its own thing:
+//   • land on the bar
+//   • drop FOLLOW, or the playhead drags the page straight back off the bar
+//     you just chose (this is why the chips felt like they did nothing while
+//     the transport was following)
+//   • carry LOOP with you, because LOOP loops the bar you are looking at
+// Note what does NOT come through here: the FOLLOW effect's own setBarPage,
+// and the clamps. That distinction is the whole point — the page moving
+// because the music moved must never drag the loop along behind it, which is
+// the crawl the old pin existed to prevent. Only a bar YOU picked moves it.
+var goToBar=function goToBar(bi){setBarPage(bi);setFollowSeq(false);if(loopMode)setLoopBar(bi);};// ── ADD / REMOVE BAR ───────────────────────────────────────────────────
 // Resizing invalidates the cached VARY grids for that pattern (they're keyed
 // by pat id and sized to the old width), so drop them and let the scheduler
 // re-roll at the next bar boundary.
-var _dropVaryCache=function _dropVaryCache(id){try{variedGrids.current["delete"](id);variedDrumGrids.current["delete"](id);variedDrumVels.current["delete"](id);}catch(e){}};var setEditPatBars=function setEditPatBars(n){var target=Math.max(1,Math.min(MAX_BARS,n));if(!editPat||target===patBars(editPat))return;var grew=target>patBars(editPat);pushHistory();_dropVaryCache(editPat.id);if(activeLayer==="drums")setDrumPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});else setPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});if(grew){// Adding a bar means you want to write in it — land there. FOLLOW has to
-// go or the playhead would drag the page straight back off it, same as
-// any other edit clearing follow.
-setFollowSeq(false);setBarPage(target-1);}else{setBarPage(function(bp){return Math.min(bp,target-1);});}};var addBar=function addBar(){return setEditPatBars(patBars(editPat)+1);};var removeBar=function removeBar(){return setEditPatBars(patBars(editPat)-1);};// Copy the visible bar into a NEW bar appended right after it — the fastest
+var _dropVaryCache=function _dropVaryCache(id){try{variedGrids.current["delete"](id);variedDrumGrids.current["delete"](id);variedDrumVels.current["delete"](id);}catch(e){}};var setEditPatBars=function setEditPatBars(n){var target=Math.max(1,Math.min(MAX_BARS,n));if(!editPat||target===patBars(editPat))return;var grew=target>patBars(editPat);pushHistory();_dropVaryCache(editPat.id);if(activeLayer==="drums")setDrumPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});else setPats(function(ps){return ps.map(function(p){return p.id===editPat.id?resizePatBars(p,target):p;});});if(grew){// Adding a bar means you want to write in it — land there, and take
+// FOLLOW and LOOP with you.
+goToBar(target-1);}else{setBarPage(function(bp){return Math.min(bp,target-1);});}};var addBar=function addBar(){return setEditPatBars(patBars(editPat)+1);};var removeBar=function removeBar(){return setEditPatBars(patBars(editPat)-1);};// Copy the visible bar into a NEW bar appended right after it — the fastest
 // way to build a long pattern (lay down bar 1, extend, vary).
 // DUP BAR inserts a copy of the visible bar right after it, in the part
 // you're LOOKING AT — parts have independent lengths, so lengthening the
@@ -1397,13 +1419,13 @@ var out=Object.assign({},g,{grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCol
 // length is left alone and it keeps looping to fill.
 var oldLen=Math.max(1,Math.min(oldW,part.gridLen||oldW));out.gridLen=oldLen>off?Math.min(newW,oldLen+COLS):oldLen;delete out.bars;// bars lives on the pattern
 return out;};var L=activeLayer;setPatterns(function(ps){return ps.map(function(p){if(p.id!==editPat.id)return p;var parts=Object.assign({},p.parts,_defineProperty({},L,growPart(p.parts[L])));return syncPatBars(Object.assign({},p,{parts:parts}));});});// Land on the copy, for the same reason ADD BAR does.
-setFollowSeq(false);setBarPage(curBar+1);};// ×2 — the part you're looking at becomes twice as long and its new half is
+goToBar(curBar+1);};// ×2 — the part you're looking at becomes twice as long and its new half is
 // a copy of the old one, so "two nearly identical passes with small
 // variations" is one button instead of DUP BAR n times. Like DUP BAR it acts
 // on the ACTIVE part only: a 1-bar drum loop under a doubled melody doesn't
 // want doubling, it wants to keep looping to fill.
 var doublePattern=function doublePattern(){if(!editPat)return;var n=patBars(editPat);if(n*2>MAX_BARS){showFlash("MAX "+MAX_BARS+" BARS");return;}pushHistory();_dropVaryCache(editPat.id);var oldW=n*COLS,W=oldW*2;var dbl=function dbl(part){if(!part||!Array.isArray(part.grid))return part;var srcW=gridW(part.grid);var oldLen=Math.max(1,Math.min(srcW,part.gridLen||srcW));var g=resizePatBars(Object.assign({},part,{bars:n}),n*2);var out=Object.assign({},g,{grid:spliceCols(g.grid,sliceCols(part.grid,0,oldW),oldW,0,oldW)});if(g.durs)out.durs=spliceCols(g.durs,sliceCols(part.durs||[],0,oldW,function(){return 1;}),oldW,0,oldW,function(){return 1;});if(g.params)out.params=spliceFlat(g.params,sliceFlat(part.params||[],0,oldW),oldW,0,oldW);if(g.vel)out.vel=spliceCols(g.vel,sliceCols(toDrumVel2D(part.vel,srcW),0,oldW,function(){return 100;}),oldW,0,oldW,function(){return 100;});if(g.rat)out.rat=spliceCols(g.rat,sliceCols(toDrumRat2D(part.rat,srcW),0,oldW,function(){return 1;}),oldW,0,oldW,function(){return 1;});if(out.motion&&_typeof(out.motion)==="object"){var m={};for(var _i20=0,_Object$keys1=Object.keys(out.motion);_i20<_Object$keys1.length;_i20++){var k=_Object$keys1[_i20];m[k]=spliceCols(out.motion[k],sliceCols(out.motion[k],0,oldW,function(){return null;}),oldW,0,oldW,function(){return null;});}out.motion=m;}out.gridLen=oldLen>=oldW?W:oldLen;delete out.bars;return out;};var L=activeLayer;setPatterns(function(ps){return ps.map(function(p){if(p.id!==editPat.id)return p;var parts=Object.assign({},p.parts,_defineProperty({},L,dbl(p.parts[L])));return syncPatBars(Object.assign({},p,{parts:parts}));});});// Land on the top of the copy — that's the half you're about to vary.
-setFollowSeq(false);setBarPage(n);};// ── SONG PAGE ──────────────────────────────────────────────────────────
+goToBar(n);};// ── SONG PAGE ──────────────────────────────────────────────────────────
 // One lane, because a pattern is all three parts. The palette at the top is
 // the pattern selector for the whole app — picking one here is what the part
 // pages then edit, which is what frees the pill row from those pages.
@@ -1501,9 +1523,10 @@ var _barHasNotes=function _barHasNotes(bi){if(!editPat||!editPat.grid)return fal
 // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
 // ops, where the buttons can be a real touch size — a row of 18px glyphs above
 // the grid was too small to hit on the phone.
-var _scrubTo=function _scrubTo(clientX,el){var rect=el.getBoundingClientRect();var i=Math.floor((clientX-rect.left)/rect.width*barCount);var bi=Math.max(0,Math.min(barCount-1,i));// Deliberately does NOT switch FOLLOW off — that's the transport's toggle
-// and a grid edit is what clears it, same as it always was.
-setBarPage(bi);};// Tap or drag anywhere along the chips to move. The row is deliberately tall
+var _scrubTo=function _scrubTo(clientX,el){var rect=el.getBoundingClientRect();var i=Math.floor((clientX-rect.left)/rect.width*barCount);var bi=Math.max(0,Math.min(barCount-1,i));// Picking a bar is a deliberate "work on this one": it drops FOLLOW and
+// takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
+// you can slide the loop from bar to bar without leaving the grid.
+goToBar(bi);};// Tap or drag anywhere along the chips to move. The row is deliberately tall
 // so a thin chip on a long pattern is still an easy target. Held separately
 // from barStrip because the drawer repeats the chips on their own: the sheet
 // covers the strip above the grid, and DUP BAR / DEL BAR act on the VISIBLE
@@ -1899,10 +1922,14 @@ e.preventDefault();// A primary pointer is the first finger of a fresh interacti
 // fingers should legitimately be down, so clear any stale IDs left behind
 // by a missed up/cancel. This is what makes the multi-touch state unleakable.
 if(e.isPrimary)activePtrsR.current.clear();activePtrsR.current.add(e.pointerId);var g=gesture.current;// Shift+click on desktop = two-finger drag (pattern shift)
-if(e.shiftKey&&!IS_MOBILE){clearTimeout(longPressR.current);longPressR.current=null;if(popupR.current){var col=popupR.current.col;var vals=paramPopupValuesR.current;if(vals)setPats(function(ps){return ps.map(function(p){if(p.id!==activeIdR.current)return p;var params=(p.params||defaultStepParams()).map(function(sp,i){return i===col?Object.assign({},sp,vals):sp;});return Object.assign({},p,{params:params});});});setParamPopup(null);popupR.current=null;}g.state="shift";setShifting(true);g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;g.shiftPointerID=e.pointerId;if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}var _pat=patsR.current.find(function(p){return p.id===activeIdR.current;});g.baseGrid=_pat?_pat.grid.map(function(r){return _toConsumableArray(r);}):null;g.baseParams=_pat?(_pat.params||defaultStepParams()).map(function(s){return _objectSpread({},s);}):null;return;}// Second finger down → shift mode, dismiss popup. isPrimary is false for any
+if(e.shiftKey&&!IS_MOBILE){clearTimeout(longPressR.current);longPressR.current=null;if(popupR.current){var col=popupR.current.col;var vals=paramPopupValuesR.current;if(vals)setPats(function(ps){return ps.map(function(p){if(p.id!==activeIdR.current)return p;var params=(p.params||defaultStepParams()).map(function(sp,i){return i===col?Object.assign({},sp,vals):sp;});return Object.assign({},p,{params:params});});});setParamPopup(null);popupR.current=null;}g.state="shift";setShifting(true);g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;g.shiftPointerID=e.pointerId;// Pinned at gesture start, not read live during the drag — same reason
+// LOOP pins its bar. A window that moved mid-drag would rotate one bar
+// partway and then start rotating a different one.
+g.shiftOff=synthBarOffR();if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}var _pat=patsR.current.find(function(p){return p.id===activeIdR.current;});g.baseGrid=_pat?_pat.grid.map(function(r){return _toConsumableArray(r);}):null;g.baseParams=_pat?(_pat.params||defaultStepParams()).map(function(s){return _objectSpread({},s);}):null;return;}// Second finger down → shift mode, dismiss popup. isPrimary is false for any
 // finger beyond the first — stateless, so it can never get stuck "on".
 if(!e.isPrimary){clearTimeout(longPressR.current);longPressR.current=null;if(popupR.current){var _col=popupR.current.col;var _vals=paramPopupValuesR.current;if(_vals)setPats(function(ps){return ps.map(function(p){if(p.id!==activeIdR.current)return p;var params=(p.params||defaultStepParams()).map(function(sp,i){return i===_col?Object.assign({},sp,_vals):sp;});return Object.assign({},p,{params:params});});});setParamPopup(null);popupR.current=null;}if(g.state==="pending"||g.state==="paint"||g.state==="popup-idle"){g.state="shift";setShifting(true);// Anchor shift to this (second) pointer's position and capture it
-g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;g.shiftPointerID=e.pointerId;if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}var _pat2=patsR.current.find(function(p){return p.id===activeIdR.current;});g.baseGrid=_pat2?_pat2.grid.map(function(r){return _toConsumableArray(r);}):null;g.baseParams=_pat2?(_pat2.params||defaultStepParams()).map(function(s){return _objectSpread({},s);}):null;}return;}// Compute cell from physical coordinates — most reliable on mobile
+g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;g.shiftPointerID=e.pointerId;g.shiftOff=synthBarOffR();// pinned — see the desktop branch above
+if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}var _pat2=patsR.current.find(function(p){return p.id===activeIdR.current;});g.baseGrid=_pat2?_pat2.grid.map(function(r){return _toConsumableArray(r);}):null;g.baseParams=_pat2?(_pat2.params||defaultStepParams()).map(function(s){return _objectSpread({},s);}):null;}return;}// Compute cell from physical coordinates — most reliable on mobile
 // (elementFromPoint and e.target both fail when note rects intercept)
 var gridEl=gridRef.current;// vc = view column (what's on screen, 0..COLS-1) — used for geometry.
 // c  = absolute pattern column (vc + the visible bar's offset) — used for data.
@@ -1943,10 +1970,20 @@ var wasExisting=g.existingAtStart.has(_key);if(wasExisting){if(!g.tieRuns.has(cr
 // drag a tie as far as the page you can see. (Longer ties are still
 // reachable via the step popup's DUR.)
 var _activePat=patsR.current.find(function(p){return p.id===activeIdR.current;});var _off3=synthBarOffR();var maxCol=Math.min(((_activePat$gridLen2=_activePat===null||_activePat===void 0?void 0:_activePat.gridLen)!==null&&_activePat$gridLen2!==void 0?_activePat$gridLen2:patW(_activePat))-1,_off3+COLS-1);var _targetCol=Math.max(g.durStartCol,Math.min(maxCol,_off3+Math.floor((e.clientX-_rect4.left)/_cellW)));if(g.lastDurTarget===_targetCol)return;g.lastDurTarget=_targetCol;applyDurEditR.current(_targetCol);return;}if(g.state==="note-move"){var _gridEl3=gridRef.current;if(!_gridEl3)return;var _rect5=_gridEl3.getBoundingClientRect();var _cellH=_rect5.height/ROWS;var _newRow=Math.max(0,Math.min(ROWS-1,Math.floor((e.clientY-_rect5.top)/_cellH)));if(_newRow!==g.moveCurrentRow)applyNoteMoveR.current(_newRow);return;}if(g.state==="shift"&&g.baseGrid&&g.baseParams){if(e.pointerId!==g.shiftPointerID)return;// ignore first finger
-var ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);if(ndx!==g.appliedDX||ndy!==g.appliedDY){g.appliedDX=ndx;g.appliedDY=ndy;// Rotation wraps around the whole pattern (all bars), not the visible
-// page — shifting a 4-bar pattern right by one step should carry the
-// last step of bar 4 around to the first step of bar 1.
-var _W=gridW(g.baseGrid);var sh=Array.from({length:ROWS},function(_,r){return Array.from({length:_W},function(_,c){return g.baseGrid[(r-ndy+ROWS)%ROWS][(c-ndx+_W)%_W];});});var sp=Array.from({length:_W},function(_,c){return g.baseParams[(c-ndx+_W)%_W];});setPats(function(ps){return ps.map(function(p){return p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp});});});}}},[]);var handleGridUp=useCallback(function(e){activePtrsR.current["delete"](e.pointerId);clearTimeout(longPressR.current);longPressR.current=null;var g=gesture.current;if(g.state==="paint"){g.state="idle";setShifting(false);return;}if(g.state==="dur-edit"){g.state="idle";g.lastDurTarget=null;g.preTieGrid=null;g.preTieDurs=null;setShifting(false);return;}if(g.state==="note-move"){g.state="idle";g.preMoveGrid=null;g.preMoveDurs=null;g.moveStartRow=null;g.moveStartCol=null;g.moveCurrentRow=null;setShifting(false);return;}if(g.state==="pending-dismiss"){// Commit popup values then close
+var ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);if(ndx!==g.appliedDX||ndy!==g.appliedDY){g.appliedDX=ndx;g.appliedDY=ndy;// Scoped to the BAR you can see, and wrapping inside it — the same rule
+// RAND / CLR / CPY / PST / MUT8 already follow. It used to rotate the
+// whole pattern, so a nudge while looking at bar 1 of a 4-bar part also
+// moved bars 2-4, off-screen, with nothing on the page to show it had
+// happened until playback reached them. Columns outside the window are
+// copied through untouched — vertically as well as horizontally, or a
+// one-row drag would transpose the bars you can't see.
+var _W=gridW(g.baseGrid);var off=Math.max(0,Math.min(g.shiftOff||0,Math.max(0,_W-1)));var win=Math.max(1,Math.min(COLS,_W-off));var inWin=function inWin(c){return c>=off&&c<off+win;};// Modulo twice, because JS % keeps the sign of the dividend and both
+// deltas go negative (dragging left / up). The old `(r-ndy+ROWS)%ROWS`
+// form only normalised while |delta| stayed under one wrap: the drag
+// delta is raw pixels from the gesture start and the pointer is
+// captured, so a two-finger drag longer than ~16 cells — a flick across
+// a phone screen — indexed a negative row and threw inside pointermove.
+var wrap=function wrap(v,n){return(v%n+n)%n;};var srcC=function srcC(c){return off+wrap(c-off-ndx,win);};var sh=Array.from({length:ROWS},function(_,r){return Array.from({length:_W},function(_,c){return inWin(c)?g.baseGrid[wrap(r-ndy,ROWS)][srcC(c)]:g.baseGrid[r][c];});});var sp=Array.from({length:_W},function(_,c){return inWin(c)?g.baseParams[srcC(c)]:g.baseParams[c];});setPats(function(ps){return ps.map(function(p){return p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp});});});}}},[]);var handleGridUp=useCallback(function(e){activePtrsR.current["delete"](e.pointerId);clearTimeout(longPressR.current);longPressR.current=null;var g=gesture.current;if(g.state==="paint"){g.state="idle";setShifting(false);return;}if(g.state==="dur-edit"){g.state="idle";g.lastDurTarget=null;g.preTieGrid=null;g.preTieDurs=null;setShifting(false);return;}if(g.state==="note-move"){g.state="idle";g.preMoveGrid=null;g.preMoveDurs=null;g.moveStartRow=null;g.moveStartCol=null;g.moveCurrentRow=null;setShifting(false);return;}if(g.state==="pending-dismiss"){// Commit popup values then close
 if(popupR.current){var col=popupR.current.col;var vals=paramPopupValuesR.current;if(vals)setPats(function(ps){return ps.map(function(p){if(p.id!==activeIdR.current)return p;var params=(p.params||defaultStepParams()).map(function(sp,i){return i===col?Object.assign({},sp,vals):sp;});return Object.assign({},p,{params:params});});});setParamPopup(null);popupR.current=null;}g.state="idle";setShifting(false);return;}if(g.state==="popup"){// Sticky — commit current values but keep popup visible
 if(popupR.current){var _col2=popupR.current.col;var _vals2=paramPopupValuesR.current;if(_vals2)setPats(function(ps){return ps.map(function(p){if(p.id!==activeIdR.current)return p;var params=(p.params||defaultStepParams()).map(function(sp,i){return i===_col2?Object.assign({},sp,_vals2):sp;});return Object.assign({},p,{params:params});});});}setParamPopup(function(p){return p?_objectSpread(_objectSpread({},p),{},{activeArm:null}):p;});// clear active arm highlight
 if(popupR.current)popupR.current.lockedArm=null;g.state="idle";return;}if(g.state==="pending"){// Tap: use paintStartCell which was recorded before pointer capture was set
@@ -1999,7 +2036,15 @@ rat[row][col]=nx;return Object.assign({},p,{grid:grid,rat:rat});});});};// Shift
 // base each move (no accumulation drift). Horizontal rotation wraps within the
 // active length (gridLen); vertical wraps across all voices. Moves grid, vel
 // and rat together so a hit keeps its velocity + ratchet as it travels.
-var shiftDrumActive=function shiftDrumActive(dCols,dRows,base){var W=gridW(base.grid);var L=Math.max(1,Math.min(W,base.gridLen||W));var mod=function mod(n,m){return(n%m+m)%m;};var ng=Array.from({length:DRUM_ROWS},function(){return new Array(W).fill(false);});var nv=mkDrumVel(W),nr=mkDrumRat(W);for(var r=0;r<DRUM_ROWS;r++){var sr=mod(r-dRows,DRUM_ROWS);for(var c=0;c<W;c++){var sc=c<L?mod(c-dCols,L):c;ng[r][c]=!!(base.grid[sr]&&base.grid[sr][sc]);nv[r][c]=base.vel[sr]&&base.vel[sr][sc]!=null?base.vel[sr][sc]:100;nr[r][c]=base.rat[sr]&&base.rat[sr][sc]!=null?base.rat[sr][sc]:1;}}return{grid:ng,vel:nv,rat:nr};};// Two-finger drag = shift the pattern, the same gesture POLY/MONO have. The
+var shiftDrumActive=function shiftDrumActive(dCols,dRows,base){var W=gridW(base.grid);var mod=function mod(n,m){return(n%m+m)%m;};// Scoped to the BAR on screen and wrapping inside it, exactly as the synth
+// grid's two-finger shift does, and as RAND / CLR / CPY / PST already did.
+// It used to rotate the whole pattern, so a nudge while looking at bar 1 of
+// a 4-bar kit also moved bars 2-4 — off screen, with nothing on the page to
+// show it until playback got there. Columns outside the window are copied
+// through untouched VERTICALLY as well as horizontally, or a one-row drag
+// would move the voices in bars you can't see. The offset is pinned into
+// `base` at gesture start, so nothing can page the window mid-drag.
+var off=Math.max(0,Math.min(base.off||0,Math.max(0,W-1)));var win=Math.max(1,Math.min(COLS,W-off));var ng=Array.from({length:DRUM_ROWS},function(){return new Array(W).fill(false);});var nv=mkDrumVel(W),nr=mkDrumRat(W);for(var r=0;r<DRUM_ROWS;r++){for(var c=0;c<W;c++){var inWin=c>=off&&c<off+win;var sr=inWin?mod(r-dRows,DRUM_ROWS):r;var sc=inWin?off+mod(c-off-dCols,win):c;ng[r][c]=!!(base.grid[sr]&&base.grid[sr][sc]);nv[r][c]=base.vel[sr]&&base.vel[sr][sc]!=null?base.vel[sr][sc]:100;nr[r][c]=base.rat[sr]&&base.rat[sr][sc]!=null?base.rat[sr][sc]:1;}}return{grid:ng,vel:nv,rat:nr};};// Two-finger drag = shift the pattern, the same gesture POLY/MONO have. The
 // synth grid promotes paint→shift inside its container-level gesture machine;
 // the drum grid's pointer handling is PER CELL, so there was nothing to
 // promote and a second finger just started a second paint. This ref is that
@@ -2009,7 +2054,10 @@ var drumGestR=useRef(null);// Shared by both drum grid mounts (portrait + landsc
 // drift between them.
 var beginDrumShift=function beginDrumShift(e,dPat,dLen){e.preventDefault();e.stopPropagation();var ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();var cw=ge.width/COLS||1,ch=ge.height/DRUM_ROWS||1,sx=e.clientX,sy=e.clientY;var live=drumGestR.current;// Shift from where the pattern was BEFORE the first finger touched it: a
 // two-finger drag is a shift, not a shift on top of an accidental note.
-var base=live?live.base:{grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};if(live){live.cancel();applyDrumShift(0,0,base);}// undo the paint; it already pushed history
+var base=live?live.base:{grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen,// Pinned here, not read live in shiftDrumActive: the shift is scoped to
+// the visible bar, and a window that moved mid-drag would rotate one
+// bar partway and then start rotating a different one.
+off:drumBarOffR()};if(live){live.cancel();applyDrumShift(0,0,base);}// undo the paint; it already pushed history
 else pushHistory();// no paint in flight → own undo entry
 setShifting(true);var mv=function mv(ev){return applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);};var _up2=function up(){document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",_up2);document.removeEventListener("pointercancel",_up2);setShifting(false);};document.addEventListener("pointermove",mv);document.addEventListener("pointerup",_up2);document.addEventListener("pointercancel",_up2);};var applyDrumShift=function applyDrumShift(dCols,dRows,base){var s=shiftDrumActive(dCols,dRows,base);setDrumPats(function(ps){return ps.map(function(p){return p.id!==activeDrumId?p:Object.assign({},p,{grid:s.grid,vel:s.vel,rat:s.rat});});});};var clearDrums=function clearDrums(){pushHistory();return setDrumPats(function(ps){return ps.map(function(p){if(p.id!==activeDrumId)return p;var off=barOffIn(p);return Object.assign({},p,{grid:spliceCols(p.grid,null,off),vel:spliceCols(toDrumVel2D(p.vel,gridW(p.grid)),null,off,0,COLS,function(){return 100;}),rat:spliceCols(toDrumRat2D(p.rat,gridW(p.grid)),null,off,0,COLS,function(){return 1;})});});});};// Mixer link groups.
 //  • Hi-hats (CH+OH): every mix param is linked — they model one physical

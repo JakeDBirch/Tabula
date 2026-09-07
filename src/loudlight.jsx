@@ -1404,6 +1404,22 @@ const buildSMF=(tracks)=>{
 };
 const downloadBlob=(data,filename,type)=>{
   const blob=(data instanceof Blob)?data:new Blob([data],{type:type||"application/octet-stream"});
+  // A WKWebView has no downloads directory, and clicking an <a download> for a
+  // blob: URL there is a silent no-op — so inside the iOS app this would look
+  // exactly like a dead button. MIDI export takes this path unconditionally,
+  // and MP3 falls back to it whenever navigator.canShare says no, so both would
+  // break. Hand the bytes to the shell instead; it presents the iOS share sheet
+  // (Save to Files, AirDrop, mail it to yourself), which is what "download"
+  // means on a phone anyway. Base64 because a message handler carries JSON, not
+  // binary — fine at export sizes, and export is never in the audio path.
+  const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.saveFile;
+  if(window.__LOUDLIGHT_NATIVE__&&h){
+    const fr=new FileReader();
+    fr.onload=()=>{try{h.postMessage({name:filename,mime:blob.type,b64:String(fr.result).split(",")[1]||""});}catch(e){console.error("native save failed",e);}};
+    fr.onerror=()=>console.error("native save: could not read blob");
+    fr.readAsDataURL(blob);
+    return;
+  }
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 };
@@ -3013,7 +3029,12 @@ export default function LoudLight(){
       if(!IS_MOBILE)return false;
       const iOS=/iphone|ipad|ipod/i.test(navigator.userAgent||"");
       const standalone=(navigator.standalone===true)||(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches);
-      return iOS&&!standalone&&!localStorage.getItem("tabula-nohint");
+      // The native iOS shell reports neither navigator.standalone nor
+      // display-mode:standalone, so without this it would tell someone who
+      // installed Tabula from TestFlight to install Tabula. The shell sets the
+      // flag before any app code runs.
+      const native=window.__LOUDLIGHT_NATIVE__===true;
+      return iOS&&!native&&!standalone&&!localStorage.getItem("tabula-nohint");
     }catch(e){return false;}
   });
   // Mobile orientation — drives the landscape rail layout. Recomputed on
@@ -4045,9 +4066,8 @@ export default function LoudLight(){
   // Never leave the page pointing past the end of a pattern (switching pattern,
   // switching layer, or removing bars can all strand it).
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
-  // LOOP pins itself to the bar you are ON when you switch it on, and holds
-  // there until you switch it off. Move it by turning LOOP off and on again
-  // from the bar you want. Every LOOP button goes through here.
+  // LOOP starts on the bar you are ON when you switch it on, and from then on
+  // it follows your bar selection (see goToBar). Every LOOP button goes here.
   const toggleLoop=()=>{
     if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}
     else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}
@@ -4059,6 +4079,23 @@ export default function LoudLight(){
   // A pattern that shrank (DEL BAR, or switching to a shorter one) must not
   // leave the loop pinned past the end.
   useEffect(()=>{ if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1)); },[loopMode,loopBar,barCount]);
+  // The one way a DELIBERATE bar change happens — a chip tap or drag, ADD BAR,
+  // DUP BAR, ×2. Three things travel together, and they went out of step as
+  // soon as each caller did its own thing:
+  //   • land on the bar
+  //   • drop FOLLOW, or the playhead drags the page straight back off the bar
+  //     you just chose (this is why the chips felt like they did nothing while
+  //     the transport was following)
+  //   • carry LOOP with you, because LOOP loops the bar you are looking at
+  // Note what does NOT come through here: the FOLLOW effect's own setBarPage,
+  // and the clamps. That distinction is the whole point — the page moving
+  // because the music moved must never drag the loop along behind it, which is
+  // the crawl the old pin existed to prevent. Only a bar YOU picked moves it.
+  const goToBar=(bi)=>{
+    setBarPage(bi);
+    setFollowSeq(false);
+    if(loopMode)setLoopBar(bi);
+  };
 
   // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
   // Resizing invalidates the cached VARY grids for that pattern (they're keyed
@@ -4076,11 +4113,9 @@ export default function LoudLight(){
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     if(grew){
-      // Adding a bar means you want to write in it — land there. FOLLOW has to
-      // go or the playhead would drag the page straight back off it, same as
-      // any other edit clearing follow.
-      setFollowSeq(false);
-      setBarPage(target-1);
+      // Adding a bar means you want to write in it — land there, and take
+      // FOLLOW and LOOP with you.
+      goToBar(target-1);
     } else {
       setBarPage(bp=>Math.min(bp,target-1));
     }
@@ -4133,8 +4168,7 @@ export default function LoudLight(){
       return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the copy, for the same reason ADD BAR does.
-    setFollowSeq(false);
-    setBarPage(curBar+1);
+    goToBar(curBar+1);
   };
   // ×2 — the part you're looking at becomes twice as long and its new half is
   // a copy of the old one, so "two nearly identical passes with small
@@ -4176,8 +4210,7 @@ export default function LoudLight(){
       return syncPatBars(Object.assign({},p,{parts}));
     }));
     // Land on the top of the copy — that's the half you're about to vary.
-    setFollowSeq(false);
-    setBarPage(n);
+    goToBar(n);
   };
 
   // ── SONG PAGE ──────────────────────────────────────────────────────────
@@ -4798,9 +4831,10 @@ export default function LoudLight(){
     const rect=el.getBoundingClientRect();
     const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
     const bi=Math.max(0,Math.min(barCount-1,i));
-    // Deliberately does NOT switch FOLLOW off — that's the transport's toggle
-    // and a grid edit is what clears it, same as it always was.
-    setBarPage(bi);
+    // Picking a bar is a deliberate "work on this one": it drops FOLLOW and
+    // takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
+    // you can slide the loop from bar to bar without leaving the grid.
+    goToBar(bi);
   };
   // Tap or drag anywhere along the chips to move. The row is deliberately tall
   // so a thin chip on a long pattern is still an easy target. Held separately
@@ -6380,6 +6414,10 @@ export default function LoudLight(){
       g.state="shift";setShifting(true);
       g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
       g.shiftPointerID=e.pointerId;
+      // Pinned at gesture start, not read live during the drag — same reason
+      // LOOP pins its bar. A window that moved mid-drag would rotate one bar
+      // partway and then start rotating a different one.
+      g.shiftOff=synthBarOffR();
       if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
       const pat=patsR.current.find(p=>p.id===activeIdR.current);
       g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
@@ -6406,6 +6444,7 @@ export default function LoudLight(){
         // Anchor shift to this (second) pointer's position and capture it
         g.startX=e.clientX;g.startY=e.clientY;g.appliedDX=0;g.appliedDY=0;
         g.shiftPointerID=e.pointerId;
+        g.shiftOff=synthBarOffR(); // pinned — see the desktop branch above
         if(gridRef.current){try{gridRef.current.setPointerCapture(e.pointerId);}catch(_){}gesture.current.capturedId=e.pointerId;}
         const pat=patsR.current.find(p=>p.id===activeIdR.current);
         g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
@@ -6744,12 +6783,28 @@ export default function LoudLight(){
       const ndx=Math.round(dx/g.cellPx),ndy=Math.round(dy/g.cellPx);
       if(ndx!==g.appliedDX||ndy!==g.appliedDY){
         g.appliedDX=ndx;g.appliedDY=ndy;
-        // Rotation wraps around the whole pattern (all bars), not the visible
-        // page — shifting a 4-bar pattern right by one step should carry the
-        // last step of bar 4 around to the first step of bar 1.
+        // Scoped to the BAR you can see, and wrapping inside it — the same rule
+        // RAND / CLR / CPY / PST / MUT8 already follow. It used to rotate the
+        // whole pattern, so a nudge while looking at bar 1 of a 4-bar part also
+        // moved bars 2-4, off-screen, with nothing on the page to show it had
+        // happened until playback reached them. Columns outside the window are
+        // copied through untouched — vertically as well as horizontally, or a
+        // one-row drag would transpose the bars you can't see.
         const _W=gridW(g.baseGrid);
-        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>g.baseGrid[(r-ndy+ROWS)%ROWS][(c-ndx+_W)%_W]));
-        const sp=Array.from({length:_W},(_,c)=>g.baseParams[(c-ndx+_W)%_W]);
+        const off=Math.max(0,Math.min(g.shiftOff||0,Math.max(0,_W-1)));
+        const win=Math.max(1,Math.min(COLS,_W-off));
+        const inWin=c=>c>=off&&c<off+win;
+        // Modulo twice, because JS % keeps the sign of the dividend and both
+        // deltas go negative (dragging left / up). The old `(r-ndy+ROWS)%ROWS`
+        // form only normalised while |delta| stayed under one wrap: the drag
+        // delta is raw pixels from the gesture start and the pointer is
+        // captured, so a two-finger drag longer than ~16 cells — a flick across
+        // a phone screen — indexed a negative row and threw inside pointermove.
+        const wrap=(v,n)=>((v%n)+n)%n;
+        const srcC=c=>off+wrap(c-off-ndx,win);
+        const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>
+          inWin(c)?g.baseGrid[wrap(r-ndy,ROWS)][srcC(c)]:g.baseGrid[r][c]));
+        const sp=Array.from({length:_W},(_,c)=>inWin(c)?g.baseParams[srcC(c)]:g.baseParams[c]);
         setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp})));
       }
     }
@@ -7016,14 +7071,24 @@ export default function LoudLight(){
   // and rat together so a hit keeps its velocity + ratchet as it travels.
   const shiftDrumActive=(dCols,dRows,base)=>{
     const W=gridW(base.grid);
-    const L=Math.max(1,Math.min(W,base.gridLen||W));
     const mod=(n,m)=>((n%m)+m)%m;
+    // Scoped to the BAR on screen and wrapping inside it, exactly as the synth
+    // grid's two-finger shift does, and as RAND / CLR / CPY / PST already did.
+    // It used to rotate the whole pattern, so a nudge while looking at bar 1 of
+    // a 4-bar kit also moved bars 2-4 — off screen, with nothing on the page to
+    // show it until playback got there. Columns outside the window are copied
+    // through untouched VERTICALLY as well as horizontally, or a one-row drag
+    // would move the voices in bars you can't see. The offset is pinned into
+    // `base` at gesture start, so nothing can page the window mid-drag.
+    const off=Math.max(0,Math.min(base.off||0,Math.max(0,W-1)));
+    const win=Math.max(1,Math.min(COLS,W-off));
     const ng=Array.from({length:DRUM_ROWS},()=>new Array(W).fill(false));
     const nv=mkDrumVel(W),nr=mkDrumRat(W);
     for(let r=0;r<DRUM_ROWS;r++){
-      const sr=mod(r-dRows,DRUM_ROWS);
       for(let c=0;c<W;c++){
-        const sc=c<L?mod(c-dCols,L):c;
+        const inWin=c>=off&&c<off+win;
+        const sr=inWin?mod(r-dRows,DRUM_ROWS):r;
+        const sc=inWin?off+mod(c-off-dCols,win):c;
         ng[r][c]=!!(base.grid[sr]&&base.grid[sr][sc]);
         nv[r][c]=(base.vel[sr]&&base.vel[sr][sc]!=null)?base.vel[sr][sc]:100;
         nr[r][c]=(base.rat[sr]&&base.rat[sr][sc]!=null)?base.rat[sr][sc]:1;
@@ -7048,7 +7113,11 @@ export default function LoudLight(){
     // Shift from where the pattern was BEFORE the first finger touched it: a
     // two-finger drag is a shift, not a shift on top of an accidental note.
     const base=live?live.base
-      :{grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
+      :{grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen,
+        // Pinned here, not read live in shiftDrumActive: the shift is scoped to
+        // the visible bar, and a window that moved mid-drag would rotate one
+        // bar partway and then start rotating a different one.
+        off:drumBarOffR()};
     if(live){live.cancel();applyDrumShift(0,0,base);} // undo the paint; it already pushed history
     else pushHistory();                              // no paint in flight → own undo entry
     setShifting(true);

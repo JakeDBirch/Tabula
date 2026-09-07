@@ -5,7 +5,8 @@
   "description": "Touch-first grid sequencer.",
   "scripts": {
     "build": "node build.mjs",
-    "audit": "node build.mjs --audit-only"
+    "audit": "node build.mjs --audit-only",
+    "build:ios": "node build.mjs --ios"
   },
   "devDependencies": {
     "@babel/cli": "^7.24.0",

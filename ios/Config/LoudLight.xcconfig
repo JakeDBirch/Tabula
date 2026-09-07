@@ -1,0 +1,32 @@
+// Signing and versioning for the Loud Light iOS app.
+//
+// This file is committed and is the one place to edit; everything else in the
+// Xcode project is generated from project.yml and will be overwritten.
+//
+// DEVELOPMENT_TEAM is the Apple Developer Team ID, from
+// https://developer.apple.com/account → Membership details. Not a secret — it
+// appears in every provisioning profile the app ships with.
+//
+// PRODUCT_BUNDLE_IDENTIFIER is set: reverse-DNS of loudlight.co, which Jake
+// owns. It must match the App ID registered in App Store Connect exactly, and
+// it is permanent — a bundle ID can never be changed or reused once a build has
+// been uploaded. The `sequencer` leaf leaves room for other apps under
+// co.loudlight later.
+
+DEVELOPMENT_TEAM = KP6QHVP8GY
+PRODUCT_BUNDLE_IDENTIFIER = co.loudlight.sequencer
+
+// Automatic signing lets Xcode (and, in CI, xcodebuild -allowProvisioningUpdates)
+// create and download the certificate and provisioning profile for you, so
+// there are no .p12 or .mobileprovision files to manage or leak.
+CODE_SIGN_STYLE = Automatic
+
+// The version people see in TestFlight and on the App Store. Bump by hand for
+// a real release.
+MARKETING_VERSION = 1.0
+
+// The build number. Must increase with every upload to App Store Connect — an
+// upload that reuses one is rejected outright. CI overrides this with the
+// workflow run number so that can't happen by accident; this value is only
+// used for local archives.
+CURRENT_PROJECT_VERSION = 1

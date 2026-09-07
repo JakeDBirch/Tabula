@@ -19,6 +19,7 @@ A touch-first grid sequencer that runs as a **single static HTML file**. Built p
 ```bash
 npm ci            # or npm install — pulls Babel (@babel/core, cli, preset-env, preset-react)
 npm run build     # compiles src/loudlight.jsx → index.html   (ALWAYS run after editing)
+npm run build:ios # additionally emits ios/www/ — the offline payload for the iOS app
 npm run audit     # standalone CJS return_react2 audit
 ```
 
@@ -78,13 +79,15 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the playable loop length in steps, now `1..bars*16` — it is the single source of truth for length; bar count is just its allocation. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
 - **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **chips only** (`barChips`) — tap or drag them to page — then a bar readout (pattern name · visible/total) and a **`+`**. A tap on the `+` adds a bar; a **press-and-hold (~450ms) or right-click** opens the pattern drawer on mobile. Adding a bar is the constant gesture and it used to cost a trip through the drawer, so it got the tap and the drawer got the deliberate one. The readout is now a plain label — it stopped being the drawer handle. The hold is the one sheet opener that isn't `onClick`, so it needs `sheetGuardR`: the sheet opens with the finger still down, the backdrop mounts under it, and that press's trailing click would dismiss the sheet instantly (the same trap the onClick-not-onPointerDown rule guards against). The backdrop ignores clicks for 400ms after the stamp. The `+` swallows its own trailing click after a hold too, or the drawer would arrive with a surprise extra bar. On desktop the hold is not wired at all — the sidebar's `+BAR` is always visible — so a long press there is just a slow tap. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
-- **Adding a bar lands you on it.** ADD BAR pages to the new last bar and DUP BAR to the copy, and both clear FOLLOW — otherwise the playhead drags the page straight back off the bar you just made.
+- **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
 - **LOOP cycles one bar**, not the whole pattern: `patLen` becomes `COLS` and each part's cursor runs `loopOff + step%COLS`. The bar belongs to whatever is playing — the song's current entry in song mode, the pattern you're editing otherwise.
-- **LOOP is pinned, not live.** `loopBar` is captured from the visible bar the moment LOOP is switched on and held there — paging, FOLLOW and the playhead can't move it (it used to read `barPageR` every tick, so the loop crawled around under you). Move it by switching LOOP off and on again from the bar you want. The scheduler reads `loopBarR`; `barPageR` now only feeds the editor's view offset. The pinned chip is marked with a steel underline (`C_LOOP`, the LOOP button's colour) — deliberately a different channel from the current-page fill and the gold `C_VARY` playing ring, so all three states read at once on a 2px-wide chip. `loopBar` is persisted at every `loopMode` site and clamped when the pattern shrinks. It pins the **pattern** too (`loopPat`): a bar index alone got applied to whatever the song was playing, so looping bar 4 of pattern B while the song sat in A sounded A's bar 4. Switching to a different pattern while LOOP is on moves the loop with you — that's explicit, unlike paging or FOLLOW.
+- **LOOP loops the bar you're looking at.** `loopBar` starts on the visible bar when LOOP is switched on and thereafter follows your **bar selection** — tap or drag the chips and the loop goes with you, so you can slide the loop from bar to bar without leaving the grid. The distinction that matters, and the reason this isn't the old crawl bug: only a bar *you picked* moves it. It is set in `goToBar` (chips, ADD/DUP BAR, ×2) and nowhere else, so the FOLLOW effect's own `setBarPage`, the clamps and the project resets all move the page without touching the loop. The scheduler still reads `loopBarR`, never `barPageR` — reading the page every tick is what made the loop crawl around under you, and that coupling stays severed. The pinned chip is marked with a steel underline (`C_LOOP`, the LOOP button's colour) — deliberately a different channel from the current-page fill and the gold `C_VARY` playing ring, so all three states read at once on a 2px-wide chip. `loopBar` is persisted at every `loopMode` site and clamped when the pattern shrinks. It pins the **pattern** too (`loopPat`): a bar index alone got applied to whatever the song was playing, so looping bar 4 of pattern B while the song sat in A sounded A's bar 4. Switching to a different pattern while LOOP is on moves the loop with you — that's explicit, unlike paging or FOLLOW.
 - **LOOP holds the song's place instead of overriding it.** In song mode LOOP parks `songPosR` on the current entry and cycles one bar of *that* pattern; switching LOOP off carries on from where it was held. `inSong` is now just `songModeR.current` — the loop gate moved onto the song-advance step in the master clock. `loopBar` is a bar *index*, so it clamps into a shorter song entry.
-- **Page-follow rides the EXISTING `followSeq`** (the transport's FOLLOW), not a toggle of its own — FOLLOW already means "keep the editor on what's playing" and the visible bar is the finer grain of that. A separate `barFollow` was tried and rejected. Chip taps don't clear it; a grid edit does, as always.
+- **Page-follow rides the EXISTING `followSeq`** (the transport's FOLLOW), not a toggle of its own — FOLLOW already means "keep the editor on what's playing" and the visible bar is the finer grain of that. A separate `barFollow` was tried and rejected. Picking a bar from the chips clears FOLLOW, as does a grid edit: choosing a bar while the playhead is dragging the page is a contradiction, and the chips read as doing nothing if the page snaps straight back.
 - **Two mobile sheets, not one.** `activeSheet==="bars"` (opened by the bar-count handle) holds the pattern ops + bar ops; `activeSheet==="pattern"` (the STEP chip) holds SPEED + the step lanes. Drums have no step lanes, so STEP routes to `"bars"` there. Sheet openers must be `onClick`, never `onPointerDown` — the backdrop mounts under the finger and the same tap's trailing click dismisses the sheet instantly. In render, `c` is the view column and `ac = barOff+c` is the data column. In the pointer handlers, `synthBarOffR()` / `drumBarOffR()` convert a hit-tested view column to absolute — they read live refs so the `[]`-dep useCallbacks don't bake in a stale page. **Paged, not scrolled**, deliberately: a scrolling grid needs a parent `overflow-x`, which is the iOS gesture-interception trap below.
-- **Bar-scoped ops.** RAND / CLR / CPY / PST / MUT8 and the STEP-lane RST/RAND all act on the **visible bar**, not the whole pattern (`sliceCols`/`spliceCols`/`sliceFlat`/`spliceFlat`). DUP/DEL stay pattern-level and must carry `bars`. `⧉` (duplicate bar) *inserts* after the visible bar — it opens a gap with `openBarGap` and slides later bars right; overwriting the next bar instead is a bug that was caught once already. It must go through `setPatterns` and insert into **all three parts**: doing it through a per-layer view makes `mergeLayer` resize the other two, which appends a blank bar at the END rather than inserting one, and the parts slide out of alignment.
+- **Bar-scoped ops.** RAND / CLR / CPY / PST / MUT8, the STEP-lane RST/RAND and the **two-finger shift** all act on the **visible bar**, not the whole pattern (`sliceCols`/`spliceCols`/`sliceFlat`/`spliceFlat`). DUP/DEL stay pattern-level and must carry `bars`. `⧉` (duplicate bar) *inserts* after the visible bar — it opens a gap with `openBarGap` and slides later bars right; overwriting the next bar instead is a bug that was caught once already. It must go through `setPatterns` and insert into **all three parts**: doing it through a per-layer view makes `mergeLayer` resize the other two, which appends a blank bar at the END rather than inserting one, and the parts slide out of alignment.
+- **The two-finger shift is bar-scoped and wraps inside the bar — on BOTH grids.** Dragging two fingers (shift+drag on desktop) rotates the notes and their step params (drums: grid + vel + rat), and it moves only the bar on screen — a nudge on bar 1 of a 4-bar part used to rotate all four, off-screen, with nothing on the page to show it until playback got there. Columns outside the window are copied through untouched **vertically as well as horizontally**, or a one-row drag would transpose the bars you can't see. The window offset is pinned at gesture start — `g.shiftOff` on the synth grid, `base.off` on the drums — not read live, or a page mid-drag would rotate one bar partway and then start on a different one. The two grids have separate implementations (`handleGridMove` vs `shiftDrumActive`) because their pointer handling differs, so **a fix to one is not a fix to the other** — that asymmetry is exactly how drums kept whole-pattern scoping for a while after synth stopped. Note it rotates `grid` and `params` but **not `durs`**, so a shifted long note keeps the duration of whatever used to sit in its new column; pre-existing, unfixed.
+- **Wrap indices with `((v%n)+n)%n`, never `(v-d+n)%n`.** The latter only normalises while `|d| < n`, and the shift delta is raw pixels from the gesture start with the pointer captured — so a two-finger drag longer than 16 cells (a flick across a phone screen, trivially reachable on a 1-bar pattern) indexed a negative row or column and threw inside `pointermove`. Confirmed by driving the pre-change build headlessly; it throws, the fixed one doesn't.
 - **VARY rerolls per bar** (`s % COLS === 0`), scoped to that bar's column window, so shifts/ghosts wrap inside the bar and earlier bars keep their roll. On a 1-bar pattern this is identical to the old per-loop behaviour.
 
 - `params[c]` keys: `vel, flt, dly, rev, rhy, dur, oct, glide` (see `defaultStepParams`). `rev`/`dur` were added after the first arch doc.
@@ -168,6 +171,115 @@ Global delay + reverb buses; each layer has send amounts, and per-step `dly`/`re
 
 ---
 
+---
+
+## The iOS app
+
+A native shell around the same source, for TestFlight and eventually the App
+Store. `src/loudlight.jsx` is still the only source; `build.mjs --ios` emits a
+**second target** beside `index.html`:
+
+```
+src/loudlight.jsx ──┬── index.html   Pages: React from a CDN, service worker, PWA meta
+                 └── ios/www/     app bundle: everything local, nothing remote
+```
+
+`ios/www/` is generated and gitignored (it carries a ~9MB copy of `samples/`).
+Setup, the App Store Connect click-path and the on-device checklist are in
+`docs/ios-testflight.md`.
+
+**The offline payload is asserted, not hoped for.** The `--ios` pass rewrites the
+two runtime CDN references — the Google Fonts `@import` and the on-demand lamejs
+`<script src>` — to local files, and **fails the build** if either substitution
+misses or if any remote URL survives into the output (Supabase, the SVG
+namespace and Babel's own license comment are the three documented exemptions).
+Same spirit as the `return_react2` audit: a TestFlight build that white-screens
+without signal is the failure this exists to prevent, and it would only ever
+show up on a device you can't attach a debugger to. If you add a CDN dependency
+to the source, the iOS build breaks until you vendor it into `vendor/`.
+
+**The shell is ~150 lines of Swift, no Capacitor, no Cordova.** Three files in
+`ios/LoudLight/`, doing only what a web page on iOS cannot do for itself:
+
+- **`BundleSchemeHandler`** serves the bundle over `loudlight://app` rather than
+  `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
+  origin, so `localStorage` there is unreliable and has historically been dropped
+  between launches — and `localStorage` is where autosave and the entire project
+  library live. A custom scheme gives one stable origin for the life of the
+  install. It is the same reason Capacitor serves from `capacitor://localhost`.
+- **`WebAppViewController`** owns the `AVAudioSession` (`.playback` +
+  `.mixWithOthers`), defers the bottom screen-edge gesture so a drag on the
+  transport row isn't a swipe home, dims the home indicator, and reloads if the
+  web content process dies. Pinned to the view's edges, **not** the safe area —
+  the page already reads `env(safe-area-inset-*)`, so insetting here would apply
+  the notch padding twice.
+- **`BundleSchemeHandler` tracks stopped tasks.** Replying to a `WKURLSchemeTask`
+  after WebKit has called `stop` on it throws an ObjC exception that takes the
+  app down, and there is no way to ask a task whether it's still live.
+
+**Two source changes the shell needs, both guarded on `window.__LOUDLIGHT_NATIVE__`
+(set by the iOS scaffold, absent on the web):**
+
+- The **install hint** must not fire. A WKWebView reports neither
+  `navigator.standalone` nor `display-mode: standalone`, so without the flag the
+  app tells someone who installed it from TestFlight to install it.
+- **`downloadBlob` routes through a native bridge.** An `<a download>` for a
+  `blob:` URL is a **silent no-op** in a WKWebView. MIDI export takes that path
+  unconditionally and MP3 falls back to it whenever `navigator.canShare` says no,
+  so both would look like dead buttons. The bytes go to the shell as base64 over
+  a `webkit.messageHandlers` channel, and it presents the iOS share sheet — which
+  is what "download" means on a phone anyway. Verified end to end headlessly by
+  shimming `window.webkit` and asserting the MIDI header bytes arrive.
+
+**iPhone and iPad from one build** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
+app needed no changes: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad gets the
+touch layout rather than the desktop one, and the layout is flex/`dvh` with
+`isLandscape` recomputed on resize. Verified headlessly from 400×700 to
+1194×834 and across a live resize — no overflow in either axis, and cells grow
+from ~21px on a phone to ~48px on an 11" iPad. Do **not** reach for
+`UIRequiresFullScreen` if iPad windowing ever looks wrong: it is deprecated and
+ignored from iPadOS 26, where every app is a resizable window, so the layout
+holding at any size is the only real answer.
+
+**iPhone and iPad from one target** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
+app needed no changes for it: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad
+gets the touch layout rather than the desktop one, and the layout is flex/`dvh`
+with `isLandscape` recomputed on resize. Verified from 400×700 to 1194×834 and
+across a live resize — no overflow in either axis, and cells grow from ~22px on
+a phone to ~48px on an 11" iPad. Do **not** reach for `UIRequiresFullScreen` if
+iPad windowing ever looks wrong: it is deprecated and ignored from iPadOS 26,
+where every app is a resizable window, so the layout holding at any size is the
+only real answer.
+
+**The app icon is derived from `icon.png`, not copied.** `ios/tools/make-icon.mjs`
+squares off its baked rounded corners, which are painted over **white** — iOS
+applies its own mask, so shipping it verbatim would put four white wedges around
+a navy icon on the home screen. The fill is a least-squares plane fitted per
+corner from the surrounding background: a flat fill bands against the ground's
+gradient, and resampling the nearest solid pixel per-pixel streaks into a
+starburst (both were tried). The script fails rather than writing an icon with
+any near-white left in the corners. Re-run it if `icon.png` changes.
+
+**The Xcode project is generated, never committed.** `ios/project.yml` (XcodeGen)
+is the reviewable form of a `.pbxproj`. Consequence to remember: **anything
+changed in Xcode's project or target inspector is destroyed by the next
+`xcodegen generate`** — signing and versioning therefore live in
+`ios/Config/LoudLight.xcconfig`, which is committed. `www` is declared as a folder
+*reference*, not a group: as a group Xcode flattens every file into the bundle
+root and every sample 404s.
+
+**Unverified.** None of the Swift has ever been compiled — there is no Mac,
+Xcode or iPhone in the environment it was written in. The web payload *is*
+verified (renders headlessly, React and DM Sans load locally, zero network
+requests, install hint suppressed, export bridge round-trips). The on-device
+checklist in `docs/ios-testflight.md` is ordered by likelihood of biting; the
+two genuinely doubtful ones are the ring/silent switch and background audio,
+because **WKWebView runs an audio session of its own and does not reliably
+honour the category the host app sets**. If background audio doesn't hold,
+delete `UIBackgroundModes` — declaring a background mode the app doesn't use is
+itself a review rejection.
+
+
 ## Persistence — the multi-site rule
 
 When you add saved state, add it to EVERY site or saves/undo silently lose it (`userMask` / `userRoot` were the most recent walk through this list):
@@ -228,5 +340,7 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
-- **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is unresolved — "Tabula" collides with an open-source PDF tool and, worse for discovery, sits one letter from "tabla" in App Store search.
+- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and on `main`; see "The iOS app" above. Builds for **iPhone and iPad** from one target. Blocked on Jake only for the Team ID and the bundle identifier in `ios/Config/LoudLight.xcconfig`, registering the app in App Store Connect, and a first archive from his Mac. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. The app name is settled (Loud Light); **the bundle ID is the permanent one** and is still a placeholder (`com.loudlight.sequencer`).
+- **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
+- **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.
