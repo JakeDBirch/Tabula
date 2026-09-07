@@ -49,10 +49,17 @@ targets:
       base:
         INFOPLIST_FILE: Tabula/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # iPhone only. The web app has a phone layout and a desktop layout and
-        # nothing tuned for iPad; shipping an untested iPad build just gives
-        # review a second device to find bugs on.
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone and iPad. Nothing in the web app needed changing for it:
+        # IS_MOBILE keys off maxTouchPoints, so an iPad already gets the
+        # touch layout rather than the desktop one, and the layout is flex/dvh
+        # throughout with isLandscape recomputed on resize. Checked headlessly
+        # from 400x700 up to 1194x834 and through a live resize — no overflow in
+        # either axis at any size, and grid cells grow from 21px on a phone to
+        # 48px on an 11" iPad, which is the whole point of playing it there.
+        # Note that iPadOS 26 makes every app a resizable window regardless
+        # (UIRequiresFullScreen is deprecated and ignored), so "iPad support"
+        # is really "survives an arbitrary window size" — which it does.
+        TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         SWIFT_TREAT_WARNINGS_AS_ERRORS: NO

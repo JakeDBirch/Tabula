@@ -198,6 +198,16 @@ to the source, the iOS build breaks until you vendor it into `vendor/`.
   is what "download" means on a phone anyway. Verified end to end headlessly by
   shimming `window.webkit` and asserting the MIDI header bytes arrive.
 
+**iPhone and iPad from one build** (`TARGETED_DEVICE_FAMILY = "1,2"`). The web
+app needed no changes: `IS_MOBILE` keys off `maxTouchPoints`, so an iPad gets the
+touch layout rather than the desktop one, and the layout is flex/`dvh` with
+`isLandscape` recomputed on resize. Verified headlessly from 400×700 to
+1194×834 and across a live resize — no overflow in either axis, and cells grow
+from ~21px on a phone to ~48px on an 11" iPad. Do **not** reach for
+`UIRequiresFullScreen` if iPad windowing ever looks wrong: it is deprecated and
+ignored from iPadOS 26, where every app is a resizable window, so the layout
+holding at any size is the only real answer.
+
 **The Xcode project is generated, never committed.** `ios/project.yml` (XcodeGen)
 is the reviewable form of a `.pbxproj`. Consequence to remember: **anything
 changed in Xcode's project or target inspector is destroyed by the next

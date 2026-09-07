@@ -141,7 +141,7 @@ references — *does* run on every push.
 
 ---
 
-## Getting it onto phones
+## Getting it onto devices
 
 **Yourself and a few people (no review):** App Store Connect → Users and Access
 → **+** → invite them with the **Developer** role (or **App Manager**). Then
@@ -156,6 +156,31 @@ mechanism for you and a handful of trusted ears, not for a mailing list.
 on re-uploading, or expect a puzzled message from someone in three months.
 
 ---
+
+## iPad
+
+The build targets iPhone **and** iPad (`TARGETED_DEVICE_FAMILY = "1,2"` in
+`ios/project.yml`). One app, one build, one TestFlight entry — install it on the
+iPad from the same TestFlight invite you used on the phone.
+
+Nothing in the web app needed changing for it. `IS_MOBILE` keys off
+`navigator.maxTouchPoints`, so an iPad gets the **touch** layout rather than the
+desktop one, and the layout is flex + `dvh` throughout with `isLandscape`
+recomputed on resize. What you gain is size: grid cells go from about 21px on a
+phone to about 48px on an 11" iPad, which is the actual reason to play it there.
+
+The thing to know about modern iPadOS: **every app is a resizable window now.**
+`UIRequiresFullScreen` is deprecated and ignored from iPadOS 26, so there is no
+way to demand full screen and no point declaring it — "iPad support" really
+means "survives an arbitrary window size". Checked headlessly from 400×700 up to
+1194×834 and through a live resize: no overflow in either axis at any size, no
+errors, and the layout returns to its original geometry when the window goes
+back. Worth a real drag on the device anyway — a rail layout that reflows
+correctly can still *feel* wrong.
+
+An iPhone-only build would have installed on an iPad regardless, letterboxed in
+compatibility mode. This is the difference between that and the app actually
+using the screen.
 
 ## Going public later
 
@@ -221,7 +246,10 @@ they are to bite:
 6. **Cloud sync.** Requests now carry an `Origin` of `tabula://app` rather than
    an `https://` one. Supabase's CORS should accept it, but sign-in is the place
    to find out if it does not.
-7. **Latency and touch feel**, which is the only part of this no test can answer.
+7. **iPad specifically:** drag the window narrow and wide with the app running.
+   The layout is verified to reflow, but a resizable window is also a new
+   interruption source for the audio graph, and that part is untested.
+8. **Latency and touch feel**, which is the only part of this no test can answer.
 
 To attach Safari's Web Inspector to a Debug build: run from Xcode, then
 Safari → Develop → *your iPhone* → Tabula. For a TestFlight build, add
