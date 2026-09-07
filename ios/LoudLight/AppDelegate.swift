@@ -1,20 +1,13 @@
 import UIKit
 
-/// Deliberately not a scene-based app. Loud Light is one full-screen instrument with
-/// one audio engine and one autosave; multiple windows would mean two schedulers
-/// writing the same localStorage key, which is a data-loss bug waiting to be
-/// filed. A plain window-based delegate keeps that impossible.
+/// Process-level entry point only. The window belongs to `SceneDelegate`, which
+/// the `UIApplicationSceneManifest` in Info.plist names; see that file for why
+/// the app is single-scene rather than single-window-by-avoiding-scenes.
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
 
-    var window: UIWindow?
-
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = WebAppViewController()
-        window.makeKeyAndVisible()
-        self.window = window
-        return true
+        true
     }
 }
