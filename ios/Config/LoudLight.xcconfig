@@ -3,10 +3,9 @@
 // This file is committed and is the one place to edit; everything else in the
 // Xcode project is generated from project.yml and will be overwritten.
 //
-// ── Fill in before the first build ──────────────────────────────────────────
-//
-// DEVELOPMENT_TEAM is your 10-character Apple Developer Team ID. Find it at
-// https://developer.apple.com/account → Membership details → Team ID.
+// DEVELOPMENT_TEAM is the Apple Developer Team ID, from
+// https://developer.apple.com/account → Membership details. Not a secret — it
+// appears in every provisioning profile the app ships with.
 //
 // PRODUCT_BUNDLE_IDENTIFIER is set: reverse-DNS of loudlight.co, which Jake
 // owns. It must match the App ID registered in App Store Connect exactly, and
@@ -14,7 +13,7 @@
 // been uploaded. The `sequencer` leaf leaves room for other apps under
 // co.loudlight later.
 
-DEVELOPMENT_TEAM =
+DEVELOPMENT_TEAM = KP6QHVP8GY
 PRODUCT_BUNDLE_IDENTIFIER = co.loudlight.sequencer
 
 // Automatic signing lets Xcode (and, in CI, xcodebuild -allowProvisioningUpdates)
