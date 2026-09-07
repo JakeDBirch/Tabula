@@ -3106,10 +3106,27 @@ export default function LoudLight(){
   // the initializer (plain localStorage, the `tnori-` prefix storageSet falls
   // back to) because the async storageGet would land a frame late and the grid
   // would visibly resize on every launch.
+  //
+  // Default CLOSED: the grid is what the app is, and the keys are a reference
+  // you reach for — a legend when a user key makes the pitches unguessable, an
+  // audition when you want to hear one. Neither is worth 24px of a 370px phone
+  // grid by default. Anything but a stored "1" reads as closed, so a first
+  // launch and a deliberate collapse land in the same state.
+  //
+  // Written ONLY by the toggle (see toggleRowKeys), never by an effect on
+  // mount. An effect stamps the current value into storage on every launch,
+  // which silently converts "hasn't decided" into "decided" — and then a later
+  // change of default reaches nobody, because every existing install already
+  // has a value. The key is `tnori-rowkeys-open`; the brief-lived
+  // `tnori-rowkeys` is dead for exactly that reason and is not read.
   const [rowKeysOpen, setRowKeysOpen] = useState(()=>{
-    try{return localStorage.getItem("tnori-rowkeys")!=="0";}catch(e){return true;}
+    try{return localStorage.getItem("tnori-rowkeys-open")==="1";}catch(e){return false;}
   });
-  useEffect(()=>{try{localStorage.setItem("tnori-rowkeys",rowKeysOpen?"1":"0");}catch(e){}},[rowKeysOpen]);
+  const toggleRowKeys=()=>{
+    const next=!rowKeysOpen;
+    setRowKeysOpen(next);
+    try{localStorage.setItem("tnori-rowkeys-open",next?"1":"0");}catch(e){}
+  };
   const [audRow, setAudRow] = useState(-1);
   const audRowTmrR=useRef(0);
   const flashRowKey=k=>{
@@ -4917,7 +4934,7 @@ export default function LoudLight(){
       <div role="button" aria-label={rowKeysOpen?"Hide the row keys":"Show the row keys"}
         aria-pressed={rowKeysOpen}
         title={rowKeysOpen?"Hide the note keys beside the grid":"Show the note keys beside the grid"}
-        onClick={e=>{e.stopPropagation();setRowKeysOpen(o=>!o);}}
+        onClick={e=>{e.stopPropagation();toggleRowKeys();}}
         style={{display:"flex",alignItems:"center",justifyContent:"center",
           height:IS_MOBILE?24:22,width:IS_MOBILE?26:24,borderRadius:5,
           border:"1px solid "+(rowKeysOpen?"rgba(255,214,150,0.45)":"rgba(168,190,212,0.18)"),
