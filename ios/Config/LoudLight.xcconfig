@@ -8,13 +8,14 @@
 // DEVELOPMENT_TEAM is your 10-character Apple Developer Team ID. Find it at
 // https://developer.apple.com/account → Membership details → Team ID.
 //
-// PRODUCT_BUNDLE_IDENTIFIER must match the App ID you register in App Store
-// Connect, and it is permanent — an app's bundle ID can never be changed or
-// reused once it has shipped, so pick the one you want to live with. Reverse
-// domain form, letters/numbers/hyphens/dots only.
+// PRODUCT_BUNDLE_IDENTIFIER is set: reverse-DNS of loudlight.co, which Jake
+// owns. It must match the App ID registered in App Store Connect exactly, and
+// it is permanent — a bundle ID can never be changed or reused once a build has
+// been uploaded. The `sequencer` leaf leaves room for other apps under
+// co.loudlight later.
 
 DEVELOPMENT_TEAM =
-PRODUCT_BUNDLE_IDENTIFIER = com.loudlight.sequencer
+PRODUCT_BUNDLE_IDENTIFIER = co.loudlight.sequencer
 
 // Automatic signing lets Xcode (and, in CI, xcodebuild -allowProvisioningUpdates)
 // create and download the certificate and provisioning profile for you, so

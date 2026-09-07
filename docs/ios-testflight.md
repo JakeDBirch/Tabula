@@ -50,10 +50,11 @@ You need the Team ID and a bundle identifier before anything will build.
 `ios/Config/LoudLight.xcconfig` and commit — it is not a secret, it appears in
 every provisioning profile.
 
-**2. Bundle identifier.** Also in `ios/Config/LoudLight.xcconfig`, currently
-`com.loudlight.sequencer`. **Choose carefully: a bundle ID is permanent.** It can
-never be renamed or reused once a build has been uploaded. Reverse-domain form
-of a domain you control is the convention.
+**2. Bundle identifier.** Already set to `co.loudlight.sequencer` in
+`ios/Config/LoudLight.xcconfig` — reverse-DNS of `loudlight.co`. It has to match
+the App ID you register in App Store Connect **exactly**, and it is permanent: a
+bundle ID can never be renamed or reused once a build has been uploaded. So the
+only thing to get right is typing the same string in both places.
 
 **3. Register the app.** [App Store Connect](https://appstoreconnect.apple.com)
 → Apps → **+** → New App. Platform iOS, your bundle ID, SKU anything (`tabula`),
