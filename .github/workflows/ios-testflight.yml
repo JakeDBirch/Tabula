@@ -10,8 +10,14 @@
 # Setup — five repository secrets. Full walkthrough in docs/ios-testflight.md.
 #
 # From one App Store Connect API key (Users and Access ▸ Integrations ▸ App
-# Store Connect API ▸ Team Keys, role "App Manager"). The .p8 downloads exactly
-# once and cannot be re-downloaded:
+# Store Connect API ▸ Team Keys, role "Admin"). The .p8 downloads exactly once
+# and cannot be re-downloaded.
+#
+# Admin, not App Manager: over the API, Certificates/Identifiers/Profiles is a
+# separate permission area only the Admin role reaches, and -allowProvisioningUpdates
+# needs it to create and download the provisioning profile. App Manager can
+# upload builds but cannot touch profiles, so the archive step fails before it
+# ever gets to the upload:
 #
 #   APPSTORE_KEY_ID        the key's Key ID, e.g. ABC123DEFG
 #   APPSTORE_ISSUER_ID     the Issuer ID shown above the key list (a UUID)

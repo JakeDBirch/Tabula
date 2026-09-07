@@ -110,9 +110,21 @@ afternoon.
 
 ### 1. App Store Connect API key
 
-App Store Connect → **Users and Access → Integrations → App Store Connect API →
-Team Keys → +**, role **App Manager**. The `.p8` downloads **once and only
-once** — Apple will not let you download it again.
+App Store Connect → **Users and Access → Integrations → App Store Connect API**.
+
+On a fresh account the page offers only **Request Access** — API access is off
+until the Account Holder turns it on. You are the Account Holder, so requesting
+it grants it.
+
+Then **Team Keys → +**, role **Admin**.
+
+> **Admin, not App Manager.** Over the API, Certificates/Identifiers/Profiles is
+> a separate permission area that only Admin reaches, and
+> `-allowProvisioningUpdates` needs it to create and download the provisioning
+> profile. App Manager can upload builds but not touch profiles, so the archive
+> step fails before it ever reaches the upload. Getting it wrong means revoking
+> the key and generating another — and the `.p8` downloads **once and only
+> once**, so there is no recovering the first one.
 
 | Secret | Where it comes from |
 |---|---|
