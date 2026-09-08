@@ -333,21 +333,39 @@ var partView=function partView(pat,layer){return Object.assign({},pat.parts[laye
 // stops being "column i of the part" and this 1:1 copy would silently play
 // something other than what was arranged. collapseBlockers reports that (and
 // the two size limits) so the caller can refuse rather than quietly mangle it.
-var COLLAPSE_LAYERS=["synth","lead","drums"];// The finest step present, so every part is a whole number of destination
-// columns per source step. speedMult only ever takes the SPEED_OPTS values
-// (0.5, 1, 1.5, 2, 3, 4), which are all whole multiples of 0.5 — so working in
-// half-step units makes the gcd exact integer arithmetic with no float slop,
-// and there is always a common grid. An EMPTY part's speed is not a fact about
-// the music, so it doesn't get a vote; otherwise a default-1x drum part nobody
-// had touched would drag a half-speed pattern onto a doubled grid for nothing.
-var _gcdI2=function _gcdI(a,b){return b?_gcdI2(b,a%b):a;};var collapseSpeed=function collapseSpeed(entries){var u=0;var _iterator4=_createForOfIteratorHelper(entries),_step4;try{for(_iterator4.s();!(_step4=_iterator4.n()).done;){var e=_step4.value;for(var _i0=0,_COLLAPSE_LAYERS=COLLAPSE_LAYERS;_i0<_COLLAPSE_LAYERS.length;_i0++){var l=_COLLAPSE_LAYERS[_i0];var q=e&&e.parts&&e.parts[l];if(!partHasNotes(q))continue;u=_gcdI2(u,Math.max(1,Math.round((q.speedMult||1)*2)));}}}catch(err){_iterator4.e(err);}finally{_iterator4.f();}return(u||2)/2;};// How many destination columns this entry occupies, on that common grid.
-var collapseSpan=function collapseSpan(e,dm){var c=patCycle(e);return Math.max(1,Math.round(c.steps*(c.mult/dm)));};var collapseBlockers=function collapseBlockers(entries,patternCount){var bad=[];// Each entry contributes what it SOUNDS for, which is its cycle — the master
+var COLLAPSE_LAYERS=["synth","lead","drums"];// Which grid the flattened pattern lands on.
+//
+// Two candidates. The FINEST step present is always available: work in
+// half-step units (every SPEED_OPTS value — 0.5, 1, 1.5, 2, 3, 4 — is a whole
+// multiple of 0.5) and take the gcd, so every part is a whole number of
+// destination columns per source step and a common grid always exists.
+//
+// But 1× is the one worth having when it is reachable, because the flattened
+// pattern then reads as ordinary time: bars are bars, the step lanes line up
+// with the beat, and everything downstream (further collapses, MIDI export,
+// anything that assumes a step is a step) sees a normal pattern instead of one
+// carrying a speed multiplier. Reachable means every populated part's speed is
+// a whole number of 1× steps — m ∈ {1,2,3,4}. A part at 2× (m=0.5) or ⅔×
+// (m=1.5) has onsets on HALF a 1× step, which a 1× grid cannot hold at all; no
+// amount of futzing with placement fixes that, so those keep the finer grid.
+//
+// In half-step units that test is just "is the gcd even": u is even exactly
+// when every m*2 is even, i.e. when every m is a whole number.
+//
+// The cost of normalising is columns — a ½× song doubles its width — so if 1×
+// would push it past MAX_BARS the finer grid is kept rather than refusing.
+// Either way the sound is identical; only the grid it is written on differs.
+var _gcdI2=function _gcdI(a,b){return b?_gcdI2(b,a%b):a;};var collapseSpan=function collapseSpan(e,dm){var c=patCycle(e);return Math.max(1,Math.round(c.steps*(c.mult/dm)));};var collapsePlan=function collapsePlan(entries){var u=0;var _iterator4=_createForOfIteratorHelper(entries),_step4;try{for(_iterator4.s();!(_step4=_iterator4.n()).done;){var e=_step4.value;for(var _i0=0,_COLLAPSE_LAYERS=COLLAPSE_LAYERS;_i0<_COLLAPSE_LAYERS.length;_i0++){var l=_COLLAPSE_LAYERS[_i0];var q=e&&e.parts&&e.parts[l];// An EMPTY part's speed is not a fact about the music, so it doesn't get a
+// vote; otherwise a default-1× drum part nobody had touched would drag a
+// half-speed song onto a doubled grid for nothing.
+if(!partHasNotes(q))continue;u=_gcdI2(u,Math.max(1,Math.round((q.speedMult||1)*2)));}}}catch(err){_iterator4.e(err);}finally{_iterator4.f();}var fine=(u||2)/2;var total=function total(dm){return entries.reduce(function(n,e){return n+collapseSpan(e,dm);},0);};var at=function at(dm,extra){return Object.assign({dm:dm,totalCols:Math.max(1,total(dm)),totalBars:Math.max(1,Math.ceil(Math.max(1,total(dm))/COLS))},extra||{});};if(fine===1)return at(1,{});if(!u||u%2)return at(fine,{cantBe1x:true});// a half-step speed is in play
+var one=at(1,{normalised:true});if(one.totalBars<=MAX_BARS)return one;return at(fine,{tooBigAt1x:one.totalBars});};var collapseBlockers=function collapseBlockers(entries,patternCount){var bad=[];// Each entry contributes what it SOUNDS for, which is its cycle — the master
 // part's loop — not its allocation. Repeats need nothing here: a slot played
 // three times arrives as three entries, because songSeq expands them.
-var dm=collapseSpeed(entries);var totalCols=entries.reduce(function(n,e){return n+collapseSpan(e,dm);},0);var totalBars=Math.max(1,Math.ceil(totalCols/COLS));if(!entries.length)bad.push("THE SONG IS EMPTY");if(totalBars>MAX_BARS)bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);if(patternCount>=MAX_PATTERNS)bad.push("PATTERN LIST IS FULL");// There is deliberately no speed refusal here any more. Mixed speeds are
+var plan=collapsePlan(entries);var totalBars=plan.totalBars;if(!entries.length)bad.push("THE SONG IS EMPTY");if(totalBars>MAX_BARS)bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);if(patternCount>=MAX_PATTERNS)bad.push("PATTERN LIST IS FULL");// There is deliberately no speed refusal here any more. Mixed speeds are
 // representable — see collapseEntries — and refusing them meant the button
 // only worked on songs simple enough not to need it.
-return{blockers:bad,totalBars:totalBars,totalCols:totalCols,dm:dm};};// Flatten the arrangement onto ONE grid.
+return Object.assign({blockers:bad},plan);};// Flatten the arrangement onto ONE grid.
 //
 // The old version demanded every part be at 1x, which made the button useless
 // on exactly the songs worth flattening. It isn't a real limit: a part at
@@ -366,7 +384,7 @@ return{blockers:bad,totalBars:totalBars,totalCols:totalCols,dm:dm};};// Flatten 
 // is the same sound by construction. Where it doesn't divide, the ratchet is
 // left on the onset and counted, so the caller can say so rather than quietly
 // changing the music.
-var collapseEntries=function collapseEntries(entries,name){var dm=collapseSpeed(entries);var totalCols=entries.reduce(function(n,e){return n+collapseSpan(e,dm);},0);var totalBars=Math.max(1,Math.ceil(totalCols/COLS));var out=mkPattern(name,totalBars);var approx=0;// ratchets a stretch couldn't place exactly
+var collapseEntries=function collapseEntries(entries,name){var plan=collapsePlan(entries);var dm=plan.dm,totalCols=plan.totalCols,totalBars=plan.totalBars;var out=mkPattern(name,totalBars);var approx=0;// ratchets a stretch couldn't place exactly
 var _loop2=function _loop2(){var layer=_COLLAPSE_LAYERS2[_i1];var dst=out.parts[layer];var isDrum=layer==="drums";var off=0;// destination column
 var _iterator5=_createForOfIteratorHelper(entries),_step5;try{for(_iterator5.s();!(_step5=_iterator5.n()).done;){var e=_step5.value;var span=collapseSpan(e,dm);var src=e.parts&&e.parts[layer];// A legacy project can reach here with a part missing or with rows that
 // don't match today's shape. That's not a reason to fail the whole
@@ -395,7 +413,7 @@ var first=entries[0];if(first&&first.parts.drums){var d=first.parts.drums;Object
 vRhythm:d.vRhythm||0,vVelocity:d.vVelocity||0,vo:d.vo!=null?d.vo:DRUM_ORDER_V});}// Whichever part the source called master, the collapsed copy is one flat
 // pattern — pin its master so inference can't pick a shorter part and cut the
 // flattening short.
-out.master=COLLAPSE_LAYERS.find(function(l){return partHasNotes(out.parts[l]);})||null;out._approx=approx;return syncPatBars(out);};var layerLib=function layerLib(pats,layer){return(pats||[]).map(function(p){return partView(p,layer);});};var _stripView=function _stripView(v){var o=Object.assign({},v);delete o.id;delete o.name;delete o.bars;return o;};var mergeLayer=function mergeLayer(patterns,layer,next){var seen=new Set((next||[]).map(function(v){return v.id;}));var out=[];var _iterator6=_createForOfIteratorHelper(patterns||[]),_step6;try{var _loop3=function _loop3(){var p=_step6.value;if(!seen.has(p.id))return 1;// continue
+out.master=COLLAPSE_LAYERS.find(function(l){return partHasNotes(out.parts[l]);})||null;out._approx=approx;out._plan=plan;return syncPatBars(out);};var layerLib=function layerLib(pats,layer){return(pats||[]).map(function(p){return partView(p,layer);});};var _stripView=function _stripView(v){var o=Object.assign({},v);delete o.id;delete o.name;delete o.bars;return o;};var mergeLayer=function mergeLayer(patterns,layer,next){var seen=new Set((next||[]).map(function(v){return v.id;}));var out=[];var _iterator6=_createForOfIteratorHelper(patterns||[]),_step6;try{var _loop3=function _loop3(){var p=_step6.value;if(!seen.has(p.id))return 1;// continue
 // dropped from the view = pattern deleted
 var v=(next||[]).find(function(x){return x.id===p.id;});var np=Object.assign({},p,{name:v.name!=null?v.name:p.name});// A bar-count change touches ONLY this layer's part. The other two keep
 // their own lengths and loop to fill. (The view normally arrives already
@@ -627,7 +645,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-08 04:13Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-08 04:43Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -2242,7 +2260,11 @@ var approx=np._approx||0;delete np._approx;setPatterns(function(ps){return[].con
 // looked like nothing had happened — the one visible change was a new chip
 // in a row you weren't looking at, and a flash that faded in under two
 // seconds. Opening the result is the confirmation.
-setSongView(false);setPage("edit");setBarPage(0);var spd=np.parts.synth.speedMult||1;var spdLbl=spd===1?"":" · "+((SPEED_OPTS.find(function(o){return o.mult===spd;})||{}).label||spd+"×");// Say when a stretch couldn't place a ratchet exactly, rather than changing
+setSongView(false);setPage("edit");setBarPage(0);// Say what grid it landed on and why, whenever that isn't plain 1×.
+// Silence would be worse than a long flash here: the whole point of the
+// normalise is that you can stop thinking about speed, so the one case
+// where it couldn't has to announce itself.
+var plan=np._plan||{};delete np._plan;var spd=plan.dm||1;var spdLbl=spd===1?"":" · KEPT AT "+((SPEED_OPTS.find(function(o){return o.mult===spd;})||{}).label||spd+"×")+(plan.cantBe1x?" (IT DOESN'T LAND ON A 1× GRID)":plan.tooBigAt1x?" (1× WOULD BE "+plan.tooBigAt1x+" BARS)":"");// Say when a stretch couldn't place a ratchet exactly, rather than changing
 // the music quietly. Everything else in a mixed-speed collapse is exact.
 showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS"+spdLbl+(approx?" · "+approx+" RATCHET"+(approx===1?"":"S")+" APPROXIMATED":""));}catch(err){console.error("SONG → PATTERN failed",err);showFlash("SONG → PATTERN FAILED: "+String(err&&err.message||err).toUpperCase().slice(0,70),"warn");}};var dupPatternId=function dupPatternId(id){if(patterns.length>=MAX_PATTERNS)return;var src=patterns.find(function(x){return x.id===id;});if(!src)return;pushHistory();var np=JSON.parse(JSON.stringify(src));np.id=++_id;np.name=pickSym(patterns.map(function(x){return x.name;}));setPatterns(function(ps){return[].concat(_toConsumableArray(ps),[np]);});setActivePatId(np.id);};var delPatternId=function delPatternId(id){if(patterns.length<=1)return;pushHistory();var rem=patterns.filter(function(x){return x.id!==id;});setPatterns(rem);if(activePatternId===id)setActivePatId(rem[0].id);setSong(function(sg){return sg.map(function(v){return v===id?null:v;});});setSongRep(function(rp){return rp.map(function(v,i){return song[i]===id?1:v;});});};var addPat=addPattern;var dupPat=function dupPat(){return dupPatternId(activeId);};var delPat=function delPat(){return delPatternId(activeId);};// CPY / PST move ONE BAR. That's what makes a long pattern workable: build a
 // bar, copy it forward, vary it. The clipboard is a COLS-wide slice.

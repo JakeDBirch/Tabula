@@ -740,43 +740,67 @@ const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pa
 // something other than what was arranged. collapseBlockers reports that (and
 // the two size limits) so the caller can refuse rather than quietly mangle it.
 const COLLAPSE_LAYERS=["synth","lead","drums"];
-// The finest step present, so every part is a whole number of destination
-// columns per source step. speedMult only ever takes the SPEED_OPTS values
-// (0.5, 1, 1.5, 2, 3, 4), which are all whole multiples of 0.5 — so working in
-// half-step units makes the gcd exact integer arithmetic with no float slop,
-// and there is always a common grid. An EMPTY part's speed is not a fact about
-// the music, so it doesn't get a vote; otherwise a default-1x drum part nobody
-// had touched would drag a half-speed pattern onto a doubled grid for nothing.
+// Which grid the flattened pattern lands on.
+//
+// Two candidates. The FINEST step present is always available: work in
+// half-step units (every SPEED_OPTS value — 0.5, 1, 1.5, 2, 3, 4 — is a whole
+// multiple of 0.5) and take the gcd, so every part is a whole number of
+// destination columns per source step and a common grid always exists.
+//
+// But 1× is the one worth having when it is reachable, because the flattened
+// pattern then reads as ordinary time: bars are bars, the step lanes line up
+// with the beat, and everything downstream (further collapses, MIDI export,
+// anything that assumes a step is a step) sees a normal pattern instead of one
+// carrying a speed multiplier. Reachable means every populated part's speed is
+// a whole number of 1× steps — m ∈ {1,2,3,4}. A part at 2× (m=0.5) or ⅔×
+// (m=1.5) has onsets on HALF a 1× step, which a 1× grid cannot hold at all; no
+// amount of futzing with placement fixes that, so those keep the finer grid.
+//
+// In half-step units that test is just "is the gcd even": u is even exactly
+// when every m*2 is even, i.e. when every m is a whole number.
+//
+// The cost of normalising is columns — a ½× song doubles its width — so if 1×
+// would push it past MAX_BARS the finer grid is kept rather than refusing.
+// Either way the sound is identical; only the grid it is written on differs.
 const _gcdI=(a,b)=>b?_gcdI(b,a%b):a;
-const collapseSpeed=(entries)=>{
-  let u=0;
-  for(const e of entries)for(const l of COLLAPSE_LAYERS){
-    const q=e&&e.parts&&e.parts[l];
-    if(!partHasNotes(q))continue;
-    u=_gcdI(u,Math.max(1,Math.round(((q.speedMult)||1)*2)));
-  }
-  return (u||2)/2;
-};
-// How many destination columns this entry occupies, on that common grid.
 const collapseSpan=(e,dm)=>{
   const c=patCycle(e);
   return Math.max(1,Math.round(c.steps*(c.mult/dm)));
+};
+const collapsePlan=(entries)=>{
+  let u=0;
+  for(const e of entries)for(const l of COLLAPSE_LAYERS){
+    const q=e&&e.parts&&e.parts[l];
+    // An EMPTY part's speed is not a fact about the music, so it doesn't get a
+    // vote; otherwise a default-1× drum part nobody had touched would drag a
+    // half-speed song onto a doubled grid for nothing.
+    if(!partHasNotes(q))continue;
+    u=_gcdI(u,Math.max(1,Math.round(((q.speedMult)||1)*2)));
+  }
+  const fine=(u||2)/2;
+  const total=(dm)=>entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
+  const at=(dm,extra)=>Object.assign({dm,totalCols:Math.max(1,total(dm)),
+    totalBars:Math.max(1,Math.ceil(Math.max(1,total(dm))/COLS))},extra||{});
+  if(fine===1)            return at(1,{});
+  if(!u||u%2)             return at(fine,{cantBe1x:true});   // a half-step speed is in play
+  const one=at(1,{normalised:true});
+  if(one.totalBars<=MAX_BARS) return one;
+  return at(fine,{tooBigAt1x:one.totalBars});
 };
 const collapseBlockers=(entries,patternCount)=>{
   const bad=[];
   // Each entry contributes what it SOUNDS for, which is its cycle — the master
   // part's loop — not its allocation. Repeats need nothing here: a slot played
   // three times arrives as three entries, because songSeq expands them.
-  const dm=collapseSpeed(entries);
-  const totalCols=entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
-  const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
+  const plan=collapsePlan(entries);
+  const {totalBars}=plan;
   if(!entries.length)              bad.push("THE SONG IS EMPTY");
   if(totalBars>MAX_BARS)           bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);
   if(patternCount>=MAX_PATTERNS)   bad.push("PATTERN LIST IS FULL");
   // There is deliberately no speed refusal here any more. Mixed speeds are
   // representable — see collapseEntries — and refusing them meant the button
   // only worked on songs simple enough not to need it.
-  return {blockers:bad,totalBars,totalCols,dm};
+  return Object.assign({blockers:bad},plan);
 };
 // Flatten the arrangement onto ONE grid.
 //
@@ -798,9 +822,8 @@ const collapseBlockers=(entries,patternCount)=>{
 // left on the onset and counted, so the caller can say so rather than quietly
 // changing the music.
 const collapseEntries=(entries,name)=>{
-  const dm=collapseSpeed(entries);
-  const totalCols=entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
-  const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
+  const plan=collapsePlan(entries);
+  const dm=plan.dm, totalCols=plan.totalCols, totalBars=plan.totalBars;
   const out=mkPattern(name,totalBars);
   let approx=0;                                  // ratchets a stretch couldn't place exactly
   for(const layer of COLLAPSE_LAYERS){
@@ -920,6 +943,7 @@ const collapseEntries=(entries,name)=>{
   // flattening short.
   out.master=COLLAPSE_LAYERS.find(l=>partHasNotes(out.parts[l]))||null;
   out._approx=approx;
+  out._plan=plan;
   return syncPatBars(out);
 };
 const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
@@ -7472,8 +7496,16 @@ export default function LoudLight(){
     // in a row you weren't looking at, and a flash that faded in under two
     // seconds. Opening the result is the confirmation.
     setSongView(false);setPage("edit");setBarPage(0);
-    const spd=np.parts.synth.speedMult||1;
-    const spdLbl=spd===1?"":" · "+((SPEED_OPTS.find(o=>o.mult===spd)||{}).label||spd+"×");
+    // Say what grid it landed on and why, whenever that isn't plain 1×.
+    // Silence would be worse than a long flash here: the whole point of the
+    // normalise is that you can stop thinking about speed, so the one case
+    // where it couldn't has to announce itself.
+    const plan=np._plan||{}; delete np._plan;
+    const spd=plan.dm||1;
+    const spdLbl=spd===1?""
+      :" · KEPT AT "+((SPEED_OPTS.find(o=>o.mult===spd)||{}).label||spd+"×")
+        +(plan.cantBe1x?" (IT DOESN'T LAND ON A 1× GRID)"
+         :plan.tooBigAt1x?" (1× WOULD BE "+plan.tooBigAt1x+" BARS)":"");
     // Say when a stretch couldn't place a ratchet exactly, rather than changing
     // the music quietly. Everything else in a mixed-speed collapse is exact.
     showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS"+spdLbl
