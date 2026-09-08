@@ -254,6 +254,23 @@ iPad windowing ever looks wrong: it is deprecated and ignored from iPadOS 26,
 where every app is a resizable window, so the layout holding at any size is the
 only real answer.
 
+**The packaged iPhone app is landscape-only** (`UISupportedInterfaceOrientations`
+in `Info.plist`, both rotations). **iPad is deliberately not locked** — iPadOS 26
+makes every app a resizable window and already warns that supporting all
+orientations will soon be required, so a lock there is half-honoured today and a
+forward-compat liability tomorrow. Nor is the **web** locked: `screen.orientation
+.lock()` is unimplemented in iOS Safari, so the only web equivalent is a "rotate
+your device" curtain, which is a product decision rather than a setting.
+
+Worth knowing before assuming landscape is the roomier layout on a phone: **it
+isn't.** The grid is square and height-bound, so rotating a phone makes it
+marginally *smaller* — measured across four iPhone sizes, 355→343px on an SE and
+410→398px on a 15 Pro Max. Landscape also leaves ~130px of unused width beside
+the grid (`min(100vw - 190px, 100dvh - 32px)` is the height term on every phone).
+What landscape buys is the **rail** — transport, layers and sheet openers beside
+the grid rather than stacked under it. The portrait mobile layout is untouched
+and still ships on the web; don't delete it as dead code.
+
 **The app icon is derived from `icon.png`, not copied.** `ios/tools/make-icon.mjs`
 squares off its baked rounded corners, which are painted over **white** — iOS
 applies its own mask, so shipping it verbatim would put four white wedges around

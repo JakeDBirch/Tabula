@@ -71,9 +71,17 @@
 	<string>Dark</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- iPhone is landscape-only: one orientation to hold the instrument in,
+	     rather than a layout that reflows under your hands mid-take. Both
+	     rotations, so it follows the hand rather than dictating a side. Note
+	     what this does NOT buy: the grid is square and height-bound, so
+	     landscape makes it marginally SMALLER, not bigger (measured across
+	     four iPhone sizes: 355->343px on an SE, 410->398px on a 15 Pro Max).
+	     What it buys is the rail — transport, layers and sheet openers beside
+	     the grid instead of stacked under it. The portrait layout is untouched
+	     and still ships on the web, where the orientation isn't ours to pick. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
-		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
