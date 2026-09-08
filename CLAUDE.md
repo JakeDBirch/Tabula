@@ -357,7 +357,25 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
-- **iOS beta**: **working.** Runs on Jake's iPhone and iPad, and `Actions ▸ iOS TestFlight ▸ Run workflow` builds, signs and uploads to App Store Connect from a GitHub runner — first run green, ~3½ min, no Mac involved. Signing is committed (Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer`); the five CI secrets are set. Remaining: add internal testers in App Store Connect, and the on-device checklist in `docs/ios-testflight.md` (project survives a force-quit is the one that matters — `localStorage` is the whole project library). Internal TestFlight first, which skips Apple review entirely.
+- **iOS beta**: **working.** Runs on Jake's iPhone and iPad, and `Actions ▸ iOS TestFlight ▸ Run workflow` builds, signs and uploads to App Store Connect from a GitHub runner — first run green, ~3½ min, no Mac involved. Signing is committed (Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer`); the five CI secrets are set. Internal group created with Jake in it.
+
+  **A cloud session can ship a beta end to end**: edit source → `npm run
+  build:ios` → commit → push `main` → dispatch the workflow with the GitHub MCP
+  `actions_run_trigger` (`method: run_workflow`, `workflow_id:
+  ios-testflight.yml`, `ref: main`) → watch it with `actions_list` /
+  `get_job_logs`. Build numbers come from `github.run_number`, so they always
+  increase and never collide. **Don't dispatch on every change** — an upload is
+  outward-facing and notifies testers; ship when asked. Nothing inside App Store
+  Connect is reachable from here (testers, metadata, review submission are all
+  Jake's).
+
+  Whether a new build reaches devices with no clicks depends on **Enable
+  automatic distribution** on the internal group; without it each build must be
+  added to the group by hand. Builds expire after 90 days.
+
+  Still to do: the on-device checklist in `docs/ios-testflight.md` — project
+  survives a force-quit is the one that matters, since `localStorage` is the
+  whole project library.
 - **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.
