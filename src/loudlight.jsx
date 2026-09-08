@@ -691,43 +691,75 @@ const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pa
 // something other than what was arranged. collapseBlockers reports that (and
 // the two size limits) so the caller can refuse rather than quietly mangle it.
 const COLLAPSE_LAYERS=["synth","lead","drums"];
+// The finest step present, so every part is a whole number of destination
+// columns per source step. speedMult only ever takes the SPEED_OPTS values
+// (0.5, 1, 1.5, 2, 3, 4), which are all whole multiples of 0.5 — so working in
+// half-step units makes the gcd exact integer arithmetic with no float slop,
+// and there is always a common grid. An EMPTY part's speed is not a fact about
+// the music, so it doesn't get a vote; otherwise a default-1x drum part nobody
+// had touched would drag a half-speed pattern onto a doubled grid for nothing.
+const _gcdI=(a,b)=>b?_gcdI(b,a%b):a;
+const collapseSpeed=(entries)=>{
+  let u=0;
+  for(const e of entries)for(const l of COLLAPSE_LAYERS){
+    const q=e&&e.parts&&e.parts[l];
+    if(!partHasNotes(q))continue;
+    u=_gcdI(u,Math.max(1,Math.round(((q.speedMult)||1)*2)));
+  }
+  return (u||2)/2;
+};
+// How many destination columns this entry occupies, on that common grid.
+const collapseSpan=(e,dm)=>{
+  const c=patCycle(e);
+  return Math.max(1,Math.round(c.steps*(c.mult/dm)));
+};
 const collapseBlockers=(entries,patternCount)=>{
   const bad=[];
   // Each entry contributes what it SOUNDS for, which is its cycle — the master
   // part's loop — not its allocation. Repeats need nothing here: a slot played
   // three times arrives as three entries, because songSeq expands them.
-  const totalCols=entries.reduce((n,e)=>n+patCycle(e).steps,0);
+  const dm=collapseSpeed(entries);
+  const totalCols=entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
   const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
   if(!entries.length)              bad.push("THE SONG IS EMPTY");
   if(totalBars>MAX_BARS)           bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);
   if(patternCount>=MAX_PATTERNS)   bad.push("PATTERN LIST IS FULL");
-  // Name the pattern and the part. "SET EVERY PART TO 1× FIRST" sent you
-  // hunting through every pattern in the song for the one that wasn't, and it
-  // reads like a blanket refusal to collapse rather than one fixable thing.
-  const slow=[];
-  for(const e of entries)for(const l of COLLAPSE_LAYERS){
-    const m=(e.parts&&e.parts[l]&&e.parts[l].speedMult)||1;
-    if(m!==1){
-      const tag=(e.name||"?")+" "+(l==="synth"?"POLY":l==="lead"?"MONO":"DRUMS");
-      if(!slow.includes(tag))slow.push(tag);
-    }
-  }
-  if(slow.length)                  bad.push(slow.slice(0,3).join(", ")+(slow.length>3?" +"+(slow.length-3)+" MORE":"")+" ISN'T AT 1× — SET IT THERE FIRST");
-  return {blockers:bad,totalBars,totalCols};
+  // There is deliberately no speed refusal here any more. Mixed speeds are
+  // representable — see collapseEntries — and refusing them meant the button
+  // only worked on songs simple enough not to need it.
+  return {blockers:bad,totalBars,totalCols,dm};
 };
+// Flatten the arrangement onto ONE grid.
+//
+// The old version demanded every part be at 1x, which made the button useless
+// on exactly the songs worth flattening. It isn't a real limit: a part at
+// speedMult m holds each of its steps for m absolute steps, so against a finer
+// destination grid it is simply a STRETCHED copy of itself — one onset every
+// k = m/dm columns, with durations multiplied by k. Pick dm as the finest speed
+// in the song and every part lands on whole columns. When every populated part
+// already shares one speed (much the commonest case, including a whole song at
+// 1/2x) k is 1 everywhere, the destination just inherits that speed, and the
+// copy is byte-for-byte what it always was.
+//
+// Ratchets are the one thing a stretch can distort: rhy/rat subdivide the STEP
+// (subDur = stepDur/n), and the destination's step is k times shorter, so a
+// ratchet carried across verbatim would fire k times too fast. Where k divides
+// evenly by n it is expanded instead into n real onsets spaced k/n apart, which
+// is the same sound by construction. Where it doesn't divide, the ratchet is
+// left on the onset and counted, so the caller can say so rather than quietly
+// changing the music.
 const collapseEntries=(entries,name)=>{
-  // Widths come from each entry's CYCLE, so a pattern that sounds for 14 steps
-  // contributes 14 columns and the next entry starts where it actually did.
-  // Using its bar ALLOCATION wrote 16 and shifted everything after it by two.
-  const totalCols=entries.reduce((n,e)=>n+patCycle(e).steps,0);
+  const dm=collapseSpeed(entries);
+  const totalCols=entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
   const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
   const out=mkPattern(name,totalBars);
+  let approx=0;                                  // ratchets a stretch couldn't place exactly
   for(const layer of COLLAPSE_LAYERS){
     const dst=out.parts[layer];
     const isDrum=layer==="drums";
     let off=0;                                   // destination column
     for(const e of entries){
-      const span=patCycle(e).steps;              // absolute columns this entry occupies
+      const span=collapseSpan(e,dm);
       const src=e.parts&&e.parts[layer];
       // A legacy project can reach here with a part missing or with rows that
       // don't match today's shape. That's not a reason to fail the whole
@@ -737,27 +769,76 @@ const collapseEntries=(entries,name)=>{
       // The part loops over its OWN gridLen, which is what makes a short part
       // fill a longer entry — the same modulo the scheduler applies.
       const len=Math.max(1,Math.min(w,src.gridLen||w));
+      const k=Math.max(1,Math.round(((src.speedMult)||1)/dm));
       const vel=Array.isArray(src.vel)?(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w)):null;
       const rat=Array.isArray(src.rat)?(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w)):null;
       const rows=Math.min(src.grid.length,dst.grid.length);
+      const put=(r,col,dur)=>{
+        if(col<0||col>=totalCols)return;
+        dst.grid[r][col]=true;
+        if(!isDrum&&dst.durs)dst.durs[r][col]=Math.max(1,dur);
+      };
       for(let i=0;i<span;i++){
-        const from=i%len, to=off+i;
+        const to=off+i;
+        // Only a step BOUNDARY carries an onset. The k-1 columns after it are
+        // the same source step still sounding, covered by the note's duration.
+        if(i%k)continue;
+        const from=Math.floor(i/k)%len;
+        const sp=(!isDrum&&src.params&&src.params[from])?src.params[from]:null;
+        const rhy=sp?Math.max(1,Math.round(sp.rhy??1)):1;
         for(let r=0;r<rows;r++){
-          const sr=src.grid[r]; if(!sr)continue;
-          dst.grid[r][to]=!!sr[from];
-          if(!isDrum&&src.durs&&dst.durs&&src.durs[r])dst.durs[r][to]=src.durs[r][from]||1;
+          const sr=src.grid[r]; if(!sr||!sr[from])continue;
           if(isDrum){
-            if(vel&&dst.vel&&vel[r]&&vel[r][from]!=null)dst.vel[r][to]=vel[r][from];
-            if(rat&&dst.rat&&rat[r]&&rat[r][from]!=null)dst.rat[r][to]=rat[r][from];
+            const n=Math.max(1,Math.round((rat&&rat[r]&&rat[r][from]!=null)?rat[r][from]:1));
+            const v=(vel&&vel[r]&&vel[r][from]!=null)?vel[r][from]:100;
+            if(k>1&&n>1&&k%n===0){
+              const gap=k/n;
+              for(let t=0;t<n;t++){
+                const c=to+t*gap;
+                if(c>=totalCols)break;
+                dst.grid[r][c]=true;
+                if(dst.vel)dst.vel[r][c]=v;
+                if(dst.rat)dst.rat[r][c]=1;
+              }
+            }else{
+              if(k>1&&n>1)approx++;
+              dst.grid[r][to]=true;
+              if(dst.vel)dst.vel[r][to]=v;
+              if(dst.rat)dst.rat[r][to]=n;
+            }
+            continue;
+          }
+          const d=Math.max(1,(src.durs&&src.durs[r]&&src.durs[r][from])||1);
+          if(k>1&&rhy>1&&k%rhy===0){
+            const gap=k/rhy;
+            // Every hit is one sub-step long and none carries a tail: when
+            // ratch>1 the engine plays subDur*0.9 per hit and ignores `durs`
+            // altogether, so the source note's length was never audible and
+            // re-creating it here would ADD length the song never had.
+            for(let t=0;t<rhy;t++)put(r,to+t*gap,gap);
+          }else{
+            if(k>1&&rhy>1)approx++;
+            put(r,to,d*k);
           }
         }
-        if(!isDrum&&src.params&&dst.params&&src.params[from])dst.params[to]=Object.assign({},src.params[from]);
+        if(!isDrum&&dst.params&&sp){
+          const cp=Object.assign({},sp);
+          // A ratchet that got expanded into real onsets must not ALSO ratchet.
+          if(k>1&&rhy>1&&k%rhy===0){
+            cp.rhy=1;
+            for(let t=1;t<rhy;t++){
+              const c=to+t*(k/rhy);
+              if(c<totalCols)dst.params[c]=Object.assign({},cp);
+            }
+          }
+          dst.params[to]=cp;
+        }
         if(isDrum&&src.motion&&typeof src.motion==="object"){
           dst.motion=dst.motion||{};
-          for(const k of Object.keys(src.motion)){
-            const lane=src.motion[k];if(!Array.isArray(lane))continue;
-            if(!dst.motion[k])dst.motion[k]=lane.map(()=>new Array(totalBars*COLS).fill(null));
-            for(let r=0;r<lane.length;r++)dst.motion[k][r][to]=(lane[r]&&lane[r][from]!=null)?lane[r][from]:null;
+          for(const mk of Object.keys(src.motion)){
+            const lane=src.motion[mk];if(!Array.isArray(lane))continue;
+            if(!dst.motion[mk])dst.motion[mk]=lane.map(()=>new Array(totalBars*COLS).fill(null));
+            for(let r=0;r<lane.length;r++)dst.motion[mk][r][to]=(lane[r]&&lane[r][from]!=null)?lane[r][from]:null;
           }
         }
       }
@@ -767,7 +848,7 @@ const collapseEntries=(entries,name)=>{
     // whole number of bars — the allocation above is rounded up to bars, and
     // any remainder is silence at the end rather than a repeat of the top.
     dst.gridLen=Math.max(1,totalCols);
-    dst.speedMult=1;
+    dst.speedMult=dm;
   }
   // The drum bus settings aren't per-column, so they come from the first entry.
   const first=entries[0];
@@ -783,6 +864,7 @@ const collapseEntries=(entries,name)=>{
   // pattern — pin its master so inference can't pick a shorter part and cut the
   // flattening short.
   out.master=COLLAPSE_LAYERS.find(l=>partHasNotes(out.parts[l]))||null;
+  out._approx=approx;
   return syncPatBars(out);
 };
 const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
@@ -7284,6 +7366,10 @@ export default function LoudLight(){
     if(blockers.length){showFlash("CAN'T DO IT — "+blockers[0],"warn");return;}
     pushHistory();
     const np=collapseEntries(entries,pickSym(patterns.map(x=>x.name)));
+    // Carried out of collapseEntries rather than stored on the pattern — it
+    // describes this one flattening, not the pattern, and would otherwise ride
+    // along into every save of it forever.
+    const approx=np._approx||0; delete np._approx;
     setPatterns(ps=>[...ps,np]);
     setActivePatId(np.id);
     // Land ON the new pattern. Appending a chip and staying on the song page
@@ -7291,7 +7377,12 @@ export default function LoudLight(){
     // in a row you weren't looking at, and a flash that faded in under two
     // seconds. Opening the result is the confirmation.
     setSongView(false);setPage("edit");setBarPage(0);
-    showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS");
+    const spd=np.parts.synth.speedMult||1;
+    const spdLbl=spd===1?"":" · "+((SPEED_OPTS.find(o=>o.mult===spd)||{}).label||spd+"×");
+    // Say when a stretch couldn't place a ratchet exactly, rather than changing
+    // the music quietly. Everything else in a mixed-speed collapse is exact.
+    showFlash("SONG → PATTERN "+np.name+" · "+totalBars+" BARS"+spdLbl
+      +(approx?" · "+approx+" RATCHET"+(approx===1?"":"S")+" APPROXIMATED":""));
    }catch(err){
     console.error("SONG → PATTERN failed",err);
     showFlash("SONG → PATTERN FAILED: "+String((err&&err.message)||err).toUpperCase().slice(0,70),"warn");
