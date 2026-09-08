@@ -5468,25 +5468,32 @@ export default function LoudLight(){
   // are too and the two columns line up by construction.
   // Deferred calls: auditionRow is declared further down and Babel lowers
   // const to var, so a bare reference here binds undefined.
-  // Collapsed all the way to nothing, not to a thin stub: the column costs 24px
-  // of a 370px phone grid and a stub would hand back only half of it. The toggle
-  // lives in the bar strip instead, which is always on screen and which no
-  // column alignment depends on. Every offset below reads this, so the two
-  // states can't drift apart.
-  const rowKeyPad=rowKeysOpen?ROWKEY_W+CELL_GAP:0;
-  const drumKeyPad=rowKeysOpen?ROWKEY_W+2:0;
+  // The keys FLOAT over column 1 rather than taking a gutter beside the grid.
+  // As a real column they cost 24px of a 370px phone grid, so opening them
+  // resized the grid and every cell moved under your finger — which is a much
+  // worse trade than covering one column of a reference you opened on purpose.
+  // These pads are what used to push the bar strip, step bar and length track
+  // across to stay column-aligned; nothing shifts now, so they are 0 and stay
+  // 0. Kept as names rather than deleted at ~8 call sites, so the alignment
+  // story stays readable and re-reserving a gutter is a one-line change.
+  const rowKeyPad=0;
+  const drumKeyPad=0;
   const _rowKeyStyle=(lit,accent)=>({flex:1,minHeight:0,display:"flex",alignItems:"center",
     justifyContent:"center",borderRadius:IS_MOBILE?2:3,cursor:"pointer",userSelect:"none",
     WebkitUserSelect:"none",touchAction:"none",fontFamily:"inherit",lineHeight:1,
     fontSize:IS_MOBILE?7.5:9,fontWeight:600,letterSpacing:0.2,overflow:"hidden",
     border:"1px solid "+(lit?accent:"rgba(168,190,212,0.10)"),
-    background:lit?"rgba(255,214,150,0.22)":"rgba(186,208,230,0.04)",
+    // Deliberately see-through: these sit ON TOP of column 1, and a lit note
+    // under them has to stay legible or the overlay would hide a bar's worth
+    // of what you're editing.
+    background:lit?"rgba(255,214,150,0.22)":"rgba(14,28,43,0.55)",
+    backdropFilter:"blur(2px)",WebkitBackdropFilter:"blur(2px)",
     color:lit?"#ffd28a":"rgba(178,199,219,0.45)",
     boxShadow:lit?"0 0 6px rgba(255,214,150,0.35)":"none",
     transition:"background .12s, box-shadow .12s, color .12s"});
   const rowKeys=!rowKeysOpen?null:(
-    <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",
-      marginRight:CELL_GAP,touchAction:"none"}}>
+    <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
+      display:"flex",flexDirection:"column",touchAction:"none"}}>
       {Array.from({length:ROWS},(_,r)=>{
         const fromBot=ROWS-1-r;
         const isOct=fromBot%curShape.span===0;
@@ -5511,8 +5518,8 @@ export default function LoudLight(){
   // mixer strip is set to. The drum grid spaces its rows by 2, so this column
   // does too or the labels walk away from the rows they name.
   const drumRowKeys=!rowKeysOpen?null:(
-    <div style={{width:ROWKEY_W,flexShrink:0,display:"flex",flexDirection:"column",gap:2,
-      marginRight:2,touchAction:"none"}}>
+    <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
+      display:"flex",flexDirection:"column",gap:2,touchAction:"none"}}>
       {DRUM_VOICES.map((voice,r)=>{
         const lit=audRow===100+r;
         const dc=drumColor(r,linkHat,linkTom);
@@ -8947,7 +8954,7 @@ export default function LoudLight(){
               {/* Row keys sit OUTSIDE the grid container: the grid's pointer
                   handlers live on that container and hit-test a column from its
                   own width, so a key column inside it would be read as column 0. */}
-              <div style={{flex:1,minHeight:0,display:"flex"}}>
+              <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
               {rowKeys}
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -9073,7 +9080,7 @@ export default function LoudLight(){
                     handlers are PER CELL rather than on the container, so this
                     column could sit inside it; it stays outside anyway so both
                     grids are built the same way. */}
-                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex"}}>
+                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",position:"relative"}}>
                 {drumRowKeys}
                 <div ref={drumGridRef} style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
                   {lenEdgeDrums}
@@ -9733,7 +9740,7 @@ export default function LoudLight(){
               <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
                   {/* Keys outside the grid container — see the desktop mount. */}
-                  <div style={{flex:1,minHeight:0,display:"flex"}}>
+                  <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
                   <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -9792,7 +9799,7 @@ export default function LoudLight(){
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
                       <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                       {/* Voice keys — tap to hear the drum on its own. */}
-                      <div style={{width:SIZE,display:"flex",flexShrink:0}}>
+                      <div style={{width:SIZE,display:"flex",flexShrink:0,position:"relative"}}>
                       {drumRowKeys}
                       <div ref={drumGridRef} style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
                         {lenEdgeDrums}
