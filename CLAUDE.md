@@ -273,16 +273,30 @@ changed in Xcode's project or target inspector is destroyed by the next
 *reference*, not a group: as a group Xcode flattens every file into the bundle
 root and every sample 404s.
 
-**Unverified.** None of the Swift has ever been compiled — there is no Mac,
-Xcode or iPhone in the environment it was written in. The web payload *is*
-verified (renders headlessly, React and DM Sans load locally, zero network
-requests, install hint suppressed, export bridge round-trips). The on-device
-checklist in `docs/ios-testflight.md` is ordered by likelihood of biting; the
-two genuinely doubtful ones are the ring/silent switch and background audio,
-because **WKWebView runs an audio session of its own and does not reliably
-honour the category the host app sets**. If background audio doesn't hold,
-delete `UIBackgroundModes` — declaring a background mode the app doesn't use is
-itself a review rejection.
+**Built and running, on device and in CI.** The app runs on Jake's iPhone and
+iPad from Xcode, and the TestFlight workflow went green on its first run
+(2026-09-08): payload built on Linux, then archive, sign and upload to App Store
+Connect from a `macos-26` runner in about 3½ minutes. So the whole chain is
+proven — no Mac needed for a build from here.
+
+**Background audio does not work, and cannot be made to.** This was the main
+native-audio reason for wrapping the app, so it is worth stating plainly:
+**Web Audio in a WKWebView cannot play on the lock screen or sustain in the
+background.** WebKit suspends the `AudioContext` when the host app backgrounds
+regardless of `UIBackgroundModes` or the host's `AVAudioSession`; the WebKit bug
+for it ([173932](https://bugs.webkit.org/show_bug.cgi?id=173932)) has been open
+since 2017, and the underlying failure is `Required client entitlement is
+missing` — a private entitlement third-party apps cannot get. No configuration
+fixes it. `UIBackgroundModes: audio` is still declared and should be **removed
+before external review** unless testing shows it buys the reported ~27 seconds
+of app-switch survival; declaring a background mode the app doesn't use is
+itself a rejection reason.
+
+The only real fix is moving the engines (`Bell`, `drumEngine`) out of Web Audio
+into AVAudioEngine/Core Audio, with the web layer reduced to UI — the same work
+that unlocks AUv3, Core MIDI and Ableton Link. Until then the honest case for
+the app is offline reliability, home-screen presence and TestFlight
+distribution, **not** audio.
 
 
 ## Persistence — the multi-site rule
@@ -345,7 +359,7 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 
 - **Cloud sync (task #87)**: **built and shipped, switched off.** See "Cloud sync (Supabase)" above and `docs/cloud-sync.md`. Waiting on Jake only for the three setup steps: create the Supabase project, run the SQL, add `{{ .Token }}` to the magic-link email template — then paste the **project URL + anon key** into `CLOUD_URL` / `CLOUD_KEY` and rebuild. Don't create his account or enter credentials. Verified end-to-end against a mocked Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out); never run against the real service.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
-- **iOS beta**: the native shell, the offline payload, the XcodeGen project and a TestFlight CI workflow are built and on `main`; see "The iOS app" above. Builds for **iPhone and iPad** from one target. Signing is settled and committed — Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer` (reverse-DNS of loudlight.co, which Jake owns; permanent, and matching the registered App ID). The App Store Connect record exists. What's left is Jake's Mac: `npm run build:ios && cd ios && xcodegen generate`, run on device, archive, upload. Internal TestFlight first — internal builds skip Apple review entirely, so guideline 4.2 never gets a chance to bite. **No Swift has ever been compiled**, so expect a round of build errors on the first attempt.
+- **iOS beta**: **working.** Runs on Jake's iPhone and iPad, and `Actions ▸ iOS TestFlight ▸ Run workflow` builds, signs and uploads to App Store Connect from a GitHub runner — first run green, ~3½ min, no Mac involved. Signing is committed (Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer`); the five CI secrets are set. Remaining: add internal testers in App Store Connect, and the on-device checklist in `docs/ios-testflight.md` (project survives a force-quit is the one that matters — `localStorage` is the whole project library). Internal TestFlight first, which skips Apple review entirely.
 - **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.
