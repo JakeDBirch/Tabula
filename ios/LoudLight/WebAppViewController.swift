@@ -43,6 +43,19 @@ final class WebAppViewController: UIViewController {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+        // Re-arming OUR session is only half of it. WebKit runs the page's
+        // AudioContext against its own session, and an interruption leaves that
+        // context in WebKit's "interrupted" state, which nothing inside the page
+        // is allowed to clear until a session is active again. So the two halves
+        // have to be sequenced: activate here, then tell the page to resume.
+        // Without this the app comes back to the foreground looking fine and
+        // playing nothing, and only a force-quit fixes it.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
     }
 
     // Light glyphs on the near-black canvas.
@@ -155,6 +168,37 @@ final class WebAppViewController: UIViewController {
             // a silent app on a device has somewhere to start.
             NSLog("[LoudLight] audio session setup failed: %@", error.localizedDescription)
         }
+        nudgeWebAudioAwake()
+    }
+
+    /// An interruption ENDED — a call hung up, another app gave the route back.
+    /// `.shouldResume` is advisory and often absent when the interrupting app
+    /// simply went away, so re-activate either way: the cost of a redundant
+    /// activation is nothing, and the cost of skipping a needed one is an app
+    /// that is silent until it is force-quit.
+    @objc private func handleAudioInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        guard type == .ended else { return }
+        configureAudioSession()
+    }
+
+    /// Ask the page to resume its AudioContext. Retried on a short delay as
+    /// well as immediately: `setActive(true)` returning without throwing does
+    /// not mean the route is ready, and a resume() attempted a beat too early
+    /// is rejected silently. The page's own handler is idempotent and no-ops
+    /// once the context is running, so an extra call costs nothing.
+    private func nudgeWebAudioAwake() {
+        let poke = { [weak self] in
+            self?.webView?.evaluateJavaScript("window.__LL_RESUME_AUDIO && window.__LL_RESUME_AUDIO()") { _, error in
+                if let error = error {
+                    NSLog("[LoudLight] resume nudge failed: %@", error.localizedDescription)
+                }
+            }
+        }
+        poke()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: poke)
     }
 }
 

@@ -199,6 +199,14 @@ const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 const C_VARY="#e6b872";
+// VARY is PARKED, not deleted. It was taking a tab, a rail slot and a mobile
+// sheet — real estate the parts of the app you use on every take were short of
+// — for something that isn't load-bearing yet. Flip this to true to bring the
+// whole thing back: the state, the persistence, the per-layer toggles and the
+// grid overlays are all still here and still correct. Note the VARY page also
+// carries the tuning knobs MUT8 reads (DROP / SHIFT / PITCH / GHOST rates), so
+// while this is false MUT8 keeps working but is no longer adjustable.
+const VARY_ON=false;
 // LOOP's accent — same steel blue as the LOOP button, so the marked bar chip
 // reads as "this is the bar LOOP is holding".
 const C_LOOP="#9fb4c7";
@@ -583,6 +591,76 @@ const syncPatBars=(p)=>{
   for(const l of PART_LAYERS)if(p.parts[l])b=Math.max(b,partBars(p.parts[l]));
   return p.bars===b?p:Object.assign({},p,{bars:b});
 };
+// ── The master part, and the cycle it defines ────────────────────────────
+// A pattern's cycle used to be `bars * COLS` — its longest ALLOCATION. That
+// ignored the two things that actually decide how long a part sounds for, and
+// broke in both directions: a part trimmed to 14 steps got cut off at 16 and
+// restarted two steps into its next pass, and a part at ½× got exactly half of
+// itself before the clock yanked it back to zero. Worse, an entirely EMPTY part
+// allocated four bars stretched the pattern to four bars, so the one part you
+// had actually composed was conforming to the shape of three you hadn't.
+//
+// The rule now: one part is the pattern's MASTER, and the cycle is its own
+// loop. Whichever layer is composed first claims it, and keeps it — the cycle
+// must not move under you when you add a second part, so the master is
+// recorded on the pattern rather than re-derived from whatever is longest.
+// Longer parts are covered by running the master a whole number of times, so
+// the master is the one part that is never cut off mid-pass. Everything else
+// loops to fill and gets snapped back at the boundary, exactly as before.
+const partAbsLen=part=>{
+  if(!part)return 0;
+  const w=partWidth(part);
+  return Math.max(1,Math.min(w,part.gridLen||w))*(part.speedMult||1);
+};
+// Only ever asked of a LIVE pattern. A packed part's grid is sparse, so this
+// would read it wrong — hence the _pk guard rather than a silent wrong answer.
+const partHasNotes=part=>{
+  if(!part||part._pk||!Array.isArray(part.grid))return false;
+  return part.grid.some(r=>Array.isArray(r)&&r.some(Boolean));
+};
+const masterLayerOf=(pat)=>{
+  if(!pat||!pat.parts)return null;
+  // Recorded wins, empty or not: "the first layer composed stays the master"
+  // is only a promise if clearing it doesn't silently hand the job to another.
+  if(pat.master&&pat.parts[pat.master])return pat.master;
+  // Nothing recorded — a pattern from before this existed, or one still empty.
+  // Infer the longest POPULATED part, which is what the old bars-based cycle
+  // already deferred to, so an ordinary project's timing is untouched.
+  let best=null,bl=-1;
+  for(const l of PART_LAYERS){
+    const q=pat.parts[l];
+    if(!partHasNotes(q))continue;
+    const al=partAbsLen(q);
+    if(al>bl){bl=al;best=l;}
+  }
+  return best;
+};
+// The cycle everything re-synchronises on, expressed in the MASTER'S OWN steps
+// (`steps`) plus the step duration multiplier that unit implies (`mult`).
+// Master steps rather than absolute ones so the count stays a whole number:
+// 15 steps at 2× is 7.5 absolute steps, and a clock cannot wrap on a half.
+const patCycle=(pat)=>{
+  const layer=masterLayerOf(pat);
+  if(!layer)return {layer:null,steps:Math.max(1,patBars(pat)*COLS),mult:1};
+  const mp=pat.parts[layer];
+  const w=partWidth(mp);
+  const mlen=Math.max(1,Math.min(w,mp.gridLen||w));
+  const mult=mp.speedMult||1;
+  const one=mlen*mult;                           // one master pass, in absolute steps
+  let longest=one;
+  for(const l of PART_LAYERS){
+    const q=pat.parts[l];
+    if(partHasNotes(q))longest=Math.max(longest,partAbsLen(q));
+  }
+  // Whole passes only. The epsilon is for the 1.5 and 0.5 multipliers, where
+  // longest/one lands a hair over an integer in binary floating point.
+  const reps=Math.max(1,Math.ceil(longest/one-1e-9));
+  return {layer,steps:Math.max(1,mlen*reps),mult};
+};
+// How many bars the pattern SOUNDS for, as opposed to how many it has been
+// allocated. What the song page's bar dots count, so the dots match the
+// playhead that lights them.
+const cycleBars=(pat)=>Math.max(1,Math.min(MAX_BARS,Math.ceil(patCycle(pat).steps/COLS)));
 const mkSynthPart=(w=COLS)=>({grid:mkGrid(w),durs:mkDurs(w),params:defaultStepParams(w),gridLen:Math.min(COLS,w),speedMult:1});
 const mkDrumPart =(w=COLS)=>({grid:Array.from({length:DRUM_ROWS},()=>new Array(w).fill(false)),
   vel:mkDrumVel(w),rat:mkDrumRat(w),gridLen:Math.min(COLS,w),speedMult:1,
@@ -615,27 +693,41 @@ const partView=(pat,layer)=>Object.assign({},pat.parts[layer],{id:pat.id,name:pa
 const COLLAPSE_LAYERS=["synth","lead","drums"];
 const collapseBlockers=(entries,patternCount)=>{
   const bad=[];
-  const totalBars=entries.reduce((n,e)=>n+patBars(e),0);
+  // Each entry contributes what it SOUNDS for, which is its cycle — the master
+  // part's loop — not its allocation. Repeats need nothing here: a slot played
+  // three times arrives as three entries, because songSeq expands them.
+  const totalCols=entries.reduce((n,e)=>n+patCycle(e).steps,0);
+  const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
   if(!entries.length)              bad.push("THE SONG IS EMPTY");
   if(totalBars>MAX_BARS)           bad.push("THAT'S "+totalBars+" BARS — THE LIMIT IS "+MAX_BARS);
   if(patternCount>=MAX_PATTERNS)   bad.push("PATTERN LIST IS FULL");
-  const speeds=new Set();
+  // Name the pattern and the part. "SET EVERY PART TO 1× FIRST" sent you
+  // hunting through every pattern in the song for the one that wasn't, and it
+  // reads like a blanket refusal to collapse rather than one fixable thing.
+  const slow=[];
   for(const e of entries)for(const l of COLLAPSE_LAYERS){
     const m=(e.parts&&e.parts[l]&&e.parts[l].speedMult)||1;
-    if(m!==1)speeds.add(m);
+    if(m!==1){
+      const tag=(e.name||"?")+" "+(l==="synth"?"POLY":l==="lead"?"MONO":"DRUMS");
+      if(!slow.includes(tag))slow.push(tag);
+    }
   }
-  if(speeds.size)                  bad.push("SET EVERY PART TO 1× FIRST");
-  return {blockers:bad,totalBars};
+  if(slow.length)                  bad.push(slow.slice(0,3).join(", ")+(slow.length>3?" +"+(slow.length-3)+" MORE":"")+" ISN'T AT 1× — SET IT THERE FIRST");
+  return {blockers:bad,totalBars,totalCols};
 };
 const collapseEntries=(entries,name)=>{
-  const totalBars=entries.reduce((n,e)=>n+patBars(e),0);
+  // Widths come from each entry's CYCLE, so a pattern that sounds for 14 steps
+  // contributes 14 columns and the next entry starts where it actually did.
+  // Using its bar ALLOCATION wrote 16 and shifted everything after it by two.
+  const totalCols=entries.reduce((n,e)=>n+patCycle(e).steps,0);
+  const totalBars=Math.max(1,Math.ceil(totalCols/COLS));
   const out=mkPattern(name,totalBars);
   for(const layer of COLLAPSE_LAYERS){
     const dst=out.parts[layer];
     const isDrum=layer==="drums";
     let off=0;                                   // destination column
     for(const e of entries){
-      const span=patBars(e)*COLS;                // absolute columns this entry occupies
+      const span=patCycle(e).steps;              // absolute columns this entry occupies
       const src=e.parts&&e.parts[layer];
       // A legacy project can reach here with a part missing or with rows that
       // don't match today's shape. That's not a reason to fail the whole
@@ -671,7 +763,10 @@ const collapseEntries=(entries,name)=>{
       }
       off+=span;
     }
-    dst.gridLen=totalBars*COLS;                  // the whole thing plays
+    // The whole thing plays. gridLen is the SOUNDING length, which needn't be a
+    // whole number of bars — the allocation above is rounded up to bars, and
+    // any remainder is silence at the end rather than a repeat of the top.
+    dst.gridLen=Math.max(1,totalCols);
     dst.speedMult=1;
   }
   // The drum bus settings aren't per-column, so they come from the first entry.
@@ -684,6 +779,10 @@ const collapseEntries=(entries,name)=>{
       // project, and took the whole collapse down with it.
       vRhythm:d.vRhythm||0,vVelocity:d.vVelocity||0,vo:d.vo!=null?d.vo:DRUM_ORDER_V});
   }
+  // Whichever part the source called master, the collapsed copy is one flat
+  // pattern — pin its master so inference can't pick a shorter part and cut the
+  // flattening short.
+  out.master=COLLAPSE_LAYERS.find(l=>partHasNotes(out.parts[l]))||null;
   return syncPatBars(out);
 };
 const layerLib=(pats,layer)=>(pats||[]).map(p=>partView(p,layer));
@@ -2385,7 +2484,7 @@ class Bell{
   setDlyHp(v){if(!this.ready)return;if(this.dlyHp)this.dlyHp.frequency.setTargetAtTime(hpHz(v),this.ctx.currentTime,.02);}
   setDlyLp(v){if(!this.ready)return;if(this.dlyLp)this.dlyLp.frequency.setTargetAtTime(lpHz(v),this.ctx.currentTime,.02);}
   setDelaySend(pct){if(!this.ready)return;if(this.dlySend)this.dlySend.gain.setTargetAtTime(pct/100,this.ctx.currentTime,.02);}
-  async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
+  async resume(){if(this.ctx&&this.ctx.state!=="running")await this.ctx.resume();}
 }
 
 
@@ -2544,7 +2643,7 @@ class DrumEngine{
     try{g.gain.cancelScheduledValues(at);g.gain.setTargetAtTime(0.0001,at,0.008);}catch(e){}
     this.activeOH=null;
   }
-  async resume(){if(this.ctx&&this.ctx.state==="suspended")await this.ctx.resume();}
+  async resume(){if(this.ctx&&this.ctx.state!=="running")await this.ctx.resume();}
 
   // Exponential envelope — no linear-to-zero artifacts
   _env(g,t,pk,atk,dec,sus,rel){
@@ -2870,6 +2969,10 @@ export default function LoudLight(){
   // Drums have no per-step page — never leave the drums layer parked on STEP
   // (its tab is hidden); fall back to the grid editor.
   useEffect(()=>{if(activeLayer==="drums"&&page==="step")setPage("edit");},[activeLayer,page]);
+  // A project saved while VARY was open would restore onto a page that no
+  // longer renders anything — a blank panel with no tab to leave it by.
+  useEffect(()=>{if(!VARY_ON&&page==="vary")setPage("edit");},[page]);
+  useEffect(()=>{if(!VARY_ON&&activeSheet==="vary")setActiveSheet(null);},[activeSheet]);
   const [bpm,       setBpm]       = useState(120);
 
   // Drum step editing state
@@ -2937,6 +3040,10 @@ export default function LoudLight(){
   const [userMask,  setUserMask]  = useState(USER_MASK_DEF);
   const [userRoot,  setUserRoot]  = useState(0);
   const [playing,   setPlaying]   = useState(false);
+  // The audio session was taken away and would not come back on its own. iOS
+  // requires a fresh user gesture to re-acquire it in some interruption cases,
+  // so this drives a banner rather than being retried forever in silence.
+  const [audioStalled, setAudioStalled] = useState(false);
   const [step,      setStep]      = useState(-1);
   const [playId,    setPlayId]    = useState(null);
   // Playing pattern id of whichever layer is ACTIVE (synth/lead/drums) — drives
@@ -3396,6 +3503,27 @@ export default function LoudLight(){
   // Live mirrors for the scheduler.
   const patternsR=useRef(patterns);
   useEffect(()=>{patternsR.current=patterns;},[patterns]);
+  // Claim the master for any pattern that hasn't got one — the first layer
+  // composed in it. Done here, once, over the whole store rather than at each
+  // of the ~20 sites that can turn a cell on (tap, paint, RAND, MUT8, PST,
+  // variation, collapse, load): a React commit is one user action, so the part
+  // that just gained its first note is exactly what this sees, and there is no
+  // mutation site left to forget. Deliberately NOT pushHistory'd — it's a
+  // consequence of the edit you just made, not a separate one to undo past.
+  // It also stamps patterns loaded from older saves, where masterLayerOf
+  // infers the longest populated part: that is the one the bars-based cycle
+  // already deferred to, so an ordinary project keeps the timing it had.
+  useEffect(()=>{
+    let changed=false;
+    const next=patterns.map(p=>{
+      if(!p||!p.parts||p.master)return p;
+      const m=masterLayerOf(p);
+      if(!m)return p;                             // still empty — nothing to claim it
+      changed=true;
+      return Object.assign({},p,{master:m});
+    });
+    if(changed)setPatterns(next);
+  },[patterns]);
   const activePatternIdR=useRef(activePatternId);
   useEffect(()=>{activePatternIdR.current=activePatternId;},[activePatternId]);
   // The playable song: the list with its gaps closed. Editing leaves holes;
@@ -4512,7 +4640,11 @@ export default function LoudLight(){
                 // stretch of the same pattern reads as "x4" without collapsing
                 // the individually tappable cells.
                 const rep=_rep(idx);
-                const pbars=pat?patBars(pat):1;
+                // Bars the entry SOUNDS for, not bars it was allocated — the
+                // dots are lit by the playhead, so counting the allocation drew
+                // dots that could never light (four dots for a pattern whose
+                // only composed part is one bar long).
+                const pbars=pat?cycleBars(pat):1;
                 // A run's badge counts PLAYS, not cells, so it agrees with the
                 // pips: two cells at x2 each is a run of 4. Only drawn when the
                 // run spans more than one cell — a single cell's repeats are
@@ -5964,9 +6096,25 @@ export default function LoudLight(){
     }
   };
 
+  const lastResumeTryR=useRef(0);
+  const resumeAudioR=useRef(null);
   const scheduler=useCallback(()=>{
     if(!bell.current.ready)return;
     const ctx=bell.current.ctx;
+    // The transport's own watchdog. A context the OS interrupted just FREEZES
+    // currentTime — the loops below then spin scheduling nothing, so the app
+    // sits there looking like it is playing, in silence. Every lifecycle event
+    // we listen for can be missed in a WKWebView; this one cannot, because it
+    // is the transport itself noticing. Throttled: resume() is a real await and
+    // this runs every 25ms.
+    if(ctx.state!=="running"){
+      const now=Date.now();
+      if(now-lastResumeTryR.current>800){
+        lastResumeTryR.current=now;
+        if(resumeAudioR.current)resumeAudioR.current();
+      }
+      return;
+    }
     const LOOKAHEAD=0.1; // seconds ahead to schedule
     // Master clock = absolute, BPM-derived. NO per-pat multiplier here.
     // Each pattern plays at its own speedMult as an independent multiplier
@@ -6005,7 +6153,15 @@ export default function LoudLight(){
     // The cycle length in absolute steps. Everything re-synchronises here:
     // parts loop inside it at their own gridLen and speed, and the song
     // advances when it wraps (unless LOOP is holding it).
-    const patLen=Math.max(1,inLoop?COLS:patBars(curPat)*COLS);
+    // The cycle, and the unit it is counted in. Not `bars * COLS` any more:
+    // that measured the longest ALLOCATION, so a part trimmed to 14 steps was
+    // cut off at 16 and a ½× part got half of itself. The master part's own
+    // loop defines it, and the clock ticks in the master's steps so the count
+    // stays whole at every speed multiplier. LOOP still cycles one BAR — one
+    // bar of the master, at the master's rate.
+    const cyc=patCycle(curPat);
+    const masterStepDur=absStepDur*(cyc.mult||1);
+    const patLen=Math.max(1,inLoop?COLS:cyc.steps);
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
       if(!part)return null;
@@ -6037,7 +6193,7 @@ export default function LoudLight(){
         // unchanged from before multi-bar patterns; on a 32-bar pattern it keeps
         // VARY meaning "a fresh roll each bar" instead of once every 32 bars.
         const _barC0=Math.floor(s/COLS)*COLS;
-        if(s%COLS===0&&varyModeR.current[layer]){
+        if(VARY_ON&&s%COLS===0&&varyModeR.current[layer]){
           if(layer==="drums"){
             const vRhythm=(pat.vRhythm||0)/100;
             const vVelocity=(pat.vVelocity||0)/100;
@@ -6129,11 +6285,11 @@ export default function LoudLight(){
         }
         for(const l of PART_LAYERS){
           freeR.current[l].step=0;
-          freeR.current[l].nextAt=nextNoteR.current+absStepDur;
+          freeR.current[l].nextAt=nextNoteR.current+masterStepDur;
         }
       }
       stepR.current=ns;
-      nextNoteR.current+=absStepDur;
+      nextNoteR.current+=masterStepDur;
     }
     // Coarse position for the song page's bar dots. Same lookahead lead as the
     // grid playhead — both are published when a step is SCHEDULED, not when it
@@ -6269,40 +6425,73 @@ export default function LoudLight(){
   useEffect(()=>()=>clearInterval(tmrR.current),[]);
 
   // ── iOS audio session + wake lock management ──────────────────────────────
+  // Bringing the audio back after the OS took it away. This used to test every
+  // context for state==="suspended", which is the ONE state an interrupted iOS
+  // context is not in: WebKit has its own non-standard **"interrupted"** state
+  // for a context the audio session was pulled out from under — switching to
+  // another app, a call, another app claiming the session. So every guard here
+  // silently no-op'd, play() kept failing its own !=="running" check, and the
+  // only way back was to force-quit and relaunch. That is the "no sound until I
+  // close and reopen it" bug.
+  //
+  // Two consequences worth keeping: test for **not running** rather than for a
+  // particular stopped state, and RETRY — resume() rejects while the underlying
+  // AVAudioSession is still inactive, which is exactly the instant these events
+  // fire on the way back to the foreground.
+  const audioCtxs=useCallback(()=>[
+    bell.current&&bell.current.ctx,
+    drumEngine.current&&drumEngine.current.ctx,
+  ].filter(c=>c&&typeof c.resume==="function"),[]);
+  const audioStalledR=useRef(false);
+  const resumeAudio=useCallback(async(tries=6)=>{
+    const cs=audioCtxs();
+    if(!cs.length)return true;
+    for(let i=0;i<tries;i++){
+      for(const c of cs){
+        if(c.state==="running")continue;
+        try{await c.resume();}catch(e){}
+      }
+      if(cs.every(c=>c.state==="running")){
+        if(silentLoopR.current&&silentLoopR.current.paused){try{await silentLoopR.current.play();}catch(e){}}
+        if(audioStalledR.current){audioStalledR.current=false;setAudioStalled(false);}
+        return true;
+      }
+      await new Promise(r=>setTimeout(r,120*(i+1)));   // 120,240,360… ≈ 2.5s total
+    }
+    // Still dead. iOS will not let a page re-acquire the session without a
+    // fresh user gesture in some interruption cases, so say so instead of
+    // leaving a transport that looks like it is playing in silence.
+    if(!audioStalledR.current){audioStalledR.current=true;setAudioStalled(true);}
+    return false;
+  },[]);
+  // The shell calls this after it has re-activated the AVAudioSession, which is
+  // the half of the handshake a web page cannot do for itself.
+  useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
+  useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
-    // Resume AudioContext and silent loop when page becomes visible
     const onVisible=async()=>{
-      if(document.visibilityState==="visible"){
-        if(bell.current.ctx&&bell.current.ctx.state==="suspended"){
-          try{await bell.current.ctx.resume();}catch(e){}
-        }
-        if(drumEngine.current.ctx&&drumEngine.current.ctx.state==="suspended"){
-          try{await drumEngine.current.ctx.resume();}catch(e){}
-        }
-        // Re-play silent loop (iOS may have paused it)
-        if(silentLoopR.current&&silentLoopR.current.paused){
-          try{await silentLoopR.current.play();}catch(e){}
-        }
-        // Re-request wake lock if playing
-        if(playingR.current)requestWakeLock();
-      }
+      if(document.visibilityState!=="visible")return;
+      await resumeAudio();
+      if(playingR.current)requestWakeLock();
     };
-    // iOS pageshow fires when returning from bfcache (app switch)
-    const onPageShow=async(e)=>{
-      if(e.persisted){
-        if(bell.current.ctx&&bell.current.ctx.state==="suspended"){
-          try{await bell.current.ctx.resume();}catch(e2){}
-        }
-        if(silentLoopR.current&&silentLoopR.current.paused){
-          try{await silentLoopR.current.play();}catch(e2){}
-        }
-      }
-    };
+    // pageshow fires on the way back from the bfcache; focus is the one that
+    // reliably fires in a WKWebView app switch, where visibilitychange does not
+    // always. Cheap to over-subscribe — resumeAudio is a no-op when running.
+    const onPageShow=()=>{resumeAudio();};
+    const onFocus=()=>{resumeAudio();};
     document.addEventListener("visibilitychange",onVisible);
     window.addEventListener("pageshow",onPageShow);
+    window.addEventListener("focus",onFocus);
+    // The context itself announces the interruption. This is the signal that
+    // does not depend on guessing which lifecycle event a WKWebView will send.
+    const cs=audioCtxs();
+    const onState=()=>{if(document.visibilityState==="visible")resumeAudio();};
+    for(const c of cs)c.addEventListener&&c.addEventListener("statechange",onState);
     return()=>{
       document.removeEventListener("visibilitychange",onVisible);
       window.removeEventListener("pageshow",onPageShow);
+      window.removeEventListener("focus",onFocus);
+      for(const c of cs)c.removeEventListener&&c.removeEventListener("statechange",onState);
     };
   },[]);
 
@@ -6563,6 +6752,7 @@ export default function LoudLight(){
   },[]);
 
   // Shared popup-open logic — called by both long press and right-click
+  const popupOpenAtR=useRef(0);
   const commitAndClose=useCallback(()=>{
     const pr=popupR.current;
     if(!pr)return;
@@ -6583,6 +6773,13 @@ export default function LoudLight(){
   const openParamPopup=useCallback((c,ox,oy,baseVals)=>{
     const g=gesture.current;
     g.state="popup";
+    // The popup opens from a press-and-hold, with the finger STILL DOWN, and
+    // the gesture releases pointer capture on the way in — so the trailing
+    // pointerup/click of that same press lands on whatever mounts underneath.
+    // A dismiss-on-tap-outside backdrop would therefore close the popup in the
+    // same instant it appeared. Same trap as sheetGuardR, same fix: ignore the
+    // backdrop until the press that opened it is over.
+    popupOpenAtR.current=Date.now();
     popupR.current={col:c,originX:ox,originY:oy,baseValues:baseVals,lockedArm:null};
     setParamPopup({col:c,x:ox,y:oy,activeArm:null,values:{...baseVals}});
   },[]);
@@ -7693,8 +7890,8 @@ export default function LoudLight(){
   // VARY is per-layer; these drive the global indicators (tab tint, mobile
   // chip). anyVary = at least one layer on; activeVary = the layer the user
   // is currently looking at.
-  const anyVary = varyMode.synth||varyMode.lead||varyMode.drums;
-  const activeVary = !!varyMode[activeLayer];
+  const anyVary = VARY_ON && (varyMode.synth||varyMode.lead||varyMode.drums);
+  const activeVary = VARY_ON && !!varyMode[activeLayer];
 
   // ── GLOBAL FX panel ──────────────────────────────────────────────────────
   // The reverb and delay *design* params. These are global
@@ -7993,6 +8190,25 @@ export default function LoudLight(){
           pinned open on desktop — now that the panel is a menu, "SAVED S1" /
           "UNDO" / "MIDI EXPORTED" need somewhere to land whether or not the
           menu is open, so it floats above everything (the modal included). */}
+      {audioStalled&&(
+        <div role="button" aria-label="Restore audio"
+          onClick={async()=>{
+            // Must run from the gesture: re-acquiring an interrupted iOS audio
+            // session needs a user activation, which is the whole reason this
+            // banner exists instead of a silent retry loop.
+            try{await startEngines();}catch(e){}
+            const ok=await resumeAudio(3);
+            if(ok)showFlash("AUDIO RESTORED");
+          }}
+          style={{position:"fixed",left:"50%",transform:"translateX(-50%)",
+            top:"calc(env(safe-area-inset-top) + 8px)",zIndex:400,cursor:"pointer",
+            padding:"9px 14px",borderRadius:9,background:"rgba(120,40,30,0.96)",
+            border:"1px solid rgba(255,190,150,0.5)",color:"#ffd7bd",
+            fontSize:10,letterSpacing:1.2,fontWeight:700,textAlign:"center",
+            boxShadow:"0 6px 20px rgba(0,0,0,0.5)"}}>
+          AUDIO INTERRUPTED — TAP TO RESTORE
+        </div>
+      )}
       {flash&&(
         <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get
@@ -8041,6 +8257,17 @@ export default function LoudLight(){
         const py=Math.max(10,Math.min(vh-H-10, paramPopup.y-H-16));
         return(
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:400,pointerEvents:"none"}} onPointerMove={handleGridMove}>
+            {/* Tap anywhere off the card to commit and close. This is a sibling
+                UNDER the card rather than pointer events on the container, so
+                the radial drag's move handling is untouched — and because the
+                backdrop is a child, moves across it still bubble to onPointerMove
+                above, which the radial actually wants. */}
+            <div style={{position:"absolute",inset:0,pointerEvents:"all",background:"transparent"}}
+              onPointerDown={(e)=>{
+                if(Date.now()-popupOpenAtR.current<400)return;   // still the opening press
+                e.stopPropagation();
+                commitAndClose();
+              }}/>
             <div style={{position:"absolute",left:px,top:py,width:W,
               background:"rgba(10,20,32,0.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",
               borderRadius:14,border:"1px solid rgba(168,190,212,0.15)",
@@ -8050,7 +8277,7 @@ export default function LoudLight(){
               {/* Header row */}
               <div style={{display:"flex",alignItems:"center",marginBottom:8}}>
                 <span style={{fontSize:9,color:"rgba(178,199,219,0.4)",letterSpacing:2,flex:1}}>STEP {(popupR.current?.col??0)+1}</span>
-                <div onClick={commitAndClose} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(178,199,219,0.4)",fontSize:16,cursor:"pointer",borderRadius:11}}>×</div>
+                <span style={{fontSize:8,color:"rgba(178,199,219,0.22)",letterSpacing:1.5,fontWeight:500}}>TAP OUTSIDE TO CLOSE</span>
               </div>
               {/* Sliders */}
               {PARAM_ARMS.map(arm=>{
@@ -8784,7 +9011,7 @@ export default function LoudLight(){
               );
             })()}
 
-            {activeLayer==="drums"&&page==="vary"&&(()=>{
+            {VARY_ON&&activeLayer==="drums"&&page==="vary"&&(()=>{
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
               const vRhythm=dPat?.vRhythm||0;
               const vVelocity=dPat?.vVelocity||0;
@@ -8884,7 +9111,7 @@ export default function LoudLight(){
                 </div>
               )}
             {/* VARY page — was "SET", now includes an in-page enable toggle. */}
-            {activeLayer!=="drums"&&page==="vary"&&(
+            {VARY_ON&&activeLayer!=="drums"&&page==="vary"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 {/* Enable / disable — per layer; this page is POLY or MONO. */}
                 <button onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}
@@ -9023,7 +9250,7 @@ export default function LoudLight(){
           {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {[["edit","EDIT"],...(activeLayer==="drums"?[]:[["step","STEP"]]),["sound","SOUND"],["fx","FX"],["vary","VARY"]].map(([p,lbl])=>(
+            {[["edit","EDIT"],...(activeLayer==="drums"?[]:[["step","STEP"]]),["sound","SOUND"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
               <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
@@ -9074,7 +9301,7 @@ export default function LoudLight(){
               {patternChipsRail}
               {/* per-layer function pills — STEP / SOUND / VARY */}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
-              {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+              {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
                 <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                   style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
                     border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
@@ -9135,7 +9362,7 @@ export default function LoudLight(){
                reached only by tapping the already-active layer/pattern.) */}
           {!isLandscape&&(
           <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
-            {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
+            {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
               <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
                 style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
                   border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
@@ -9797,7 +10024,7 @@ export default function LoudLight(){
                   </div>
                 )}
                 {/* VARY sheet */}
-                {activeSheet==="vary"&&(
+                {VARY_ON&&activeSheet==="vary"&&(
                   <div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>VARY</div>
                     {activeLayer!=="drums"&&(
