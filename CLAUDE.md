@@ -465,15 +465,34 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
 - **iOS beta**: **working.** Runs on Jake's iPhone and iPad, and `Actions ▸ iOS TestFlight ▸ Run workflow` builds, signs and uploads to App Store Connect from a GitHub runner — first run green, ~3½ min, no Mac involved. Signing is committed (Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer`); the five CI secrets are set. Internal group created with Jake in it.
 
-  **A cloud session can ship a beta end to end**: edit source → `npm run
-  build:ios` → commit → push `main` → dispatch the workflow with the GitHub MCP
-  `actions_run_trigger` (`method: run_workflow`, `workflow_id:
-  ios-testflight.yml`, `ref: main`) → watch it with `actions_list` /
-  `get_job_logs`. Build numbers come from `github.run_number`, so they always
-  increase and never collide. **Don't dispatch on every change** — an upload is
-  outward-facing and notifies testers; ship when asked. Nothing inside App Store
-  Connect is reachable from here (testers, metadata, review submission are all
-  Jake's).
+  **A cloud session CANNOT currently trigger the upload** — this was recorded
+  optimistically once and is wrong, so don't promise it. Both routes are 403 for
+  the session's GitHub credentials (tested 2026-09-08):
+  `actions_run_trigger` returns *Resource not accessible by integration* (the
+  app token has no Actions: write), and pushing an `ios-v*` tag fails with HTTP
+  403 on `git-receive-pack` (the git proxy permits branch refs only). Pushing to
+  `main` works fine, which is why the Pages build always ships and the beta
+  never does by itself.
+
+  So a cloud session takes it as far as `main` and then **Jake clicks Actions ▸
+  iOS TestFlight ▸ Run workflow ▸ main**. To close that gap properly, grant the
+  Claude GitHub app Actions: write; a commit-message trigger (e.g. run the
+  upload job when the head commit contains `[testflight]`) would also work but
+  quietly removes the deliberate friction below.
+
+  Build numbers come from `github.run_number`, so they always increase and never
+  collide. **Don't ship on every change** — a macOS runner is billed at 10× a
+  Linux one and an upload notifies testers; ship when asked. Nothing inside App
+  Store Connect is reachable from here (testers, metadata, review submission are
+  all Jake's).
+
+  Getting a build onto a device is **two independent switches**, and neither is
+  ours: whether App Store Connect attaches the build to the internal group
+  (the group's Build Distribution setting — ours are uploaded by `xcodebuild`
+  from a runner, not by Xcode, so "Automatic for Xcode Builds" is unproven for
+  them), and whether the device installs it (TestFlight's per-app Automatic
+  Updates toggle). Internal testers need no Beta App Review; they get it as soon
+  as processing finishes.
 
   **But that capability is per-session, so check it before promising a build.**
   A later session (2026-09-08) found both doors shut: `actions_run_trigger`
