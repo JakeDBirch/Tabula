@@ -4471,6 +4471,122 @@ export default function LoudLight(){
     const i=patterns.findIndex(p=>p.id===id);
     return i<0?"rgba(186,208,230,0.4)":patCol(i);
   };
+  // ── PATTERN OPS — the + button's second function ────────────────────────
+  // Everything you can do TO a pattern hangs off the one button that makes a
+  // new one, the same way the bar strip's + carries the bar controls. That
+  // pays for itself twice: the ops stop taking a permanent row on every page,
+  // and the song header's DUP/DEL go away entirely because the palette's + is
+  // right there carrying them.
+  //
+  // The menu is explicit about scope. RAND / CLR / MUT8 / CPY / PST act on the
+  // VISIBLE BAR of the layer you're editing, not the whole pattern — that has
+  // always been true and has never been written down anywhere you could see it,
+  // which is exactly the kind of thing a menu can say for free.
+  const patPlusR=useRef({tmr:0,held:false});
+  const patMenuAtR=useRef(0);
+  const _patPlusEnd=()=>{if(patPlusR.current.tmr){clearTimeout(patPlusR.current.tmr);patPlusR.current.tmr=0;}};
+  const _openPatOps=(x,y)=>{patMenuAtR.current=Date.now();setDelArm(null);setPatMenu({id:activePatternId,x,y});};
+  // One handler set, spread into all three + mounts (sidebar/portrait chips,
+  // landscape rail, song palette) so they cannot drift apart.
+  const patPlusProps={
+    onPointerDown:(e)=>{
+      e.stopPropagation();
+      patPlusR.current.held=false;_patPlusEnd();
+      const x=e.clientX,y=e.clientY;
+      patPlusR.current.tmr=setTimeout(()=>{patPlusR.current.tmr=0;patPlusR.current.held=true;_openPatOps(x,y);},450);
+    },
+    onPointerMove:(e)=>{if(e.buttons)_patPlusEnd();},
+    onPointerUp:()=>{_patPlusEnd();},
+    onPointerCancel:()=>{_patPlusEnd();patPlusR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_patPlusEnd();patPlusR.current.held=true;_openPatOps(e.clientX,e.clientY);},
+    onClick:(e)=>{
+      e.stopPropagation();
+      // The hold already opened the menu — swallow its trailing click, or the
+      // menu arrives with a surprise extra pattern behind it.
+      if(patPlusR.current.held){patPlusR.current.held=false;return;}
+      addPattern();
+    },
+  };
+  const setPatternMaster=(layer)=>{
+    pushHistory();
+    setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
+  };
+  const patternOpsMenu=!patMenu?null:(()=>{
+    const pm=patMenu;
+    const cur=patterns.find(x=>x.id===pm.id)||patterns.find(x=>x.id===activePatternId)||patterns[0];
+    if(!cur)return null;
+    const vw=window.innerWidth,vh=window.innerHeight;
+    const W=Math.min(230,vw-16),H=250;
+    const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
+    const close=()=>{setPatMenu(null);setDelArm(null);};
+    const act=(fn)=>{fn();close();};
+    const only=patterns.length<=1;
+    const mst=masterLayerOf(cur);
+    const armed=delArm===cur.id;
+    const cell=(label,fn,disabled,danger)=>(
+      <button key={label} disabled={!!disabled}
+        style={{padding:"9px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+          color:disabled?"rgba(178,199,219,0.2)":danger?"rgba(212,130,130,0.95)":"rgba(212,226,240,0.82)",
+          fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:disabled?"default":"pointer"}}
+        onClick={disabled?undefined:fn}>{label}</button>
+    );
+    const head=(t)=>(<div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:2,fontWeight:600,
+      color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>{t}</div>);
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-patMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-patMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:13,fontWeight:700,color:_patColorOf(cur.id)}}>{cur.name}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>
+              {cycleBars(cur)} BAR{cycleBars(cur)===1?"":"S"}</span>
+          </div>
+          {head("THIS BAR · "+(activeLayer==="lead"?"MONO":activeLayer==="drums"?"DRUMS":"POLY"))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("RAND",()=>act(()=>activeLayer==="drums"?randDrumVel():randPatId(cur.id)))}
+            {cell("CLR", ()=>act(()=>activeLayer==="drums"?clearDrums():clearPatId(cur.id)))}
+            {cell("MUT8",()=>act(()=>activeLayer==="drums"?mutateDrumPat1():mutatePat1()))}
+            {cell("CPY", ()=>act(()=>copyPatId(cur.id)),activeLayer==="drums")}
+            {cell("PST", ()=>act(()=>pastePatId(cur.id)),activeLayer==="drums"||!clipboard)}
+            {cell("×2",  ()=>act(()=>doublePattern()),barCount*2>MAX_BARS)}
+          </div>
+          {head("PATTERN")}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("⧉ DUP",()=>act(()=>dupPatternId(cur.id)),patterns.length>=MAX_PATTERNS)}
+            {cell(armed?"DELETE?":"✕ DEL",
+              ()=>{if(armed){delPatternId(cur.id);close();}else setDelArm(cur.id);},
+              only,true)}
+          </div>
+          {/* The master decides the pattern's LENGTH, so leaving it invisible
+              would mean a pattern that plays a length you cannot account for
+              and cannot change. It is claimed by whichever layer you composed
+              first; this is the way to say otherwise. */}
+          {head("MASTER — SETS THE LENGTH")}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {PART_LAYERS.map(l=>{
+              const on=mst===l, lbl=l==="lead"?"MONO":l==="drums"?"DRUMS":"POLY";
+              return(
+                <button key={l}
+                  style={{padding:"9px 0",border:"none",fontFamily:"inherit",
+                    background:on?"rgba(230,184,114,0.16)":"rgba(10,18,28,0.92)",
+                    color:on?"#e6b872":"rgba(178,199,219,0.5)",
+                    fontSize:9,fontWeight:700,letterSpacing:1.2,cursor:"pointer"}}
+                  onClick={()=>{setPatternMaster(l);}}>{lbl}</button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
       justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
@@ -4479,43 +4595,14 @@ export default function LoudLight(){
           workflow the old pattern pills had. Both, because tapping is easier on
           a phone and dragging is faster once you know where a section goes. */}
       <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
-        {/* DUP / DEL act on the SELECTED chip — the same rule as the bar ops
-            acting on the visible bar. Deferred calls, not bare references:
-            dupPatternId / delPatternId are declared further down and Babel
-            lowers const to var, so binding them here installs undefined. */}
+        {/* Names the pattern the palette's + will act on when you hold it —
+            the highlighted chip says so too, but not while your thumb is over
+            the row. DUP / DEL and the rest moved onto that + (hold it), so the
+            header is a label now rather than a control strip. */}
         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
           <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>PATTERNS</div>
-          {(()=>{
-            const selName=(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name;
-            const full=patterns.length>=MAX_PATTERNS;
-            const last=patterns.length<=1;
-            const armed=delArm!=null&&delArm===activePatternId;
-            const btn=(d,extra)=>Object.assign({minWidth:34,height:28,padding:"0 9px",borderRadius:6,
-              display:"flex",alignItems:"center",justifyContent:"center",gap:3,
-              fontSize:9,letterSpacing:1,fontWeight:600,lineHeight:1,userSelect:"none",
-              cursor:d?"default":"pointer",flexShrink:0,
-              border:"1px solid rgba(168,190,212,"+(d?"0.07":"0.2")+")",background:"transparent",
-              color:d?"rgba(168,190,212,0.16)":"rgba(178,199,219,0.6)"},extra||{});
-            return(
-              <Fragment>
-                {/* Names the chip DUP/DEL will act on — the highlighted chip
-                    says so too, but not while your thumb is over the row. */}
-                <span style={{fontSize:11,fontWeight:700,color:_patColorOf(activePatternId),marginRight:1}}>{selName}</span>
-                <div role="button" aria-label="Duplicate selected pattern"
-                  onClick={full?undefined:()=>{setDelArm(null);dupPatternId(activePatternId);}}
-                  style={btn(full)}>⧉ DUP</div>
-                <div role="button" aria-label="Delete selected pattern"
-                  onClick={last?undefined:()=>{
-                    // First tap arms, second deletes. delPatternId also strips
-                    // the pattern out of the song, so this is not a one-tap op.
-                    if(armed){delPatternId(activePatternId);setDelArm(null);}
-                    else setDelArm(activePatternId);
-                  }}
-                  style={btn(last,armed?{border:"1px solid #c47a7a",background:"rgba(196,122,122,0.14)",color:"#d09090"}:last?{}:{color:"rgba(196,122,122,0.7)"})}>
-                  {armed?"DELETE "+selName+"?":"✕ DEL"}</div>
-              </Fragment>
-            );
-          })()}
+          <span style={{fontSize:11,fontWeight:700,color:_patColorOf(activePatternId),marginRight:1}}>
+            {(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
           {patterns.map((p,i)=>{
@@ -4585,12 +4672,9 @@ export default function LoudLight(){
             );
           })}
           {patterns.length<MAX_PATTERNS&&(
-            // Deferred call, not a bare reference: addPattern is declared later
-            // in the component and Babel turns const into var, so binding it
-            // directly here would silently install onClick={undefined}.
-            <div onClick={()=>addPattern()}
+            <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
               style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
-                justifyContent:"center",cursor:"pointer",userSelect:"none",
+                justifyContent:"center",cursor:"pointer",userSelect:"none",touchAction:"none",
                 border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
                 color:"rgba(178,199,219,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
           )}
@@ -5149,10 +5233,10 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern" onClick={()=>addPattern()}
+        <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
-            fontSize:IS_MOBILE?15:13,fontWeight:600,
+            fontSize:IS_MOBILE?15:13,fontWeight:600,touchAction:"none",
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
             color:"rgba(178,199,219,0.45)"})}>+</div>
       )}
@@ -5175,9 +5259,9 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern" onClick={()=>addPattern()}
+        <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
           style={Object.assign({},_patChipBase,{
-            padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,
+            padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,touchAction:"none",
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
             color:"rgba(178,199,219,0.45)"})}>+</div>
       )}
@@ -8327,48 +8411,8 @@ export default function LoudLight(){
       })()}
 
       {/* Pattern pill context menu */}
-      {patMenu&&(()=>{
-        const pm=patMenu;
-        const vw=window.innerWidth,vh=window.innerHeight;
-        const W=200,H=160;
-        const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));
-        const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
-        const close=()=>setPatMenu(null);
-        const act=(fn)=>{fn();close();};
-        const targetId=pm.id;
-        const isOnlyPat=pats.length<=1;
-        return(
-          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
-            <div style={{position:"absolute",left:px,top:py,width:W,
-              background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-              borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
-              boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",
-              pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(186,208,230,0.06)"}}>
-                {[
-                  ["RAND",  ()=>act(()=>randPatId(targetId))],
-                  ["CLR",   ()=>act(()=>clearPatId(targetId))],
-                  ["CPY",   ()=>act(()=>copyPatId(targetId))],
-                  ["PST",   ()=>act(()=>pastePatId(targetId)), !clipboard],
-                  ["DUP",   ()=>act(()=>dupPatId(targetId)),   pats.length>=MAX_PATTERNS],
-                  ["DEL",   ()=>act(()=>delPatId(targetId)),   isOnlyPat, true],
-                  ["MUT8",  ()=>act(mutatePat1)],
-                  ["",      null, true],
-                ].map(([label,fn,disabled,danger])=>(
-                  <button key={label} disabled={!!disabled}
-                    style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",
-                      color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",
-                      fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer",
-                      transition:"background .1s"}}
-                    onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background="rgba(255,255,255,0.08)";}}
-                    onMouseLeave={e=>e.currentTarget.style.background="rgba(10,10,10,0.9)"}
-                    onClick={disabled?undefined:fn}>{label}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* Pattern ops — the + button's hold menu. One mount, both platforms. */}
+      {patternOpsMenu}
 
       {/* Chain drag ghost */}
 
@@ -10111,22 +10155,6 @@ export default function LoudLight(){
             </>
           )}
 
-          {/* Pat context menu (mobile) */}
-          {patMenu&&(()=>{
-            const pm=patMenu;const vw=window.innerWidth,vh=window.innerHeight;const W=200,H=160;
-            const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
-            const close=()=>setPatMenu(null);const act=(fn)=>{fn();close();};const targetId=pm.id;const isOnlyPat=pats.length<=1;
-            return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500}} onPointerDown={close} onClick={close}>
-              <div style={{position:"absolute",left:px,top:py,width:W,background:"rgba(12,12,12,0.92)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",overflow:"hidden",pointerEvents:"all"}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(186,208,230,0.06)"}}>
-                  {[["RAND",()=>act(()=>randPatId(targetId))],["CLR",()=>act(()=>clearPatId(targetId))],["CPY",()=>act(()=>copyPatId(targetId))],["PST",()=>act(()=>pastePatId(targetId)),!clipboard],["DUP",()=>act(()=>dupPatId(targetId)),pats.length>=MAX_PATTERNS],["DEL",()=>act(()=>delPatId(targetId)),isOnlyPat,true]].map(([label,fn,disabled,danger])=>(
-                    <button key={label} disabled={!!disabled} style={{padding:"10px 0",background:"rgba(10,10,10,0.9)",border:"none",color:disabled?"rgba(255,255,255,0.2)":danger?"rgba(196,122,122,0.9)":"rgba(255,255,255,0.8)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:disabled?"default":"pointer"}}
-                      onClick={disabled?undefined:fn}>{label}</button>
-                  ))}
-                </div>
-              </div>
-            </div>);
-          })()}
 
           {/* Drum context menu (mobile) */}
           {drumMenu&&(()=>{
