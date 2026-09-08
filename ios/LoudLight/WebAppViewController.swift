@@ -190,7 +190,12 @@ final class WebAppViewController: UIViewController {
     /// is rejected silently. The page's own handler is idempotent and no-ops
     /// once the context is running, so an extra call costs nothing.
     private func nudgeWebAudioAwake() {
-        let poke = { [weak self] in
+        // Annotated `() -> Void` on purpose. Without it the single expression
+        // in the body infers `() -> Void?` — optional chaining through `self?`
+        // and `webView?` makes the result Optional — which does not match
+        // asyncAfter's closure overload, so the compiler falls through to the
+        // `execute: DispatchWorkItem` one and rejects it.
+        let poke: () -> Void = { [weak self] in
             self?.webView?.evaluateJavaScript("window.__LL_RESUME_AUDIO && window.__LL_RESUME_AUDIO()") { _, error in
                 if let error = error {
                     NSLog("[LoudLight] resume nudge failed: %@", error.localizedDescription)
