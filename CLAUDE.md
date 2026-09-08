@@ -75,6 +75,43 @@ The old per-layer pattern `chain`s, `synthPhrases` / `drumPhrases`, `sections` a
 Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells), `params[c]` (per-**column** step params), `gridLen` (loop length in steps), `bars`, `speedMult`, `id`, `name`.
 
 - **Parts loop to fill, and every bar op is per-part.** A part sounds its own length and repeats it for as long as the pattern lasts, so a 1-bar drum part keeps going through a 4-bar pattern. Loop-to-fill comes from parts having **different bar counts** — NOT from a part's `gridLen` being shorter than its own allocation. That distinction is the whole design: if a part were allocated 4 bars but only sounded 1, the editor would show you three empty bars while you heard bar 1 repeating, and editing bar 1 would change all four. So ADD BAR / DUP BAR / ×2 / DEL BAR act on the **active part alone**, and a part that grows gets a real, empty, independently editable bar (`resizePatBars` grows `gridLen` with the allocation). The drums page shows the drums' bars; the synth page shows the synth's. `growLenTo` (synth tap / both paint paths / `setDrumCell`) still re-extends a part after the length slider has trimmed it mid-bar; erasing never shortens.
+- **One part is the pattern's MASTER, and its loop is the pattern's cycle.** This
+  replaced `bars * COLS` — the longest *allocation* — which ignored both things
+  that decide how long a part actually sounds. A part trimmed to `gridLen` 14
+  was cut off at 16 and restarted two steps into its next pass; a part at ½×
+  got exactly half of itself; and an entirely **empty** part allocated four bars
+  stretched the pattern to four bars, so the one part you had composed was
+  conforming to the shape of three you hadn't. `patCycle(pat)` returns
+  `{layer, steps, mult}` — the cycle **in the master's own steps**, plus the
+  step-duration multiplier that unit implies. Master steps rather than absolute
+  ones because the count has to stay whole: 15 steps at 2× is 7.5 absolute
+  steps and a clock cannot wrap on a half. The scheduler ticks `nextNoteR` by
+  `absStepDur * cyc.mult` and wraps at `cyc.steps`.
+- **The master is claimed by whichever layer is composed first, and keeps it.**
+  Recorded as `pat.master`, not re-derived, so it cannot move under you when you
+  add a second part — that promise is the whole point, and it is why
+  `masterLayerOf` returns a recorded master **even when its part is now empty**.
+  It is stamped by one effect over the whole `patterns` store rather than at the
+  ~20 sites that can turn a cell on (tap, paint, RAND, MUT8, PST, variation,
+  collapse, load): a React commit is one user action, so "the part that just
+  gained its first note" is exactly what that effect sees, and there is no
+  mutation site left to forget. A pattern with no recorded master (an older
+  save) infers the longest **populated** part — which is what the bars-based
+  cycle already deferred to, so ordinary projects keep their timing. Verified:
+  across 1/2/4/8 bars and all three part combinations, an ordinary pattern's new
+  cycle is bit-identical to its old one.
+- **Longer parts get whole passes of the master, never a truncated one.**
+  `reps = ceil(longest / oneMasterPass)`, over populated parts only. So a 1-bar
+  master under a 4-bar drum part still gives a 4-bar pattern (unchanged), and a
+  14-step ½× master under 4 bars of drums gives 3 master passes rather than
+  cutting the master mid-loop. Whoever is master is the one part that always
+  finishes; everything else loops to fill and is snapped at the boundary, as
+  before. `cycleBars(pat)` is what the song page's bar dots count — bars the
+  pattern *sounds* for, so a dot can't be drawn that the playhead never lights.
+- **The master is editable and visible** in the `+` button's hold menu. It
+  decides the pattern's length, so leaving it purely implicit would mean a
+  pattern playing a length you could neither account for nor change, made
+  permanent by a stray first tap on the wrong layer.
 - **×2** (`doublePattern`, in `barOpsRow` and the SEQUENCE drawer) doubles the ACTIVE part and copies its data into the new half — the fast way to get a second nearly-identical pass to vary. A 1-bar drum loop under a doubled melody doesn't want doubling; it wants to keep looping to fill.
 - **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the playable loop length in steps, now `1..bars*16` — it is the single source of truth for length; bar count is just its allocation. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
@@ -130,6 +167,39 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### Controls & interaction conventions
 
+- **Tap is the common action; press-and-hold (or right-click) is the rarer,
+  more deliberate one.** This is a deliberate house pattern now, not a one-off:
+  the bar strip's `+` (tap adds a bar, hold opens the bar drawer), the scale
+  keyboard (tap toggles a note, hold sets the tonic), a song slot (tap places,
+  hold sets its repeat count), and the pattern `+` (tap adds a pattern, hold
+  opens **every** pattern op). Two traps come with it every single time, and
+  both have been hit here already: the menu opens **with the finger still
+  down**, so its backdrop must ignore dismissals for ~400ms or the opening
+  press's own trailing click closes it instantly (`sheetGuardR`,
+  `patMenuAtR`, `popupOpenAtR`); and the hold must **swallow its trailing
+  click**, or the menu arrives with a surprise extra bar/pattern behind it.
+- **Every pattern op lives on the pattern `+`'s hold menu** (`patternOpsMenu`,
+  one body, spread into all three `+` mounts via `patPlusProps` — sidebar/
+  portrait chips, landscape rail, song palette). It groups them honestly: RAND /
+  CLR / MUT8 / CPY / PST are **bar-scoped** (the visible bar of the layer you're
+  editing) and sit under THIS BAR; ×2 / DUP / DEL and the master selector sit
+  under PATTERN. The song header's DUP/DEL are gone — the palette's `+` is a few
+  pixels away and carries them. `patPlusProps` must be declared **above**
+  `songPage`: Babel lowers `const` to `var`, so spreading it before assignment
+  installs nothing at all, silently.
+- **The loop end is a band on the grid, not a slider under it.** Grab it
+  anywhere down the grid's full height and drag. Deliberately a band at the
+  boundary rather than the whole inactive tail — "the right side of the grid"
+  literally — because a horizontal drag across empty cells is the **paint**
+  gesture, and reserving the tail would cost you the ability to draw past the
+  loop end, which is how you extend it (`growLenTo`, which grows to the end of
+  the bar containing the painted column). On the synth grid the band does not
+  swallow taps: its `pointerdown` is left to bubble into the container's gesture
+  machine, and it only takes over once you drag sideways past **5px** — one
+  under the grid's own 6px paint threshold, so a resize can never leave a stray
+  note behind it. The drum grid handles pointers per cell, so there is nothing
+  to bubble into and its band captures directly; a tap there is a no-op rather
+  than a hit. That asymmetry is the same one the two-finger shift has.
 - **KnobSlider**: ballistic *relative* drag (dragging the full width moves ~half the range; Ctrl/Cmd = ultra-fine). **Double-tap / double-click = reset to `def`** (or 0 for bipolar, else min). No jump-to-position.
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
@@ -355,6 +425,25 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 - **A hand-written test fixture only tests the fields you remembered.** `SONG → PATTERN` called `.slice()` on a drum part's `vo`, which is a schema-version **number** (`DRUM_ORDER_V`), not a list — so it threw for every project that had one, which is every project. Five headless runs passed because the fixtures I wrote by hand omitted `vo` entirely. When testing anything that consumes saved state, build the fixture **with the app** (drive the UI, or go through `mkPattern`/`mkDrumPart`) rather than typing an object that looks about right. Green tests over invented data are worth very little.
 - **Wrap anything that reads arbitrary saved data, and surface what it throws.** The same bug reported as "the button does nothing": no pattern, no message, indistinguishable from a dead control. Same lesson as the silent `catch(e){}` around project restore — an error you can see is worth far more than a tidy failure.
 - **Grid pointer events** live on the parent `gridRef` container, not per-cell — **except the drum grid, whose handlers are per-cell.** That asymmetry is why two-finger shift silently didn't exist on drums for so long: the synth grid promotes paint→shift inside its container-level gesture machine, and there was nothing on the drum side to promote, so a second finger just began a second paint. `drumGestR` is that missing path — the first finger registers `{base,cancel}`, and `beginDrumShift` (shared by the portrait and landscape mounts) calls it off, restores the snapshot with `applyDrumShift(0,0,base)`, and shifts from where the pattern was before any finger touched it. A gesture the synth grid has is not automatically a gesture the drums have; check both. If you change grid event handling, test on iPhone immediately.
+- **An interrupted iOS AudioContext is not `"suspended"`.** WebKit has its own
+  non-standard **`"interrupted"`** state for a context whose audio session was
+  taken away — an app switch, a call, another app claiming the route. Every
+  resume guard in here tested `state === "suspended"`, so all of them silently
+  no-op'd, `play()` kept failing its own `!== "running"` check, and the only way
+  back was to force-quit and relaunch. That was the "no sound until I close and
+  reopen it" bug. Three rules came out of it: test for **not running** rather
+  than a particular stopped state; **retry** (`resume()` rejects while the
+  underlying `AVAudioSession` is still inactive, which is exactly when the
+  foreground events fire); and don't trust the lifecycle events at all — the
+  **transport watchdogs it**, because a stopped context merely freezes
+  `currentTime`, so the scheduler spins scheduling nothing while the app looks
+  like it is playing. On the native side the two halves must be **sequenced**:
+  `WebAppViewController` re-activates the session (on `didBecomeActive` and on
+  `AVAudioSession.interruptionNotification` `.ended`) and only then calls
+  `window.__LL_RESUME_AUDIO`, because WebKit will not let the page clear
+  `"interrupted"` until a session is active. When iOS still refuses — some
+  interruptions need a fresh user gesture — a banner says so, rather than
+  leaving a transport that looks like it is playing in silence.
 - **iOS gesture interception**: parent `touch-action: pan-x` / `overflow-x: auto` makes Safari swallow gestures at the OS level — vertical drags don't propagate. If a drag feels "stuck horizontally," check the parent's `touch-action`.
 - **Babel compiles undefined refs happily** — only fails at runtime. When you rename/extract a variable, grep the old name everywhere before building. Worse in JSX values: `const songPage = (<div onClick={addPattern}/>)` defined *above* `addPattern` silently binds `onClick={undefined}` (Babel lowers `const` to `var`, so there's no TDZ error and no crash — the control just does nothing). Defer the lookup: `onClick={()=>addPattern()}`.
 - **A silent `catch(e){}` around project restore hides everything.** The mount restore used to swallow its exception, so a throw inside `applyShareState` looked exactly like "the project didn't load" — and because no state changed, autosave never fired either, leaving the old save in place to be re-read next time. It now logs. That is how a deleted-but-still-called `migrateLegacyBass` was found; without the log there was no symptom to chase.
@@ -407,6 +496,27 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   Still to do: the on-device checklist in `docs/ios-testflight.md` — project
   survives a force-quit is the one that matters, since `localStorage` is the
   whole project library.
+- **Native audio (the real one)**: Web Audio in a WKWebView is the wrong floor
+  for a music app, and Jake has said so. The reported symptom was **not** the
+  timing jitter you'd expect from a `setTimeout` scheduler on the same thread as
+  React — it was silence after an app switch, which turned out to be the
+  `"interrupted"`-state bug above and is fixed. That fix is worth having on its
+  own, and it does not change the destination. The destination decision is
+  **what "native" means**, because it forks a project whose premise is one
+  source file: (a) Swift/AVAudioEngine only — fastest to a tight iOS app, two
+  engines to maintain forever, web stagnates; or (b) **one DSP core, two hosts**
+  — the engine written once in C/Rust, run in an AudioWorklet on the web and
+  inside AVAudioEngine on iOS, which is also the render block an AUv3 needs
+  anyway. (b) is the recommendation, migrated in shippable steps: move the
+  **clock** into an AudioWorklet first (fixes timing on both targets and is step
+  one of the core rather than throwaway work), then the voices, then compile it
+  and host it natively. Not started; awaiting Jake's call on (a) vs (b).
+- **VARY is parked**, not deleted — `VARY_ON=false` in the source, one line to
+  bring back. It was spending a tab, a rail slot and a sheet on something not
+  yet load-bearing while the everyday layout was short of room. Note the VARY
+  page also carries the tuning knobs MUT8 reads, so MUT8 currently works but
+  isn't adjustable. Jake wants to circle back once the crucial layout and
+  workflow are settled.
 - **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.

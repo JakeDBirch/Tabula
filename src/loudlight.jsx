@@ -7380,6 +7380,7 @@ export default function LoudLight(){
     const off=barOffIn(p);
     return Object.assign({},p,{gridLen:Math.max(1,Math.min(patW(p),off+len))});
   }));
+  useEffect(()=>{setDrumLenR.current=setDrumLen;});
   // Ctrl/Cmd+click a drum cell: cycle its ratchet count. An empty cell turns
   // on at 2 (start ratcheting); a lit cell cycles 1→2→3→4→1 (4 = max, wraps
   // back to a single hit but stays lit). Ratchet retriggers the voice that
@@ -7929,33 +7930,129 @@ export default function LoudLight(){
   },[]);
   const handleSwingUp = useCallback(()=>{swingDraggingR.current=false;setSwingDragging(false);},[]);
 
-  // Grid length slider (horizontal, below step bar)
-  const lenSliderRef = useRef(null);
-  const lenDragActive = useRef(false);
-  const computeLen = useCallback(clientX=>{
-    const el=lenSliderRef.current; if(!el)return;
+  // ── LOOP END — the length control, on the grid itself ────────────────────
+  // It used to be a strip under the grid with a small handle in it: a separate
+  // control, in a separate place, for a property you read off the grid. Now the
+  // boundary IS the control — a band down the grid's full height that you grab
+  // anywhere and drag.
+  //
+  // NOT the whole inactive tail, which is what "the right side of the grid"
+  // would literally mean: a horizontal drag across empty cells is the paint
+  // gesture, and reserving the tail for resizing would cost you the ability to
+  // draw notes past the loop end — which is how you EXTEND it (growLenTo).
+  //
+  // On the synth grid the band does not swallow taps. Its pointerdown is
+  // deliberately left to bubble into the container's own gesture machine, so a
+  // tap through the band still paints; it only takes the gesture over once you
+  // drag sideways past 5px — one under the grid's own 6px paint threshold, so a
+  // resize can never leave a stray note behind it. The drum grid handles
+  // pointers PER CELL, so there is nothing to bubble into and its band captures
+  // directly; a tap there is a no-op rather than a note, which is the one place
+  // the two grids differ. (They always do — see the two-finger shift.)
+  const [lenDragging,setLenDragging]=useState(false);
+  const lenDraggingR=useRef(false);
+  useEffect(()=>{lenDraggingR.current=lenDragging;},[lenDragging]);
+  // setDrumLen is declared below this point and Babel lowers const to var, so
+  // binding it here directly would install undefined. Reached through a ref.
+  const setDrumLenR=useRef(null);
+  const _setSynthLenFromX=useCallback((clientX)=>{
+    const el=gridRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
     const pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
-    // The slider spans ONE bar, so it sets the loop end within the visible bar:
-    // drag it on bar 3 of a 4-bar pattern and you get a length of 32..48.
     const off=synthBarOffR();
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeIdR.current)return p;
+      // The band spans the VISIBLE BAR, so it sets the loop end within it —
+      // drag it on bar 3 of a 4-bar pattern and you get a length of 32..48.
       const len=Math.max(1,Math.min(patW(p),off+Math.round(pct*COLS)));
       return Object.assign({},p,{gridLen:len});
     }));
   },[]);
-  const handleLenDown = useCallback(e=>{
+  const _lenEdgeBubbleDown=useCallback((e)=>{
+    const startX=e.clientX,startY=e.clientY,pid=e.pointerId;
+    let taken=false;
+    const onMove=(ev)=>{
+      if(ev.pointerId!==pid&&ev.pointerId!==undefined)return;
+      const dx=ev.clientX-startX,dy=ev.clientY-startY;
+      if(!taken){
+        if(Math.abs(dx)<=5||Math.abs(dx)<=Math.abs(dy))return;
+        taken=true;
+        // Take the gesture off the grid before it can promote to paint.
+        gesture.current.state="idle";
+        try{
+          if(gridRef.current&&gesture.current.capturedId!=null)
+            gridRef.current.releasePointerCapture(gesture.current.capturedId);
+        }catch(_){}
+        clearTimeout(longPressR.current);longPressR.current=null;
+        setLenDragging(true);
+      }
+      _setSynthLenFromX(ev.clientX);
+    };
+    const onUp=()=>{
+      document.removeEventListener("pointermove",onMove);
+      document.removeEventListener("pointerup",onUp);
+      document.removeEventListener("pointercancel",onUp);
+      if(taken)setLenDragging(false);
+    };
+    document.addEventListener("pointermove",onMove);
+    document.addEventListener("pointerup",onUp);
+    document.addEventListener("pointercancel",onUp);
+  },[_setSynthLenFromX]);
+  // Shared look. `frac` is where down the bar the end falls, 0..1.
+  const _lenEdgeStyle=(frac)=>({position:"absolute",top:0,bottom:0,width:20,
+    left:"calc("+(frac*100)+"% - 10px)",zIndex:5,cursor:"ew-resize",
+    touchAction:"none",display:"flex",alignItems:"stretch",justifyContent:"center"});
+  const _lenEdgeBar=(on)=>({width:on?4:3,borderRadius:2,
+    background:on?"rgba(255,214,150,0.95)":"rgba(255,214,150,0.5)",
+    boxShadow:on?"0 0 10px rgba(255,214,150,0.75)":"0 0 5px rgba(255,214,150,0.3)",
+    transition:"background .08s, width .08s"});
+  // Everything past the end is dimmed and is NOT a hit target — you still have
+  // to be able to draw out there.
+  const _lenTail=(frac)=>({position:"absolute",left:(frac*100)+"%",right:0,top:0,bottom:0,
+    background:"rgba(6,12,20,0.42)",pointerEvents:"none",zIndex:4});
+  // Drums: same band, but it captures directly — the drum grid has no
+  // container-level pointer handler for a tap to bubble into.
+  const drumGridRef=useRef(null);
+  const _setDrumLenFromX=useCallback((clientX)=>{
+    const el=drumGridRef.current; if(!el)return;
+    const rect=el.getBoundingClientRect();
+    const pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+    setDrumLenR.current&&setDrumLenR.current(Math.max(1,Math.round(pct*COLS)));
+  },[]);
+  const _lenEdgeCaptureDown=useCallback((e)=>{
     e.stopPropagation();e.preventDefault();
-    lenDragActive.current=true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    computeLen(e.clientX);
-  },[computeLen]);
-  const handleLenMove = useCallback(e=>{
-    if(!lenDragActive.current)return;
-    e.stopPropagation();computeLen(e.clientX);
-  },[computeLen]);
-  const handleLenUp = useCallback(()=>{lenDragActive.current=false;},[]);
+    try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+    setLenDragging(true);
+    _setDrumLenFromX(e.clientX);
+  },[_setDrumLenFromX]);
+  const _lenEdgeCaptureMove=useCallback((e)=>{
+    if(!lenDraggingR.current)return;
+    e.stopPropagation();_setDrumLenFromX(e.clientX);
+  },[_setDrumLenFromX]);
+  const _lenEdgeCaptureUp=useCallback(()=>{setLenDragging(false);},[]);
+  const lenEdgeDrums=(
+    <Fragment>
+      {_lenFrac<1&&<div style={_lenTail(_lenFrac)}/>}
+      <div role="slider" aria-label="Loop end" aria-valuenow={editPat?.gridLen??COLS}
+        aria-valuemin={1} aria-valuemax={barCount*COLS} data-lenedge="drums"
+        onPointerDown={_lenEdgeCaptureDown} onPointerMove={_lenEdgeCaptureMove}
+        onPointerUp={_lenEdgeCaptureUp} onPointerCancel={_lenEdgeCaptureUp}
+        style={_lenEdgeStyle(_lenFrac)}>
+        <div style={_lenEdgeBar(lenDragging)}/>
+      </div>
+    </Fragment>
+  );
+  const lenEdgeSynth=(
+    <Fragment>
+      {_lenFrac<1&&<div style={_lenTail(_lenFrac)}/>}
+      <div role="slider" aria-label="Loop end" aria-valuenow={editPat?.gridLen??COLS}
+        aria-valuemin={1} aria-valuemax={barCount*COLS} data-lenedge="synth"
+        onPointerDown={_lenEdgeBubbleDown} style={_lenEdgeStyle(_lenFrac)}>
+        <div style={_lenEdgeBar(lenDragging)}/>
+      </div>
+    </Fragment>
+  );
+
 
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
@@ -8635,9 +8732,10 @@ export default function LoudLight(){
                   own width, so a key column inside it would be read as column 0. */}
               <div style={{flex:1,minHeight:0,display:"flex"}}>
               {rowKeys}
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column"})}
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
+                {lenEdgeSynth}
                 {Array.from({length:ROWS},(_,r)=>{
                   const fromBot=ROWS-1-r;
                   // Octave and fifth rows come from the SCALE's own shape now —
@@ -8731,17 +8829,7 @@ export default function LoudLight(){
                   </div>
                 );})}
               </div>
-              <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:rowKeyPad})}
-                onPointerDown={handleLenDown} onPointerMove={handleLenMove}
-                onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                {/* The slider is one BAR wide, so it shows this page's slice of
-                    the playable length: full on bars before the loop end, empty
-                    on bars past it, partial on the bar the end falls in. */}
-                <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px",transition:"width .05s"}}/>
-                <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:IS_MOBILE?-3:-3,bottom:IS_MOBILE?-3:-3,width:IS_MOBILE?3:12,left:`calc(${_lenFrac*100}% - ${IS_MOBILE?1:6}px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",letterSpacing:1,pointerEvents:"none"}}>{gridLen}</span>
-              </div>
+
               </div>
               </div>
             )}
@@ -8770,7 +8858,8 @@ export default function LoudLight(){
                     grids are built the same way. */}
                 <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex"}}>
                 {drumRowKeys}
-                <div style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2})}>
+                <div ref={drumGridRef} style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
+                  {lenEdgeDrums}
                   {DRUM_VOICES.map((voice,r)=>{
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
@@ -8849,15 +8938,7 @@ export default function LoudLight(){
                   )})}
                 </div>
                 </div>
-                {/* Length slider */}
-                <div style={{...S.lenSlider,flexShrink:0,marginLeft:drumKeyPad,width:dw?dw-drumKeyPad:"80%"}}
-                  onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}
-                  onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();setDrumLen(Math.max(1,Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*COLS)));}}>
-                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                  <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                  {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:12,left:`calc(${_lenFrac*100}% - 6px)`,background:"rgba(255,255,255,0.8)",borderRadius:3,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                  <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",letterSpacing:1,pointerEvents:"none"}}>{dLen}</span>
-                </div>
+
               </div>
               );
             })()}
@@ -9437,9 +9518,10 @@ export default function LoudLight(){
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex"}}>
                   {rowKeys}
-                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column"})}
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
+                    {lenEdgeSynth}
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%curShape.span===0;const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
                       const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
@@ -9469,12 +9551,7 @@ export default function LoudLight(){
                   </div>
                   </div>
                   <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
-                  <div ref={lenSliderRef} style={Object.assign({},S.lenSlider,{marginLeft:rowKeyPad})} onPointerDown={handleLenDown} onPointerMove={handleLenMove} onPointerUp={handleLenUp} onPointerCancel={handleLenUp}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.15)",borderRadius:"3px 0 0 3px"}}/>
-                    <div style={{position:"absolute",right:0,top:0,bottom:0,width:`${(1-_lenFrac)*100}%`,background:"rgba(186,208,230,0.035)",borderRadius:"0 3px 3px 0"}}/>
-                    {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-3,bottom:-3,width:3,left:`calc(${_lenFrac*100}% - 1px)`,background:"rgba(255,255,255,0.8)",borderRadius:2,boxShadow:"0 0 6px rgba(255,255,255,0.4)"}}/>}
-                    <span style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",fontSize:7,color:"rgba(178,199,219,0.3)",pointerEvents:"none"}}>{gridLen}</span>
-                  </div>
+
                 </div>
               </div>
             )}
@@ -9500,7 +9577,8 @@ export default function LoudLight(){
                       {/* Voice keys — tap to hear the drum on its own. */}
                       <div style={{width:SIZE,display:"flex",flexShrink:0}}>
                       {drumRowKeys}
-                      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none"}}>
+                      <div ref={drumGridRef} style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
+                        {lenEdgeDrums}
                         {DRUM_VOICES.map((voice,r)=>{
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
