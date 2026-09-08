@@ -369,9 +369,23 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   Connect is reachable from here (testers, metadata, review submission are all
   Jake's).
 
+  **But that capability is per-session, so check it before promising a build.**
+  A later session (2026-09-08) found both doors shut: `actions_run_trigger`
+  returned `403 Resource not accessible by integration` (its GitHub App token
+  had no `actions: write`), and pushing an `ios-v*` tag — the workflow's other
+  release trigger — got `HTTP 403` from the git proxy, four attempts, while
+  branch pushes to `main` from the same session worked fine. So a session can
+  have full push access to `main` and still be unable to ship a build.
+
   Whether a new build reaches devices with no clicks depends on **Enable
   automatic distribution** on the internal group; without it each build must be
   added to the group by hand. Builds expire after 90 days.
+
+  Note the two triggers do different work: a **push to `main` runs only the
+  Linux `payload` job** (does the offline bundle still build, is it still free
+  of remote references — seconds, cheap). The `upload` job that archives, signs
+  and sends to App Store Connect is gated to `workflow_dispatch` or an `ios-v*`
+  tag. A green tick on a push is therefore NOT a build on TestFlight.
 
   Still to do: the on-device checklist in `docs/ios-testflight.md` — project
   survives a force-quit is the one that matters, since `localStorage` is the
