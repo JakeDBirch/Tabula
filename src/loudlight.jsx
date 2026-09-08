@@ -4931,9 +4931,9 @@ export default function LoudLight(){
           a collapsed column has nowhere to put a handle that isn't width you
           were trying to get back — and the bar strip is on screen on every part
           page, drums included, with nothing column-aligned depending on it. */}
-      <div role="button" aria-label={rowKeysOpen?"Hide the row keys":"Show the row keys"}
+      <div role="button" aria-label={rowKeysOpen?"Hide the note names":"Show the note names"}
         aria-pressed={rowKeysOpen}
-        title={rowKeysOpen?"Hide the note keys beside the grid":"Show the note keys beside the grid"}
+        title={rowKeysOpen?"Hide the note names (keys beside the grid, labels on the rows)":"Show the note names (keys beside the grid, labels on the rows)"}
         onClick={e=>{e.stopPropagation();toggleRowKeys();}}
         style={{display:"flex",alignItems:"center",justifyContent:"center",
           height:IS_MOBILE?24:22,width:IS_MOBILE?26:24,borderRadius:5,
@@ -8380,6 +8380,26 @@ export default function LoudLight(){
                   const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
+                    {rowKeysOpen&&(()=>{
+                      // Row labels, the same treatment the drum grid has always
+                      // used for its voice names: the name repeated across the
+                      // row at low alpha, BEHIND the notes. Per-cell would print
+                      // the same name sixteen times in a row — every cell in a
+                      // row is the same pitch, so a label per cell carries no
+                      // information a label per row doesn't, and at 19.6px it is
+                      // a wall of 7px text. Four across leaves ~78px per label
+                      // on a phone. It is absolutely positioned and FIRST in the
+                      // row, so it paints over the (static) cells and under the
+                      // (absolute, later) note rects: visible on empty cells,
+                      // covered where a note sits on it.
+                      const nm=noteNameOf(curFreqs[r]*stR(transpose));
+                      return(<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",
+                        justifyContent:"space-around",pointerEvents:"none",
+                        fontSize:IS_MOBILE?9:11,fontWeight:700,letterSpacing:1,lineHeight:1,
+                        color:isOct?"rgba(200,218,236,0.30)":"rgba(186,208,230,0.18)"}}>
+                        {[0,1,2,3].map(i=><span key={i}>{nm}</span>)}
+                      </div>);
+                    })()}
                     {Array.from({length:COLS},(_,c)=>{
                       // c is the VIEW column; ac is the absolute pattern column.
                       const ac=barOff+c;
@@ -9173,7 +9193,27 @@ export default function LoudLight(){
                       const fromBot=ROWS-1-r;const isOct=fromBot%curShape.span===0;const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
                       const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                       return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
-                        {Array.from({length:COLS},(_,c)=>{
+                        {rowKeysOpen&&(()=>{
+                      // Row labels, the same treatment the drum grid has always
+                      // used for its voice names: the name repeated across the
+                      // row at low alpha, BEHIND the notes. Per-cell would print
+                      // the same name sixteen times in a row — every cell in a
+                      // row is the same pitch, so a label per cell carries no
+                      // information a label per row doesn't, and at 19.6px it is
+                      // a wall of 7px text. Four across leaves ~78px per label
+                      // on a phone. It is absolutely positioned and FIRST in the
+                      // row, so it paints over the (static) cells and under the
+                      // (absolute, later) note rects: visible on empty cells,
+                      // covered where a note sits on it.
+                      const nm=noteNameOf(curFreqs[r]*stR(transpose));
+                      return(<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",
+                        justifyContent:"space-around",pointerEvents:"none",
+                        fontSize:IS_MOBILE?9:11,fontWeight:700,letterSpacing:1,lineHeight:1,
+                        color:isOct?"rgba(200,218,236,0.30)":"rgba(186,208,230,0.18)"}}>
+                        {[0,1,2,3].map(i=><span key={i}>{nm}</span>)}
+                      </div>);
+                    })()}
+                    {Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
                           const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=ac>=gridLen;
