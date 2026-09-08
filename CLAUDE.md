@@ -210,15 +210,30 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   press's own trailing click closes it instantly (`sheetGuardR`,
   `patMenuAtR`, `popupOpenAtR`); and the hold must **swallow its trailing
   click**, or the menu arrives with a surprise extra bar/pattern behind it.
-- **Every pattern op lives on the pattern `+`'s hold menu** (`patternOpsMenu`,
-  one body, spread into all three `+` mounts via `patPlusProps` — sidebar/
-  portrait chips, landscape rail, song palette). It groups them honestly: RAND /
-  CLR / MUT8 / CPY / PST are **bar-scoped** (the visible bar of the layer you're
-  editing) and sit under THIS BAR; ×2 / DUP / DEL and the master selector sit
-  under PATTERN. The song header's DUP/DEL are gone — the palette's `+` is a few
-  pixels away and carries them. `patPlusProps` must be declared **above**
-  `songPage`: Babel lowers `const` to `var`, so spreading it before assignment
-  installs nothing at all, silently.
+- **Each hold menu hangs off the thing it acts on.** The pattern `+`'s hold
+  (`patternOpsMenu`, one body spread into all three `+` mounts via
+  `patPlusProps` — sidebar/portrait chips, landscape rail, song palette) is
+  **pattern-wide only**: ×2, DUP, DEL and the master selector. A **bar chip's**
+  hold (`barOpsMenu`, opened from the bar strip, which hit-tests the bar from
+  the pointer x exactly as `_scrubTo` does) carries the **bar-scoped** ops —
+  RAND / CLR / MUT8 / CPY / PST, DUP BAR and DELETE BAR *n*. They were briefly
+  together under the `+`, which put "randomise this bar" two rows from "delete
+  this pattern" under a button that makes patterns. Opening the bar menu
+  **selects that bar first** (the same `goToBar` a tap does), so every existing
+  bar-scoped implementation — all of which act on the *visible* bar — needed no
+  changes, and you can see what you are about to change. The song header's
+  DUP/DEL are gone; the palette's `+` is a few pixels away and carries them.
+  `patPlusProps` must be declared **above** `songPage`: Babel lowers `const` to
+  `var`, so spreading it before assignment installs nothing at all, silently.
+  Note the desktop sidebar keeps its own always-visible RAND/CLR/MUT8/CPY/PST
+  row — a different surface, deliberately left alone.
+- **`deleteBarAt(bar)` deletes THAT bar; `removeBar` (−BAR) shrinks from the
+  end.** Both are wanted and they are not the same op — a menu hanging off a
+  particular chip has to be positional or its label is a lie. `deleteBarAt`
+  mirrors `duplicateBar`: same per-active-part scope, same `setPatterns` route
+  (going through a per-layer view makes `mergeLayer` resize the other parts and
+  they slide out of alignment), and the bar's own entry in `barLens` goes with
+  it.
 - **The loop end is a band on the grid, not a slider under it.** Grab it
   anywhere down the grid's full height and drag. It sets the **visible bar's**
   length and nothing else (see per-bar lengths above). Deliberately a band at the

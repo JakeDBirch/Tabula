@@ -3365,6 +3365,7 @@ export default function LoudLight(){
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
+  const [barMenu,   setBarMenu]   = useState(null); // {bar, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
@@ -4507,6 +4508,52 @@ export default function LoudLight(){
     // Land on the copy, for the same reason ADD BAR does.
     goToBar(curBar+1);
   };
+  // Delete THIS bar, not the last one. `removeBar` (the −BAR button) shrinks
+  // the part from the end, which is fine for a button that says "one fewer bar"
+  // but would be a lie on a menu hanging off a particular chip. Mirrors
+  // duplicateBar: same per-active-part scope, same setPatterns route (going
+  // through a per-layer view makes mergeLayer resize the other parts and they
+  // slide out of alignment), and the bar's own length goes with it.
+  const _dropBarCols=(rows,off)=>Array.isArray(rows)
+    ? rows.map(r=>{const a=Array.isArray(r)?r:[];return a.slice(0,off).concat(a.slice(off+COLS));})
+    : rows;
+  const _dropBarFlat=(arr,off)=>Array.isArray(arr)?arr.slice(0,off).concat(arr.slice(off+COLS)):arr;
+  const deleteBarAt=(bar)=>{
+    if(!editPat)return;
+    const n=patBars(editPat);
+    if(n<=1||bar<0||bar>=n)return;
+    pushHistory();
+    _dropVaryCache(editPat.id);
+    const off=bar*COLS;
+    const cut=(part)=>{
+      if(!part||!Array.isArray(part.grid))return part;
+      const W=gridW(part.grid);
+      const out=Object.assign({},part);
+      out.grid=_dropBarCols(part.grid,off);
+      if(part.durs)  out.durs  =_dropBarCols(part.durs,off);
+      if(part.params)out.params=_dropBarFlat(part.params,off);
+      if(part.vel)   out.vel   =_dropBarCols(toDrumVel2D(part.vel,W),off);
+      if(part.rat)   out.rat   =_dropBarCols(toDrumRat2D(part.rat,W),off);
+      if(part.motion&&typeof part.motion==="object"){
+        const m={};
+        for(const k of Object.keys(part.motion))m[k]=_dropBarCols(part.motion[k],off);
+        out.motion=m;
+      }
+      const lens=partBarLens(part);
+      lens.splice(bar,1);
+      out.barLens=lens.length?lens:[COLS];
+      out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+      delete out.bars;                       // bars lives on the pattern
+      return out;
+    };
+    const L=activeLayer;
+    setPatterns(ps=>ps.map(p=>{
+      if(p.id!==editPat.id)return p;
+      const parts=Object.assign({},p.parts,{[L]:cut(p.parts[L])});
+      return syncPatBars(Object.assign({},p,{parts}));
+    }));
+    goToBar(Math.max(0,Math.min(n-2,bar)));
+  };
   // ×2 — the part you're looking at becomes twice as long and its new half is
   // a copy of the old one, so "two nearly identical passes with small
   // variations" is one button instead of DUP BAR n times. Like DUP BAR it acts
@@ -4700,6 +4747,70 @@ export default function LoudLight(){
     pushHistory();
     setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
   };
+  // ── BAR OPS — a bar chip's second function ──────────────────────────────
+  // The ops that act on ONE BAR hang off that bar's chip, which is the thing
+  // they act on. They used to sit on the pattern +'s menu alongside the
+  // pattern-wide ones, which put "randomise this bar" and "delete this pattern"
+  // two rows apart under a button that makes patterns.
+  //
+  // Opening the menu SELECTS the bar first (the same goToBar a tap does), so
+  // the existing bar-scoped implementations — which all act on the visible bar
+  // — need no changes and you can see what you are about to change.
+  const barMenuAtR=useRef(0);
+  const barHoldR=useRef({tmr:0,held:false});
+  const _barAt=(clientX,el)=>{
+    const rect=el.getBoundingClientRect();
+    return Math.max(0,Math.min(barCount-1,Math.floor(((clientX-rect.left)/rect.width)*barCount)));
+  };
+  const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
+  const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
+  const barOpsMenu=!barMenu?null:(()=>{
+    const bm=barMenu;
+    const vw=window.innerWidth,vh=window.innerHeight;
+    const W=Math.min(230,vw-16),H=190;
+    const px=Math.max(8,Math.min(vw-W-8,bm.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,bm.y+14));
+    const close=()=>setBarMenu(null);
+    const act=(fn)=>{fn();close();};
+    const isDrum=activeLayer==="drums";
+    const only=barCount<=1;
+    const cell=(label,fn,disabled,danger)=>(
+      <button key={label} disabled={!!disabled}
+        style={{padding:"9px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+          color:disabled?"rgba(178,199,219,0.2)":danger?"rgba(212,130,130,0.95)":"rgba(212,226,240,0.82)",
+          fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:disabled?"default":"pointer"}}
+        onClick={disabled?undefined:fn}>{label}</button>
+    );
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-barMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-barMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:12,fontWeight:700,color:"rgba(232,220,205,0.9)"}}>BAR {bm.bar+1}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>
+              {(activeLayer==="lead"?"MONO":isDrum?"DRUMS":"POLY")+" · "+(partBarLens(editPat)[bm.bar]||COLS)+" STEPS"}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("RAND",()=>act(()=>isDrum?randDrumVel():randPatId(activePatternId)))}
+            {cell("CLR", ()=>act(()=>isDrum?clearDrums():clearPatId(activePatternId)))}
+            {cell("MUT8",()=>act(()=>isDrum?mutateDrumPat1():mutatePat1()))}
+            {cell("CPY", ()=>act(()=>copyPatId(activePatternId)),isDrum)}
+            {cell("PST", ()=>act(()=>pastePatId(activePatternId)),isDrum||!clipboard)}
+            {cell("⧉ DUP",()=>act(()=>duplicateBar()),barCount>=MAX_BARS)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("✕ DELETE BAR "+(bm.bar+1),()=>act(()=>deleteBarAt(bm.bar)),only,true)}
+          </div>
+        </div>
+      </div>
+    );
+  })();
   const patternOpsMenu=!patMenu?null:(()=>{
     const pm=patMenu;
     const cur=patterns.find(x=>x.id===pm.id)||patterns.find(x=>x.id===activePatternId)||patterns[0];
@@ -4737,17 +4848,12 @@ export default function LoudLight(){
             <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>
               {cycleBars(cur)} BAR{cycleBars(cur)===1?"":"S"}</span>
           </div>
-          {head("THIS BAR · "+(activeLayer==="lead"?"MONO":activeLayer==="drums"?"DRUMS":"POLY"))}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
-            {cell("RAND",()=>act(()=>activeLayer==="drums"?randDrumVel():randPatId(cur.id)))}
-            {cell("CLR", ()=>act(()=>activeLayer==="drums"?clearDrums():clearPatId(cur.id)))}
-            {cell("MUT8",()=>act(()=>activeLayer==="drums"?mutateDrumPat1():mutatePat1()))}
-            {cell("CPY", ()=>act(()=>copyPatId(cur.id)),activeLayer==="drums")}
-            {cell("PST", ()=>act(()=>pastePatId(cur.id)),activeLayer==="drums"||!clipboard)}
-            {cell("×2",  ()=>act(()=>doublePattern()),barCount*2>MAX_BARS)}
-          </div>
+          {/* Bar-scoped ops used to live here too. They moved onto the bar
+              chips' own hold menu — the thing they act on — which left this one
+              meaning only "the whole pattern". */}
           {head("PATTERN")}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("×2",  ()=>act(()=>doublePattern()),barCount*2>MAX_BARS)}
             {cell("⧉ DUP",()=>act(()=>dupPatternId(cur.id)),patterns.length>=MAX_PATTERNS)}
             {cell(armed?"DELETE?":"✕ DEL",
               ()=>{if(armed){delPatternId(cur.id);close();}else setDelArm(cur.id);},
@@ -5275,8 +5381,23 @@ export default function LoudLight(){
   // bar, so you must be able to see and change it from inside the drawer.
   const barChips=(
       <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
-           onPointerDown={e=>{e.stopPropagation();e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);_scrubTo(e.clientX,e.currentTarget);}}
-           onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
+           onPointerDown={e=>{
+             e.stopPropagation();e.preventDefault();
+             e.currentTarget.setPointerCapture(e.pointerId);
+             _scrubTo(e.clientX,e.currentTarget);
+             // Hold a chip for that bar's own ops. The tap has already selected
+             // it, so the menu acts on what you are looking at.
+             barHoldR.current.held=false;_barHoldEnd();
+             const bar=_barAt(e.clientX,e.currentTarget),x=e.clientX,y=e.clientY;
+             barHoldR.current.tmr=setTimeout(()=>{
+               barHoldR.current.tmr=0;barHoldR.current.held=true;_openBarOps(bar,x,y);
+             },450);
+           }}
+           onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_barHoldEnd();_scrubTo(e.clientX,e.currentTarget);}}
+           onPointerUp={()=>{_barHoldEnd();}}
+           onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;}}
+           onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barHoldEnd();
+             const bar=_barAt(e.clientX,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
         {Array.from({length:barCount},(_,bi)=>{
           const isCur=bi===curBar, isPlaying=bi===playingBar;
           // Three states have to stay tellable apart on the same chip: the bar
@@ -8734,6 +8855,8 @@ export default function LoudLight(){
       {/* Pattern pill context menu */}
       {/* Pattern ops — the + button's hold menu. One mount, both platforms. */}
       {patternOpsMenu}
+      {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
+      {barOpsMenu}
 
       {/* Chain drag ghost */}
 
