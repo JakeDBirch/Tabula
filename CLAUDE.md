@@ -79,6 +79,31 @@ The old per-layer pattern `chain`s, `synthPhrases` / `drumPhrases`, `sections` a
 Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells), `params[c]` (per-**column** step params), `gridLen` (loop length in steps), `bars`, `speedMult`, `id`, `name`.
 
 - **Parts loop to fill, and every bar op is per-part.** A part sounds its own length and repeats it for as long as the pattern lasts, so a 1-bar drum part keeps going through a 4-bar pattern. Loop-to-fill comes from parts having **different bar counts** — NOT from a part's `gridLen` being shorter than its own allocation. That distinction is the whole design: if a part were allocated 4 bars but only sounded 1, the editor would show you three empty bars while you heard bar 1 repeating, and editing bar 1 would change all four. So ADD BAR / DUP BAR / ×2 / DEL BAR act on the **active part alone**, and a part that grows gets a real, empty, independently editable bar (`resizePatBars` grows `gridLen` with the allocation). The drums page shows the drums' bars; the synth page shows the synth's. `growLenTo` (synth tap / both paint paths / `setDrumCell`) still re-extends a part after the length slider has trimmed it mid-bar; erasing never shortens.
+- **Length is PER BAR, not one number for the part.** `gridLen` used to be a
+  single length counted from column 0, so trimming bar 1 to 14 steps didn't
+  make a 14-step bar — it truncated the whole part at column 14 and every later
+  bar stopped existing. You could have one odd bar, at the end, and nothing
+  after it. `part.barLens` is an array, one entry per bar: the part plays bar 0
+  for `barLens[0]` steps, bar 1 for `barLens[1]`, then wraps. Consecutive
+  14-step bars are `[14,14]`; a 4/4 next to a 7/8 is `[16,14]`.
+  - **`partSeq(part)`** is the ordered list of absolute columns the part plays,
+    and the scheduler's `lf.step` indexes THAT rather than doing `% gridLen`.
+    That indirection is the whole fix: a short bar contributes fewer entries and
+    the cursor moves on to the next bar instead of the part ending.
+  - **`gridLen` is kept in step as the SUM** — the true sounding length — for
+    everything that only wants to know how long a part is. It is **no longer a
+    column bound**: anything asking "is this column past the end" must ask per
+    bar (`colPastEnd`), which is what the grid, the step bar, the drum cells and
+    the bar chips now do.
+  - **A part with no `barLens` reads exactly as `gridLen` always meant**: bars
+    fill in order until it runs out, so a legacy `gridLen` of 14 over two bars
+    is `[14,0]` — bar 1 silent, precisely what it used to do. Nothing about an
+    existing project changes, and that bar 1 is now reachable instead of dead.
+  - Lengths travel with the bar ops: `resizePatBars` gives a grown bar a full
+    one and drops the tail when shrinking, `⧉` copies the duplicated bar's
+    length, and ×2 doubles the array. `growLenTo` extends **only the bar drawn
+    in**, and only as far as the column drawn — a bar you deliberately set to 14
+    must not snap back to 16 because you added a note at step 3.
 - **One part is the pattern's MASTER, and its loop is the pattern's cycle.** This
   replaced `bars * COLS` — the longest *allocation* — which ignored both things
   that decide how long a part actually sounds. A part trimmed to `gridLen` 14
@@ -192,7 +217,8 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   `songPage`: Babel lowers `const` to `var`, so spreading it before assignment
   installs nothing at all, silently.
 - **The loop end is a band on the grid, not a slider under it.** Grab it
-  anywhere down the grid's full height and drag. Deliberately a band at the
+  anywhere down the grid's full height and drag. It sets the **visible bar's**
+  length and nothing else (see per-bar lengths above). Deliberately a band at the
   boundary rather than the whole inactive tail — "the right side of the grid"
   literally — because a horizontal drag across empty cells is the **paint**
   gesture, and reserving the tail would cost you the ability to draw past the

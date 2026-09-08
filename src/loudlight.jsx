@@ -607,10 +607,60 @@ const syncPatBars=(p)=>{
 // Longer parts are covered by running the master a whole number of times, so
 // the master is the one part that is never cut off mid-pass. Everything else
 // loops to fill and gets snapped back at the boundary, exactly as before.
+// ── PER-BAR LENGTHS ──────────────────────────────────────────────────────
+// A part's playable length used to be ONE number, `gridLen`, counted from the
+// start of the part. So trimming bar 1 to 14 steps didn't make a 14-step bar —
+// it truncated the whole part at column 14 and every later bar stopped
+// existing. You could have one odd bar, at the end, and nothing after it.
+//
+// A length per bar instead. The part plays bar 0 for barLens[0] steps, bar 1
+// for barLens[1], and so on, then wraps — so consecutive 14-step bars are just
+// [14,14], and a 4/4 bar next to a 7/8 one is [16,14]. `gridLen` is kept in
+// step as the SUM (the true sounding length) for everything that only wants to
+// know how long the part is; it is no longer a column bound, and anything
+// asking "is this column past the end" has to ask per bar.
+//
+// A part with no `barLens` is read exactly as `gridLen` always meant: bars fill
+// up in order until it runs out, so a legacy gridLen of 14 over two bars is
+// [14,0] — bar 1 silent, which is precisely what it used to do. Nothing about
+// an existing project changes, and bar 1 is now reachable instead of dead.
+const partBarLens=(part)=>{
+  const bars=partBars(part);
+  const src=(part&&Array.isArray(part.barLens))?part.barLens:null;
+  if(src)return Array.from({length:bars},(_,i)=>
+    Math.max(0,Math.min(COLS,Math.round(src[i]!=null?src[i]:COLS))));
+  const w=partWidth(part), gl=Math.max(1,Math.min(w,(part&&part.gridLen)||w));
+  return Array.from({length:bars},(_,i)=>Math.max(0,Math.min(COLS,gl-i*COLS)));
+};
+// The absolute columns this part plays, in order — one entry per sounding step.
+// The scheduler indexes this rather than doing `step % gridLen`, which is what
+// makes a short bar skip to the next bar instead of ending the part.
+const partSeq=(part)=>{
+  const lens=partBarLens(part), out=[];
+  for(let i=0;i<lens.length;i++){const o=i*COLS;for(let c=0;c<lens[i];c++)out.push(o+c);}
+  return out.length?out:[0];
+};
+const partSeqLen=(part)=>{
+  const lens=partBarLens(part);
+  let n=0; for(const l of lens)n+=l;
+  return Math.max(1,n);
+};
+// Is this absolute column past its own bar's end?
+const colPastEnd=(part,ac)=>{
+  const lens=partBarLens(part);
+  const bi=Math.floor(ac/COLS);
+  return (ac%COLS)>=(lens[bi]!=null?lens[bi]:COLS);
+};
+// Write one bar's length, keeping gridLen (the sum) honest.
+const setBarLen=(part,bar,len)=>{
+  const lens=partBarLens(part);
+  if(bar<0||bar>=lens.length)return part;
+  lens[bar]=Math.max(1,Math.min(COLS,Math.round(len)));
+  return Object.assign({},part,{barLens:lens,gridLen:Math.max(1,lens.reduce((a,b)=>a+b,0))});
+};
 const partAbsLen=part=>{
   if(!part)return 0;
-  const w=partWidth(part);
-  return Math.max(1,Math.min(w,part.gridLen||w))*(part.speedMult||1);
+  return partSeqLen(part)*(part.speedMult||1);
 };
 // Only ever asked of a LIVE pattern. A packed part's grid is sparse, so this
 // would read it wrong — hence the _pk guard rather than a silent wrong answer.
@@ -643,8 +693,7 @@ const patCycle=(pat)=>{
   const layer=masterLayerOf(pat);
   if(!layer)return {layer:null,steps:Math.max(1,patBars(pat)*COLS),mult:1};
   const mp=pat.parts[layer];
-  const w=partWidth(mp);
-  const mlen=Math.max(1,Math.min(w,mp.gridLen||w));
+  const mlen=partSeqLen(mp);
   const mult=mp.speedMult||1;
   const one=mlen*mult;                           // one master pass, in absolute steps
   let longest=one;
@@ -766,9 +815,11 @@ const collapseEntries=(entries,name)=>{
       // collapse — leave this part empty for this entry and carry on.
       if(!src||!Array.isArray(src.grid)||!src.grid.length){off+=span;continue;}
       const w=partWidth(src);
-      // The part loops over its OWN gridLen, which is what makes a short part
-      // fill a longer entry — the same modulo the scheduler applies.
-      const len=Math.max(1,Math.min(w,src.gridLen||w));
+      // The part loops over its OWN sequence of columns — per-bar lengths and
+      // all — which is what makes a short part fill a longer entry. Indexing
+      // the sequence rather than doing % gridLen is the same thing the
+      // scheduler does, so a 14-step bar flattens as 14 columns.
+      const seq=partSeq(src), len=seq.length;
       const k=Math.max(1,Math.round(((src.speedMult)||1)/dm));
       const vel=Array.isArray(src.vel)?(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w)):null;
       const rat=Array.isArray(src.rat)?(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w)):null;
@@ -783,7 +834,7 @@ const collapseEntries=(entries,name)=>{
         // Only a step BOUNDARY carries an onset. The k-1 columns after it are
         // the same source step still sounding, covered by the note's duration.
         if(i%k)continue;
-        const from=Math.floor(i/k)%len;
+        const from=seq[Math.floor(i/k)%len];
         const sp=(!isDrum&&src.params&&src.params[from])?src.params[from]:null;
         const rhy=sp?Math.max(1,Math.round(sp.rhy??1)):1;
         for(let r=0;r<rows;r++){
@@ -848,6 +899,10 @@ const collapseEntries=(entries,name)=>{
     // whole number of bars — the allocation above is rounded up to bars, and
     // any remainder is silence at the end rather than a repeat of the top.
     dst.gridLen=Math.max(1,totalCols);
+    // Flattening produces one continuous run of columns, so every bar is full
+    // except possibly the last. Stated outright — inheriting barLens from
+    // mkPattern would leave a 16 on a final part-bar that only half exists.
+    dst.barLens=Array.from({length:totalBars},(_,i)=>Math.max(0,Math.min(COLS,totalCols-i*COLS)));
     dst.speedMult=dm;
   }
   // The drum bus settings aren't per-column, so they come from the first entry.
@@ -1081,17 +1136,31 @@ const resizePatBars=(p,bars)=>{
   // you empty bars while you hear earlier ones repeating); it comes from parts
   // inside a pattern having DIFFERENT bar counts, so a 1-bar drum part repeats
   // through a 4-bar pattern and its editor honestly shows one bar.
-  out.gridLen=grew?w:Math.max(1,Math.min(w,p.gridLen||w));
+  // Per-bar lengths travel with the resize: grown bars arrive full (a new bar
+  // you can play straight away), and shrinking just drops the tail. Read from
+  // the ORIGINAL part, so a legacy gridLen is converted here once rather than
+  // being re-derived later against the new width and meaning something else.
+  {
+    const oldLens=partBarLens(p), nb=Math.max(1,Math.round(w/COLS));
+    out.barLens=Array.from({length:nb},(_,i)=>oldLens[i]!=null?oldLens[i]:COLS);
+    out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+  }
+  void grew;
   return out;
 };
 // Writing into a bar past the end of a part would be silent under that rule, so
 // an explicit note extends the part through the bar it landed in — that's how a
 // bar you just added gets content of its own. Only note CREATION calls this;
 // erasing never shortens, and the length slider stays the way to trim.
+// Drawing a note past a bar's end re-extends THAT BAR to cover it — the escape
+// hatch that stops a trimmed bar from being a trap. It grows to the column you
+// drew on, not to the full bar: a bar you deliberately set to 14 shouldn't snap
+// back to 16 because you added a note at step 3.
 const growLenTo=(p,col)=>{
   if(!p||!Array.isArray(p.grid))return p;
-  const w=gridW(p.grid), end=Math.min(w,(Math.floor(col/COLS)+1)*COLS);
-  return (p.gridLen||0)>=end?p:Object.assign({},p,{gridLen:end});
+  const bar=Math.floor(col/COLS), lens=partBarLens(p), need=(col%COLS)+1;
+  if((lens[bar]!=null?lens[bar]:COLS)>=need)return p;
+  return setBarLen(p,bar,need);
 };
 // Normalize a pattern loaded from disk: derive `bars` from whatever its arrays
 // actually carry, then re-run the resize so every lane agrees on the width.
@@ -4284,7 +4353,12 @@ export default function LoudLight(){
   // How much of THIS page is inside the playable length (drives the one-bar-wide
   // length slider): 1 on bars before the loop end, 0 past it, partial on the bar
   // the end lands in.
-  const _lenFrac      = Math.max(0,Math.min(1,((editPat?.gridLen??COLS)-barOff)/COLS));
+  // The VISIBLE bar's own length, as a fraction of a bar. Was
+  // (gridLen - barOff)/COLS — a single length counted from the start of the
+  // part, which is the thing that made trimming bar 1 delete bars 2 and 3.
+  const _barLens      = partBarLens(editPat);
+  const _curBarLen    = Math.max(0,Math.min(COLS,_barLens[curBar]!=null?_barLens[curBar]:COLS));
+  const _lenFrac      = _curBarLen/COLS;
   const liveStep      = activeLayer==="drums"?drumStep:step;
   const playingBar    = playing&&liveStep>=0?Math.floor(liveStep/COLS):-1;
 
@@ -4389,12 +4463,14 @@ export default function LoudLight(){
         for(const k of Object.keys(out.motion))m[k]=openBarGap(out.motion[k],dst,newW);
         out.motion=m;
       }
-      // Inserting a bar inside the loop extends the loop by exactly that bar,
-      // rather than snapping the length out to the full allocated width. A part
-      // whose loop ends before the duplicated bar never sounded it, so its
-      // length is left alone and it keeps looping to fill.
-      const oldLen=Math.max(1,Math.min(oldW,part.gridLen||oldW));
-      out.gridLen=oldLen>off?Math.min(newW,oldLen+COLS):oldLen;
+      // The copy is a copy in length too: duplicating a 14-step bar gives you
+      // a second 14-step bar, not a 16-step one with two dead steps on the end.
+      {
+        const lens=partBarLens(part), bar=Math.floor(off/COLS);
+        lens.splice(bar+1,0,lens[bar]!=null?lens[bar]:COLS);
+        out.barLens=lens;
+        out.gridLen=Math.max(1,lens.reduce((a,b)=>a+b,0));
+      }
       delete out.bars;                       // bars lives on the pattern
       return out;
     };
@@ -4436,7 +4512,14 @@ export default function LoudLight(){
           m[k]=spliceCols(out.motion[k],sliceCols(out.motion[k],0,oldW,()=>null),oldW,0,oldW,()=>null);
         out.motion=m;
       }
-      out.gridLen=oldLen>=oldW?W:oldLen;
+      // ×2 doubles the lengths along with the notes, so an odd-length pattern
+      // doubles into two of itself rather than into itself plus a full bar.
+      {
+        const lens=partBarLens(part);
+        out.barLens=[...lens,...lens];
+        out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+      }
+      void oldLen;
       delete out.bars;
       return out;
     };
@@ -5167,7 +5250,7 @@ export default function LoudLight(){
   // covers the strip above the grid, and DUP BAR / DEL BAR act on the VISIBLE
   // bar, so you must be able to see and change it from inside the drawer.
   const barChips=(
-      <div style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
+      <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{e.stopPropagation();e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);_scrubTo(e.clientX,e.currentTarget);}}
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_scrubTo(e.clientX,e.currentTarget);}}>
         {Array.from({length:barCount},(_,bi)=>{
@@ -5180,7 +5263,10 @@ export default function LoudLight(){
           // Bars past this part's loop end hold no content of their own — the
           // part repeats its own length through them (loop to fill), which is
           // also why the playhead ring never visits them. Recessed for that.
-          const past=bi*COLS>=(editPat?.gridLen??COLS);
+          // A bar is dead when its OWN length is zero — which is how a legacy
+          // gridLen that stopped short reads. It is no longer "everything after
+          // the cut", because there is no single cut any more.
+          const past=(_barLens[bi]||0)===0;
           const wide=barCount<=8;   // number the chips while they're readable
           return(
             <div key={bi} style={{position:"relative",flex:1,minWidth:2,borderRadius:3,
@@ -6348,11 +6434,17 @@ export default function LoudLight(){
           lf.nextAt+=absStepDur;
           break;
         }
-        const len=pat.gridLen??16;
+        // The columns this part actually plays, in order. `lf.step` indexes
+        // THIS, not the raw column — that indirection is what lets bar 1 be 14
+        // steps long and bar 2 still exist after it. A short bar simply
+        // contributes fewer entries and the cursor moves on to the next bar.
+        const seq=partSeq(pat);
+        const len=seq.length;
         const layerStepDur=absStepDur*(pat.speedMult??1);
-        // In LOOP the cursor runs 0..COLS-1 across the visible bar's columns;
-        // otherwise it runs the part's own loop length.
-        const s=inLoop?loopOff+(lf.step%COLS):lf.step%len;
+        // In LOOP the cursor runs across the pinned bar's own columns — its own
+        // length, so looping a 14-step bar loops 14 steps, not 16.
+        const loopLen=inLoop?Math.max(1,partBarLens(pat)[loopBarIdx]||COLS):0;
+        const s=inLoop?loopOff+(lf.step%loopLen):seq[lf.step%len];
         const at=lf.nextAt;
         // Variation regenerates at every BAR boundary (s%COLS===0), not just at
         // the top of the pattern. On a 1-bar pattern that IS step 0, so this is
@@ -6428,7 +6520,10 @@ export default function LoudLight(){
         // Update playId — used by FOLLOW + pill highlights — synth-track focused.
         if(layer==="synth")setPlayId(pat.id);
         // Advance step.
-        const ns=inLoop?(lf.step+1)%COLS:(s+1)%len;
+        // Advance the cursor, not the column: with per-bar lengths the next
+        // column is wherever the sequence says, and (s+1) would walk straight
+        // into a short bar's dead tail.
+        const ns=inLoop?(lf.step+1)%loopLen:(lf.step+1)%len;
         lf.step=ns;
         lf.nextAt+=layerStepDur;
       }
@@ -7468,8 +7563,7 @@ export default function LoudLight(){
   // `len` arrives as a 1..COLS position within the VISIBLE bar; offset it.
   const setDrumLen=(len)=>setDrumPats(ps=>ps.map(p=>{
     if(p.id!==activeDrumId)return p;
-    const off=barOffIn(p);
-    return Object.assign({},p,{gridLen:Math.max(1,Math.min(patW(p),off+len))});
+    return setBarLen(p,Math.floor(barOffIn(p)/COLS),len);
   }));
   useEffect(()=>{setDrumLenR.current=setDrumLen;});
   // Ctrl/Cmd+click a drum cell: cycle its ratchet count. An empty cell turns
@@ -8050,13 +8144,13 @@ export default function LoudLight(){
     const el=gridRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
     const pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
-    const off=synthBarOffR();
+    const bar=Math.floor(synthBarOffR()/COLS);
     setPats(ps=>ps.map(p=>{
       if(p.id!==activeIdR.current)return p;
-      // The band spans the VISIBLE BAR, so it sets the loop end within it —
-      // drag it on bar 3 of a 4-bar pattern and you get a length of 32..48.
-      const len=Math.max(1,Math.min(patW(p),off+Math.round(pct*COLS)));
-      return Object.assign({},p,{gridLen:len});
+      // Sets THIS BAR's length and nothing else. It used to set one length for
+      // the whole part counted from column 0, so dragging on bar 1 cut every
+      // bar after it off the end.
+      return setBarLen(p,bar,Math.round(pct*COLS));
     }));
   },[]);
   const _lenEdgeBubbleDown=useCallback((e)=>{
@@ -8124,8 +8218,8 @@ export default function LoudLight(){
   const lenEdgeDrums=(
     <Fragment>
       {_lenFrac<1&&<div style={_lenTail(_lenFrac)}/>}
-      <div role="slider" aria-label="Loop end" aria-valuenow={editPat?.gridLen??COLS}
-        aria-valuemin={1} aria-valuemax={barCount*COLS} data-lenedge="drums"
+      <div role="slider" aria-label="Loop end" aria-valuenow={_curBarLen}
+        aria-valuemin={1} aria-valuemax={COLS} data-lenedge="drums"
         onPointerDown={_lenEdgeCaptureDown} onPointerMove={_lenEdgeCaptureMove}
         onPointerUp={_lenEdgeCaptureUp} onPointerCancel={_lenEdgeCaptureUp}
         style={_lenEdgeStyle(_lenFrac)}>
@@ -8136,8 +8230,8 @@ export default function LoudLight(){
   const lenEdgeSynth=(
     <Fragment>
       {_lenFrac<1&&<div style={_lenTail(_lenFrac)}/>}
-      <div role="slider" aria-label="Loop end" aria-valuenow={editPat?.gridLen??COLS}
-        aria-valuemin={1} aria-valuemax={barCount*COLS} data-lenedge="synth"
+      <div role="slider" aria-label="Loop end" aria-valuenow={_curBarLen}
+        aria-valuemin={1} aria-valuemax={COLS} data-lenedge="synth"
         onPointerDown={_lenEdgeBubbleDown} style={_lenEdgeStyle(_lenFrac)}>
         <div style={_lenEdgeBar(lenDragging)}/>
       </div>
@@ -8845,7 +8939,7 @@ export default function LoudLight(){
                       const ac=barOff+c;
                       const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
                       const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
-                      const inactive=ac>=gridLen;
+                      const inactive=colPastEnd(activePat,ac);
                       return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{
                         background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                         outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px",
@@ -8868,7 +8962,7 @@ export default function LoudLight(){
                           const vw=Math.min(ci+span,A1)-A0-vs;   // visible width
                           const vel=p?(p.vel??100):100;
                           const b=0.55+(vel/127)*0.45;
-                          const inactive=ci>=gridLen;
+                          const inactive=colPastEnd(activePat,ci);
                           const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;
                           const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
@@ -8911,7 +9005,7 @@ export default function LoudLight(){
               <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>
                 {Array.from({length:COLS},(_,c)=>{
                   const ac=barOff+c;
-                  const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;
+                  const isA=playing&&ac===step,isQ=c%4===0,inactive=colPastEnd(activePat,ac);
                   return(
                   <div key={c} style={S.stepColWrap}>
                     <div style={Object.assign({},S.stepDot,{
@@ -8963,7 +9057,7 @@ export default function LoudLight(){
                         const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][ac]!=null)?dPat.vel[r][ac]:100;
                         const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][ac]!=null)?dPat.rat[r][ac]:1;
                         const isActive=playing&&ac===drumStep;
-                        const inactive=ac>=dLen;
+                        const inactive=colPastEnd(dPat,ac);
                         const isQ=c%4===0;
                         // VARY overlay: gold ring where the live variation ADDED a
                         // hit, dim where it DROPPED one. Base grid stays editable.
@@ -9620,12 +9714,12 @@ export default function LoudLight(){
                         {Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
-                          const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=ac>=gridLen;
+                          const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=colPastEnd(activePat,ac);
                           return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=ci>=gridLen;const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                         {vSGrid&&Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           if(ac>=gridLen)return null;
@@ -9641,7 +9735,7 @@ export default function LoudLight(){
                     })}
                   </div>
                   </div>
-                  <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=ac>=gridLen;return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
+                  <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=colPastEnd(activePat,ac);return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
 
                 </div>
               </div>
@@ -9682,7 +9776,7 @@ export default function LoudLight(){
                               const cv=(dPat&&dPat.vel&&dPat.vel[r]&&dPat.vel[r][ac]!=null)?dPat.vel[r][ac]:100;
                               const rt=(dPat&&dPat.rat&&dPat.rat[r]&&dPat.rat[r][ac]!=null)?dPat.rat[r][ac]:1;
                               const isActive=playing&&ac===drumStep;
-                              const inactive=ac>=dLen;
+                              const inactive=colPastEnd(dPat,ac);
                               const isQ=step%4===0;
                               const varOn=vGridD?!!(vGridD[r]&&vGridD[r][ac]):on;
                               const vAdd=vGridD&&varOn&&!on&&ac<dLen, vDrop=vGridD&&!varOn&&on;
