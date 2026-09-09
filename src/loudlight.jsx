@@ -691,10 +691,6 @@ const setBarMult=(part,bar,mult)=>{
   m[bar]=mult;
   return Object.assign({},part,{barMults:m,speedMult:m[0]||1});
 };
-const setAllBarMults=(part,mult)=>{
-  const m=partBarMults(part).map(()=>mult);
-  return Object.assign({},part,{barMults:m,speedMult:mult});
-};
 // One pass of a part, in ABSOLUTE steps. A SUM now, not `len * mult`: each of
 // its columns costs its own bar's rate. This is the number every cross-part
 // comparison is in — it is the only unit in which a ½× bar and a 1× bar are
@@ -4894,9 +4890,9 @@ export default function LoudLight(){
             {cell("✕ DELETE BAR "+(bm.bar+1),()=>act(()=>deleteBarAt(bm.bar)),only,true)}
           </div>
           {/* Playback speed for THIS BAR. Read from partBarMults rather than
-              the activePatSpeed memo, which is declared thousands of lines
-              below this and would be undefined at build time (Babel const→var).
-              The desktop sidebar's row still sets the whole part at once. */}
+              a component-level memo — anything declared below this point in the
+              body would be undefined at build time (Babel const→var). This is
+              the only speed control now; the desktop sidebar's row is gone. */}
           <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:2,fontWeight:600,
             color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>
             SPEED — BAR {bm.bar+1}</div>
@@ -8532,17 +8528,10 @@ export default function LoudLight(){
   // Per-pattern speed: the SPEED selector reads/writes the active pat's
   // speedMult so each pattern can have its own playback rate. Falls back to
   // the legacy global speedMult when the pat is missing the field.
-  const activePatForSpeed = activeLayer==="drums"
-    ? drumPats.find(x=>x.id===activeDrumId)
-    : pats.find(x=>x.id===activeId);
-  const activePatSpeed = activePatForSpeed?.speedMult ?? speedMult;
-  // The desktop sidebar's selector: sets the WHOLE part to one rate. Still
-  // wanted — "make this pattern half time" is a real op — and it is the thing
-  // that keeps a per-bar model from making the common case fiddly.
-  const setActivePatSpeed = (mult)=>{
-    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:setAllBarMults(p,mult)));
-    else setPats(ps=>ps.map(p=>p.id!==activeId?p:setAllBarMults(p,mult)));
-  };
+  // There is no whole-part speed setter any more: the desktop sidebar's row was
+  // its only caller and it is gone, so SPEED is per bar everywhere. If setting
+  // every bar at once is wanted back, setAllBarMults is the one-line way — the
+  // house idiom would be a hold on the bar menu's speed buttons.
   // The bar menu's selector: one bar only.
   const setBarSpeed = (bar,mult)=>{
     pushHistory();
@@ -9131,13 +9120,6 @@ export default function LoudLight(){
                       ))}
                     </div>
                     {barOpsRow}
-                    {/* Per-pattern SPEED selector */}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
-                      {SPEED_OPTS.map(({label,mult})=>(
-                        <button key={label} style={Object.assign({},S.speedBtn,{padding:"4px 0",fontSize:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
-                          onClick={()=>setActivePatSpeed(mult)}>{label}</button>
-                      ))}
-                    </div>
                   </div>
                 );
               })()}
@@ -9156,13 +9138,6 @@ export default function LoudLight(){
                       ))}
                     </div>
                     {barOpsRow}
-                    {/* Per-pattern SPEED selector — drums layer */}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,marginTop:2}}>
-                      {SPEED_OPTS.map(({label,mult})=>(
-                        <button key={label} style={Object.assign({},S.speedBtn,{padding:"4px 0",fontSize:8,minWidth:0},Math.abs(activePatSpeed-mult)<0.001?S.speedBtnOn:{})}
-                          onClick={()=>setActivePatSpeed(mult)}>{label}</button>
-                      ))}
-                    </div>
                   </div>
                 );
               })()}
@@ -10814,8 +10789,6 @@ const S={
   tabOn:     {background:"rgba(255,255,255,0.07)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)"},
   stepVaryDivider:{height:1,background:"rgba(186,208,230,0.06)",margin:"16px 0 8px"},
   speedRow:  {display:"flex",flexWrap:"wrap",gap:4,marginBottom:IS_MOBILE?10:14},
-  speedBtn:  {flex:1,padding:IS_MOBILE?"7px 0":"9px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?11:12,cursor:"pointer",borderRadius:10,transition:"all .12s"},
-  speedBtnOn:{border:"1px solid rgba(255,255,255,0.5)",color:"#fff",background:"rgba(255,255,255,0.08)"},
 
   pill:      {padding:IS_MOBILE?"5px 13px":"7px 16px",borderRadius:20,fontSize:IS_MOBILE?11:12,fontWeight:700,letterSpacing:2,cursor:"pointer",flexShrink:0,transition:"all .12s",display:"flex",alignItems:"center",gap:2},
   newPill:   {padding:"5px 10px",borderRadius:20,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(178,199,219,0.3)",fontSize:14,cursor:"pointer",flexShrink:0},
