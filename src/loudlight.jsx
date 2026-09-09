@@ -658,9 +658,53 @@ const setBarLen=(part,bar,len)=>{
   lens[bar]=Math.max(1,Math.min(COLS,Math.round(len)));
   return Object.assign({},part,{barLens:lens,gridLen:Math.max(1,lens.reduce((a,b)=>a+b,0))});
 };
+// ── PER-BAR SPEED ────────────────────────────────────────────────────────
+// The companion to barLens, and the same argument: `speedMult` was ONE rate
+// for the whole part, so a pattern could be fast or slow but never both, and
+// a half-time bar in the middle of a phrase was not expressible. `barMults`
+// is an array, one SPEED_OPTS multiplier per bar. Absent, it reads as the old
+// single `speedMult` repeated — so nothing about an existing project changes.
+//
+// `speedMult` is kept in step as bar 0's rate, because it is what a legacy
+// reader, a packed save and the desktop selector all still look at. It is no
+// longer the whole truth; anything that needs a step's real rate must ask for
+// the BAR's (`colMult`).
+const partBarMults=(part)=>{
+  const bars=partBars(part);
+  const src=(part&&Array.isArray(part.barMults))?part.barMults:null;
+  const base=(part&&part.speedMult)||1;
+  return Array.from({length:bars},(_,i)=>{
+    const v=src?(src[i]!=null?src[i]:base):base;
+    return (typeof v==="number"&&v>0)?v:1;
+  });
+};
+// The rate of the bar this absolute column sits in — the multiplier the
+// scheduler must use for THIS step, not the part's nominal one.
+const colMult=(part,ac)=>{
+  const m=partBarMults(part);
+  const bi=Math.floor(ac/COLS);
+  return m[bi]!=null?m[bi]:1;
+};
+const setBarMult=(part,bar,mult)=>{
+  const m=partBarMults(part);
+  if(bar<0||bar>=m.length)return part;
+  m[bar]=mult;
+  return Object.assign({},part,{barMults:m,speedMult:m[0]||1});
+};
+const setAllBarMults=(part,mult)=>{
+  const m=partBarMults(part).map(()=>mult);
+  return Object.assign({},part,{barMults:m,speedMult:mult});
+};
+// One pass of a part, in ABSOLUTE steps. A SUM now, not `len * mult`: each of
+// its columns costs its own bar's rate. This is the number every cross-part
+// comparison is in — it is the only unit in which a ½× bar and a 1× bar are
+// the same kind of thing.
 const partAbsLen=part=>{
   if(!part)return 0;
-  return partSeqLen(part)*(part.speedMult||1);
+  const lens=partBarLens(part), mults=partBarMults(part);
+  let t=0;
+  for(let i=0;i<lens.length;i++)t+=lens[i]*(mults[i]||1);
+  return t;
 };
 // Only ever asked of a LIVE pattern. A packed part's grid is sparse, so this
 // would read it wrong — hence the _pk guard rather than a silent wrong answer.
@@ -689,13 +733,21 @@ const masterLayerOf=(pat)=>{
 // (`steps`) plus the step duration multiplier that unit implies (`mult`).
 // Master steps rather than absolute ones so the count stays a whole number:
 // 15 steps at 2× is 7.5 absolute steps, and a clock cannot wrap on a half.
+// The cycle everything re-synchronises on, counted in the MASTER PART'S OWN
+// STEPS (`steps`) — not in absolute steps and no longer with a single `mult`,
+// because with per-bar speed a pass is a SUM of differently-priced steps and
+// there is no one multiplier to name. The clock therefore advances one master
+// step at a time and prices each tick from that step's own bar (`colMult`).
+// `abs` is the same cycle measured in absolute steps, which is the unit
+// cross-part comparisons and the collapse need.
 const patCycle=(pat)=>{
   const layer=masterLayerOf(pat);
-  if(!layer)return {layer:null,steps:Math.max(1,patBars(pat)*COLS),mult:1};
+  if(!layer){
+    const n=Math.max(1,patBars(pat)*COLS);
+    return {layer:null,steps:n,abs:n,reps:1};
+  }
   const mp=pat.parts[layer];
-  const mlen=partSeqLen(mp);
-  const mult=mp.speedMult||1;
-  const one=mlen*mult;                           // one master pass, in absolute steps
+  const one=Math.max(1e-9,partAbsLen(mp));       // one master pass, in absolute steps
   let longest=one;
   for(const l of PART_LAYERS){
     const q=pat.parts[l];
@@ -704,12 +756,18 @@ const patCycle=(pat)=>{
   // Whole passes only. The epsilon is for the 1.5 and 0.5 multipliers, where
   // longest/one lands a hair over an integer in binary floating point.
   const reps=Math.max(1,Math.ceil(longest/one-1e-9));
-  return {layer,steps:Math.max(1,mlen*reps),mult};
+  return {layer,steps:Math.max(1,partSeqLen(mp)*reps),abs:one*reps,reps};
 };
 // How many bars the pattern SOUNDS for, as opposed to how many it has been
 // allocated. What the song page's bar dots count, so the dots match the
-// playhead that lights them.
-const cycleBars=(pat)=>Math.max(1,Math.min(MAX_BARS,Math.ceil(patCycle(pat).steps/COLS)));
+// playhead that lights them. Counted as bars-with-a-length rather than
+// ceil(steps/COLS): two 8-step bars are two bars, and the division said one.
+const cycleBars=(pat)=>{
+  const m=masterLayerOf(pat);
+  if(!m)return Math.max(1,Math.min(MAX_BARS,patBars(pat)));
+  const live=partBarLens(pat.parts[m]).filter(l=>l>0).length||1;
+  return Math.max(1,Math.min(MAX_BARS,live*patCycle(pat).reps));
+};
 const mkSynthPart=(w=COLS)=>({grid:mkGrid(w),durs:mkDurs(w),params:defaultStepParams(w),gridLen:Math.min(COLS,w),speedMult:1});
 const mkDrumPart =(w=COLS)=>({grid:Array.from({length:DRUM_ROWS},()=>new Array(w).fill(false)),
   vel:mkDrumVel(w),rat:mkDrumRat(w),gridLen:Math.min(COLS,w),speedMult:1,
@@ -763,10 +821,7 @@ const COLLAPSE_LAYERS=["synth","lead","drums"];
 // would push it past MAX_BARS the finer grid is kept rather than refusing.
 // Either way the sound is identical; only the grid it is written on differs.
 const _gcdI=(a,b)=>b?_gcdI(b,a%b):a;
-const collapseSpan=(e,dm)=>{
-  const c=patCycle(e);
-  return Math.max(1,Math.round(c.steps*(c.mult/dm)));
-};
+const collapseSpan=(e,dm)=>Math.max(1,Math.round(patCycle(e).abs/dm));
 const collapsePlan=(entries)=>{
   let u=0;
   for(const e of entries)for(const l of COLLAPSE_LAYERS){
@@ -775,7 +830,14 @@ const collapsePlan=(entries)=>{
     // vote; otherwise a default-1× drum part nobody had touched would drag a
     // half-speed song onto a doubled grid for nothing.
     if(!partHasNotes(q))continue;
-    u=_gcdI(u,Math.max(1,Math.round(((q.speedMult)||1)*2)));
+    // Every BAR votes, not the part: with per-bar speed one part can hold a 1×
+    // bar and a ⅔× bar, and the destination grid has to be fine enough for
+    // both. Bars with no length never sound, so they don't get a say.
+    const lens=partBarLens(q), mults=partBarMults(q);
+    for(let i=0;i<mults.length;i++){
+      if(!(lens[i]>0))continue;
+      u=_gcdI(u,Math.max(1,Math.round((mults[i]||1)*2)));
+    }
   }
   const fine=(u||2)/2;
   const total=(dm)=>entries.reduce((n,e)=>n+collapseSpan(e,dm),0);
@@ -843,7 +905,7 @@ const collapseEntries=(entries,name)=>{
       // the sequence rather than doing % gridLen is the same thing the
       // scheduler does, so a 14-step bar flattens as 14 columns.
       const seq=partSeq(src), len=seq.length;
-      const k=Math.max(1,Math.round(((src.speedMult)||1)/dm));
+      const mults=partBarMults(src);
       const vel=Array.isArray(src.vel)?(Array.isArray(src.vel[0])?src.vel:toDrumVel2D(src.vel,w)):null;
       const rat=Array.isArray(src.rat)?(Array.isArray(src.rat[0])?src.rat:toDrumRat2D(src.rat,w)):null;
       const rows=Math.min(src.grid.length,dst.grid.length);
@@ -852,12 +914,19 @@ const collapseEntries=(entries,name)=>{
         dst.grid[r][col]=true;
         if(!isDrum&&dst.durs)dst.durs[r][col]=Math.max(1,dur);
       };
-      for(let i=0;i<span;i++){
-        const to=off+i;
-        // Only a step BOUNDARY carries an onset. The k-1 columns after it are
-        // the same source step still sounding, covered by the note's duration.
-        if(i%k)continue;
-        const from=seq[Math.floor(i/k)%len];
+      // Walk the part's own steps forward in TIME. The stretch factor is
+      // per-STEP now — a step costs its own bar's rate — so the old "an onset
+      // every k columns" walk stopped describing it the moment two bars could
+      // run at different speeds. `acc` is absolute steps into this entry, and
+      // acc/dm is exact because dm divides every rate in the song.
+      const spanAbs=span*dm;
+      let acc=0;
+      for(let t=0;acc<spanAbs-1e-9;t++){
+        const from=seq[t%len];
+        const m=mults[Math.floor(from/COLS)]||1;
+        const k=Math.max(1,Math.round(m/dm));
+        const to=off+Math.round(acc/dm);
+        acc+=m;
         const sp=(!isDrum&&src.params&&src.params[from])?src.params[from]:null;
         const rhy=sp?Math.max(1,Math.round(sp.rhy??1)):1;
         for(let r=0;r<rows;r++){
@@ -1165,9 +1234,14 @@ const resizePatBars=(p,bars)=>{
   // the ORIGINAL part, so a legacy gridLen is converted here once rather than
   // being re-derived later against the new width and meaning something else.
   {
-    const oldLens=partBarLens(p), nb=Math.max(1,Math.round(w/COLS));
+    const oldLens=partBarLens(p), oldMults=partBarMults(p), nb=Math.max(1,Math.round(w/COLS));
+    const tailM=oldMults.length?oldMults[oldMults.length-1]:1;
     out.barLens=Array.from({length:nb},(_,i)=>oldLens[i]!=null?oldLens[i]:COLS);
+    // A new bar continues at the rate of the one before it. Arriving at 1× in
+    // the middle of a half-time part would be a surprise, not a default.
+    out.barMults=Array.from({length:nb},(_,i)=>oldMults[i]!=null?oldMults[i]:tailM);
     out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+    out.speedMult=out.barMults[0]||1;
   }
   void grew;
   return out;
@@ -4491,10 +4565,12 @@ export default function LoudLight(){
       // The copy is a copy in length too: duplicating a 14-step bar gives you
       // a second 14-step bar, not a 16-step one with two dead steps on the end.
       {
-        const lens=partBarLens(part), bar=Math.floor(off/COLS);
+        const lens=partBarLens(part), mults=partBarMults(part), bar=Math.floor(off/COLS);
         lens.splice(bar+1,0,lens[bar]!=null?lens[bar]:COLS);
-        out.barLens=lens;
+        mults.splice(bar+1,0,mults[bar]!=null?mults[bar]:1);
+        out.barLens=lens; out.barMults=mults;
         out.gridLen=Math.max(1,lens.reduce((a,b)=>a+b,0));
+        out.speedMult=mults[0]||1;
       }
       delete out.bars;                       // bars lives on the pattern
       return out;
@@ -4539,10 +4615,12 @@ export default function LoudLight(){
         for(const k of Object.keys(part.motion))m[k]=_dropBarCols(part.motion[k],off);
         out.motion=m;
       }
-      const lens=partBarLens(part);
-      lens.splice(bar,1);
+      const lens=partBarLens(part), mults=partBarMults(part);
+      lens.splice(bar,1); mults.splice(bar,1);
       out.barLens=lens.length?lens:[COLS];
+      out.barMults=mults.length?mults:[1];
       out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+      out.speedMult=out.barMults[0]||1;
       delete out.bars;                       // bars lives on the pattern
       return out;
     };
@@ -4586,9 +4664,11 @@ export default function LoudLight(){
       // ×2 doubles the lengths along with the notes, so an odd-length pattern
       // doubles into two of itself rather than into itself plus a full bar.
       {
-        const lens=partBarLens(part);
+        const lens=partBarLens(part), mults=partBarMults(part);
         out.barLens=[...lens,...lens];
+        out.barMults=[...mults,...mults];
         out.gridLen=Math.max(1,out.barLens.reduce((a,b)=>a+b,0));
+        out.speedMult=out.barMults[0]||1;
       }
       void oldLen;
       delete out.bars;
@@ -4794,7 +4874,13 @@ export default function LoudLight(){
             borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
             <span style={{fontSize:12,fontWeight:700,color:"rgba(232,220,205,0.9)"}}>BAR {bm.bar+1}</span>
             <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>
-              {(activeLayer==="lead"?"MONO":isDrum?"DRUMS":"POLY")+" · "+(partBarLens(editPat)[bm.bar]||COLS)+" STEPS"}</span>
+              {(()=>{
+                const m=partBarMults(editPat)[bm.bar]||1;
+                const lbl=(SPEED_OPTS.find(o=>Math.abs(o.mult-m)<0.001)||{}).label||"";
+                return (activeLayer==="lead"?"MONO":isDrum?"DRUMS":"POLY")
+                  +" · "+(partBarLens(editPat)[bm.bar]||COLS)+" STEPS"
+                  +(m!==1&&lbl?" · "+lbl:"");
+              })()}</span>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("RAND",()=>act(()=>isDrum?randDrumVel():randPatId(activePatternId)))}
@@ -4807,26 +4893,23 @@ export default function LoudLight(){
           <div style={{display:"grid",gridTemplateColumns:"1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("✕ DELETE BAR "+(bm.bar+1),()=>act(()=>deleteBarAt(bm.bar)),only,true)}
           </div>
-          {/* Playback speed. It belongs on a menu about structure rather than
-              on the STEP sheet, where it was the only control that wasn't a
-              step lane — but it is a property of the whole PART, not of this
-              bar, so the header says so rather than letting the "BAR n" title
-              above imply otherwise. Read from editPat rather than the
-              activePatSpeed memo, which is declared thousands of lines below
-              this and would be undefined at build time (Babel const→var). */}
+          {/* Playback speed for THIS BAR. Read from partBarMults rather than
+              the activePatSpeed memo, which is declared thousands of lines
+              below this and would be undefined at build time (Babel const→var).
+              The desktop sidebar's row still sets the whole part at once. */}
           <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:2,fontWeight:600,
             color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>
-            SPEED — WHOLE {activeLayer==="lead"?"MONO":isDrum?"DRUMS":"POLY"} PART</div>
+            SPEED — BAR {bm.bar+1}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {SPEED_OPTS.map(({label,mult})=>{
-              const on=Math.abs((editPat&&editPat.speedMult||1)-mult)<0.001;
+              const on=Math.abs((partBarMults(editPat)[bm.bar]||1)-mult)<0.001;
               return(
                 <button key={label}
                   style={{padding:"9px 0",border:"none",fontFamily:"inherit",
                     background:on?"rgba(168,197,160,0.16)":"rgba(10,18,28,0.92)",
                     color:on?"#a8c5a0":"rgba(178,199,219,0.5)",
                     fontSize:10,fontWeight:700,cursor:"pointer"}}
-                  onClick={()=>{setActivePatSpeed(mult);}}>{label}</button>
+                  onClick={()=>{setBarSpeed(bm.bar,mult);}}>{label}</button>
               );
             })}
           </div>
@@ -6587,8 +6670,20 @@ export default function LoudLight(){
     // stays whole at every speed multiplier. LOOP still cycles one BAR — one
     // bar of the master, at the master's rate.
     const cyc=patCycle(curPat);
-    const masterStepDur=absStepDur*(cyc.mult||1);
-    const patLen=Math.max(1,inLoop?COLS:cyc.steps);
+    // The master clock advances one MASTER STEP at a time and prices each tick
+    // from that step's own bar. There is no single masterStepDur any more: with
+    // per-bar speed a pass is a sum of differently-priced steps, so a uniform
+    // tick would drift against the parts within the first bar.
+    const mPart=cyc.layer?curPat.parts[cyc.layer]:null;
+    const mSeq=mPart?partSeq(mPart):null;
+    const loopMasterLen=(inLoop&&mPart)?Math.max(1,partBarLens(mPart)[loopBarIdx]||COLS):COLS;
+    const masterDur=(i)=>{
+      if(!mPart)return absStepDur;
+      // In LOOP every tick is the pinned bar's, so its rate is constant.
+      const col=inLoop?loopOff:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
+      return absStepDur*colMult(mPart,col);
+    };
+    const patLen=Math.max(1,inLoop?loopMasterLen:cyc.steps);
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
       if(!part)return null;
@@ -6615,11 +6710,13 @@ export default function LoudLight(){
         // contributes fewer entries and the cursor moves on to the next bar.
         const seq=partSeq(pat);
         const len=seq.length;
-        const layerStepDur=absStepDur*(pat.speedMult??1);
         // In LOOP the cursor runs across the pinned bar's own columns — its own
         // length, so looping a 14-step bar loops 14 steps, not 16.
         const loopLen=inLoop?Math.max(1,partBarLens(pat)[loopBarIdx]||COLS):0;
         const s=inLoop?loopOff+(lf.step%loopLen):seq[lf.step%len];
+        // Priced from the bar THIS step is in, so it has to come after `s`.
+        // It is both how long the note sounds and how far the cursor moves.
+        const layerStepDur=absStepDur*colMult(pat,s);
         const at=lf.nextAt;
         // Variation regenerates at every BAR boundary (s%COLS===0), not just at
         // the top of the pattern. On a 1-bar pattern that IS step 0, so this is
@@ -6709,7 +6806,10 @@ export default function LoudLight(){
     // step 0. That single rule replaces sync/free/random and the old "shortest
     // populated lane" bar.
     while(nextNoteR.current<ctx.currentTime+LOOKAHEAD){
-      const ns=(stepR.current+1)%patLen;
+      // The tick being LEFT is what nextNoteR is currently sitting on, so its
+      // duration is the one to advance by — not the tick being entered.
+      const cur=stepR.current;
+      const ns=(cur+1)%patLen;
       if(ns===0){
         // LOOP holds the song where it is: the entry keeps playing, one bar
         // of it at a time, and position is exactly where you left it when LOOP
@@ -6721,19 +6821,23 @@ export default function LoudLight(){
         }
         for(const l of PART_LAYERS){
           freeR.current[l].step=0;
-          freeR.current[l].nextAt=nextNoteR.current+masterStepDur;
+          freeR.current[l].nextAt=nextNoteR.current+masterDur(cur);
         }
       }
       stepR.current=ns;
-      nextNoteR.current+=masterStepDur;
+      nextNoteR.current+=masterDur(cur);
     }
     // Coarse position for the song page's bar dots. Same lookahead lead as the
     // grid playhead — both are published when a step is SCHEDULED, not when it
     // sounds — so the two agree with each other.
     {
+      // Read the master's COLUMN, not its step count: with per-bar lengths and
+      // per-bar speeds the two stopped being the same number, and the dots are
+      // about where you are in the pattern, not how many ticks have gone by.
       const cs=stepR.current;
-      const pb=inLoop?loopBarIdx:Math.floor(cs/COLS);
-      const pq=pb*4+Math.floor((cs%COLS)/4);
+      const mcol=(mSeq&&mSeq.length)?mSeq[cs%mSeq.length]:cs;
+      const pb=inLoop?loopBarIdx:Math.floor(mcol/COLS);
+      const pq=pb*4+Math.floor((mcol%COLS)/4);
       if(songPulseR.current!==pq){songPulseR.current=pq;setSongPulse(pq);}
     }
   },[]);
@@ -8432,9 +8536,18 @@ export default function LoudLight(){
     ? drumPats.find(x=>x.id===activeDrumId)
     : pats.find(x=>x.id===activeId);
   const activePatSpeed = activePatForSpeed?.speedMult ?? speedMult;
+  // The desktop sidebar's selector: sets the WHOLE part to one rate. Still
+  // wanted — "make this pattern half time" is a real op — and it is the thing
+  // that keeps a per-bar model from making the common case fiddly.
   const setActivePatSpeed = (mult)=>{
-    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:Object.assign({},p,{speedMult:mult})));
-    else setPats(ps=>ps.map(p=>p.id!==activeId?p:Object.assign({},p,{speedMult:mult})));
+    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:setAllBarMults(p,mult)));
+    else setPats(ps=>ps.map(p=>p.id!==activeId?p:setAllBarMults(p,mult)));
+  };
+  // The bar menu's selector: one bar only.
+  const setBarSpeed = (bar,mult)=>{
+    pushHistory();
+    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:setBarMult(p,bar,mult)));
+    else setPats(ps=>ps.map(p=>p.id!==activeId?p:setBarMult(p,bar,mult)));
   };
   // VARY is per-layer; these drive the global indicators (tab tint, mobile
   // chip). anyVary = at least one layer on; activeVary = the layer the user

@@ -106,6 +106,41 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     length, and ×2 doubles the array. `growLenTo` extends **only the bar drawn
     in**, and only as far as the column drawn — a bar you deliberately set to 14
     must not snap back to 16 because you added a note at step 3.
+- **Speed is PER BAR too** (`part.barMults`, the companion to `barLens`). Same
+  argument: `speedMult` was one rate for the whole part, so a pattern could be
+  fast or slow but never both, and a half-time bar inside a phrase was not
+  expressible. Absent, `barMults` reads as the old single `speedMult` repeated,
+  so nothing about an existing project changes. `speedMult` is kept in step as
+  **bar 0's** rate because a legacy reader, a packed save and the desktop
+  selector all still look at it — it is no longer the whole truth, and anything
+  needing a step's real rate must ask `colMult(part, absCol)`.
+  - **There is no single `masterStepDur` any more.** A pass is a SUM of
+    differently-priced steps, so the master clock advances **one master step at
+    a time** and prices each tick from that step's own bar. A uniform tick would
+    drift against the parts inside the first bar. Same for each part's cursor:
+    `layerStepDur` is computed *after* `s` is known, from `colMult(pat, s)`, and
+    is both how long the note sounds and how far the cursor moves.
+  - `patCycle` therefore returns `{layer, steps, abs, reps}` and **no `mult`**:
+    `steps` counts master steps, `abs` is the same cycle in absolute steps, and
+    `abs` is the unit every cross-part comparison and the collapse work in.
+    `partAbsLen` is a sum (`Σ barLens[i] * barMults[i]`), not `len * mult`.
+  - `songPulse` reads the master's **column** (`mSeq[step % len]`), not its step
+    count — with per-bar lengths and speeds those stopped being the same number.
+  - Rates travel with the bar ops exactly as lengths do; a bar grown by
+    `resizePatBars` **continues at the rate of the one before it**, because
+    arriving at 1× in the middle of a half-time part is a surprise, not a
+    default.
+  - Two controls, deliberately: the **bar menu's** SPEED row sets one bar, and
+    the **desktop sidebar's** row sets the whole part at once (`setAllBarMults`)
+    — "make this pattern half time" is a real op, and it is what stops a per-bar
+    model making the common case fiddly.
+  - **Collapse walks the source in TIME, not in columns.** The stretch factor is
+    per-step now, so the old "an onset every k columns" walk stopped describing
+    it the moment two bars could run at different speeds; the loop accumulates
+    absolute steps and divides by the destination grid. Every **bar** votes in
+    the gcd that picks that grid, not the part — one part can hold a 1× bar and
+    a ⅔× bar, and the grid has to be fine enough for both. Bars with no length
+    never sound, so they don't vote.
 - **One part is the pattern's MASTER, and its loop is the pattern's cycle.** This
   replaced `bars * COLS` — the longest *allocation* — which ignored both things
   that decide how long a part actually sounds. A part trimmed to `gridLen` 14
