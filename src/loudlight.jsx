@@ -4767,7 +4767,7 @@ export default function LoudLight(){
   const barOpsMenu=!barMenu?null:(()=>{
     const bm=barMenu;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(230,vw-16),H=190;
+    const W=Math.min(230,vw-16),H=260;
     const px=Math.max(8,Math.min(vw-W-8,bm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,bm.y+14));
     const close=()=>setBarMenu(null);
@@ -4806,6 +4806,29 @@ export default function LoudLight(){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("✕ DELETE BAR "+(bm.bar+1),()=>act(()=>deleteBarAt(bm.bar)),only,true)}
+          </div>
+          {/* Playback speed. It belongs on a menu about structure rather than
+              on the STEP sheet, where it was the only control that wasn't a
+              step lane — but it is a property of the whole PART, not of this
+              bar, so the header says so rather than letting the "BAR n" title
+              above imply otherwise. Read from editPat rather than the
+              activePatSpeed memo, which is declared thousands of lines below
+              this and would be undefined at build time (Babel const→var). */}
+          <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:2,fontWeight:600,
+            color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>
+            SPEED — WHOLE {activeLayer==="lead"?"MONO":isDrum?"DRUMS":"POLY"} PART</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {SPEED_OPTS.map(({label,mult})=>{
+              const on=Math.abs((editPat&&editPat.speedMult||1)-mult)<0.001;
+              return(
+                <button key={label}
+                  style={{padding:"9px 0",border:"none",fontFamily:"inherit",
+                    background:on?"rgba(168,197,160,0.16)":"rgba(10,18,28,0.92)",
+                    color:on?"#a8c5a0":"rgba(178,199,219,0.5)",
+                    fontSize:10,fontWeight:700,cursor:"pointer"}}
+                  onClick={()=>{setActivePatSpeed(mult);}}>{label}</button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -10194,19 +10217,9 @@ export default function LoudLight(){
                     {/* STEP lanes — per-step params for the visible bar */}
                     {activeLayer!=="drums"&&(
                       <div style={{...S.stepPage,minHeight:0,overflowY:"scroll",paddingBottom:20,paddingLeft:4,paddingRight:4}}>
-                        {/* Playback speed */}
-                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,flexShrink:0}}>
-                          <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,marginRight:4}}>SPEED</div>
-                          {SPEED_OPTS.map(opt=>{
-                            const sel=Math.abs(activePatSpeed-opt.mult)<0.001;
-                            return(
-                              <div key={opt.label} onPointerDown={e=>{e.stopPropagation();setActivePatSpeed(opt.mult);}}
-                                style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+(sel?"rgba(168,197,160,0.7)":"rgba(168,197,160,0.18)"),background:sel?"rgba(168,197,160,0.15)":"transparent",color:sel?"#a8c5a0":"rgba(178,199,219,0.5)",fontSize:11,fontWeight:600,cursor:"pointer",userSelect:"none",lineHeight:1,flexShrink:0}}>
-                                {opt.label}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {/* SPEED moved to the bar chips' hold menu — it is a
+                            property of the part, not of a step, and it was the
+                            one thing on this sheet that wasn't a step lane. */}
                         <div style={S.stepPageHdr}>
                           <div style={S.stepPagePat}>{activePat?.name||""}</div>
                           <div style={{flex:1}}/>

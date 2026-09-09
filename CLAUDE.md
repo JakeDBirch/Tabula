@@ -216,7 +216,17 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   **pattern-wide only**: ×2, DUP, DEL and the master selector. A **bar chip's**
   hold (`barOpsMenu`, opened from the bar strip, which hit-tests the bar from
   the pointer x exactly as `_scrubTo` does) carries the **bar-scoped** ops —
-  RAND / CLR / MUT8 / CPY / PST, DUP BAR and DELETE BAR *n*. They were briefly
+  RAND / CLR / MUT8 / CPY / PST, DUP BAR and DELETE BAR *n* — plus **SPEED**,
+  which is the one thing there that is *not* bar-scoped. `speedMult` is a
+  property of the whole part, so that section carries its own header saying so
+  rather than letting the "BAR *n*" title imply otherwise. It moved off the
+  STEP sheet, where it was the only control that wasn't a step lane. Read it
+  from `editPat.speedMult`, not the `activePatSpeed` memo — that is declared
+  thousands of lines below the menu and would be `undefined` at build time.
+  (Per-BAR speed would be a different thing again: `layerStepDur` is currently
+  one rate per part, and the master cycle is `steps × mult`, so varying it
+  across bars means both stop being a single multiplication. Not built; ask
+  before assuming a request for it.) They were briefly
   together under the `+`, which put "randomise this bar" two rows from "delete
   this pattern" under a button that makes patterns. Opening the bar menu
   **selects that bar first** (the same `goToBar` a tap does), so every existing
