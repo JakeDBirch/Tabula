@@ -691,6 +691,10 @@ const setBarMult=(part,bar,mult)=>{
   m[bar]=mult;
   return Object.assign({},part,{barMults:m,speedMult:m[0]||1});
 };
+const setAllBarMults=(part,mult)=>{
+  const m=partBarMults(part).map(()=>mult);
+  return Object.assign({},part,{barMults:m,speedMult:mult});
+};
 // One pass of a part, in ABSOLUTE steps. A SUM now, not `len * mult`: each of
 // its columns costs its own bar's rate. This is the number every cross-part
 // comparison is in — it is the only unit in which a ½× bar and a 1× bar are
@@ -4834,6 +4838,9 @@ export default function LoudLight(){
   // — need no changes and you can see what you are about to change.
   const barMenuAtR=useRef(0);
   const barHoldR=useRef({tmr:0,held:false});
+  // Component-level, not a per-render object: the hold spans a pointerdown and
+  // a pointerup with a state update (and therefore a re-render) in between.
+  const spdHoldR=useRef({tmr:0,held:false});
   const _barAt=(clientX,el)=>{
     const rect=el.getBoundingClientRect();
     return Math.max(0,Math.min(barCount-1,Math.floor(((clientX-rect.left)/rect.width)*barCount)));
@@ -4893,19 +4900,38 @@ export default function LoudLight(){
               a component-level memo — anything declared below this point in the
               body would be undefined at build time (Babel const→var). This is
               the only speed control now; the desktop sidebar's row is gone. */}
-          <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:2,fontWeight:600,
+          <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:1.6,fontWeight:600,
             color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>
-            SPEED — BAR {bm.bar+1}</div>
+            SPEED — BAR {bm.bar+1}{barCount>1?" · HOLD = ALL":""}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {SPEED_OPTS.map(({label,mult})=>{
               const on=Math.abs((partBarMults(editPat)[bm.bar]||1)-mult)<0.001;
+              const end=()=>{if(spdHoldR.current.tmr){clearTimeout(spdHoldR.current.tmr);spdHoldR.current.tmr=0;}};
               return(
                 <button key={label}
-                  style={{padding:"9px 0",border:"none",fontFamily:"inherit",
+                  style={{padding:"9px 0",border:"none",fontFamily:"inherit",touchAction:"none",
                     background:on?"rgba(168,197,160,0.16)":"rgba(10,18,28,0.92)",
                     color:on?"#a8c5a0":"rgba(178,199,219,0.5)",
                     fontSize:10,fontWeight:700,cursor:"pointer"}}
-                  onClick={()=>{setBarSpeed(bm.bar,mult);}}>{label}</button>
+                  onPointerDown={(e)=>{
+                    e.stopPropagation();
+                    spdHoldR.current.held=false;end();
+                    spdHoldR.current.tmr=setTimeout(()=>{
+                      spdHoldR.current.tmr=0;spdHoldR.current.held=true;
+                      setAllBarSpeed(mult);
+                    },450);
+                  }}
+                  onPointerUp={end} onPointerLeave={()=>{end();spdHoldR.current.held=false;}}
+                  onPointerCancel={()=>{end();spdHoldR.current.held=false;}}
+                  onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();end();
+                    spdHoldR.current.held=true;setAllBarSpeed(mult);}}
+                  onClick={(e)=>{
+                    e.stopPropagation();
+                    // Swallow the hold's own trailing click, or every "all
+                    // bars" would immediately be followed by "…and this bar".
+                    if(spdHoldR.current.held){spdHoldR.current.held=false;return;}
+                    setBarSpeed(bm.bar,mult);
+                  }}>{label}</button>
               );
             })}
           </div>
@@ -8528,15 +8554,23 @@ export default function LoudLight(){
   // Per-pattern speed: the SPEED selector reads/writes the active pat's
   // speedMult so each pattern can have its own playback rate. Falls back to
   // the legacy global speedMult when the pat is missing the field.
-  // There is no whole-part speed setter any more: the desktop sidebar's row was
-  // its only caller and it is gone, so SPEED is per bar everywhere. If setting
-  // every bar at once is wanted back, setAllBarMults is the one-line way — the
-  // house idiom would be a hold on the bar menu's speed buttons.
-  // The bar menu's selector: one bar only.
+  // Tap a speed sets THIS bar; hold (or right-click) sets every bar in the
+  // part. The house split — the common action on the tap, the broader and
+  // rarer one on the deliberate gesture — and it is what keeps a per-bar model
+  // from making "put this whole pattern in half time" an eight-tap job.
   const setBarSpeed = (bar,mult)=>{
     pushHistory();
     if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:setBarMult(p,bar,mult)));
     else setPats(ps=>ps.map(p=>p.id!==activeId?p:setBarMult(p,bar,mult)));
+  };
+  const setAllBarSpeed = (mult)=>{
+    pushHistory();
+    if(activeLayer==="drums") setDrumPats(ps=>ps.map(p=>p.id!==activeDrumId?p:setAllBarMults(p,mult)));
+    else setPats(ps=>ps.map(p=>p.id!==activeId?p:setAllBarMults(p,mult)));
+    const lbl=(SPEED_OPTS.find(o=>Math.abs(o.mult-mult)<0.001)||{}).label||(mult+"×");
+    // The menu stays open and only one button changes state, so on a one-bar
+    // part a hold and a tap would look identical without this.
+    showFlash("EVERY BAR "+lbl);
   };
   // VARY is per-layer; these drive the global indicators (tab tint, mobile
   // chip). anyVary = at least one layer on; activeVary = the layer the user

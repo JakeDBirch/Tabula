@@ -130,13 +130,19 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     `resizePatBars` **continues at the rate of the one before it**, because
     arriving at 1× in the middle of a half-time part is a surprise, not a
     default.
-  - **One control: the bar menu's SPEED row, per bar.** The desktop sidebar's
-    whole-part row is gone, and `setAllBarMults` with it — that row was its only
-    caller. Consequence worth knowing before someone reports it as a bug:
-    there is no longer any way to set every bar at once, so "make this 8-bar
-    pattern half time" is eight trips through the hold menu. If it is wanted
-    back, the house idiom is a **hold** on the bar menu's speed buttons meaning
-    "every bar", and `setAllBarMults` is a three-line helper to restore.
+  - **One control: the bar menu's SPEED row.** The desktop sidebar's whole-part
+    row is gone. **Tap a speed sets this bar; hold (or right-click) sets every
+    bar in the part** — the house split again, the common action on the tap and
+    the broader, rarer one on the deliberate gesture, which is what keeps a
+    per-bar model from making "put this whole pattern in half time" an
+    eight-tap job. Both of the usual traps apply: the hold **swallows its own
+    trailing click** (or every "all bars" would be followed immediately by
+    "…and this bar"), and its ref is **component-level**, because the gesture
+    spans a pointerdown and a pointerup with a state update — and therefore a
+    re-render — in between. The menu stays open afterwards so you can audition,
+    which is why an all-bars write also flashes: on a one-bar part a hold and a
+    tap would otherwise look identical. The header advertises it (`HOLD = ALL`)
+    whenever the part has more than one bar.
   - **Collapse walks the source in TIME, not in columns.** The stretch factor is
     per-step now, so the old "an onset every k columns" walk stopped describing
     it the moment two bars could run at different speeds; the loop accumulates
