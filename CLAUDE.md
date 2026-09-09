@@ -518,52 +518,49 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
 - **iOS beta**: **working.** Runs on Jake's iPhone and iPad, and `Actions ▸ iOS TestFlight ▸ Run workflow` builds, signs and uploads to App Store Connect from a GitHub runner — first run green, ~3½ min, no Mac involved. Signing is committed (Team ID `KP6QHVP8GY`, bundle ID `co.loudlight.sequencer`); the five CI secrets are set. Internal group created with Jake in it.
 
-  **A cloud session CANNOT currently trigger the upload** — this was recorded
-  optimistically once and is wrong, so don't promise it. Both routes are 403 for
-  the session's GitHub credentials (tested 2026-09-08):
-  `actions_run_trigger` returns *Resource not accessible by integration* (the
-  app token has no Actions: write), and pushing an `ios-v*` tag fails with HTTP
-  403 on `git-receive-pack` (the git proxy permits branch refs only). Pushing to
-  `main` works fine, which is why the Pages build always ships and the beta
-  never does by itself.
+  **A cloud session usually CANNOT trigger the upload — check before promising
+  a build.** This was once recorded optimistically, from the fact that the
+  dispatch tool existed rather than from calling it, and that was wrong. Two
+  sessions on 2026-09-08 found both release routes shut:
+  `actions_run_trigger` returns *403 Resource not accessible by integration*
+  (the GitHub App token has no `actions: write`), and pushing an `ios-v*` tag —
+  the workflow's other release trigger — gets `HTTP 403` on `git-receive-pack`,
+  because the git proxy permits branch refs only. Pushes to `main` from the same
+  session work fine, which is the trap: a session can have full push access to
+  `main` and still be unable to ship a build. It is why the Pages build always
+  deploys and the beta never does by itself.
 
-  So a cloud session takes it as far as `main` and then **Jake clicks Actions ▸
-  iOS TestFlight ▸ Run workflow ▸ main**. To close that gap properly, grant the
-  Claude GitHub app Actions: write; a commit-message trigger (e.g. run the
-  upload job when the head commit contains `[testflight]`) would also work but
+  So a cloud session takes it as far as `main`, and then **Jake clicks Actions ▸
+  iOS TestFlight ▸ Run workflow ▸ main**. To close the gap properly, grant the
+  Claude GitHub app `actions: write`. A commit-message trigger (run the upload
+  job when the head commit contains `[testflight]`) would also work, but it
   quietly removes the deliberate friction below.
 
+  **The three jobs do different work, and a green tick on a push is NOT a build
+  on TestFlight.** `payload` runs on every push (Linux, seconds): does the
+  offline bundle still build, is it still free of remote references. `compile`
+  runs only on a push that touches `ios/` — it type-checks the Swift shell
+  unsigned, with no secrets, so it cannot sign, upload, notify a tester or burn
+  a build number. It exists because the shell is otherwise never compiled until
+  you try to ship: a one-line type error once survived until a release run died
+  90 seconds into the archive. `upload` — archive, sign, send to App Store
+  Connect — is gated to `workflow_dispatch` or an `ios-v*` tag.
+
   Build numbers come from `github.run_number`, so they always increase and never
-  collide. **Don't ship on every change** — a macOS runner is billed at 10× a
-  Linux one and an upload notifies testers; ship when asked. Nothing inside App
-  Store Connect is reachable from here (testers, metadata, review submission are
-  all Jake's).
+  collide. **Don't ship on every change**: a macOS runner is billed at 10× a
+  Linux one and an upload notifies testers, so ship when asked. Nothing inside
+  App Store Connect is reachable from here — testers, metadata and review
+  submission are all Jake's.
 
-  Getting a build onto a device is **two independent switches**, and neither is
-  ours: whether App Store Connect attaches the build to the internal group
-  (the group's Build Distribution setting — ours are uploaded by `xcodebuild`
-  from a runner, not by Xcode, so "Automatic for Xcode Builds" is unproven for
-  them), and whether the device installs it (TestFlight's per-app Automatic
-  Updates toggle). Internal testers need no Beta App Review; they get it as soon
-  as processing finishes.
-
-  **But that capability is per-session, so check it before promising a build.**
-  A later session (2026-09-08) found both doors shut: `actions_run_trigger`
-  returned `403 Resource not accessible by integration` (its GitHub App token
-  had no `actions: write`), and pushing an `ios-v*` tag — the workflow's other
-  release trigger — got `HTTP 403` from the git proxy, four attempts, while
-  branch pushes to `main` from the same session worked fine. So a session can
-  have full push access to `main` and still be unable to ship a build.
-
-  Whether a new build reaches devices with no clicks depends on **Enable
-  automatic distribution** on the internal group; without it each build must be
-  added to the group by hand. Builds expire after 90 days.
-
-  Note the two triggers do different work: a **push to `main` runs only the
-  Linux `payload` job** (does the offline bundle still build, is it still free
-  of remote references — seconds, cheap). The `upload` job that archives, signs
-  and sends to App Store Connect is gated to `workflow_dispatch` or an `ios-v*`
-  tag. A green tick on a push is therefore NOT a build on TestFlight.
+  **Getting a build onto a device is two independent switches, and neither is
+  ours.** First, whether App Store Connect attaches the build to the internal
+  group: the group's Build Distribution setting, whose "Automatic for Xcode
+  Builds" wording is unproven for ours, since they are uploaded by `xcodebuild`
+  from a runner rather than by Xcode. Without automatic distribution each build
+  must be added to the group by hand. Second, whether the device installs it:
+  TestFlight's per-app Automatic Updates toggle. Internal testers need no Beta
+  App Review — they get it as soon as processing finishes. Builds expire after
+  90 days.
 
   Still to do: the on-device checklist in `docs/ios-testflight.md` — project
   survives a force-quit is the one that matters, since `localStorage` is the
