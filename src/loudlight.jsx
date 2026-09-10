@@ -5034,6 +5034,21 @@ export default function LoudLight(){
     );
   })();
 
+  // The bar count on a pattern chip, drawn as a bar-line sandwich — |8| rather
+  // than "8b". It reads as a measure count instead of a unit abbreviation, and
+  // it is the one piece of information on the chip besides the name, so it can
+  // afford to be legible: 10px rather than 8, and less dimmed. Blank at one
+  // bar, since |1| on every chip is noise.
+  const patBarsBadge=(p)=>{
+    const n=patBars(p);
+    if(n<=1)return null;
+    // ASCII pipes on purpose. U+2758 (light vertical bar) is the prettier rule,
+    // but DM Sans arrives from Google Fonts as a latin subset that does not
+    // carry it, so on a device it would be tofu or a mismatched fallback — and
+    // that is exactly the kind of thing you only find on a phone you cannot
+    // attach a debugger to.
+    return <span style={{fontSize:10,opacity:0.75,fontWeight:600,letterSpacing:1}}>{"|"+n+"|"}</span>;
+  };
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
       justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
@@ -5130,7 +5145,7 @@ export default function LoudLight(){
                   opacity:dragging?0.35:1,
                   fontSize:13,fontWeight:700,lineHeight:1}}>
                 {p.name}
-                <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+                {patBarsBadge(p)}
               </div>
             );
           })}
@@ -5547,15 +5562,26 @@ export default function LoudLight(){
   // from barStrip because the drawer repeats the chips on their own: the sheet
   // covers the strip above the grid, and DUP BAR / DEL BAR act on the VISIBLE
   // bar, so you must be able to see and change it from inside the drawer.
+  // Tapping the bar you are ALREADY on opens STEP — the step lanes for that bar.
+  // The STEP button is gone; this gesture IS the button now. It means whatever
+  // STEP meant on this surface: the step sheet on mobile, the step page on
+  // desktop (toggling back, since that page repeats the bar strip). Drums have
+  // no step lanes, so STEP has always routed them to the bar sheet — which on
+  // desktop is the bar-ops menu. The bar's OWN ops keep the hold, as before.
+  const _openStepFor=(bar,x,y)=>{
+    if(IS_MOBILE){ const k=activeLayer==="drums"?"bars":"pattern";
+      setActiveSheet(sh=>sh===k?null:k); return; }
+    if(activeLayer==="drums"){ _openBarOps(bar,x,y); return; }
+    setPage(pg=>pg==="step"?"edit":"step");
+  };
   const barChips=(
       <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
              const bar=_barAt(e.clientX,e.currentTarget),x=e.clientX,y=e.clientY;
-             // Tapping the bar you are ALREADY on is the same second function
-             // as holding it — there is nothing for a re-select to do, so the
-             // gesture is free. Recorded before _scrubTo, which is what makes
+             // Tapping the bar you are ALREADY on opens STEP (see
+             // _openStepFor). Recorded before _scrubTo, which is what makes
              // the bar current.
              barHoldR.current.wasCur=(bar===curBar);
              barHoldR.current.moved=false;
@@ -5571,15 +5597,21 @@ export default function LoudLight(){
              barHoldR.current.moved=true;_barHoldEnd();_scrubTo(e.clientX,e.currentTarget);}}
            onPointerUp={e=>{
              _barHoldEnd();
+             // A right-click's own pointerup must not ALSO fire the tap-again:
+             // contextmenu has already opened the bar menu, and STEP would land
+             // on top of it. (Harmless while both gestures opened the same
+             // menu; a real bug the moment they stopped.)
+             if(e.button===2){barHoldR.current.wasCur=false;return;}
              // Not after a hold (it already opened it) and not after a scrub,
              // where the release lands on a bar you were dragging to rather
              // than one you deliberately tapped twice.
              if(!barHoldR.current.held&&!barHoldR.current.moved&&barHoldR.current.wasCur)
-               _openBarOps(_barAt(e.clientX,e.currentTarget),e.clientX,e.clientY);
+               _openStepFor(_barAt(e.clientX,e.currentTarget),e.clientX,e.clientY);
              barHoldR.current.wasCur=false;
            }}
            onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;barHoldR.current.wasCur=false;}}
            onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barHoldEnd();
+             barHoldR.current.held=true;barHoldR.current.wasCur=false;
              const bar=_barAt(e.clientX,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
         {Array.from({length:barCount},(_,bi)=>{
           const isCur=bi===curBar, isPlaying=bi===playingBar;
@@ -5725,7 +5757,7 @@ export default function LoudLight(){
             background:sel?col+"22":"transparent",
             color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
           {p.name}
-          <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+          {patBarsBadge(p)}
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
@@ -5751,7 +5783,7 @@ export default function LoudLight(){
             background:sel?col+"22":"transparent",
             color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
           {p.name}
-          <span style={{fontSize:8,opacity:0.6,fontWeight:600}}>{patBars(p)>1?patBars(p)+"b":""}</span>
+          {patBarsBadge(p)}
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
@@ -9487,7 +9519,7 @@ export default function LoudLight(){
                   // VARY visual feedback (synth/lead): the live varied grid for the
                   // active pattern while vary is on + playing. Drives the gold/dim
                   // overlay below; re-renders each step via `step`.
-                  const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
+                  const vSGrid=(activeVary&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
@@ -9570,7 +9602,11 @@ export default function LoudLight(){
               // VARY visual feedback: while vary.drums is on AND playing, read the
               // live varied grid so the editor animates the variation (gold ring on
               // added hits, dim on dropped). Re-renders each step via drumStep.
-              const dVaryShow=varyMode.drums&&playing;
+              // VARY_ON gates the overlay as well as the scheduler. Without it a project
+                  // saved while VARY was on still painted ghost rings on the grid while
+                  // the audio did NOT vary — a ring saying "this note is being added"
+                  // when it wasn't, and no control anywhere to switch it off.
+                  const dVaryShow=VARY_ON&&varyMode.drums&&playing;
               const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
               return(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
@@ -10104,7 +10140,8 @@ export default function LoudLight(){
           {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {[["edit","EDIT"],...(activeLayer==="drums"?[]:[["step","STEP"]]),["sound","SOUND"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
+            {/* No STEP tab: tapping the bar you are already on opens it. */}
+            {[["edit","EDIT"],["sound","SOUND"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
               <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
@@ -10155,8 +10192,8 @@ export default function LoudLight(){
               {patternChipsRail}
               {/* per-layer function pills — STEP / SOUND / VARY */}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
-              {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
-                <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
+              {[["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
+                <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
                   style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
                     border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
                     background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
@@ -10216,8 +10253,8 @@ export default function LoudLight(){
                reached only by tapping the already-active layer/pattern.) */}
           {!isLandscape&&(
           <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
-            {[["step","STEP",activeSheet==="pattern"||activeSheet==="bars"],["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
-              <button key={key} onClick={()=>{ if(key==="step"){const k=activeLayer==="drums"?"bars":"pattern";setActiveSheet(s=>s===k?null:k);} else setActiveSheet(s=>s===key?null:key); }}
+            {[["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
+              <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
                 style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
                   border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
                   background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
@@ -10253,7 +10290,7 @@ export default function LoudLight(){
                     {lenEdgeSynth}
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%curShape.span===0;const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
-                      const vSGrid=(varyMode[activeLayer]&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
+                      const vSGrid=(activeVary&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                       return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
@@ -10290,7 +10327,11 @@ export default function LoudLight(){
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
-                  const dVaryShow=varyMode.drums&&playing;
+                  // VARY_ON gates the overlay as well as the scheduler. Without it a project
+                  // saved while VARY was on still painted ghost rings on the grid while
+                  // the audio did NOT vary — a ring saying "this note is being added"
+                  // when it wasn't, and no control anywhere to switch it off.
+                  const dVaryShow=VARY_ON&&varyMode.drums&&playing;
                   const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
                   const GAP=2;
                   // Drum grid is now oriented to match the synth grid: voices
