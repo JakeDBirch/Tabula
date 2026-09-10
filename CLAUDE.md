@@ -243,27 +243,41 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### Controls & interaction conventions
 
-- **The TEMPO chip is a scrubber, not a door.** Drag it vertically to change
-  BPM / ST / SWG, double-tap to reset that field, **hold (or right-click) to
-  open the drawer**. It shows and edits whichever of the three you last touched
-  — in the drawer *or* the desktop sidebar, since all six scrubbers record the
-  field — so the global you are working on is under your thumb rather than two
-  taps behind a sheet. `TEMPO_FIELDS` is one table both the chip and those
-  widgets read, so ranges, ballistic gains and double-tap defaults cannot
-  drift.
-  - The drawer **had** to move to the hold: a tap that opened it would fire on
-    every drag that didn't clear the 3px deadzone. So a plain tap now does
-    **nothing at all** — deliberately. It must not re-point the chip at another
-    field either: this is a performance control, and silently changing what the
-    next drag moves is the kind of surprise you only find mid-take.
-  - The sheet is therefore dismissed by its **backdrop**, which is the only way
-    out now that the chip's tap is inert. And because the hold opens it with
-    the finger still down, the hold stamps `sheetGuardR` exactly like the bar
-    strip's `+` — without it the press's own trailing click closes the sheet on
-    release. It happened to survive without the stamp only because the chip
-    holds pointer capture, which is not a thing to rely on.
+- **The TEMPO chip: tap opens the drawer, hold edits it in place.** It shows
+  whichever of BPM / ST / SWG you last touched — in the drawer *or* the desktop
+  sidebar, since all six scrubbers record the field — so the global you are
+  working on is the one under your thumb. **Tap** opens the TEMPO drawer (and
+  taps again to close it). **Hold** turns the chip into a scrubber: a readout
+  pops up **above** the chip and a vertical drag moves the value live. It pops
+  up above because your finger is on the chip, which makes the chip the one
+  place the number cannot be. `TEMPO_FIELDS` is one table both the chip and
+  those widgets read, so ranges, ballistic gearing and defaults cannot drift.
+  - **The hold is what makes the two gestures separable.** Drag-on-tap and
+    open-on-tap cannot coexist on one control: every drag that failed to clear
+    the deadzone would also open the sheet. Requiring the hold first makes a
+    tap unambiguously a tap. It was built the other way round first — drag on
+    press, drawer on hold — and that cost the tap entirely, since a tap then
+    had nothing safe to do.
+  - **Right-click pops the readout up STICKY**, because a right-click cannot be
+    dragged. It then tracks the bare pointer (a window `pointermove`, since no
+    button is down) until a click or ESC. That is the honest desktop reading of
+    "hold = right-click" for a gesture that is a drag rather than a menu.
+  - The hold-drag **swallows its trailing click**, or every edit would end with
+    the drawer opening on top of it — the same trap every hold in here has.
+    Movement before the hold lands (>10px) drops the whole gesture rather than
+    opening the drawer off a smeared tap.
+  - The chip has **no double-tap reset**: the first tap now opens the drawer,
+    so the second lands on its backdrop. The drawer's own scrubbers keep
+    theirs, one tap away.
   - `tempoField` is a **state, not a choice**, so it is deliberately not
     persisted: every launch starts on BPM.
+- **`ballisticNudge` uses the SLIDERS' speed curve.** The trackless scrubbers
+  (bpm / transpose / swing, and the chip) floored their slow end at `0.5×` the
+  gearing while `ballisticDelta` floors at `DRAG_SLOW` = 0.10 — so a slow crawl
+  on the tempo readout was five times coarser than the same crawl on a knob,
+  and it skipped numbers you could not then land on. Both now share the
+  `DRAG_SLOW → cap` shape; only the cap differs (`NUDGE_FAST`, since a
+  trackless scrubber has no pixel length to scale against).
 - **Tapping something that is ALREADY selected does its second function** —
   the same thing its hold does. There is nothing for a re-select to do, so the
   gesture is free, and it is the cheap one to reach for mid-take: tap the bar

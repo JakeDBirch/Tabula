@@ -1547,12 +1547,15 @@ const ballisticDelta=(pixelDelta,dim,range)=>{
 };
 // Velocity-aware nudge for *trackless* scrubbers (bpm / transpose / swing) — a
 // number readout you drag vertically with no on-screen extent to scale against.
-// `base` is the units-per-pixel gearing at medium speed; slow drags get ~0.5×
-// that (finer), fast flicks ~2.5× (coarser). Same ballistic spirit as the
-// sliders, geared to each scrubber's own range instead of a pixel length.
+// `base` is the units-per-pixel gearing at 1:1; the speed curve is deliberately
+// the SLIDERS' curve (`ballisticDelta`), floored at DRAG_SLOW rather than the
+// 0.5 it used to use. That old floor made a slow drag five times coarser than
+// the same slow drag on a knob, which is the whole reason a crawl on the tempo
+// readout skipped numbers — you could not land on one. Slow now means slow.
+const NUDGE_FAST = 2.5;    // the cap a flick reaches (cf. DRAG_MAXCAP)
 const ballisticNudge=(pixelDelta,base)=>{
   const speed=Math.min(1,Math.abs(pixelDelta)/DRAG_FASTPX);
-  return pixelDelta*base*(0.5+2.0*speed);
+  return pixelDelta*base*(DRAG_SLOW+(NUDGE_FAST-DRAG_SLOW)*speed);
 };
 // Double-tap / double-click → reset to default. The dblclick DOM event is
 // unreliable on touch (controls capture the pointer + touch-action:none), so we
@@ -3227,6 +3230,8 @@ export default function LoudLight(){
   // drawer. A state, not a choice, so it is deliberately NOT persisted: every
   // launch starts on BPM, which is the one you want nine times in ten.
   const [tempoField, setTempoField] = useState("bpm"); // "bpm" | "st" | "swing"
+  // The hold-to-edit readout that floats over the TEMPO chip: {cx,top,bottom,sticky}.
+  const [tempoPop, setTempoPop] = useState(null);
 
   // Drum step editing state
   const drumStepR=useRef(-1);
@@ -3798,6 +3803,7 @@ export default function LoudLight(){
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
+  const tempoPopAtR=useRef(0);
   const tempoFieldR=useRef("bpm");
   useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
   const loopR=useRef(false),activeIdR=useRef(activeId);
@@ -8603,16 +8609,22 @@ export default function LoudLight(){
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
-  // ── The TEMPO chip is a scrubber, not a door ─────────────────────────────
-  // It shows and edits whichever of the three globals you last touched, so the
-  // one you are actually working on is under your thumb instead of two taps
-  // away behind a sheet. The drawer moved onto the HOLD, per the house rule —
-  // and it has to, because a tap that opened the sheet would fire on every
-  // drag that didn't quite clear the deadzone.
+  // ── The TEMPO chip: tap opens the drawer, HOLD edits it in place ─────────
+  // It shows whichever of the three globals you last touched, so the one you
+  // are actually working on is the one under your thumb. Tap is the common
+  // action and opens the drawer, per the house rule; the hold is the rarer,
+  // more deliberate one and turns the chip into a scrubber — a readout pops up
+  // ABOVE the chip (your finger is on the chip, so the chip itself is the one
+  // place the number cannot be) and a vertical drag moves it live.
+  //
+  // The hold is what makes the two gestures separable at all. Drag-on-tap and
+  // open-on-tap cannot coexist on one control: every drag that failed to clear
+  // the deadzone would also open the sheet. Requiring the hold first means a
+  // tap is unambiguously a tap, and the drawer gets it back.
   //
   // One table, so the chip and the drawer's own three scrubbers cannot drift:
-  // same ranges, same ballistic gains, same double-tap resets as the drawer
-  // widgets these were lifted from.
+  // same ranges, same ballistic gearing, same defaults as the drawer widgets
+  // these were lifted from.
   const TEMPO_FIELDS=[
     {key:"bpm",  unit:"BPM", min:40,  max:300, gain:0.5, reset:120,
      get:()=>bpmR.current,    set:(v)=>setBpm(Math.round(v)),
@@ -8627,53 +8639,112 @@ export default function LoudLight(){
   const tempoFldOf=(k)=>TEMPO_FIELDS.find(f=>f.key===k)||TEMPO_FIELDS[0];
   const tempoFld=tempoFldOf(tempoField);
   const tempoVal=tempoField==="bpm"?bpm:tempoField==="st"?transpose:swing;
-  const tempoChipR=useRef({tmr:0,held:false,drag:false,on:false,startY:0,lastY:0,val:0});
+  const tempoChipR=useRef({tmr:0,held:false,on:false,moved:false,swallow:false,startY:0,lastY:0,val:0});
   const _tempoHoldEnd=()=>{const t=tempoChipR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
+  const _tempoPopAt=(el,sticky)=>{
+    const r=el.getBoundingClientRect();
+    tempoPopAtR.current=Date.now();
+    setTempoPop({cx:r.left+r.width/2,top:r.top,bottom:r.bottom,sticky:!!sticky});
+  };
   const tempoChipProps={
     onPointerDown:(e)=>{
-      e.preventDefault();e.stopPropagation();
+      if(e.button===2)return;                 // right-click is handled by onContextMenu
+      e.stopPropagation();
       const t=tempoChipR.current, f=tempoFldOf(tempoFieldR.current);
-      t.held=false;t.drag=false;_tempoHoldEnd();
-      // Same double-tap-to-default the drawer widgets have.
-      if(isDoubleTap(e,"tempochip")){f.set(f.reset);t.on=false;return;}
+      t.held=false;t.moved=false;t.swallow=false;_tempoHoldEnd();
       t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();
-      try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
-      t.tmr=setTimeout(()=>{
-        t.tmr=0;t.held=true;t.on=false;
-        // The sheet opens with the finger still down and its backdrop mounts
-        // underneath, so stamp the guard the backdrop checks — otherwise this
-        // press's own trailing click dismisses it on release. It survives
-        // today only because the chip holds pointer capture, which is not a
-        // thing to rely on.
-        sheetGuardR.current=Date.now();
-        setActiveSheet("tempo");
-      },450);
+      const el=e.currentTarget;
+      // Capture BEFORE the hold fires, so the drag that follows keeps landing
+      // here once the finger has wandered off a 42px chip.
+      try{el.setPointerCapture(e.pointerId);}catch(_){}
+      t.tmr=setTimeout(()=>{ t.tmr=0;t.held=true;t.lastY=t.startY;
+        t.val=tempoFldOf(tempoFieldR.current).get(); _tempoPopAt(el,false); },450);
     },
     onPointerMove:(e)=>{
       const t=tempoChipR.current;
       if(!t.on)return;
-      e.preventDefault();e.stopPropagation();
-      // 3px of deadzone before this becomes a drag, so the hold survives the
-      // wobble of a finger resting on a 42px chip.
-      if(!t.drag){
-        if(Math.abs(e.clientY-t.startY)<3)return;
-        t.drag=true;_tempoHoldEnd();
+      if(!t.held){
+        // Movement before the hold lands is a slip, not a scrub: drop the
+        // whole gesture rather than opening the drawer off a smeared tap.
+        if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();}
+        return;
       }
+      e.preventDefault();e.stopPropagation();
       const f=tempoFldOf(tempoFieldR.current);
       const dy=e.clientY-t.lastY; t.lastY=e.clientY;
       t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));
       f.set(t.val);
     },
-    onPointerUp:()=>{const t=tempoChipR.current;_tempoHoldEnd();t.on=false;t.drag=false;},
-    onPointerCancel:()=>{const t=tempoChipR.current;_tempoHoldEnd();t.on=false;t.drag=false;t.held=false;},
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_tempoHoldEnd();
-      tempoChipR.current.on=false;tempoChipR.current.held=true;setActiveSheet("tempo");},
-    // A plain tap deliberately does NOTHING. It cannot open the sheet (see
-    // above) and it must not change which field is live: the chip is a
-    // performance control, and silently re-pointing it at a different global
-    // would mean the next drag moved something you didn't mean to touch.
-    onClick:(e)=>{e.stopPropagation();tempoChipR.current.held=false;},
+    onPointerUp:()=>{
+      const t=tempoChipR.current;_tempoHoldEnd();
+      // A hold-drag must swallow its own trailing click, or every edit would be
+      // followed by the drawer opening on top of it.
+      if(t.held||t.moved)t.swallow=true;
+      if(t.held)setTempoPop(null);
+      t.on=false;t.held=false;
+    },
+    onPointerCancel:()=>{const t=tempoChipR.current;_tempoHoldEnd();
+      if(t.held)setTempoPop(null);
+      t.on=false;t.held=false;t.swallow=true;},
+    onContextMenu:(e)=>{
+      // Desktop's hold. A right-click can't be dragged, so the readout comes up
+      // STICKY instead: it tracks the bare pointer until a click or ESC.
+      e.preventDefault();e.stopPropagation();_tempoHoldEnd();
+      const t=tempoChipR.current;t.on=false;t.held=false;t.swallow=true;
+      _tempoPopAt(e.currentTarget,true);
+    },
+    onClick:(e)=>{
+      e.stopPropagation();
+      const t=tempoChipR.current;
+      if(t.swallow){t.swallow=false;return;}
+      setActiveSheet(sh=>sh==="tempo"?null:"tempo");
+    },
   };
+  // Sticky (right-click) scrubbing: the pointer has no button down, so the move
+  // has to be read off the window rather than the chip.
+  useEffect(()=>{
+    if(!tempoPop||!tempoPop.sticky)return;
+    const st={y:null,val:tempoFldOf(tempoFieldR.current).get()};
+    const mv=(e)=>{
+      const f=tempoFldOf(tempoFieldR.current);
+      if(st.y===null){st.y=e.clientY;return;}
+      const dy=e.clientY-st.y; st.y=e.clientY;
+      st.val=Math.max(f.min,Math.min(f.max,st.val-ballisticNudge(dy,f.gain)));
+      f.set(st.val);
+    };
+    const kd=(e)=>{if(e.key==="Escape")setTempoPop(null);};
+    window.addEventListener("pointermove",mv);
+    window.addEventListener("keydown",kd);
+    return ()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("keydown",kd);};
+  },[tempoPop]);
+
+  // The hold-to-edit readout. It sits ABOVE the chip (below only if there is no
+  // room), because the chip is exactly where the finger is. Pointer-transparent
+  // in hold mode — the chip owns the pointer for the length of the drag — and
+  // a click-catcher in sticky mode, where nothing else would dismiss it.
+  const tempoPopup=!tempoPop?null:(()=>{
+    const W=140,H=86,vw=window.innerWidth,vh=window.innerHeight;
+    const left=Math.max(8,Math.min(vw-W-8,tempoPop.cx-W/2));
+    const up=tempoPop.top-H-14;
+    const top=up>=8?up:Math.max(8,Math.min(vh-H-8,tempoPop.bottom+14));
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:600,
+          pointerEvents:tempoPop.sticky?"all":"none"}}
+        onPointerDown={tempoPop.sticky?()=>{if(Date.now()-tempoPopAtR.current>400)setTempoPop(null);}:undefined}>
+        <div style={{position:"absolute",left,top,width:W,height:H,
+          display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:14,border:"1px solid rgba(168,190,212,0.2)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)"}}>
+          <span style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.45)"}}>{tempoFld.unit}</span>
+          <span style={{fontSize:34,fontWeight:700,lineHeight:1,
+            color:"#ffc46a",textShadow:"0 0 18px rgba(255,196,106,0.45)"}}>{tempoFld.show(tempoVal)}</span>
+          <span style={{fontSize:7,letterSpacing:1.6,color:"rgba(178,199,219,0.3)"}}>
+            {tempoPop.sticky?"MOVE · CLICK TO CLOSE":"DRAG"}</span>
+        </div>
+      </div>
+    );
+  })();
 
   // Per-pattern speed: the SPEED selector reads/writes the active pat's
   // speedMult so each pattern can have its own playback rate. Falls back to
@@ -9140,6 +9211,7 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
+      {tempoPopup}
 
       {/* Chain drag ghost */}
 
@@ -10301,8 +10373,8 @@ export default function LoudLight(){
                  each more width and lets the labels be legible.) */}
             <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"ns-resize",fontFamily:"inherit",padding:0,touchAction:"none"}}
-                aria-label={"Tempo controls — drag to change "+tempoFld.unit+", hold to open"}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+                aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
                 data-tempochip={tempoField} {...tempoChipProps}>
                 <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
@@ -10360,8 +10432,8 @@ export default function LoudLight(){
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"ns-resize",fontFamily:"inherit",padding:0,touchAction:"none"}}
-                  aria-label={"Tempo controls — drag to change "+tempoFld.unit+", hold to open"}
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+                  aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
                   data-tempochip={tempoField} {...tempoChipProps}>
                   <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{tempoFld.show(tempoVal)}</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>{tempoFld.unit}</span>
