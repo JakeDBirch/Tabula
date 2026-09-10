@@ -4831,6 +4831,10 @@ export default function LoudLight(){
       // re-select what the hold already selected) but kept for the same reason
       // everywhere else: the idiom should behave identically wherever it is.
       if(patChipR.current.held){patChipR.current.held=false;return;}
+      // Tapping the chip you are already on has nothing to select, so it does
+      // the same thing the hold does. Read the ref, not the render's value —
+      // this fires long after the render that built the handler.
+      if(activePatternIdR.current===id){_openPatOpsFor(id,e.clientX,e.clientY);return;}
       setActivePatId(id);
     },
   });
@@ -4848,7 +4852,7 @@ export default function LoudLight(){
   // the existing bar-scoped implementations — which all act on the visible bar
   // — need no changes and you can see what you are about to change.
   const barMenuAtR=useRef(0);
-  const barHoldR=useRef({tmr:0,held:false});
+  const barHoldR=useRef({tmr:0,held:false,wasCur:false,moved:false});
   // Component-level, not a per-render object: the hold spans a pointerdown and
   // a pointerup with a state update (and therefore a re-render) in between.
   const spdHoldR=useRef({tmr:0,held:false});
@@ -5081,7 +5085,13 @@ export default function LoudLight(){
                     endHold();
                     // The hold already opened this chip's menu and selected it.
                     if(held){ held=false; return; }
-                    if(!moved){ setActivePatId(p.id); return; }   // a tap just selects
+                    if(!moved){
+                      // A tap selects; a tap on the one already selected opens
+                      // its menu, the same as a hold.
+                      if(activePatternIdR.current===p.id)_openPatOpsFor(p.id,ev.clientX,ev.clientY);
+                      else setActivePatId(p.id);
+                      return;
+                    }
                     const t=hit(ev);
                     if(t){
                       // On a slot: fill it, replacing whatever was there. On a
@@ -5533,18 +5543,33 @@ export default function LoudLight(){
            onPointerDown={e=>{
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
+             const bar=_barAt(e.clientX,e.currentTarget),x=e.clientX,y=e.clientY;
+             // Tapping the bar you are ALREADY on is the same second function
+             // as holding it — there is nothing for a re-select to do, so the
+             // gesture is free. Recorded before _scrubTo, which is what makes
+             // the bar current.
+             barHoldR.current.wasCur=(bar===curBar);
+             barHoldR.current.moved=false;
              _scrubTo(e.clientX,e.currentTarget);
              // Hold a chip for that bar's own ops. The tap has already selected
              // it, so the menu acts on what you are looking at.
              barHoldR.current.held=false;_barHoldEnd();
-             const bar=_barAt(e.clientX,e.currentTarget),x=e.clientX,y=e.clientY;
              barHoldR.current.tmr=setTimeout(()=>{
                barHoldR.current.tmr=0;barHoldR.current.held=true;_openBarOps(bar,x,y);
              },450);
            }}
-           onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();_barHoldEnd();_scrubTo(e.clientX,e.currentTarget);}}
-           onPointerUp={()=>{_barHoldEnd();}}
-           onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;}}
+           onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();
+             barHoldR.current.moved=true;_barHoldEnd();_scrubTo(e.clientX,e.currentTarget);}}
+           onPointerUp={e=>{
+             _barHoldEnd();
+             // Not after a hold (it already opened it) and not after a scrub,
+             // where the release lands on a bar you were dragging to rather
+             // than one you deliberately tapped twice.
+             if(!barHoldR.current.held&&!barHoldR.current.moved&&barHoldR.current.wasCur)
+               _openBarOps(_barAt(e.clientX,e.currentTarget),e.clientX,e.clientY);
+             barHoldR.current.wasCur=false;
+           }}
+           onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;barHoldR.current.wasCur=false;}}
            onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barHoldEnd();
              const bar=_barAt(e.clientX,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
         {Array.from({length:barCount},(_,bi)=>{

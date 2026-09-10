@@ -243,6 +243,17 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### Controls & interaction conventions
 
+- **Tapping something that is ALREADY selected does its second function** —
+  the same thing its hold does. There is nothing for a re-select to do, so the
+  gesture is free, and it is the cheap one to reach for mid-take: tap the bar
+  you are on for that bar's ops, tap the pattern chip you are on for that
+  pattern's. (The layer buttons already worked this way — tapping the active
+  layer opens its SOUND page.) Two conditions, both load-bearing: it must not
+  fire **after a hold**, which already opened the menu, and on the bar strip it
+  must not fire **after a scrub**, where the release lands on a bar you dragged
+  to rather than one you deliberately tapped twice. `barHoldR` therefore
+  carries `wasCur` and `moved` alongside the hold timer, and `wasCur` is
+  recorded *before* `_scrubTo` makes the bar current.
 - **Tap is the common action; press-and-hold (or right-click) is the rarer,
   more deliberate one.** This is a deliberate house pattern now, not a one-off:
   the bar strip's `+` (tap adds a bar, hold opens the bar drawer), the scale
