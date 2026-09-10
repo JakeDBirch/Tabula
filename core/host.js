@@ -124,6 +124,43 @@ class LLProcessor extends AudioWorkletProcessor{
 registerProcessor("loudlight-core",LLProcessor);
 `;
 
+  // The offline renderer. It runs the worklet processor's own message code
+  // (shimmed: the port, sampleRate, currentFrame) so the bounce can never
+  // drift from what the live core does with the same messages.
+  const WORKER_SRC=`
+self.onmessage=(e)=>{
+  const m=e.data; if(m.t!=="render")return;
+  try{
+    self.sampleRate=m.sr; self.currentFrame=0;
+    let Cls=null; self.registerProcessor=(n,c)=>{Cls=c;};
+    self.AudioWorkletProcessor=class{constructor(){this.port={postMessage:()=>{},onmessage:null};}};
+    (0,eval)(m.src);
+    const P=new Cls();
+    P.onmsg({t:"init",bytes:m.bytes});
+    for(const x of m.msgs)P.onmsg(x);
+    const w=P.w, sr=m.sr;
+    w.ll_play();
+    const outL=w.ll_out(0)>>2, outR=w.ll_out(1)>>2;
+    const maxFrames=Math.ceil(m.maxSec*sr), CH=128*256;
+    const Ls=[],Rs=[]; let cl=new Float32Array(CH), cr=new Float32Array(CH), ci=0, frames=0, tail=-1, nextProg=0;
+    let mem=null,f32=null;
+    while(frames<maxFrames){
+      w.ll_render_out(128);
+      if(mem!==w.memory.buffer){mem=w.memory.buffer;f32=new Float32Array(mem);}
+      cl.set(f32.subarray(outL,outL+128),ci); cr.set(f32.subarray(outR,outR+128),ci); ci+=128; frames+=128;
+      if(ci>=CH){Ls.push(cl);Rs.push(cr);cl=new Float32Array(CH);cr=new Float32Array(CH);ci=0;}
+      if(tail<0){ if(!w.ll_playing())tail=Math.ceil(m.tailSec*sr); }
+      else { tail-=128; if(tail<=0)break; }
+      if(frames>=nextProg){ nextProg+=sr>>1; self.postMessage({t:"prog",sec:frames/sr}); }
+    }
+    if(ci>0){Ls.push(cl.subarray(0,ci));Rs.push(cr.subarray(0,ci));}
+    const cat=(a)=>{let n=0;for(const c of a)n+=c.length;const o=new Float32Array(n);let p=0;for(const c of a){o.set(c,p);p+=c.length;}return o;};
+    const L=cat(Ls),R=cat(Rs);
+    self.postMessage({t:"done",L,R},[L.buffer,R.buffer]);
+  }catch(err){ self.postMessage({t:"err",error:String(err&&err.stack||err)}); }
+};
+`;
+
   // ── 3. the host ──────────────────────────────────────────────────────────
   class CoreHost{
     constructor(){
@@ -135,7 +172,66 @@ registerProcessor("loudlight-core",LLProcessor);
       const b64=(typeof window!=="undefined"&&window.__LL_CORE_WASM)||"";
       const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;
     }
-    post(m,transfer){ if(this.node)this.node.port.postMessage(m,transfer||[]); else this.pending.push([m,transfer]); }
+    // Every message also lands in a SHADOW of the core's state, so an offline
+    // render (the MP3 bounce) can start from exactly what the live core holds.
+    post(m,transfer){
+      this.shadow(m);
+      if(this.node)this.node.port.postMessage(m,transfer||[]); else this.pending.push([m,transfer]);
+    }
+    shadow(m){
+      const s=this._sh||(this._sh={p:{},l:[{},{}],d:[],freqs:null,pat:{},song:null});
+      switch(m.t){
+        case "set": s.p[m.id]=m.v; break;
+        case "layer": (s.l[m.l]||(s.l[m.l]={}))[m.id]=m.v; break;
+        case "drum": (s.d[m.d]||(s.d[m.d]={}))[m.id]=m.v; break;
+        case "freqs": s.freqs=Float32Array.from(m.f); break;
+        case "pat": s.pat[m.slot]=m.bytes.slice(); break;
+        case "patclear": delete s.pat[m.slot]; break;
+        case "song": s.song=Int32Array.from(m.ids); break;
+      }
+    }
+    // The shadow as a message list for a fresh core at sample rate `sr`.
+    snapshot(sr){
+      const s=this._sh||{p:{},l:[{},{}],d:[],freqs:null,pat:{},song:null}, out=[];
+      for(const id in s.p)out.push({t:"set",id:+id,v:s.p[id]});
+      s.l.forEach((L,l)=>{for(const id in L)out.push({t:"layer",l,id:+id,v:L[id]});});
+      s.d.forEach((D,d)=>{if(D)for(const id in D)out.push({t:"drum",d,id:+id,v:D[id]});});
+      if(s.freqs)out.push({t:"freqs",f:Float32Array.from(s.freqs)});
+      for(const slot in s.pat)out.push({t:"pat",slot:+slot,bytes:s.pat[slot].slice()});
+      if(s.song)out.push({t:"song",ids:Int32Array.from(s.song)});
+      out.push({t:"samples_clear"});
+      const map=this._samples||{};
+      for(const key of VOICES){
+        const smp=map[key];if(!smp)continue;
+        let kind=0,bufs=[];
+        if(smp.numberOfChannels!=null)bufs=[smp]; else if(smp.rr&&smp.rr.length){kind=1;bufs=smp.rr;} else if(smp.vel&&smp.vel.length){kind=2;bufs=smp.vel;}
+        bufs=bufs.slice(0,8); const d=VOICES.indexOf(key);
+        bufs.forEach((b,slot)=>out.push({t:"sample",d,kind,slot,data:CoreHost.mono(b,sr)}));
+        if(bufs.length)out.push({t:"sample_commit",d,kind,n:bufs.length});
+      }
+      return out;
+    }
+    // Render a bounce OFFLINE, faster than real time, in a Worker: a fresh core
+    // fed the snapshot plus `msgs`, played until it stops itself
+    // (LL_P_STOP_AFTER) and then `tailSec` more for the tails. Resolves
+    // {L,R,sr,frames}. `onProgress(sec)` reports rendered audio seconds.
+    renderOffline({sr,msgs,tailSec,maxSec,onProgress}){
+      return new Promise((resolve,reject)=>{
+        const url=URL.createObjectURL(new Blob([WORKER_SRC],{type:"application/javascript"}));
+        const wk=new Worker(url);
+        const done=()=>{wk.terminate();URL.revokeObjectURL(url);};
+        wk.onerror=(e)=>{done();reject(new Error("bounce worker: "+(e.message||e)));};
+        wk.onmessage=(e)=>{
+          const m=e.data;
+          if(m.t==="prog"){ if(onProgress)onProgress(m.sec); }
+          else if(m.t==="done"){ done(); resolve({L:m.L,R:m.R,sr,frames:m.L.length}); }
+          else if(m.t==="err"){ done(); reject(new Error("bounce: "+m.error)); }
+        };
+        const bytes=CoreHost.wasmBytes();
+        const transfer=[bytes]; for(const m of msgs)if(m.t==="sample")transfer.push(m.data.buffer);
+        wk.postMessage({t:"render",bytes,sr,msgs,tailSec,maxSec,src:WORKLET_SRC},transfer);
+      });
+    }
     async init(){
       if(this.initP)return this.initP;
       this.initP=(async()=>{
@@ -206,6 +302,7 @@ registerProcessor("loudlight-core",LLProcessor);
     // buffer was decoded through a 44.1k OfflineAudioContext before the live
     // context existed.
     pushSamples(map){
+      this._samples=map||{};
       this.post({t:"samples_clear"});
       for(const key of VOICES){
         const s=map&&map[key];if(!s)continue;
@@ -262,6 +359,6 @@ registerProcessor("loudlight-core",LLProcessor);
     setMute(v){this.host.set(P.P.DRUM_AUDIBLE,v);}
     chokeOH(){}
   }
-  return {packPattern,CoreHost,Bell,Drums,VOICES,MOTION,LAYER,WAVE,FILT,WORKLET_SRC,P};
+  return {packPattern,CoreHost,Bell,Drums,VOICES,MOTION,LAYER,WAVE,FILT,WORKLET_SRC,WORKER_SRC,P};
 })();
 if(typeof module!=="undefined")module.exports=LLCore;

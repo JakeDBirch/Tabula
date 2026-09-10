@@ -404,7 +404,7 @@ DEVICE and CLOUD are the same list against different stores, chosen by a segment
 
 **Sharing is gone.** The share LINK, JSON EXPORT and JSON IMPORT were removed once the named library and the cloud covered keeping and moving work — a preset file was a fourth way to do the same job. `encodeState` and `shareFlash` went with them; **`decodeState` stayed**, because the mount still reads a project out of a `#hash` and a link already sent to someone should still open. `getShareState` / `applyShareState` keep their names — they're the serialization pair for autosave, the library and the cloud, and renaming them would touch every persistence site for nothing.
 
-**EXPORT is gone from the menu too — it lives on the transport's HOLD.** MIDI and MP3 render the song *out* of the app into something another tool plays, which is not filing; and the drawer they were in is a **list**, which wants every pixel of height it can get. So they moved onto the control that plays the song, under the deliberate gesture (`playBtnProps`, on all three play-button mounts). The **MP3 pass count is folded into that menu** rather than being a second screen: it is still asked before the bounce starts — a bounce runs in real time, so an accidental 8-pass one costs minutes you can't cancel — but choosing the count *is* starting it, so a bounce is one gesture instead of three. `mp3Arm` and its disarm-on-close effect are gone with the old two-step chooser. The count is still passed to `exportMP3(n)` as an **argument**: the handler that sets `exportLoops` and starts the bounce would read the previous value out of state.
+**EXPORT is gone from the menu too — it lives on the transport's HOLD.** MIDI and MP3 render the song *out* of the app into something another tool plays, which is not filing; and the drawer they were in is a **list**, which wants every pixel of height it can get. So they moved onto the control that plays the song, under the deliberate gesture (`playBtnProps`, on all three play-button mounts). The **MP3 pass count is folded into that menu** rather than being a second screen: it is still asked before the bounce starts — a bounce runs in real time, so an accidental 8-pass one costs minutes you can't cancel — but choosing the count *is* starting it, so a bounce is one gesture instead of three. `mp3Arm` and its disarm-on-close effect are gone with the old two-step chooser. The count is still passed to `exportMP3(n)` as an **argument**: the handler that sets `exportLoops` and starts the bounce would read the previous value out of state. **With the core on, the bounce is offline and faster than real time** (`exportMP3Core`: a Worker renders a fresh core from the live one's snapshot, and the core stops itself at the last cycle top — see `docs/native-audio.md`); the realtime capture path stays for the JS engine and goes with it.
 
 `showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
 
@@ -744,9 +744,9 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   audio core" above and `docs/native-audio.md`.** The core is complete for
   everything the JS engine does (VARY excepted), hosted in an AudioWorklet
   behind `?core=1`, and verified attack-for-attack against the JS scheduler.
-  Waiting on Jake's ear before the default flips. Then, in order: the MP3
-  bounce rendered offline through the core (seconds, not minutes), the iOS
-  AVAudioEngine host (background audio at last), AUv3 / Core MIDI / Link.
+  The MP3 bounce renders offline through it (seconds, not minutes). Waiting on
+  Jake's ear before the default flips. Then, in order: the iOS AVAudioEngine
+  host (background audio at last), AUv3 / Core MIDI / Link.
   The (a)-vs-(b) question is settled by the shape of the work: a C core inside
   AVAudioEngine is (b), and it is also a perfectly good (a).
 - **VARY is parked**, not deleted — `VARY_ON=false` in the source, one line to

@@ -20,9 +20,9 @@ good (a), so nothing here forecloses it; it just doesn't leave the web behind.
 
 **Status (2026-09-10):** the core is complete for everything the JS engine
 does today except VARY (parked in the app anyway), hosted in an AudioWorklet
-behind a flag, and verified against the JS scheduler attack-for-attack. It is
-**off by default** until Jake has judged it by ear. The iOS host is not
-started.
+behind a flag, and verified against the JS scheduler attack-for-attack. The
+MP3 bounce renders offline through it. It is **off by default** until Jake
+has judged it by ear. The iOS host is not started.
 
 ## Why
 
@@ -94,6 +94,9 @@ computed in JS any more.
   every drum hit. The JS used to write these at *schedule* time (up to 100ms
   early); now they arrive at *render* time.
 - **Auditions** (the row keys) are `ll_audition_note` / `ll_audition_drum`.
+- **The host shadows everything it sends** (`CoreHost.shadow`), so
+  `snapshot(sr)` can rebuild the live core's whole state as a message list for
+  a fresh instance. That is what the offline bounce starts from.
 
 The facades (`LLCore.Bell`, `LLCore.Drums`) present the surface of the old
 `Bell` and `DrumEngine` classes — `setRvSize`, `setVoiceMix`, `play` for an
@@ -138,6 +141,25 @@ that are worth knowing:
 The core's frame counter is pinned to the worklet's `currentFrame` on the first
 render, so `ll_frame() / sampleRate` is the AudioContext's time.
 
+## The MP3 bounce
+
+With the core on, the bounce is **offline and faster than real time**
+(`exportMP3Core`). A Worker (`WORKER_SRC` in `core/host.js`) runs the worklet
+processor's own message code against a fresh wasm instance, fed the live
+core's snapshot plus three overrides: song mode on if there is a song, LOOP
+off, and `LL_P_STOP_AFTER` = passes × song entries. The core then **stops
+itself at that cycle top** — not one note of the next pass is scheduled — and
+the worker renders two more seconds for the tails. The realtime bounce could
+never stop cleanly: stopping the JS scheduler left the ~100ms it had already
+queued to play on. No AudioContext, no transport, no ScriptProcessor tap; an
+8-pass bounce of a long song is seconds, and the transport does not have to
+be free. Encoding still happens on the main thread with lamejs, as before.
+
+The pass length shown by the progress bar is the sum of the entries' master
+cycles (`patCycle(p).abs`, the same walk the core does), where the realtime
+bounce estimated `bars × 16` and was wrong for any trimmed or half-time bar.
+The stop itself is the core's, so the file is exactly the passes asked for.
+
 ## Switching it on
 
 `CORE_DEFAULT` in `src/loudlight.jsx` is the default; `?core=1` on the URL
@@ -153,6 +175,9 @@ judged by ear.
     non-silent, under 0dBFS, every attack on the grid, a WAV to listen to.
   - `wasm.mjs` — the same pattern through the JS packer into the wasm, and
     the render compared **sample for sample** against the native one.
+- `_core_bounce.mjs` (local harness) — the offline bounce end to end: ×1 and
+  ×2 of a 2s bar come back as 4s and 6s MP3s (decoded and measured), with
+  music in them, quiet tails, the transport left stopped, in about a second.
 - `node core/test/oracle.mjs` (needs the built app served on :8139 and
   Playwright) — the **equivalence oracle**. The same project, built with the
   app's own constructors, is played by the JS scheduler in the browser with
@@ -195,9 +220,7 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
    until proven otherwise — the list above is the only sanctioned differences.
 2. **Flip `CORE_DEFAULT`.** The JS engines stay in the source until the iOS
    host is done, then go.
-3. **The MP3 bounce renders offline through the core**, faster than real time
-   — the same wasm on the main thread, `ll_render` in a loop. An 8-pass bounce
-   goes from minutes to seconds and no longer needs the transport.
+3. ~~The MP3 bounce offline through the core.~~ Done — see above.
 4. **The iOS host.** `AVAudioSourceNode` whose render block calls `ll_render`;
    the JS bridge posts the same messages over `webkit.messageHandlers` instead
    of the worklet port (`CoreHost` grows a second transport). That is what

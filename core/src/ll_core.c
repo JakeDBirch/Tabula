@@ -56,7 +56,7 @@ static void defaults(void){
   p[LL_P_RV_SIZE]=50; p[LL_P_RV_DAMP]=40; p[LL_P_RV_LFDAMP]=0; p[LL_P_RV_PREDELAY]=0; p[LL_P_RV_MOD]=0; p[LL_P_DLY_TO_REV]=0;
   p[LL_P_DRUM_LEVEL]=85; p[LL_P_DRUM_FXTRIM]=100; p[LL_P_DRUM_AUDIBLE]=1;
   p[LL_P_SONG_MODE]=0; p[LL_P_LOOP]=0; p[LL_P_LOOP_BAR]=0; p[LL_P_LOOP_PAT]=-1; p[LL_P_ACTIVE_PAT]=-1;
-  p[LL_P_MASTER]=0.55f; p[LL_P_MOTION]=0;
+  p[LL_P_MASTER]=0.55f; p[LL_P_MOTION]=0; p[LL_P_STOP_AFTER]=0;
   for(int l=0;l<2;l++){
     float*q=G.lp[l];
     q[LL_L_WAVE]=WV_SAW; q[LL_L_DETUNE]=l?0:8; q[LL_L_ATTACK]=8; q[LL_L_DECAY]=400; q[LL_L_SUSTAIN]=40;
@@ -90,6 +90,7 @@ void ll_init(float sr){
 float ll_sample_rate(void){ return G.sr; }
 int ll_version(void){ return LL_VERSION; }
 double ll_frame(void){ return G.frame; }
+int ll_cycles(void){ return G.cycles; }
 
 /* ── parameters ─────────────────────────────────────────────────────────── */
 void ll_set(int id,float v){

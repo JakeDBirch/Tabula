@@ -56,6 +56,7 @@ enum ll_param {
   LL_P_ACTIVE_PAT,   /* pattern id being edited */
   LL_P_MASTER,       /* master gain, 0.55 default */
   LL_P_MOTION,       /* 0/1 — drum MOTION automation on */
+  LL_P_STOP_AFTER,   /* stop the transport at the top of this many cycles (0 = never) — the bounce */
   LL_P_COUNT
 };
 
@@ -156,6 +157,7 @@ void  ll_play(void);
 void  ll_stop(void);
 int   ll_playing(void);
 double ll_frame(void);
+int   ll_cycles(void);        /* cycle tops passed since ll_play */
 
 /* Auditions — a note or a hit right now, outside the sequencer. `hz` is the
  * frequency to sound (the host applies transpose, as Bell.play's caller did). */

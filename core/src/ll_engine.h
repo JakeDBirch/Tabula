@@ -85,7 +85,7 @@ typedef struct {
   ll_pattern pat[LL_MAX_PATTERNS];
   int32_t song[LL_SONG_MAX]; int songLen;
   /* transport / sequencer */
-  int mstep, mFirst; double mNext;
+  int mstep, mFirst, cycles; double mNext;
   struct { int step; double nextAt; } cur[LL_NLAYERS];
   int songPos, pulse, playPatId;
   float lastFreq[2]; int lastGlide[2];

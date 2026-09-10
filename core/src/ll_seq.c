@@ -138,7 +138,7 @@ static void play_drum_step(ll_pattern*P,int s,double at,double stepDur){
 /* ── the walk ───────────────────────────────────────────────────────────── */
 void seq_start(void){
   double t0=G.frame;
-  G.mstep=0; G.mNext=t0; G.mFirst=1;
+  G.mstep=0; G.mNext=t0; G.mFirst=1; G.cycles=0;
   for(int l=0;l<LL_NLAYERS;l++){ G.cur[l].step=0; G.cur[l].nextAt=t0; }
   G.songPos=0; G.pulse=-1; G.playPatId=-1;
   G.lastFreq[0]=G.lastFreq[1]=0.f; G.lastGlide[0]=G.lastGlide[1]=0;
@@ -174,6 +174,12 @@ static void part_tick(ctx_t*c,int layer){
 static void master_tick(ctx_t*c){
   int st=G.mstep; double t=G.mNext;
   if(st==0&&!G.mFirst){
+    /* The bounce stops the transport HERE, at a cycle top: no note of the
+     * next cycle is scheduled, and the tails ring out under the host's tail
+     * seconds. Exactly where the realtime bounce could never stop. */
+    G.cycles++;
+    int stopAfter=(int)G.p[LL_P_STOP_AFTER];
+    if(stopAfter>0&&G.cycles>=stopAfter){ G.play=0; ev_push(LL_EV_STOPPED,G.cycles,0,t); return; }
     if(c->inSong&&!c->inLoop&&G.songLen>1){ G.songPos=(G.songPos+1)%G.songLen; ev_push(LL_EV_SONGPOS,G.songPos,0,t); }
     for(int l=0;l<LL_NLAYERS;l++){ G.cur[l].step=0; G.cur[l].nextAt=t; }
   }
@@ -188,6 +194,7 @@ static void master_tick(ctx_t*c){
 void seq_run(double bEnd){
   if(!G.play)return;
   for(int guard=0;guard<100000;guard++){
+    if(!G.play)return;
     ctx_t c;
     if(!build_ctx(&c)){ G.mNext=bEnd; for(int l=0;l<LL_NLAYERS;l++)G.cur[l].nextAt=bEnd; return; }
     double te=G.mNext; int which=-1;

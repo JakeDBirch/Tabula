@@ -11,6 +11,7 @@ sp=sys.argv[1]
 s=open('index.html').read()
 s=s.replace('https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js','vendor/react.production.min.js')
 s=s.replace('https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js','vendor/react-dom.production.min.js')
+s=s.replace('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js','vendor/lame.min.js')
 open(sp+'/serve/index.html','w').write(s)
 PY
 curl -s -o /dev/null http://localhost:8139/index.html 2>/dev/null || (cd "$SP/serve" && python3 -m http.server 8139 >/dev/null 2>&1 & sleep 1)

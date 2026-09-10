@@ -6421,8 +6421,57 @@ export default function LoudLight(){
   // `loops` is passed in, not read from state: the chooser sets exportLoops and
   // starts the bounce in the same handler, and the state update isn't visible to
   // this closure until the next render.
+  // Hand a finished bounce over: the share sheet on a phone, a download
+  // elsewhere. One place for both bounce paths.
+  const _deliverMP3=(blob)=>{
+    window.__LL_LAST_EXPORT=blob;   // read by the harness; one reference, harmless
+    const file=new File([blob],"loudlight-song.mp3",{type:"audio/mpeg"});
+    if(IS_MOBILE&&navigator.canShare&&navigator.canShare({files:[file]})){
+      setShareFile(file);showFlash("READY — TAP SHARE");
+    }else{
+      downloadBlob(blob,"loudlight-song.mp3","audio/mpeg");showFlash("MP3 EXPORTED");
+    }
+  };
+  // ── The bounce through the core: OFFLINE, faster than real time ──────────
+  // A fresh core in a Worker gets the live core's snapshot (every parameter,
+  // pattern and sample it holds — the host shadows them), song mode forced on
+  // and LOOP off as the realtime bounce did, and LL_P_STOP_AFTER set to the
+  // number of cycles `loops` passes take. The core stops ITSELF at that cycle
+  // top — no note of the next pass, which the realtime bounce could never
+  // manage (it stopped the scheduler and the ~100ms it had already queued
+  // played on) — and the worker renders `tailSec` more for the tails. No
+  // transport, no AudioContext, no waiting: an 8-pass bounce is seconds.
+  const exportMP3Core=async(loopsArg)=>{
+    exportingR.current=true;setExporting(true);setExportPhase("Preparing");
+    try{
+      if(playingR.current)await startStop();
+      const lame=await loadLame();
+      if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
+      const loops=Math.max(1,Math.min(16,loopsArg||exportLoops||1));
+      const P=LLCore.P.P;
+      const sr=coreHost.sr||44100;
+      const haveSong=songSeq.length>0;
+      const entries=haveSong?songSeq:[activePatternId];
+      // The pass length is the sum of the entries' MASTER cycles — the same
+      // patCycle the core walks — so the progress bar and the stop agree.
+      const absStepSec=60/Math.max(1,bpm)/4;
+      const cycleSec=entries.reduce((s,id)=>{const p2=patterns.find(x=>x.id===id);return s+(p2?patCycle(p2).abs:COLS)*absStepSec;},0);
+      const tailSec=2, totalSec=cycleSec*loops;
+      const msgs=coreHost.snapshot(sr);
+      msgs.push({t:"set",id:P.SONG_MODE,v:haveSong?1:0},{t:"set",id:P.LOOP,v:0},{t:"set",id:P.STOP_AFTER,v:loops*entries.length});
+      showFlash("BOUNCING…");setExportPhase("Bouncing");
+      const {L,R}=await coreHost.renderOffline({sr,msgs,tailSec,maxSec:totalSec+tailSec+4,
+        onProgress:(sec)=>{if(exportBarR.current)exportBarR.current.style.width=Math.min(99.9,sec/(totalSec+tailSec)*100)+"%";}});
+      if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
+      showFlash("ENCODING…");setExportPhase("Encoding");if(exportBarR.current)exportBarR.current.style.width="100%";
+      await new Promise(r=>setTimeout(r,40));
+      _deliverMP3(encodeMP3(lame,L,R,sr));
+    }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
+    finally{setExportPhase("");exportingR.current=false;setExporting(false);}
+  };
   const exportMP3=async(loopsArg)=>{
     if(exportingR.current)return;
+    if(CORE_ON)return exportMP3Core(loopsArg);
     exportingR.current=true;setExporting(true);setExportPhase("Preparing");
     let cap=null,sink=null,master=null,restore=null,progTmr=null;
     try{
@@ -6511,16 +6560,9 @@ export default function LoudLight(){
       if(!L.length){showFlash("NOTHING TO BOUNCE");return;}
       showFlash("ENCODING…");setExportPhase("Encoding");if(exportBarR.current)exportBarR.current.style.width="100%";
       await new Promise(r=>setTimeout(r,40)); // let the overlay paint "Encoding" before the synchronous encode blocks
-      const blob=encodeMP3(lame,L,R,ctx.sampleRate);
       // On mobile (where the OS share sheet is the point — text/email the
-      // sketch), stash the file and surface a SHARE button instead of forcing a
-      // download. Desktop, or anywhere file-sharing isn't supported, downloads.
-      const file=new File([blob],"loudlight-song.mp3",{type:"audio/mpeg"});
-      if(IS_MOBILE&&navigator.canShare&&navigator.canShare({files:[file]})){
-        setShareFile(file);showFlash("READY — TAP SHARE");
-      }else{
-        downloadBlob(blob,"loudlight-song.mp3","audio/mpeg");showFlash("MP3 EXPORTED");
-      }
+      // sketch), a SHARE button instead of a forced download; see _deliverMP3.
+      _deliverMP3(encodeMP3(lame,L,R,ctx.sampleRate));
     }catch(err){console.error("MP3 export failed",err);showFlash("EXPORT FAILED");}
     finally{
       if(progTmr){clearInterval(progTmr);progTmr=null;}
