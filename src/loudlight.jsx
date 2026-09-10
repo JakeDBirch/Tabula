@@ -209,6 +209,17 @@ const C_VARY="#e6b872";
 // carries the tuning knobs MUT8 reads (DROP / SHIFT / PITCH / GHOST rates), so
 // while this is false MUT8 keeps working but is no longer adjustable.
 const VARY_ON=false;
+// ── THE NATIVE AUDIO CORE ────────────────────────────────────────────────────
+// One DSP core in C (core/), hosted in an AudioWorklet here and inside
+// AVAudioEngine in the iOS shell. It owns the sequencer AND the voices; the
+// React side becomes a controller that pushes the project and the parameters
+// and receives playhead events. `LLCore` is core/host.js, inlined by build.mjs
+// before this script. Off by default while it is verified by ear; `?core=1`
+// on the URL switches it on for a session, `?core=0` forces it off.
+const CORE_DEFAULT=false;
+const CORE_ON=(typeof LLCore!=="undefined")&&!/[?&]core=0\b/.test(location.search)&&(CORE_DEFAULT||/[?&]core=1\b/.test(location.search));
+const coreHost=CORE_ON?new LLCore.CoreHost():null;
+if(typeof window!=="undefined")window.__LL_CORE_HOST=coreHost;
 // LOOP's accent — same steel blue as the LOOP button, so the marked bar chip
 // reads as "this is the bar LOOP is holding".
 const C_LOOP="#9fb4c7";
@@ -2230,7 +2241,7 @@ class Bell{
     this.dly=null;this.dlyFb=null;this.dlyReturn=null;this.dlySend=null;this.dlyHp=null;this.dlyLp=null;
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
-    this.stepDur=0.125;this.ready=false;
+    this.stepDur=0.125;this.ready=false;this.masterLevel=0.55;
     // Last-played voice for the MONO layer — choked when a new MONO note
     // triggers, so notes don't ring out on top of each other (true mono
     // behaviour). Holds {vca, oscs:[]}. Single slot is fine while there's
@@ -3645,8 +3656,10 @@ export default function LoudLight(){
     return true;
   };
 
-  const bell=useRef(new Bell());
-  const drumEngine=useRef(new DrumEngine());
+  // With the core on, both engines are facades over one CoreHost — the same
+  // method names, forwarded as messages, so no call site below changed.
+  const bell=useRef(CORE_ON?new LLCore.Bell(coreHost):new Bell());
+  const drumEngine=useRef(CORE_ON?new LLCore.Drums(coreHost):new DrumEngine());
   // Push mute/solo into the audio domain: ramp each layer's bus gain so a muted
   // (or soloed-out) layer is cut instantly and any ringing note dies — in
   // addition to the scheduler no longer feeding it. Runs whenever mute/solo
@@ -3973,6 +3986,34 @@ export default function LoudLight(){
   // Per-layer params snapshot for the scheduler. Bell.play() now takes the layerP per call.
   const layerParamsR = useRef(layerParams);
   useEffect(()=>{layerParamsR.current=layerParams;},[layerParams]);
+  // ── Core mirror ──────────────────────────────────────────────────────────
+  // Everything the JS scheduler read out of a ref on every tick is pushed to
+  // the core when it changes. Sends before the worklet exists are queued by
+  // the host and replayed at init, so ordering against play-start is free.
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.BPM,bpm);},[bpm]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.TRANSPOSE,transpose);},[transpose]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.SWING,swing);},[swing]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.SONG_MODE,songMode?1:0);},[songMode]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP,loopMode?1:0);},[loopMode]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_BAR,loopBar);},[loopBar]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_PAT,loopPat==null?-1:loopPat);},[loopPat]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.ACTIVE_PAT,activePatternId==null?-1:activePatternId);},[activePatternId]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.MOTION,motionEnabled?1:0);},[motionEnabled]);
+  useEffect(()=>{if(CORE_ON)coreHost.setFreqs(curFreqs);},[curFreqs]);
+  useEffect(()=>{if(CORE_ON){coreHost.pushLayer("synth",layerParams.synth);coreHost.pushLayer("lead",layerParams.lead);}},[layerParams]);
+  useEffect(()=>{if(CORE_ON)coreHost.setSong(songSeq);},[songSeq]);
+  useEffect(()=>{if(CORE_ON)coreHost.pushSamples(voiceSamples);},[voiceSamples]);
+  // Patterns go over one slot at a time, only the ones whose identity changed
+  // — an edit replaces one pattern object, so a tap on the grid ships ~2KB.
+  const corePatR=useRef([]);
+  useEffect(()=>{
+    if(!CORE_ON)return;
+    const prev=corePatR.current;
+    const norm=part=>({bars:partBars(part),lens:partBarLens(part),mults:partBarMults(part)});
+    patterns.forEach((p,i)=>{ if(prev[i]!==p)coreHost.loadPattern(i,LLCore.packPattern(p,norm)); });
+    for(let i=patterns.length;i<prev.length;i++)coreHost.clearPattern(i);
+    corePatR.current=patterns.slice();
+  },[patterns]);
 
   useEffect(()=>{bell.current.setDlyTime((60/bpm)*DLY_NOTES[dlyIdx].mult);},[bpm,dlyIdx]);
   useEffect(()=>{bell.current.setDlyFb(dlyFbPct/100);},[dlyFbPct]);
@@ -3990,7 +4031,7 @@ export default function LoudLight(){
   // and shared across patterns, so this is the single source of truth for the
   // strips. (MOTION automation, when on, overlays per-step in playDrumStep.)
   useEffect(()=>{
-    if(!drumEngine.current.ready)return;
+    if(!drumEngine.current.ready&&!CORE_ON)return;
     const mix=fillDrumMix(drumMix);
     for(let r=0;r<DRUM_ROWS;r++){
       drumEngine.current.setVoiceMix(DRUM_VOICES[r].key,mix[r]);
@@ -4373,6 +4414,7 @@ export default function LoudLight(){
     // the scheduler ticking against fresh state.
     if(playing){
       clearInterval(tmrR.current);
+      if(CORE_ON)coreHost.stop();
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
       releaseWakeLock();
@@ -6411,7 +6453,7 @@ export default function LoudLight(){
       await _waitAudio(ctx,ctx.currentTime+0.22);
       bell.current.setRvSize&&bell.current.setRvSize(rvSize);     // re-arm reverb feedback
       bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100); // re-arm delay feedback
-      if(mGain)mGain.gain.setValueAtTime(0.55,ctx.currentTime);
+      if(mGain)mGain.gain.setValueAtTime(bell.current.masterLevel,ctx.currentTime);
       const lame=await loadLame();
       if(!lame||!lame.Mp3Encoder){showFlash("MP3 LIB FAILED");return;}
       const loops=Math.max(1,Math.min(16,loopsArg||exportLoops||1));
@@ -6488,7 +6530,7 @@ export default function LoudLight(){
       try{if(sink)sink.disconnect();}catch(e){}
       // Safety: never leave the master muted or the FX feedback flushed if the
       // bounce bailed out between the silence step and its restore.
-      try{const c=bell.current.ctx;if(c&&bell.current.master){bell.current.master.gain.setValueAtTime(0.55,c.currentTime);bell.current.setRvSize&&bell.current.setRvSize(rvSize);bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100);}}catch(e){}
+      try{const c=bell.current.ctx;if(c&&bell.current.master){bell.current.master.gain.setValueAtTime(bell.current.masterLevel,c.currentTime);bell.current.setRvSize&&bell.current.setRvSize(rvSize);bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100);}}catch(e){}
       if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);loopR.current=restore.loop;setLoopMode(restore.loop);}
       exportingR.current=false;setExporting(false);
     }
@@ -6715,6 +6757,36 @@ export default function LoudLight(){
     }
   };
 
+  // ── Core events → UI ─────────────────────────────────────────────────────
+  // The core reports what it is sounding as it renders it: the step each part
+  // is on, the pattern and song position, the pulse for the bar dots, and
+  // every drum hit for the mixer flashes. These are the state writes the JS
+  // scheduler made at schedule time; here they arrive at render time, which
+  // is closer to what you hear.
+  useEffect(()=>{
+    if(!CORE_ON)return;
+    const EV=LLCore.P.EV, LAYERS=["synth","lead","drums"];
+    coreHost.onEvents=(ev)=>{
+      const flashes=[];
+      for(let i=0;i+3<ev.length;i+=4){
+        const t=ev[i],a=ev[i+1],b=ev[i+2];
+        if(t===EV.STEP){
+          if(LAYERS[a]===activeLayerR.current){ if(a===2)setDrumStep(b); else setStep(b); }
+        } else if(t===EV.PLAYPAT){
+          if(actPlayIdR.current!==a){actPlayIdR.current=a;setActPlayId(a);}
+          setPlayId(a);
+        } else if(t===EV.SONGPOS){
+          songPosR.current=a;setSongBar(a);setSongBarLayer({synth:a,lead:a,drums:a});
+        } else if(t===EV.PULSE){
+          if(songPulseR.current!==a){songPulseR.current=a;setSongPulse(a);}
+        } else if(t===EV.DRUMHIT){
+          if(activeLayerR.current==="drums")flashes.push({r:a,vel:b});
+        }
+      }
+      if(flashes.length)setDrumFlash(prev=>{const nx={...prev};flashes.forEach(f=>{nx[f.r]={vel:f.vel,n:((prev[f.r]&&prev[f.r].n)||0)+1};});return nx;});
+    };
+    return()=>{coreHost.onEvents=null;};
+  },[]);
   const lastResumeTryR=useRef(0);
   const resumeAudioR=useRef(null);
   const scheduler=useCallback(()=>{
@@ -7023,6 +7095,7 @@ export default function LoudLight(){
     // one render. Button clicks are unaffected (state is settled there).
     if(playingR.current){
       clearInterval(tmrR.current);
+      if(CORE_ON)coreHost.stop();
       playingR.current=false;
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       setSongBar(-1);songBarR.current=-1;
@@ -7069,6 +7142,7 @@ export default function LoudLight(){
     }
     nextNoteR.current=t0; // master clock for visual playhead + bar advance
     playingR.current=true;
+    if(CORE_ON){ coreHost.play(); setPlaying(true); return; }
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
   };
   useEffect(()=>()=>clearInterval(tmrR.current),[]);

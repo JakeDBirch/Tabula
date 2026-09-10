@@ -32,3 +32,6 @@ ios/*.xcodeproj
 ios/*.xcworkspace
 ios/build/
 ios/DerivedData/
+
+# DSP core — native test binaries and their renders
+core/test/build/

@@ -6,7 +6,9 @@
   "scripts": {
     "build": "node build.mjs",
     "audit": "node build.mjs --audit-only",
-    "build:ios": "node build.mjs --ios"
+    "build:ios": "node build.mjs --ios",
+    "build:core": "node core/build.mjs",
+    "test:core": "node core/build.mjs"
   },
   "devDependencies": {
     "@babel/cli": "^7.24.0",

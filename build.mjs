@@ -131,6 +131,17 @@ if (auditOnly) {
 // 3. Wrap in HTML scaffold.
 const js = readFileSync(compiled, "utf8");
 
+// The DSP core: the generated param table, the worklet host, and the wasm
+// itself as base64. Inlined — the app is one file, and the iOS payload must
+// carry nothing that reaches for the network. core/ll_core.wasm is committed
+// (like vendor/); rebuild it with `npm run build:core` after touching core/src.
+const CORE_SCRIPT = (() => {
+  const params = readFileSync("core/ll_params.js", "utf8");
+  const host = readFileSync("core/host.js", "utf8");
+  const wasm = readFileSync("core/ll_core.wasm").toString("base64");
+  return `<script>\n${params}\n${host}\nwindow.__LL_CORE_WASM="${wasm}";\n  </script>`;
+})();
+
 // Shared <head> bits. VIEWPORT/RESET are identical across both targets so the
 // two builds can't drift on layout — only the asset sourcing differs.
 const VIEWPORT = `<meta charset="UTF-8">
@@ -164,6 +175,7 @@ const html = `<!DOCTYPE html>
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  ${CORE_SCRIPT}
   <script>
 const { useState, useEffect, useRef, useCallback, useMemo, Fragment } = React;
 
@@ -230,6 +242,7 @@ if (ios) {
   </script>
   <script src="react.production.min.js"></script>
   <script src="react-dom.production.min.js"></script>
+  ${CORE_SCRIPT}
   <script>
 const { useState, useEffect, useRef, useCallback, useMemo, Fragment } = React;
 
