@@ -3223,6 +3223,10 @@ export default function LoudLight(){
   useEffect(()=>{if(!VARY_ON&&page==="vary")setPage("edit");},[page]);
   useEffect(()=>{if(!VARY_ON&&activeSheet==="vary")setActiveSheet(null);},[activeSheet]);
   const [bpm,       setBpm]       = useState(120);
+  // Which global the TEMPO chip shows and edits — the last one touched in the
+  // drawer. A state, not a choice, so it is deliberately NOT persisted: every
+  // launch starts on BPM, which is the one you want nine times in ten.
+  const [tempoField, setTempoField] = useState("bpm"); // "bpm" | "st" | "swing"
 
   // Drum step editing state
   const drumStepR=useRef(-1);
@@ -3794,6 +3798,8 @@ export default function LoudLight(){
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
+  const tempoFieldR=useRef("bpm");
+  useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
   const loopR=useRef(false),activeIdR=useRef(activeId);
   const transpR=useRef(0),varyModeR=useRef({synth:false,lead:false,drums:false}),recModeR=useRef(false),recSourceIdR=useRef(null);
   const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0,glideJitter:0,durJitter:0});
@@ -8597,6 +8603,78 @@ export default function LoudLight(){
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
+  // ── The TEMPO chip is a scrubber, not a door ─────────────────────────────
+  // It shows and edits whichever of the three globals you last touched, so the
+  // one you are actually working on is under your thumb instead of two taps
+  // away behind a sheet. The drawer moved onto the HOLD, per the house rule —
+  // and it has to, because a tap that opened the sheet would fire on every
+  // drag that didn't quite clear the deadzone.
+  //
+  // One table, so the chip and the drawer's own three scrubbers cannot drift:
+  // same ranges, same ballistic gains, same double-tap resets as the drawer
+  // widgets these were lifted from.
+  const TEMPO_FIELDS=[
+    {key:"bpm",  unit:"BPM", min:40,  max:300, gain:0.5, reset:120,
+     get:()=>bpmR.current,    set:(v)=>setBpm(Math.round(v)),
+     show:(v)=>String(Math.round(v))},
+    {key:"st",   unit:"ST",  min:-24, max:24,  gain:1/6, reset:0,
+     get:()=>transpR.current, set:(v)=>setTranspose(Math.round(v)),
+     show:(v)=>{const n=Math.round(v);return n===0?"0":(n>0?"+"+n:String(n));}},
+    {key:"swing",unit:"SWG", min:0,   max:100, gain:1/3, reset:0,
+     get:()=>swingR.current,  set:(v)=>setSwing(Math.round(v)),
+     show:(v)=>String(Math.round(v))},
+  ];
+  const tempoFldOf=(k)=>TEMPO_FIELDS.find(f=>f.key===k)||TEMPO_FIELDS[0];
+  const tempoFld=tempoFldOf(tempoField);
+  const tempoVal=tempoField==="bpm"?bpm:tempoField==="st"?transpose:swing;
+  const tempoChipR=useRef({tmr:0,held:false,drag:false,on:false,startY:0,lastY:0,val:0});
+  const _tempoHoldEnd=()=>{const t=tempoChipR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
+  const tempoChipProps={
+    onPointerDown:(e)=>{
+      e.preventDefault();e.stopPropagation();
+      const t=tempoChipR.current, f=tempoFldOf(tempoFieldR.current);
+      t.held=false;t.drag=false;_tempoHoldEnd();
+      // Same double-tap-to-default the drawer widgets have.
+      if(isDoubleTap(e,"tempochip")){f.set(f.reset);t.on=false;return;}
+      t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();
+      try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+      t.tmr=setTimeout(()=>{
+        t.tmr=0;t.held=true;t.on=false;
+        // The sheet opens with the finger still down and its backdrop mounts
+        // underneath, so stamp the guard the backdrop checks — otherwise this
+        // press's own trailing click dismisses it on release. It survives
+        // today only because the chip holds pointer capture, which is not a
+        // thing to rely on.
+        sheetGuardR.current=Date.now();
+        setActiveSheet("tempo");
+      },450);
+    },
+    onPointerMove:(e)=>{
+      const t=tempoChipR.current;
+      if(!t.on)return;
+      e.preventDefault();e.stopPropagation();
+      // 3px of deadzone before this becomes a drag, so the hold survives the
+      // wobble of a finger resting on a 42px chip.
+      if(!t.drag){
+        if(Math.abs(e.clientY-t.startY)<3)return;
+        t.drag=true;_tempoHoldEnd();
+      }
+      const f=tempoFldOf(tempoFieldR.current);
+      const dy=e.clientY-t.lastY; t.lastY=e.clientY;
+      t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));
+      f.set(t.val);
+    },
+    onPointerUp:()=>{const t=tempoChipR.current;_tempoHoldEnd();t.on=false;t.drag=false;},
+    onPointerCancel:()=>{const t=tempoChipR.current;_tempoHoldEnd();t.on=false;t.drag=false;t.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_tempoHoldEnd();
+      tempoChipR.current.on=false;tempoChipR.current.held=true;setActiveSheet("tempo");},
+    // A plain tap deliberately does NOTHING. It cannot open the sheet (see
+    // above) and it must not change which field is live: the chip is a
+    // performance control, and silently re-pointing it at a different global
+    // would mean the next drag moved something you didn't mean to touch.
+    onClick:(e)=>{e.stopPropagation();tempoChipR.current.held=false;},
+  };
+
   // Per-pattern speed: the SPEED selector reads/writes the active pat's
   // speedMult so each pattern can have its own playback rate. Falls back to
   // the legacy global speedMult when the pat is missing the field.
@@ -9117,15 +9195,15 @@ export default function LoudLight(){
                   the mobile widgets. SPEED moved out of here because it's per-
                   pattern; these three actually are global, so they own this slot. */}
               <div style={{display:"flex",gap:3,marginBottom:winW>900?8:4}}>
-                <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={e=>{setTempoField("bpm");handleBpmDown(e);}} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{bpm}</span>
                   <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>BPM</span>
                 </div>
-                <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={e=>{setTempoField("st");handleStDown(e);}} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{stLabel}</span>
                   <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>ST</span>
                 </div>
-                <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1,padding:winW>900?"6px 4px":"4px 2px",minWidth:0}} onPointerDown={e=>{setTempoField("swing");handleSwingDown(e);}} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
                   <span style={{fontSize:winW>900?16:13,fontWeight:700,display:"block",lineHeight:1.05}}>{swing}</span>
                   <span style={{fontSize:winW>900?9:7,color:"rgba(178,199,219,0.35)",letterSpacing:1,display:"block"}}>SWG</span>
                 </div>
@@ -10223,10 +10301,11 @@ export default function LoudLight(){
                  each more width and lets the labels be legible.) */}
             <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
-                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{bpm}</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>TEMPO</span>
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"ns-resize",fontFamily:"inherit",padding:0,touchAction:"none"}}
+                aria-label={"Tempo controls — drag to change "+tempoFld.unit+", hold to open"}
+                data-tempochip={tempoField} {...tempoChipProps}>
+                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
               </button>
               {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
                    stays on once enabled; LOOP holds the song's place rather than
@@ -10281,9 +10360,11 @@ export default function LoudLight(){
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="tempo"?null:"tempo")}>
-                  <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{bpm}</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>TEMPO</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"ns-resize",fontFamily:"inherit",padding:0,touchAction:"none"}}
+                  aria-label={"Tempo controls — drag to change "+tempoFld.unit+", hold to open"}
+                  data-tempochip={tempoField} {...tempoChipProps}>
+                  <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{tempoFld.show(tempoVal)}</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>{tempoFld.unit}</span>
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.1)"),borderRadius:8,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);} setActiveSheet(null); }}>
                   <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
@@ -10314,13 +10395,13 @@ export default function LoudLight(){
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>TEMPO</div>
                     <div style={{marginBottom:12}}>{scalePicker(false)}</div>
                     <div style={{display:"flex",gap:8,marginBottom:14}}>
-                      <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleBpmDown} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
+                      <div ref={bpmDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={e=>{setTempoField("bpm");handleBpmDown(e);}} onPointerMove={handleBpmMove} onPointerUp={handleBpmUp} onPointerCancel={handleBpmUp}>
                         <span style={S.widgetN}>{bpm}</span><span style={S.widgetU}>BPM</span>
                       </div>
-                      <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleStDown} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
+                      <div ref={stDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={e=>{setTempoField("st");handleStDown(e);}} onPointerMove={handleStMove} onPointerUp={handleStUp} onPointerCancel={handleStUp}>
                         <span style={S.widgetN}>{stLabel}</span><span style={S.widgetU}>ST</span>
                       </div>
-                      <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={handleSwingDown} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
+                      <div ref={swingDragRef} style={{...S.bpmDragTarget,flex:1}} onPointerDown={e=>{setTempoField("swing");handleSwingDown(e);}} onPointerMove={handleSwingMove} onPointerUp={handleSwingUp} onPointerCancel={handleSwingUp}>
                         <span style={S.widgetN}>{swing}</span><span style={S.widgetU}>SWG</span>
                       </div>
                     </div>

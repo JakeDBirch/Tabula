@@ -243,6 +243,27 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### Controls & interaction conventions
 
+- **The TEMPO chip is a scrubber, not a door.** Drag it vertically to change
+  BPM / ST / SWG, double-tap to reset that field, **hold (or right-click) to
+  open the drawer**. It shows and edits whichever of the three you last touched
+  — in the drawer *or* the desktop sidebar, since all six scrubbers record the
+  field — so the global you are working on is under your thumb rather than two
+  taps behind a sheet. `TEMPO_FIELDS` is one table both the chip and those
+  widgets read, so ranges, ballistic gains and double-tap defaults cannot
+  drift.
+  - The drawer **had** to move to the hold: a tap that opened it would fire on
+    every drag that didn't clear the 3px deadzone. So a plain tap now does
+    **nothing at all** — deliberately. It must not re-point the chip at another
+    field either: this is a performance control, and silently changing what the
+    next drag moves is the kind of surprise you only find mid-take.
+  - The sheet is therefore dismissed by its **backdrop**, which is the only way
+    out now that the chip's tap is inert. And because the hold opens it with
+    the finger still down, the hold stamps `sheetGuardR` exactly like the bar
+    strip's `+` — without it the press's own trailing click closes the sheet on
+    release. It happened to survive without the stamp only because the chip
+    holds pointer capture, which is not a thing to rely on.
+  - `tempoField` is a **state, not a choice**, so it is deliberately not
+    persisted: every launch starts on BPM.
 - **Tapping something that is ALREADY selected does its second function** —
   the same thing its hold does. There is nothing for a re-select to do, so the
   gesture is free, and it is the cheap one to reach for mid-take: tap the bar
