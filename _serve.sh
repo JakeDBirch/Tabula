@@ -4,7 +4,7 @@
 # it offline. Run after every `npm run build` before any headless test.
 set -e
 SP=/tmp/claude-0/-home-user-Tabula/537e3ac4-afd1-599e-ae71-ca11698c527f/scratchpad
-mkdir -p "$SP/serve"; ln -sfn /home/user/Tabula/vendor "$SP/serve/vendor"
+mkdir -p "$SP/serve"; ln -sfn /home/user/Tabula/vendor "$SP/serve/vendor"; ln -sfn /home/user/Tabula/samples "$SP/serve/samples"
 python3 - "$SP" <<'PY'
 import sys
 sp=sys.argv[1]

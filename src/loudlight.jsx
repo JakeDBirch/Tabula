@@ -8314,6 +8314,21 @@ export default function LoudLight(){
   }));}
 
   // ── Internal sampler ─────────────────────────────────────────────────
+  // Where samples get decoded and where the mic gets analysed. Neither may be
+  // the engine's ctx when the core is on: it is a stand-in there, and in the
+  // iOS shell no AudioContext exists at all.
+  const _isRealCtx=c=>!!(c&&typeof c.decodeAudioData==="function"&&typeof c.createAnalyser==="function");
+  const _decodeCtx=()=>{
+    const c=!CORE_ON&&(bell.current&&bell.current.ctx||drumEngine.current&&drumEngine.current.ctx);
+    return _isRealCtx(c)?c:new OfflineAudioContext(1,1,44100);
+  };
+  const micCtxR=useRef(null);
+  const _micCtx=()=>{
+    const c=bell.current&&bell.current.ctx||drumEngine.current&&drumEngine.current.ctx;
+    if(_isRealCtx(c))return c;
+    if(!micCtxR.current){try{micCtxR.current=new (window.AudioContext||window.webkitAudioContext)();}catch(e){return null;}}
+    return micCtxR.current;
+  };
   // Load a named kit from DRUM_KITS. "synth" clears all samples; any other
   // id fetches + decodes each voice's audio file. Uses OfflineAudioContext so
   // kits can be pre-loaded before the user hits play (the live AudioContext
@@ -8334,9 +8349,13 @@ export default function LoudLight(){
     }
     const newSamples={};
     const errors=[];
-    // Prefer the live AudioContext so buffers are engine-compatible; fall back
-    // to an OfflineAudioContext for pre-loading before play.
-    const ctx=bell.current?.ctx||drumEngine.current?.ctx||new OfflineAudioContext(1,1,44100);
+    // Decode through an OfflineAudioContext, never through the engine's ctx.
+    // With the core on, bell.current.ctx is a stand-in (inside the iOS shell
+    // there is no AudioContext at all) and has no decodeAudioData — the first
+    // TestFlight build with the core decoded a cloud-loaded project's kit
+    // through it, every sample failed, and the synthesised 808 played instead.
+    // The core resamples by each buffer's own rate, so 44.1k is fine.
+    const ctx=_decodeCtx();
     const decode=async(url)=>{
       const res=await fetch(url);
       if(!res.ok)throw new Error(res.statusText);
@@ -8370,7 +8389,7 @@ export default function LoudLight(){
       if(kitId==="user")setVoiceSamples({}); // clear any prior project's USER samples
       return;
     }
-    const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx)||new OfflineAudioContext(1,1,44100);
+    const ctx=_decodeCtx();
     (async()=>{
       const decoded={};
       await Promise.all(Object.entries(sj).map(async([k,b64])=>{
@@ -8400,7 +8419,10 @@ export default function LoudLight(){
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true});
       recordStreamRef.current=stream;
-      const ctx=(bell.current&&bell.current.ctx)||(drumEngine.current&&drumEngine.current.ctx);
+      // The recorder needs a REAL AudioContext (a stream source and an
+      // analyser). The JS engine's is one; with the core on there may be none,
+      // so make one for the mic — this runs from a tap, so it can start.
+      const ctx=_micCtx();
       if(!ctx){
         stream.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;
         showFlash("AUDIO INIT");return;

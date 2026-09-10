@@ -622,11 +622,18 @@ the step plan: **`docs/native-audio.md`**. Read it before touching either side.
   attack matched in layer, time, length, pitch and velocity. Its negative
   control is real: break swing in the core and only the swing scenario fails.
   Run it after any change to the sequencer on either side.
-- **Two traps already paid for:** a `WebAssembly.Module` does not survive the
-  structured clone into an AudioWorklet (send bytes, compile in the worklet;
-  the host now listens for `messageerror`); and the master's reset is an event
-  AT the cycle top, not on the tick that leaves the last step — in a
-  time-ordered walk the JS loop order no longer protects you.
+- **Three traps already paid for:** a `WebAssembly.Module` does not survive
+  the structured clone into an AudioWorklet (send bytes, compile in the
+  worklet; the host now listens for `messageerror`); the master's reset is an
+  event AT the cycle top, not on the tick that leaves the last step — in a
+  time-ordered walk the JS loop order no longer protects you; and **never
+  decode or analyse through `bell.current.ctx` when the core is on** — it is a
+  stand-in (in the shell there is no AudioContext at all) with no
+  `decodeAudioData`. The first TestFlight build with the core loaded a cloud
+  project's kit through it, every sample failed silently and the synthesised
+  808 played instead: "the drums sound different". `_decodeCtx()` (an
+  OfflineAudioContext; the core resamples by each buffer's own rate) and
+  `_micCtx()` (a real AudioContext for the recorder) are the only routes.
 
 ## Persistence — the multi-site rule
 

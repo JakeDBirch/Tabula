@@ -191,6 +191,11 @@ differently from the wasm), and `Bridging.h` exposes `ll.h` to Swift.
   active — the page's JS may be suspended and the audio does not need it.
 - **The bounce needs no native code:** the Worker + wasm path works inside
   the WKWebView, from the same shadow.
+- **Nothing decodes through the engine's context.** `bell.current.ctx` is a
+  stand-in in the shell; kits and user samples decode through an
+  OfflineAudioContext (`_decodeCtx`) and the mic recorder makes its own real
+  AudioContext (`_micCtx`). The first device build got this wrong and played
+  the synthesised drums in place of a cloud-loaded project's kit.
 
 Not yet run on a device. The things to check there are in
 `docs/ios-testflight.md`: lock the screen mid-song, switch apps, take a call,
