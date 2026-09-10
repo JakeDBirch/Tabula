@@ -217,7 +217,10 @@ const VARY_ON=false;
 // before this script. Off by default while it is verified by ear; `?core=1`
 // on the URL switches it on for a session, `?core=0` forces it off.
 const CORE_DEFAULT=false;
-const CORE_ON=(typeof LLCore!=="undefined")&&!/[?&]core=0\b/.test(location.search)&&(CORE_DEFAULT||/[?&]core=1\b/.test(location.search));
+// Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
+// the only audio that survives the screen locking), so there it is always on.
+const CORE_NATIVE=(typeof LLCore!=="undefined")&&LLCore.CoreHost.isNative;
+const CORE_ON=(typeof LLCore!=="undefined")&&!/[?&]core=0\b/.test(location.search)&&(CORE_DEFAULT||CORE_NATIVE||/[?&]core=1\b/.test(location.search));
 const coreHost=CORE_ON?new LLCore.CoreHost():null;
 if(typeof window!=="undefined")window.__LL_CORE_HOST=coreHost;
 // LOOP's accent — same steel blue as the LOOP button, so the marked bar chip

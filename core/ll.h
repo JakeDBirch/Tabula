@@ -137,11 +137,15 @@ void  ll_set_layer(int layer, int id, float v);
 void  ll_set_drum(int voice, int id, float v);
 float ll_get(int id);
 
-/* Samples. One arena, cleared wholesale (kits load whole). kind: 0 single,
- * 1 round-robin, 2 velocity layers (soft→hard). Returns a float buffer of
- * `frames` mono samples at the engine rate for the host to fill, or NULL. */
+/* Samples. One arena, cleared wholesale (kits load whole; clearing also
+ * silences any hit still reading the old ones). kind: 0 single, 1 round-robin,
+ * 2 velocity layers (soft→hard). Returns a float buffer of `frames` mono
+ * samples for the host to fill, or NULL. `src_rate` is the sample's own rate:
+ * the core resamples on playback, so a 44.1k kit plays in tune on a 48k
+ * engine and no host has to resample. Filling the buffer may happen outside
+ * any lock the host uses — the region is private until ll_sample_commit. */
 void   ll_samples_clear(void);
-float* ll_sample_alloc(int voice, int kind, int slot, int frames);
+float* ll_sample_alloc(int voice, int kind, int slot, int frames, float src_rate);
 void   ll_sample_commit(int voice, int kind, int nslots);
 
 /* Clock. The host may pin the core's frame counter to its own (the worklet's

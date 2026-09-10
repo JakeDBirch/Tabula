@@ -73,7 +73,7 @@ typedef struct {
   ll_bq bq; float acc[LL_STRIP_W];
 } ll_strip;
 
-typedef struct { const float* p[LL_MAX_SLOTS]; int len[LL_MAX_SLOTS]; int n, kind, lastRR; } ll_sampleset;
+typedef struct { const float* p[LL_MAX_SLOTS]; int len[LL_MAX_SLOTS]; float sr[LL_MAX_SLOTS]; int n, kind, lastRR; } ll_sampleset;
 
 typedef struct { ll_dline d; ll_bq hsh, lsh; float base; int ch; double lfoPh; float lfoRate; } ll_comb;
 
@@ -131,6 +131,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
 void synth_render(int n);
 /* ll_drums.c */
 void drums_reset(void);
+void drums_stop_samples(void);
 void drums_set_mix(int voice,int id,float v,double when);
 void drums_play(int voice,double at,int vel,const float*mixOverride,int hasOverride);
 void drums_render(int n);

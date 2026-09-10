@@ -10,6 +10,9 @@ final class WebAppViewController: UIViewController {
 
     private var webView: WKWebView!
     private let schemeHandler = BundleSchemeHandler()
+    /// The DSP core in AVAudioEngine. Created after the audio session is
+    /// configured, because it reads the session's sample rate at init.
+    private var coreHost: CoreAudioHost!
 
     /// Shown instead of a white screen when the payload fails to load. A blank
     /// launch on a device you can't attach a debugger to is indistinguishable
@@ -31,7 +34,9 @@ final class WebAppViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 0.055, green: 0.110, blue: 0.169, alpha: 1) // #0e1c2b
         configureAudioSession()
+        coreHost = CoreAudioHost()
         buildWebView()
+        coreHost.webView = webView
         webView.load(URLRequest(url: BundleSchemeHandler.indexURL))
 
         // The audio session is deactivated out from under us by interruptions
@@ -88,6 +93,9 @@ final class WebAppViewController: UIViewController {
 
         let controller = WKUserContentController()
         controller.add(self, name: "saveFile")
+        // The page detects this handler and routes its audio to the core in
+        // AVAudioEngine instead of an AudioContext — see core/host.js.
+        coreHost.attach(to: controller)
         config.userContentController = controller
 
         webView = WKWebView(frame: .zero, configuration: config)
@@ -168,6 +176,9 @@ final class WebAppViewController: UIViewController {
             // a silent app on a device has somewhere to start.
             NSLog("[LoudLight] audio session setup failed: %@", error.localizedDescription)
         }
+        // The native engine first: it is what plays now. The page's own
+        // AudioContext nudge stays for anything still on Web Audio.
+        coreHost?.resume()
         nudgeWebAudioAwake()
     }
 

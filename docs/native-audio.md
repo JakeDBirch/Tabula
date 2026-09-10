@@ -20,9 +20,12 @@ good (a), so nothing here forecloses it; it just doesn't leave the web behind.
 
 **Status (2026-09-10):** the core is complete for everything the JS engine
 does today except VARY (parked in the app anyway), hosted in an AudioWorklet
-behind a flag, and verified against the JS scheduler attack-for-attack. The
-MP3 bounce renders offline through it. It is **off by default** until Jake
-has judged it by ear. The iOS host is not started.
+behind a flag on the web and in **AVAudioEngine inside the iOS shell**, and
+verified against the JS scheduler attack-for-attack. The MP3 bounce renders
+offline through it. On the web it is **off by default** until Jake has judged
+it by ear; in the app it is always on, because it is the only audio that
+survives the screen locking. The Swift host is type-checked by CI, not yet run
+on a device.
 
 ## Why
 
@@ -160,12 +163,47 @@ cycles (`patCycle(p).abs`, the same walk the core does), where the realtime
 bounce estimated `bars × 16` and was wrong for any trimmed or half-time bar.
 The stop itself is the core's, so the file is exactly the passes asked for.
 
+## The iOS host
+
+`ios/LoudLight/CoreAudioHost.swift` hosts the same C files in AVAudioEngine.
+`project.yml` compiles `core/src/*.c` into the app target with
+`-ffp-contract=off` (arm64 would otherwise fuse multiply-adds and round
+differently from the wasm), and `Bridging.h` exposes `ll.h` to Swift.
+
+- **Transport.** The page detects `webkit.messageHandlers.core` and switches
+  `CoreHost` to the native transport: no AudioContext, no worklet. The same
+  messages go over the bridge as JSON, binary as base64 (`nativePost`), and
+  the shell calls `onNativeEvents` / `onNativePong` back through
+  `evaluateJavaScript`. The shell injects `window.__LL_NATIVE_SR` at document
+  start so the page knows the engine rate before its first message.
+- **Render.** An `AVAudioSourceNode` render block calls `ll_render` into the
+  two float buffers. The sequencer runs inside it, so the music keeps going
+  when the screen locks or the app is backgrounded — `UIBackgroundModes:
+  audio` and the `.playback` session finally do what they say.
+- **Threads.** One `os_unfair_lock` guards every call into the core: the
+  render holds it for a block, a message for microseconds. A sample's frames
+  are copied outside the lock into a region that is private until the commit
+  (`ll_sample_alloc` bumps under the lock; `ll_sample_commit` publishes).
+- **Samples cross the bridge as base64 Float32** with their own rate; the core
+  resamples on playback (`ll_sample_alloc(..., src_rate)`), so neither host
+  resamples. A kit is a few MB over the bridge, once per kit switch.
+- **Events** are drained on a 30Hz timer and dropped while the app is not
+  active — the page's JS may be suspended and the audio does not need it.
+- **The bounce needs no native code:** the Worker + wasm path works inside
+  the WKWebView, from the same shadow.
+
+Not yet run on a device. The things to check there are in
+`docs/ios-testflight.md`: lock the screen mid-song, switch apps, take a call,
+and that the JS-side `playing` state agrees with the engine when you come
+back.
+
 ## Switching it on
 
-`CORE_DEFAULT` in `src/loudlight.jsx` is the default; `?core=1` on the URL
-turns the core on for a session and `?core=0` forces it off, so the live site
-can be A/B'd on a phone without a build. Flip the default once it has been
-judged by ear.
+`CORE_DEFAULT` in `src/loudlight.jsx` is the web default; `?core=1` on the
+URL turns the core on for a session and `?core=0` forces it off, so the live
+site can be A/B'd on a phone without a build. Flip the default once it has
+been judged by ear. Inside the iOS shell (`CORE_NATIVE`, i.e. the bridge
+exists) the core is always on.
 
 ## Verification
 
@@ -186,6 +224,10 @@ judged by ear.
   worklet code into the wasm in Node. Every attack must match in layer,
   time (±2 frames), length, pitch and velocity, across a song with repeats and
   swing, a free-running pattern with layer glide, and LOOP on one bar.
+- `_core_native.mjs` (local harness) — the native transport with the iOS
+  bridge shimmed: the page turns the core on, everything crosses as JSON and
+  base64 (no typed arrays), play/stop go over the bridge, shell events light
+  the playhead, and the offline bounce works with no AudioContext at all.
 - `_core_play.mjs` (local harness) — end to end in the browser with the flag
   on: the worklet boots, the core reports steps in order, the master tap is
   audible, no page errors; then the same with the flag off as the control.
@@ -221,9 +263,7 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
 2. **Flip `CORE_DEFAULT`.** The JS engines stay in the source until the iOS
    host is done, then go.
 3. ~~The MP3 bounce offline through the core.~~ Done — see above.
-4. **The iOS host.** `AVAudioSourceNode` whose render block calls `ll_render`;
-   the JS bridge posts the same messages over `webkit.messageHandlers` instead
-   of the worklet port (`CoreHost` grows a second transport). That is what
-   buys background audio, and `UIBackgroundModes: audio` becomes true.
+4. ~~The iOS host.~~ Written — see above. **Run it on the phone**: TestFlight
+   build, then the on-device checks. `UIBackgroundModes: audio` is now true.
 5. Then the things native audio was for: **AUv3** (the render block is
    already the shape an AudioUnit wants), **Core MIDI**, **Ableton Link**.

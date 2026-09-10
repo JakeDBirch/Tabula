@@ -267,8 +267,10 @@ rather than a website with an icon.
 I could not test any of this on hardware — there is no Mac, no Xcode and no
 iPhone in the environment it was written in. The web payload is verified
 (renders headlessly, loads React and the font locally, makes zero network
-requests, install hint correctly suppressed). **The Swift has never been
-compiled.** Expect to fix something in the first build.
+requests, install hint correctly suppressed). The Swift is type-checked by CI
+on every push that touches `ios/`, and the shell has run on Jake's devices —
+but `CoreAudioHost` (the AVAudioEngine host for the DSP core) has only been
+compiled, never run.
 
 Specifically worth checking by hand and by ear, in rough order of how likely
 they are to bite:
@@ -279,14 +281,24 @@ they are to bite:
    project library and autosave live in `localStorage`; the shell serves the app
    from a custom `loudlight://app` origin specifically so that store is stable
    across launches. Make a pattern, force-quit from the app switcher, reopen.
-3. **Ring/silent switch.** The shell asks for an `AVAudioSession` `.playback`
-   category, which should mean the sequencer keeps sounding on silent — but
-   `WKWebView` runs an audio session of its own and does not reliably honour
-   what the host app sets. This may simply not take.
-4. **Lock screen / backgrounding.** `UIBackgroundModes: audio` is declared, but
-   WKWebView background audio has a long history of stopping and not resuming.
-   **If it does not work, remove the key** — declaring a background mode the app
-   does not use is itself a rejection reason.
+3. **Does it make a sound at all, and the right one.** The app no longer plays
+   through Web Audio: the DSP core runs in AVAudioEngine (`CoreAudioHost`,
+   see `docs/native-audio.md`), and this build is the first time that code
+   has run on a device. Play a project you know. Compare it with the same
+   project on the web (`?core=0` is the old engine, `?core=1` the core in a
+   worklet). Anything that sounds different from `?core=0` beyond the
+   sanctioned differences in that doc is a bug in the port.
+4. **Lock screen / backgrounding / a phone call.** This is what the core is
+   for. Start a song, lock the screen: it should keep playing. Switch apps:
+   same. Take a call and hang up: it should come back on its own (the shell
+   restarts the engine on interruption-ended and on return to the foreground).
+   When you come back, the transport button should still say what the engine
+   is doing. `UIBackgroundModes: audio` is declared and is now used; if
+   background playback does NOT work, that is a bug to fix, not a key to
+   remove.
+   **Ring/silent switch:** with the `.playback` session the sequencer should
+   keep sounding on silent; this is now the shell's own engine, so it should
+   take.
 5. **MIDI and MP3 export.** `<a download>` is a silent no-op in a WKWebView, so
    `downloadBlob` now posts the bytes to the shell, which presents the share
    sheet. Untested end to end.

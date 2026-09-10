@@ -99,7 +99,7 @@ class LLProcessor extends AudioWorkletProcessor{
       case "hit": w.ll_audition_drum(m.d,m.vel); break;
       case "flush": w.ll_flush(); break;
       case "samples_clear": w.ll_samples_clear(); break;
-      case "sample": { const p=w.ll_sample_alloc(m.d,m.kind,m.slot,m.data.length); if(p){ this.views(); this.f32.set(m.data,p>>2);} else this.port.postMessage({t:"err",what:"sample",voice:m.d}); break; }
+      case "sample": { const p=w.ll_sample_alloc(m.d,m.kind,m.slot,m.data.length,m.sr||sampleRate); if(p){ this.views(); this.f32.set(m.data,p>>2);} else this.port.postMessage({t:"err",what:"sample",voice:m.d}); break; }
       case "sample_commit": w.ll_sample_commit(m.d,m.kind,m.n); break;
       case "ping": this.port.postMessage({t:"pong",frame:currentFrame,playing:w.ll_playing(),coreFrame:w.ll_frame(),started:this.started}); break;
     }
@@ -162,11 +162,32 @@ self.onmessage=(e)=>{
 `;
 
   // ── 3. the host ──────────────────────────────────────────────────────────
+  // The iOS shell registers `webkit.messageHandlers.core` and hosts the same
+  // core in AVAudioEngine. Then there is no AudioContext and no worklet: every
+  // message goes over the bridge as JSON (binary as base64) and the shell
+  // calls onNativeEvents / onNativePong back. Everything above this class —
+  // the shadow, the snapshot, the offline bounce — is transport-agnostic.
+  const NATIVE_PORT=(typeof window!=="undefined"&&window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.core)||null;
+  const b64of=(u8)=>{let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);};
   class CoreHost{
     constructor(){
       this.ctx=null;this.node=null;this.master=null;this.ready=false;this.pending=[];
       this.onEvents=null;this.sr=48000;this.initP=null;this._wasm=null;
+      this.native=!!NATIVE_PORT;
     }
+    static get isNative(){ return !!NATIVE_PORT; }
+    nativePost(m){
+      let o=m;
+      switch(m.t){
+        case "pat": o={t:"pat",slot:m.slot,b64:b64of(m.bytes)}; break;
+        case "sample": o={t:"sample",d:m.d,kind:m.kind,slot:m.slot,sr:m.sr,b64:b64of(new Uint8Array(m.data.buffer,m.data.byteOffset,m.data.byteLength))}; break;
+        case "freqs": o={t:"freqs",f:Array.from(m.f)}; break;
+        case "song": o={t:"song",ids:Array.from(m.ids)}; break;
+      }
+      try{NATIVE_PORT.postMessage(o);}catch(e){console.warn("core: bridge post failed",e);}
+    }
+    onNativeEvents(arr){ if(this.onEvents&&arr&&arr.length)this.onEvents(Int32Array.from(arr),0); }
+    onNativePong(m){ if(this.onPong)this.onPong(m); }
     // wasm bytes: base64 from window.__LL_CORE_WASM (inlined by build.mjs).
     static wasmBytes(){
       const b64=(typeof window!=="undefined"&&window.__LL_CORE_WASM)||"";
@@ -176,7 +197,9 @@ self.onmessage=(e)=>{
     // render (the MP3 bounce) can start from exactly what the live core holds.
     post(m,transfer){
       this.shadow(m);
-      if(this.node)this.node.port.postMessage(m,transfer||[]); else this.pending.push([m,transfer]);
+      if(this.native&&this.ready)this.nativePost(m);
+      else if(this.node)this.node.port.postMessage(m,transfer||[]);
+      else this.pending.push([m,transfer]);
     }
     shadow(m){
       const s=this._sh||(this._sh={p:{},l:[{},{}],d:[],freqs:null,pat:{},song:null});
@@ -206,7 +229,7 @@ self.onmessage=(e)=>{
         let kind=0,bufs=[];
         if(smp.numberOfChannels!=null)bufs=[smp]; else if(smp.rr&&smp.rr.length){kind=1;bufs=smp.rr;} else if(smp.vel&&smp.vel.length){kind=2;bufs=smp.vel;}
         bufs=bufs.slice(0,8); const d=VOICES.indexOf(key);
-        bufs.forEach((b,slot)=>out.push({t:"sample",d,kind,slot,data:CoreHost.mono(b,sr)}));
+        bufs.forEach((b,slot)=>out.push({t:"sample",d,kind,slot,sr:b.sampleRate||sr,data:CoreHost.mono(b)}));
         if(bufs.length)out.push({t:"sample_commit",d,kind,n:bufs.length});
       }
       return out;
@@ -234,6 +257,19 @@ self.onmessage=(e)=>{
     }
     async init(){
       if(this.initP)return this.initP;
+      if(this.native){
+        // The shell owns the engine; it injected its sample rate at document
+        // start. The `ctx` here is a stand-in for the few readers of
+        // bell.current.ctx (the resume watchdog, an audition's time stamp).
+        this.sr=(window.__LL_NATIVE_SR|0)||48000;
+        const sr=this.sr;
+        this.ctx={state:"running",sampleRate:sr,get currentTime(){return performance.now()/1000;},resume:async()=>{},close:async()=>{}};
+        this.ready=true;
+        for(const [m] of this.pending)this.nativePost(m);
+        this.pending=[];
+        this.initP=Promise.resolve();
+        return this.initP;
+      }
       this.initP=(async()=>{
         const AC=window.AudioContext||window.webkitAudioContext;
         this.ctx=new AC();
@@ -263,7 +299,7 @@ self.onmessage=(e)=>{
       })();
       return this.initP;
     }
-    async resume(){ if(this.ctx&&this.ctx.state!=="running"){try{await this.ctx.resume();}catch(e){}} }
+    async resume(){ if(this.native)return; if(this.ctx&&this.ctx.state!=="running"){try{await this.ctx.resume();}catch(e){}} }
     set(id,v){ this.post({t:"set",id,v:+v}); }
     setLayer(layer,id,v){ this.post({t:"layer",l:LAYER[layer]??layer,id,v:+v}); }
     setDrum(voice,id,v){ const d=typeof voice==="number"?voice:VOICES.indexOf(voice); if(d>=0)this.post({t:"drum",d,id,v:+v}); }
@@ -298,9 +334,9 @@ self.onmessage=(e)=>{
       if(mix.filtCut!=null)this.setDrum(voice,D.FILTCUT,mix.filtCut);
     }
     // Samples: an AudioBuffer, {rr:[...]} or {vel:[...]} per voice, as the app
-    // keeps them. Downmixed to mono and resampled to the engine rate if a
-    // buffer was decoded through a 44.1k OfflineAudioContext before the live
-    // context existed.
+    // keeps them. Downmixed to mono; sent with their OWN rate, and the core
+    // resamples on playback (a kit decoded through a 44.1k OfflineAudioContext
+    // before the live context existed plays in tune on a 48k engine).
     pushSamples(map){
       this._samples=map||{};
       this.post({t:"samples_clear"});
@@ -312,18 +348,13 @@ self.onmessage=(e)=>{
         else if(s.vel&&s.vel.length){kind=2;bufs=s.vel;}
         bufs=bufs.slice(0,8);
         const d=VOICES.indexOf(key);
-        bufs.forEach((b,slot)=>{const data=CoreHost.mono(b,this.sr);this.post({t:"sample",d,kind,slot,data},[data.buffer]);});
+        bufs.forEach((b,slot)=>{const data=CoreHost.mono(b);this.post({t:"sample",d,kind,slot,sr:b.sampleRate||this.sr,data},[data.buffer]);});
         if(bufs.length)this.post({t:"sample_commit",d,kind,n:bufs.length});
       }
     }
-    static mono(b,sr){
-      const n=b.length,ch=b.numberOfChannels;let m=new Float32Array(n);
+    static mono(b){
+      const n=b.length,ch=b.numberOfChannels;const m=new Float32Array(n);
       for(let c=0;c<ch;c++){const x=b.getChannelData(c);for(let i=0;i<n;i++)m[i]+=x[i]/ch;}
-      if(b.sampleRate&&Math.abs(b.sampleRate-sr)>1){
-        const r=b.sampleRate/sr,on=Math.floor(n/r);const o=new Float32Array(on);
-        for(let i=0;i<on;i++){const p=i*r,k=Math.floor(p),f=p-k;o[i]=m[k]+((m[k+1]??m[k])-m[k])*f;}
-        m=o;
-      }
       return m;
     }
   }

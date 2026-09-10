@@ -449,8 +449,19 @@ without signal is the failure this exists to prevent, and it would only ever
 show up on a device you can't attach a debugger to. If you add a CDN dependency
 to the source, the iOS build breaks until you vendor it into `vendor/`.
 
-**The shell is ~150 lines of Swift, no Capacitor, no Cordova.** Three files in
-`ios/LoudLight/`, doing only what a web page on iOS cannot do for itself:
+**The shell is a few hundred lines of Swift, no Capacitor, no Cordova.** Four
+files in `ios/LoudLight/`, doing only what a web page on iOS cannot do for
+itself:
+
+- **`CoreAudioHost`** hosts the DSP core in AVAudioEngine — `core/src/*.c`
+  compiled into the target as plain C (`project.yml`, with `-ffp-contract=off`
+  so arm64 renders what the wasm renders; `Bridging.h` exposes `ll.h`). The
+  page posts the same messages it would post to the worklet to
+  `webkit.messageHandlers.core` (binary as base64) and the render block calls
+  `ll_render`. One `os_unfair_lock` guards the core between the render thread
+  and the main thread; a sample's frames are copied outside it. Events go
+  back on a 30Hz timer, dropped while the app is inactive. Type-checked by
+  CI's `compile` job; **not yet run on a device.**
 
 - **`BundleSchemeHandler`** serves the bundle over `loudlight://app` rather than
   `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
@@ -547,11 +558,13 @@ iPad from Xcode, and the TestFlight workflow went green on its first run
 Connect from a `macos-26` runner in about 3½ minutes. So the whole chain is
 proven — no Mac needed for a build from here.
 
-**Background audio does not work, and cannot be made to — with Web Audio.**
-The DSP core (see "The native audio core") is the way out: once the iOS shell
-hosts it in AVAudioEngine, this paragraph stops applying. Until then it
-stands. This was the main native-audio reason for wrapping the app, so it is
-worth stating plainly:
+**Background audio does not work — with Web Audio.** The shell now hosts the
+DSP core in AVAudioEngine (`CoreAudioHost`), which is not Web Audio, and the
+sequencer runs inside its render block; so this paragraph describes what the
+shell is escaping from, and `UIBackgroundModes: audio` is now honest. Whether
+it survives a locked screen and an app switch on a real phone is the first
+thing to check on the next TestFlight build. The old situation, worth keeping
+because it is why the core exists:
 **Web Audio in a WKWebView cannot play on the lock screen or sustain in the
 background.** WebKit suspends the `AudioContext` when the host app backgrounds
 regardless of `UIBackgroundModes` or the host's `AVAudioSession`; the WebKit bug
@@ -579,10 +592,13 @@ AudioWorklet on the web (and inside the WKWebView) and, next, into the iOS
 shell for AVAudioEngine. Design, wire formats, host contract, verification and
 the step plan: **`docs/native-audio.md`**. Read it before touching either side.
 
-- **Off by default** (`CORE_DEFAULT=false`). `?core=1` on the URL turns it on
-  for a session, `?core=0` forces it off — A/B on the phone without a build.
-  Flip the default once Jake has judged it by ear; the JS engines stay in the
-  source until the iOS host exists.
+- **Off by default on the web** (`CORE_DEFAULT=false`). `?core=1` on the URL
+  turns it on for a session, `?core=0` forces it off — A/B on the phone
+  without a build. Flip the default once Jake has judged it by ear. **Inside
+  the iOS shell it is always on** (`CORE_NATIVE`): the shell hosts it in
+  AVAudioEngine (`ios/LoudLight/CoreAudioHost.swift`), which is the only
+  audio that survives the screen locking. The JS engines stay in the source
+  until that has been heard on a device.
 - **The app is a controller now.** Everything the JS scheduler read from a ref
   is pushed to the core when it changes (the "Core mirror" effects); patterns
   go as bytes in the wire format, one slot at a time, on identity change. If

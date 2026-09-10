@@ -33,6 +33,12 @@ targets:
 
     sources:
       - path: LoudLight
+      # The DSP core, compiled into the app as plain C. The SAME files the web
+      # build compiles to wasm; -ffp-contract=off keeps the two bit-identical
+      # (arm64 would otherwise fuse multiply-adds and round differently).
+      - path: ../core/ll.h
+      - path: ../core/src
+        compilerFlags: "-O2 -ffp-contract=off -fno-builtin -fno-strict-aliasing -Wno-unused-function"
       # A folder REFERENCE, not a group: the whole www/ tree is copied into the
       # bundle verbatim, keeping the directory layout the page's relative URLs
       # (samples/808-kit/BD.wav, fonts/…) depend on. As a group, Xcode would
@@ -48,6 +54,8 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: LoudLight/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: LoudLight/Bridging.h
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../core"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # iPhone and iPad. Nothing in the web app needed changing for it:
         # IS_MOBILE keys off maxTouchPoints, so an iPad already gets the

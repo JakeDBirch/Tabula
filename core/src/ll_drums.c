@@ -10,6 +10,12 @@
 
 static inline float filt_cut_hz(float v){ return 20.f*ll_pow(1000.f,ll_clamp(v,0,100)/100.f); }
 
+void drums_stop_samples(void){
+  for(int i=0;i<LL_NDVOICES;i++){ ll_dvoice*d=&G.dv[i]; if(!d->active)continue; int alive=0;
+    for(int e=0;e<d->nel;e++){ if(d->el[e].kind==DE_SAMPLE)d->el[e].active=0; else if(d->el[e].active)alive=1; }
+    if(!alive)d->active=0; }
+  G.activeOH=-1;
+}
 void drums_reset(void){
   for(int i=0;i<LL_NDVOICES;i++)G.dv[i].active=0;
   G.activeOH=-1;
@@ -111,10 +117,13 @@ void drums_play(int voice,double t,int vel,const float*ov,int hasOv){
     else if(ss->kind==2){ idx=(int)(((float)vel/128.f)*ss->n); if(idx<0)idx=0; if(idx>ss->n-1)idx=ss->n-1; }
     ll_dvoice*d=dv_alloc(voice);
     ll_delem*e=el_new(d,DE_SAMPLE,t);
-    e->smp=ss->p[idx]; e->smpLen=ss->len[idx]; e->rate=pr; e->pos=0; e->smpGain=v;
+    /* playbackRate × the source/engine rate ratio: the sample plays at its
+     * own pitch on any engine rate, and lasts what it lasted. */
+    float srcSr=ss->sr[idx]>1000.f?ss->sr[idx]:G.sr;
+    e->smp=ss->p[idx]; e->smpLen=ss->len[idx]; e->rate=pr*(srcSr/G.sr); e->pos=0; e->smpGain=v;
     auto_init(&e->gain,v);
     float env01=(hasOv?ov[5]:strip->env)/100.f;
-    float sampleDur=((float)e->smpLen/G.sr)/pr;
+    float sampleDur=((float)e->smpLen/srcSr)/pr;
     double endAt=t+sec2f(sampleDur);
     if(env01<0.999f){
       const float MIN_GATE=0.012f;
