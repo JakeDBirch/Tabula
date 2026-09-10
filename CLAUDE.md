@@ -95,8 +95,8 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   - **`gridLen` is kept in step as the SUM** — the true sounding length — for
     everything that only wants to know how long a part is. It is **no longer a
     column bound**: anything asking "is this column past the end" must ask per
-    bar (`colPastEnd`), which is what the grid, the step bar, the drum cells and
-    the bar chips now do.
+    bar (`colPastEnd`), which is what the grid, the drum cells and the bar chips
+    now do.
   - **A part with no `barLens` reads exactly as `gridLen` always meant**: bars
     fill in order until it runs out, so a legacy `gridLen` of 14 over two bars
     is `[14,0]` — bar 1 silent, precisely what it used to do. Nothing about an
@@ -225,7 +225,7 @@ A column of keys down the left of every grid — synth/lead show the note name (
 
 - They **float over column 1** rather than taking a gutter beside the grid, and the grid keeps its full width in both states — opening them used to resize the grid, so every cell moved under your finger. Covering one column of a reference you deliberately opened is much the better trade. `rowKeyPad` / `drumKeyPad` are therefore `0` and stay `0`; they survive as names at ~8 call sites (the bar strip, step bar and length track used to be pushed across by them) so the alignment story stays readable and re-reserving a gutter is a one-line change. The key backgrounds are translucent with a small blur, because a lit note under them still has to read.
 - They are still **outside** the `data-grid` container in the DOM, positioned absolutely over it from a shared `position:relative` parent. Two reasons, both load-bearing: the synth grid's pointer handlers live on that container and hit-test a column from its own width, so a key *inside* it would be read as column 0; and as a sibling rather than a child, a tap on a key cannot reach the grid's gesture machine at all — no `stopPropagation` needed and none to forget.
-- Rows are `flex:1` with no gap in the synth grid (and `gap:2` in the drum grid), so the key column matches — the two line up by construction rather than by a magic offset. The bar strip, step bar and length slider under the grid are pushed right by `ROWKEY_W + gap` so their columns still line up with the grid's. Note **padding does not move absolutely positioned children** — the length sliders draw their fill with `position:absolute`, so those take a margin and a narrower width, not padding.
+- Rows are `flex:1` with no gap in the synth grid (and `gap:2` in the drum grid), so the key column matches — the two line up by construction rather than by a magic offset. The bar strip above the grid is pushed right by `ROWKEY_W + gap` so its columns still line up with the grid's.
 - `startEngines` was pulled out of `startStop`: bringing up Bell + DrumEngine and re-pushing every engine-side value is now one function, called by play-start and by an audition. `auditionFreq` plays through the **active layer's** voice (its waveform, filter, envelope, sends) — the question is "what does this row sound like in this part". `auditionDrum` has to pass an explicit time: `DrumEngine.play` uses its time argument raw, with no `currentTime` default the way `Bell.play` has, so `null` lands every envelope at NaN.
 - **The overlay toggles** via the `♪` in the bar strip (`rowKeysOpen`). The toggle lives there rather than in the column itself — on screen on every part page, drums included, with nothing column-aligned depending on it. Since the keys float, the grid is now pixel-identical in both states (verified at desktop, phone portrait and phone landscape: grid x/width/height, and the bar strip's, all unchanged across a toggle, on both grids).
 - **It defaults to closed.** The grid is what the app is; the keys are a reference you reach for — a legend when a user key makes the pitches unguessable, an audition when you want to hear one — and neither is worth 24px of a 370px phone grid by default.
@@ -336,6 +336,14 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   (going through a per-layer view makes `mergeLayer` resize the other parts and
   they slide out of alignment), and the bar's own entry in `barLens` goes with
   it.
+- **Nothing lives under the grid any more.** The step bar (16 dots showing the
+  playhead and dimming past the bar's end) and the drum length track under the
+  drum grid are both gone. Everything they said, the grid already says on its
+  own surface: it lights the playing column, it recesses columns past the bar's
+  end, and the loop-end band is the length. Two rows of duplicate readout were
+  costing ~14px each of a phone's grid — and on a square, height-bound grid,
+  vertical pixels are the whole budget. `S.stepBar` / `S.stepDot` /
+  `S.stepColWrap` / `S.lenSlider` went with them.
 - **The loop end is a band on the grid, not a slider under it.** Grab it
   anywhere down the grid's full height and drag. It sets the **visible bar's**
   length and nothing else (see per-bar lengths above). Deliberately a band at the
@@ -350,6 +358,11 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   note behind it. The drum grid handles pointers per cell, so there is nothing
   to bubble into and its band captures directly; a tap there is a no-op rather
   than a hit. That asymmetry is the same one the two-finger shift has.
+- **UNDO / REDO are glyphs, not words** (`S.histBtn`, square, same height as the
+  rest of the transport so the row still reads as one row). `↶` and `↷` are
+  unambiguous, and the row has better uses for the ~80px two labels were
+  spending: on phone portrait LOOP and FOLLOW go from 76px to 117px each, which
+  are the two labels actually worth reading mid-take.
 - **KnobSlider**: ballistic *relative* drag (dragging the full width moves ~half the range; Ctrl/Cmd = ultra-fine). **Double-tap / double-click = reset to `def`** (or 0 for bipolar, else min). No jump-to-position.
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
@@ -370,13 +383,17 @@ Everything that isn't playing or editing — NEW PROJECT, the project library, M
 
 ### The project library
 
-**Named projects in a list, not fixed slots.** A project is `{id,name,updated,data}`: `id` is opaque and permanent and is what SAVE / LOAD / DELETE address; `name` is only ever a label. Picking a row highlights it and fills the name field, and **one** set of three buttons acts on the pick — three buttons per slot × four slots was the old shape and it forced a filing decision on every save. SAVE with a row picked overwrites it under whatever the name field now says, so **renaming is just editing the name and saving**; with nothing picked SAVE creates a new project. Tapping the picked row again, or DESELECT, gets you back to creating. Don't add a second `＋ NEW`-ish button — one already exists at the top of the menu meaning "reset the live session", and the two labels collided the first time round.
+**Named projects in a list, not fixed slots.** A project is `{id,name,updated,data}`: `id` is opaque and permanent and is what SAVE / LOAD / DELETE address; `name` is only ever a label. Picking a row highlights it and fills the name field, and **one** row of buttons acts on the pick — three buttons per slot × four slots was the old shape and it forced a filing decision on every save. SAVE with a row picked overwrites it under whatever the name field now says, so **renaming is just editing the name and saving**; with nothing picked SAVE creates a new project. Tapping the picked row again, or DESELECT, gets you back to creating.
+
+**NEW is in that same cluster** — `NEW · SAVE · LOAD · DELETE` — rather than on a full-width row of its own above the list. Same kind of verb, and the row it used to own is height the list wants. It is the one that acts on the **live session** instead of the list, which is what its green accent says. The save button's no-pick label is therefore **SAVE AS**, not "SAVE NEW": two buttons a thumb apart both saying NEW is exactly the collision that made the old top button a problem the first time round. Don't reintroduce a second NEW-ish button.
 
 **A new project arrives already named.** `randomName` picks two words (756 combinations, avoiding names already in the list) and drops them in the name field whenever the target becomes "new" — on open, on DESELECT, on NEW PROJECT. "Untitled 3" is a label you have to replace before it means anything; a name you can recognise a month later means nobody has to invent one before they're allowed to save. Always editable, and `⟲` in the DESELECT slot rolls again.
 
 DEVICE and CLOUD are the same list against different stores, chosen by a segmented toggle, which is what keeps it to one set of buttons. Local lives at `storageSet("projects", …)`; `migrateSlotLibrary` carries a legacy `{S1..S4}` save across as four named projects (it also passes an already-migrated array straight through). `PROJ_MAX`=24 guards the ~5MB localStorage quota against ~250KB projects; a quota failure rolls the list back so what's on screen matches what's on disk.
 
-**Sharing is gone.** The share LINK, JSON EXPORT and JSON IMPORT were removed once the named library and the cloud covered keeping and moving work — a preset file was a fourth way to do the same job. What's left is the **EXPORT** section: MIDI and MP3, which render the song *out* of Tabula into something another tool plays. (Not "bounce" — that's an audio word and MIDI isn't audio.) **MP3 asks how many passes before it starts**, rather than the count living permanently on the panel: it's a control you only care about in the two seconds before a bounce, and a bounce runs in real time, so an accidental 8-pass one costs minutes you can't cancel. The count is passed to `exportMP3(n)` as an argument — the chooser sets `exportLoops` and starts the bounce in the same handler, so reading it from state there would get the previous value. Any exit from the menu disarms the chooser, via one effect on `menuOpen`/`activeSheet` rather than a call on each close path. `encodeState` and `shareFlash` went with them; **`decodeState` stayed**, because the mount still reads a project out of a `#hash` and a link already sent to someone should still open. `getShareState` / `applyShareState` keep their names — they're the serialization pair for autosave, the library and the cloud, and renaming them would touch every persistence site for nothing.
+**Sharing is gone.** The share LINK, JSON EXPORT and JSON IMPORT were removed once the named library and the cloud covered keeping and moving work — a preset file was a fourth way to do the same job. `encodeState` and `shareFlash` went with them; **`decodeState` stayed**, because the mount still reads a project out of a `#hash` and a link already sent to someone should still open. `getShareState` / `applyShareState` keep their names — they're the serialization pair for autosave, the library and the cloud, and renaming them would touch every persistence site for nothing.
+
+**EXPORT is gone from the menu too — it lives on the transport's HOLD.** MIDI and MP3 render the song *out* of the app into something another tool plays, which is not filing; and the drawer they were in is a **list**, which wants every pixel of height it can get. So they moved onto the control that plays the song, under the deliberate gesture (`playBtnProps`, on all three play-button mounts). The **MP3 pass count is folded into that menu** rather than being a second screen: it is still asked before the bounce starts — a bounce runs in real time, so an accidental 8-pass one costs minutes you can't cancel — but choosing the count *is* starting it, so a bounce is one gesture instead of three. `mp3Arm` and its disarm-on-close effect are gone with the old two-step chooser. The count is still passed to `exportMP3(n)` as an **argument**: the handler that sets `exportLoops` and starts the bounce would read the previous value out of state.
 
 `showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
 

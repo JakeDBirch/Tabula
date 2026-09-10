@@ -142,9 +142,11 @@ const IS_MOBILE = (()=>{
 // or two wider than the cells they sit in.
 const CELL_GAP=IS_MOBILE?2:3;
 // Width of the row-key column beside the grid. Declared here for the same
-// reason CELL_GAP is: the step bar and the length slider under the grid are
-// pushed right by exactly this much so their columns still line up with the
-// grid's, and both places have to read the same number.
+// reason CELL_GAP is: the bar strip above the grid is pushed right by exactly
+// this much so its columns still line up with the grid's, and both places have
+// to read the same number. (The step bar and the length track that also used
+// this are gone — the loop-end band on the grid shows the length now, and the
+// grid lights the playing column itself.)
 const ROWKEY_W=IS_MOBILE?24:30;
 const PAT_COLORS=["#a8c5a0","#c4727a","#9fb4c7","#e6b872","#79b8f2","#7aaa96","#c4b07a","#a09ec4"];
 // A saved project is {id,name,updated,data}. `id` is opaque and permanent —
@@ -3382,7 +3384,8 @@ export default function LoudLight(){
   const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
   const exportBarR = useRef(null); // progress-bar DOM node — width driven directly (no re-render) during capture
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
-  const [mp3Arm,      setMp3Arm]      = useState(false); // MP3 tapped → asking for the pass count
+  // Where the transport's hold-to-export menu is anchored: {x,y} or null.
+  const [exportMenu,  setExportMenu]  = useState(null);
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
@@ -3803,6 +3806,7 @@ export default function LoudLight(){
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
+  const exportMenuAtR=useRef(0);
   const tempoPopAtR=useRef(0);
   const tempoFieldR=useRef("bpm");
   useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
@@ -4038,13 +4042,6 @@ export default function LoudLight(){
   // so a failure looked like a success in the corner of your eye. Warnings also
   // sit longer — you can't act on a rate-limit message you didn't finish
   // reading.
-  // Leaving the menu by ANY route disarms the MP3 chooser — backdrop, ESC, the
-  // mobile sheet's own dismiss. One rule beats remembering every close path,
-  // and a chooser left armed behind a closed menu is a trap next time it opens.
-  useEffect(()=>{
-    if(!menuOpen&&activeSheet!=="project")setMp3Arm(false);
-  },[menuOpen,activeSheet]);
-
   const showFlash=(msg,tone)=>{
     const warn=tone==="warn";
     setFlash(msg);setFlashTone(warn?"warn":"ok");
@@ -8609,6 +8606,45 @@ export default function LoudLight(){
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
+  // ── EXPORT lives on the transport's HOLD ────────────────────────────────
+  // It used to be a section of the PROJECT drawer, which is a list that wants
+  // every pixel of height it can get. Export is not filing — it is rendering
+  // the song OUT — so it belongs on the control that plays the song, under the
+  // deliberate gesture, exactly like every other second function in here.
+  //
+  // The MP3 pass count is folded into the menu rather than being a second
+  // screen: it is still asked before the bounce starts (a bounce runs in REAL
+  // TIME, so an accidental 8-pass one costs minutes you cannot cancel), but
+  // choosing the count IS starting it, so a bounce is one gesture rather than
+  // three. The count is passed to exportMP3 as an argument — reading it back
+  // from state in the same handler would get the previous value.
+  const playHoldR=useRef({tmr:0,held:false});
+  const _playHoldEnd=()=>{const t=playHoldR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
+  const playBtnProps={
+    onPointerDown:(e)=>{
+      if(e.button===2)return;
+      const t=playHoldR.current;t.held=false;_playHoldEnd();
+      const el=e.currentTarget;
+      t.tmr=setTimeout(()=>{
+        t.tmr=0;t.held=true;
+        const r=el.getBoundingClientRect();
+        exportMenuAtR.current=Date.now();
+        setExportMenu({x:r.left+r.width/2,y:r.bottom});
+      },450);
+    },
+    onPointerUp:()=>_playHoldEnd(),
+    onPointerCancel:()=>{_playHoldEnd();playHoldR.current.held=false;},
+    onPointerLeave:()=>_playHoldEnd(),
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_playHoldEnd();
+      const t=playHoldR.current;t.held=true;
+      const r=e.currentTarget.getBoundingClientRect();
+      exportMenuAtR.current=Date.now();
+      setExportMenu({x:r.left+r.width/2,y:r.bottom});},
+    // The hold swallows its own trailing click, or opening the menu would also
+    // start playback behind it.
+    onClick:()=>{const t=playHoldR.current;if(t.held){t.held=false;return;}startStop();},
+  };
+
   // ── The TEMPO chip: tap opens the drawer, HOLD edits it in place ─────────
   // It shows whichever of the three globals you last touched, so the one you
   // are actually working on is the one under your thumb. Tap is the common
@@ -8717,6 +8753,52 @@ export default function LoudLight(){
     window.addEventListener("keydown",kd);
     return ()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("keydown",kd);};
   },[tempoPop]);
+
+  const exportMenuEl=!exportMenu?null:(()=>{
+    const vw=window.innerWidth,vh=window.innerHeight;
+    const W=Math.min(216,vw-16),H=176;
+    const left=Math.max(8,Math.min(vw-W-8,exportMenu.x-W/2));
+    const top=Math.max(8,Math.min(vh-H-8,exportMenu.y+12));
+    const close=()=>setExportMenu(null);
+    const dismiss=()=>{if(Date.now()-exportMenuAtR.current>400)close();};
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={dismiss} onClick={dismiss}>
+        <div style={{position:"absolute",left,top,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",borderBottom:"1px solid rgba(168,190,212,0.1)",
+            display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(232,220,205,0.9)"}}>EXPORT</span>
+            <span style={{flex:1,fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
+              {songSeq.length?"THE SONG":"THIS PATTERN"}</span>
+          </div>
+          <button style={{width:"100%",padding:"11px 0",background:"none",border:"none",fontFamily:"inherit",
+            color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.6,cursor:"pointer"}}
+            onClick={()=>{close();exportMIDI();}}>MIDI</button>
+          <div style={{padding:"2px 10px 4px",borderTop:"1px solid rgba(168,190,212,0.1)",
+            display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{fontSize:10,fontWeight:700,letterSpacing:1.6,
+              color:exporting?"rgba(178,199,219,0.3)":"rgba(212,226,240,0.82)"}}>MP3</span>
+            <span style={{flex:1,fontSize:7,letterSpacing:1.2,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
+              {exporting?"BOUNCING…":"PASSES — REAL TIME"}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,padding:"2px 10px 10px"}}>
+            {[1,2,4,8].map(n=>(
+              <button key={n} disabled={exporting}
+                onClick={()=>{close();setExportLoops(n);exportMP3(n);}}
+                style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",
+                  cursor:exporting?"wait":"pointer",borderRadius:6,opacity:exporting?0.4:1,
+                  border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.06)",
+                  color:"rgba(226,236,247,0.85)"}}>×{n}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })();
 
   // The hold-to-edit readout. It sits ABOVE the chip (below only if there is no
   // room), because the chip is exactly where the finger is. Pointer-transparent
@@ -8847,9 +8929,6 @@ export default function LoudLight(){
         </div>
       )}
 
-      {/* NEW PROJECT — discards in-memory work and resets to defaults */}
-      <button style={{width:"100%",padding:"11px 0",border:"1px solid rgba(122,170,150,0.4)",borderRadius:7,background:"transparent",color:"rgba(122,170,150,0.85)",fontSize:11,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>newProject()}>＋ NEW PROJECT</button>
-
       {/* ── Projects ─────────────────────────────────────────────────────────
           A named list, not fixed slots. Pick a row and the one set of buttons
           below acts on it; with nothing picked, SAVE creates a new project.
@@ -8959,11 +9038,21 @@ export default function LoudLight(){
                   :<button title="Another name" style={{flexShrink:0,width:38,padding:"9px 0",borderRadius:6,border:"1px solid rgba(168,190,212,0.25)",background:"transparent",color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
                      onClick={()=>setNameDraft(randomName(takenNames(libTab)))}>⟲</button>}
               </div>
-              {/* One set of buttons. SAVE always works (new, or into the pick);
-                  LOAD and CLEAR need something picked. */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {/* One set of buttons. SAVE always works (into the pick, or as a
+                  new project); LOAD and DELETE need something picked. NEW sits
+                  here rather than at the top of the menu — it is the same kind
+                  of verb, it costs a row of its own up there, and a project
+                  drawer wants its height for the LIST. It is the one that acts
+                  on the live session rather than the list, hence the accent.
+                  Note the save label: with nothing picked it says SAVE AS, not
+                  "SAVE NEW", because two buttons a thumb apart both saying NEW
+                  is exactly the collision that got the old top button in
+                  trouble the first time round. */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                <button style={Object.assign({},mBtn,{border:"1px solid rgba(122,170,150,0.4)",color:"rgba(122,170,150,0.85)"})}
+                  onClick={()=>newProject()}>NEW</button>
                 <button style={Object.assign({},mBtn,{border:"1px solid "+accent+"88",color:accent})}
-                  onClick={()=>(onCloud?cloudSave:saveProject)()}>{picked?"SAVE":"SAVE NEW"}</button>
+                  onClick={()=>(onCloud?cloudSave:saveProject)()}>{picked?"SAVE":"SAVE AS"}</button>
                 <button style={Object.assign({},mBtn,picked?mBtnLit:{opacity:0.4})}
                   onClick={()=>(onCloud?cloudLoad:loadProject)()}>LOAD</button>
                 <button style={Object.assign({},mBtn,{color:picked?"#c98a8a":undefined,opacity:picked?1:0.4})}
@@ -8974,43 +9063,6 @@ export default function LoudLight(){
         })()}
       </div>
 
-      {/* ── Export ──────────────────────────────────────────────────────────
-          Share link, JSON export and JSON import are gone: the named project
-          library and the cloud cover keeping and moving work, and a preset file
-          was a fourth way to do the same thing. What's left renders the song
-          OUT of the app, into something another tool plays. */}
-      <div>
-        <div style={mSecLbl}>EXPORT</div>
-        {/* MP3 asks how long before it runs. The pass count used to sit here
-            permanently, which is a control you only care about in the two
-            seconds before a bounce — and a bounce is REAL TIME, so starting an
-            8-pass one by accident costs you minutes you can't cancel. */}
-        {mp3Arm?(
-          <div style={{border:"1px solid rgba(168,190,212,0.25)",borderRadius:7,padding:"9px 10px"}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-              <span style={{flex:1,fontSize:9,letterSpacing:1,color:"rgba(178,199,219,0.6)",fontWeight:600}}>HOW MANY PASSES THROUGH THE SONG?</span>
-              <button style={{padding:"2px 6px",border:"none",background:"none",color:"rgba(178,199,219,0.4)",fontSize:12,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}
-                onClick={()=>setMp3Arm(false)}>✕</button>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-              {[1,2,4,8].map(n=>(
-                <button key={n} onClick={()=>{setMp3Arm(false);setExportLoops(n);exportMP3(n);}}
-                  style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:6,
-                    border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.06)",color:"rgba(226,236,247,0.85)"}}>×{n}</button>
-              ))}
-            </div>
-            <div style={{marginTop:7,fontSize:8,letterSpacing:0.5,lineHeight:1.5,color:"rgba(178,199,219,0.3)"}}>
-              Recorded in real time — {songSeq.length?"one pass is the whole song":"one pass is the current pattern"}.
-            </div>
-          </div>
-        ):(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-            <button style={mBtn} onClick={()=>exportMIDI()}>MIDI</button>
-            <button style={Object.assign({},mBtn,{opacity:exporting?0.5:1,cursor:exporting?"wait":"pointer"})}
-              disabled={exporting} onClick={()=>setMp3Arm(true)}>{exporting?"…":"MP3"}</button>
-          </div>
-        )}
-      </div>
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
   );
@@ -9212,6 +9264,7 @@ export default function LoudLight(){
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
       {tempoPopup}
+      {exportMenuEl}
 
       {/* Chain drag ghost */}
 
@@ -9504,18 +9557,6 @@ export default function LoudLight(){
                   </div>
                 );})}
               </div>
-              </div>
-              <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>
-                {Array.from({length:COLS},(_,c)=>{
-                  const ac=barOff+c;
-                  const isA=playing&&ac===step,isQ=c%4===0,inactive=colPastEnd(activePat,ac);
-                  return(
-                  <div key={c} style={S.stepColWrap}>
-                    <div style={Object.assign({},S.stepDot,{
-                      background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",
-                      transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/>
-                  </div>
-                );})}
               </div>
 
               </div>
@@ -10070,9 +10111,9 @@ export default function LoudLight(){
           {/* Transport — always visible, centered. VARY toggle removed; it lives
               inside the VARY page now (tab still glows orange while enabled). */}
           <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(168,190,212,0.08)"}}>
-            <button style={Object.assign({},S.loopBtnBottom,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
-            <button style={Object.assign({},S.loopBtnBottom,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
-            <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} onClick={startStop}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+            <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+            <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+            <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
             <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
             <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
           </div>
@@ -10238,7 +10279,6 @@ export default function LoudLight(){
                     })}
                   </div>
                   </div>
-                  <div style={Object.assign({},S.stepBar,{marginLeft:rowKeyPad})}>{Array.from({length:COLS},(_,c)=>{const ac=barOff+c;const isA=playing&&ac===step,isQ=c%4===0,inactive=colPastEnd(activePat,ac);return(<div key={c} style={S.stepColWrap}><div style={Object.assign({},S.stepDot,{background:inactive?"rgba(186,208,230,0.06)":isA?"rgba(232,220,205,0.9)":isQ?"rgba(178,199,219,0.3)":"rgba(255,255,255,0.1)",transform:inactive?"scaleY(0.2)":isA?"scaleY(1)":isQ?"scaleY(0.6)":"scaleY(0.3)"})}/></div>);})}</div>
 
                 </div>
               </div>
@@ -10341,20 +10381,6 @@ export default function LoudLight(){
                         )})}
                       </div>
                       </div>
-                      {/* Horizontal length slider (matches synth grid orientation) */}
-                      <div style={{width:`calc(${SIZE} - ${drumKeyPad}px)`,marginLeft:drumKeyPad,height:10,background:"rgba(186,208,230,0.06)",borderRadius:5,position:"relative",cursor:"ew-resize",touchAction:"none",flexShrink:0}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          const update=ev=>{const pct=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));setDrumLen(Math.max(1,Math.round(pct*COLS)));};
-                          update(e);
-                          const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                        }}>
-                        <div style={{position:"absolute",top:0,bottom:0,left:0,width:`${_lenFrac*100}%`,background:"rgba(178,199,219,0.18)",borderRadius:"5px 0 0 5px"}}/>
-                        {_lenFrac>0&&_lenFrac<1&&<div style={{position:"absolute",top:-2,bottom:-2,width:6,left:`calc(${_lenFrac*100}% - 3px)`,background:"rgba(255,255,255,0.85)",borderRadius:3,boxShadow:"0 0 5px rgba(255,255,255,0.3)"}}/>}
-                        <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:6,color:"rgba(178,199,219,0.4)",pointerEvents:"none"}}>{dLen}</span>
-                      </div>
                     </div>
                   );
                 })()}
@@ -10406,9 +10432,9 @@ export default function LoudLight(){
             </div>
             {/* Row 2: persistent transport */}
             <div style={{display:"flex",alignItems:"center",padding:"0 10px 10px",gap:5}}>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶ UNDO</button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷ REDO</button>
-              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
+              <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+              <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
@@ -10421,14 +10447,14 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
             <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} onClick={startStop}>
+              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:30,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:30,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
@@ -11016,6 +11042,11 @@ const S={
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
   loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
+  // UNDO / REDO carry a glyph and no word, so they are square rather than
+  // word-width: the arrows are unambiguous and the row has better uses for
+  // the ~80px they were spending on two labels. Same height as the rest of
+  // the transport, so the row still reads as one row.
+  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
   tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
@@ -11034,10 +11065,6 @@ const S={
   gridShifting:{outline:"1px solid rgba(255,229,0,0.2)",borderRadius:4},
   gridRow:     {display:"flex",gap:CELL_GAP,alignItems:"stretch",touchAction:"none",flex:"1 1 0"},
   cell:        {flex:1,aspectRatio:IS_MOBILE?"1":"unset",borderRadius:IS_MOBILE?2:3,touchAction:"none",transition:"box-shadow .06s, background .06s",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"},
-  stepBar:     {display:"flex",gap:IS_MOBILE?2:3,marginTop:2,alignItems:"center"},
-  stepColWrap: {flex:1,height:IS_MOBILE?12:14,display:"flex",alignItems:"center"},
-  lenSlider:   {position:"relative",height:IS_MOBILE?10:20,marginTop:IS_MOBILE?4:8,borderRadius:IS_MOBILE?3:5,background:"rgba(186,208,230,0.06)",touchAction:"none",cursor:"ew-resize",overflow:"visible"},
-  stepDot:     {width:"100%",height:4,borderRadius:2,transition:"transform .07s, background .07s"},
 
   // Chain strip
   chainStrip:     {display:"flex",flexDirection:"row",gap:5,overflowX:"auto",scrollbarWidth:"none",padding:"8px 4px",marginTop:6,borderTop:"1px solid rgba(255,255,255,0.06)",minHeight:46,alignItems:"center",transition:"background .12s",borderRadius:6},
