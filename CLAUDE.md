@@ -254,10 +254,13 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   press's own trailing click closes it instantly (`sheetGuardR`,
   `patMenuAtR`, `popupOpenAtR`); and the hold must **swallow its trailing
   click**, or the menu arrives with a surprise extra bar/pattern behind it.
-- **Each hold menu hangs off the thing it acts on.** The pattern `+`'s hold
-  (`patternOpsMenu`, one body spread into all three `+` mounts via
-  `patPlusProps` — sidebar/portrait chips, landscape rail, song palette) is
-  **pattern-wide only**: ×2, DUP, DEL and the master selector. A **bar chip's**
+- **Each hold menu hangs off the thing it acts on.** A **pattern chip's** hold
+  (`patternOpsMenu`, opened by `patChipProps` from the two plain chip rows —
+  sidebar/portrait and the landscape rail) carries the **pattern-wide** ops: ×2,
+  DUP, DEL and the master selector. The `+` is a plain "add a pattern" again;
+  it briefly carried this menu, which meant the ops acted on whichever pattern
+  happened to be *selected* rather than on one you had pointed at. A **bar
+  chip's**
   hold (`barOpsMenu`, opened from the bar strip, which hit-tests the bar from
   the pointer x exactly as `_scrubTo` does) carries the **bar-scoped** ops —
   RAND / CLR / MUT8 / CPY / PST, DUP BAR and DELETE BAR *n* — plus **SPEED**,
@@ -281,6 +284,11 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   `var`, so spreading it before assignment installs nothing at all, silently.
   Note the desktop sidebar keeps its own always-visible RAND/CLR/MUT8/CPY/PST
   row — a different surface, deliberately left alone.
+- **The song page's palette chips fold the hold into their OWN pointer handler**
+  rather than using `patChipProps`, because they are also the **drag source**
+  for placing a pattern into a slot and the drag has to be able to cancel the
+  hold. A wobble under the 6px threshold does not cancel it; only a real drag
+  does. Both gestures live on the same element and both are tested.
 - **`deleteBarAt(bar)` deletes THAT bar; `removeBar` (−BAR) shrinks from the
   end.** Both are wanted and they are not the same op — a menu hanging off a
   particular chip has to be positional or its label is a lie. `deleteBarAt`

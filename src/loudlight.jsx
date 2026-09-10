@@ -4798,31 +4798,42 @@ export default function LoudLight(){
   // VISIBLE BAR of the layer you're editing, not the whole pattern — that has
   // always been true and has never been written down anywhere you could see it,
   // which is exactly the kind of thing a menu can say for free.
-  const patPlusR=useRef({tmr:0,held:false});
+  const patChipR=useRef({tmr:0,held:false});
   const patMenuAtR=useRef(0);
-  const _patPlusEnd=()=>{if(patPlusR.current.tmr){clearTimeout(patPlusR.current.tmr);patPlusR.current.tmr=0;}};
-  const _openPatOps=(x,y)=>{patMenuAtR.current=Date.now();setDelArm(null);setPatMenu({id:activePatternId,x,y});};
-  // One handler set, spread into all three + mounts (sidebar/portrait chips,
-  // landscape rail, song palette) so they cannot drift apart.
-  const patPlusProps={
+  const _patChipEnd=()=>{if(patChipR.current.tmr){clearTimeout(patChipR.current.tmr);patChipR.current.tmr=0;}};
+  // Opening a chip's menu SELECTS that pattern first — the same thing a tap on
+  // it does — so ×2 and the master selector, which read the pattern you are
+  // editing rather than an id, act on the one you actually pressed.
+  const _openPatOpsFor=(id,x,y)=>{
+    patMenuAtR.current=Date.now();setDelArm(null);
+    setActivePatId(id);setPatMenu({id,x,y});
+  };
+  // A pattern chip's second function, spread into the two plain chip rows.
+  // (The song palette's chips are also a DRAG source, so they fold the same
+  // hold into their own pointer handler instead — see songPage.)
+  const patChipProps=(id)=>({
     onPointerDown:(e)=>{
       e.stopPropagation();
-      patPlusR.current.held=false;_patPlusEnd();
+      patChipR.current.held=false;_patChipEnd();
       const x=e.clientX,y=e.clientY;
-      patPlusR.current.tmr=setTimeout(()=>{patPlusR.current.tmr=0;patPlusR.current.held=true;_openPatOps(x,y);},450);
+      patChipR.current.tmr=setTimeout(()=>{
+        patChipR.current.tmr=0;patChipR.current.held=true;_openPatOpsFor(id,x,y);
+      },450);
     },
-    onPointerMove:(e)=>{if(e.buttons)_patPlusEnd();},
-    onPointerUp:()=>{_patPlusEnd();},
-    onPointerCancel:()=>{_patPlusEnd();patPlusR.current.held=false;},
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_patPlusEnd();patPlusR.current.held=true;_openPatOps(e.clientX,e.clientY);},
+    onPointerMove:(e)=>{if(e.buttons)_patChipEnd();},
+    onPointerUp:()=>{_patChipEnd();},
+    onPointerCancel:()=>{_patChipEnd();patChipR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_patChipEnd();
+      patChipR.current.held=true;_openPatOpsFor(id,e.clientX,e.clientY);},
     onClick:(e)=>{
       e.stopPropagation();
-      // The hold already opened the menu — swallow its trailing click, or the
-      // menu arrives with a surprise extra pattern behind it.
-      if(patPlusR.current.held){patPlusR.current.held=false;return;}
-      addPattern();
+      // Swallow the hold's trailing click. Harmless here (it would only
+      // re-select what the hold already selected) but kept for the same reason
+      // everywhere else: the idiom should behave identically wherever it is.
+      if(patChipR.current.held){patChipR.current.held=false;return;}
+      setActivePatId(id);
     },
-  };
+  });
   const setPatternMaster=(layer)=>{
     pushHistory();
     setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
@@ -5038,18 +5049,25 @@ export default function LoudLight(){
             });
             const dragging=patternDrag&&patternDrag.fromPalette&&patternDrag.patId===p.id;
             return(
-              <div key={p.id}
+              <div key={p.id} data-palette-chip={p.id}
+                onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();_openPatOpsFor(p.id,e.clientX,e.clientY);}}
                 onPointerDown={(e)=>{
                   e.stopPropagation();
                   const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
-                  let moved=false;
+                  let moved=false,held=false;
                   _songMeasure();
+                  // These chips are the drag source for placing a pattern into
+                  // a slot, so the hold folds into their own handler rather
+                  // than using patChipProps: the drag has to be able to cancel
+                  // it. A wobble under 6px does NOT — only a real drag does.
+                  let hTmr=setTimeout(()=>{hTmr=0;held=true;_openPatOpsFor(p.id,startX,startY);},450);
+                  const endHold=()=>{if(hTmr){clearTimeout(hTmr);hTmr=0;}};
                   const hit=(ev)=>_songHit(ev.clientX,ev.clientY);
                   const onMove=(ev)=>{
                     if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
                     if(!moved){
                       if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                      moved=true;
+                      moved=true;endHold();
                       setPatternDrag({patId:p.id,name:p.name,accent:col,fromPalette:true,
                         x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
                     }
@@ -5060,6 +5078,9 @@ export default function LoudLight(){
                     document.removeEventListener("pointermove",onMove);
                     document.removeEventListener("pointerup",onUp);
                     document.removeEventListener("pointercancel",onUp);
+                    endHold();
+                    // The hold already opened this chip's menu and selected it.
+                    if(held){ held=false; return; }
                     if(!moved){ setActivePatId(p.id); return; }   // a tap just selects
                     const t=hit(ev);
                     if(t){
@@ -5095,7 +5116,7 @@ export default function LoudLight(){
             );
           })}
           {patterns.length<MAX_PATTERNS&&(
-            <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
+            <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
               style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
                 justifyContent:"center",cursor:"pointer",userSelect:"none",touchAction:"none",
                 border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
@@ -5661,8 +5682,8 @@ export default function LoudLight(){
   const patternChipsRow=(
     <div style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
-        <div key={p.id} role="button" aria-label={"Pattern "+p.name} aria-pressed={sel}
-          onClick={()=>setActivePatId(p.id)}
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls)"} aria-pressed={sel}
+          {...patChipProps(p.id)}
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
             fontSize:IS_MOBILE?13:11,
@@ -5674,7 +5695,7 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
+        <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
             fontSize:IS_MOBILE?15:13,fontWeight:600,touchAction:"none",
@@ -5688,8 +5709,8 @@ export default function LoudLight(){
   const patternChipsRail=(
     <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
-        <div key={p.id} role="button" aria-label={"Pattern "+p.name} aria-pressed={sel}
-          onClick={()=>setActivePatId(p.id)}
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls)"} aria-pressed={sel}
+          {...patChipProps(p.id)}
           style={Object.assign({},_patChipBase,{
             padding:"9px 4px",borderRadius:14,fontSize:13,
             border:"1.5px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.18)"),
@@ -5700,7 +5721,7 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern (hold for pattern controls)" {...patPlusProps}
+        <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
           style={Object.assign({},_patChipBase,{
             padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,touchAction:"none",
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
