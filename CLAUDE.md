@@ -46,7 +46,7 @@ synth + lead share one `Bell` WebAudio engine — a VCO/VCF/VCA chain built fres
 
 ### Unified patterns (in progress)
 
-A **pattern** now holds all three parts at once — `{id, name, bars, parts:{synth, lead, drums}}` — and is the unit a song sequences. `MAX_PATTERNS` = 16. Each part keeps its own **bar count**, `gridLen` and `speedMult`, and loops inside the pattern; everything re-syncs at the pattern top. A part's bar count is simply its own allocated lane width (`partBars`, which also understands a *packed* part via `_w` — measuring a packed sparse grid as one bar would rewrite every multi-bar pattern on save). The pattern's `bars` is derived: the longest part, re-computed by `syncPatBars` after anything reshapes a part, and it's what the master clock cycles on.
+A **pattern** now holds all three parts at once — `{id, name, bars, parts:{synth, lead, drums}}` — and is the unit a song sequences. `MAX_PATTERNS` = 16. Each part keeps its own **bar count**, per-bar lengths (`barLens`) and per-bar rates (`barMults`), and loops inside the pattern; everything re-syncs at the pattern top. A part's bar count is simply its own allocated lane width (`partBars`, which also understands a *packed* part via `_w` — measuring a packed sparse grid as one bar would rewrite every multi-bar pattern on save). The pattern's `bars` is derived: the longest part, re-computed by `syncPatBars` after anything reshapes a part, and it's what the master clock cycles on.
 
 `patterns` + `activePatternId` are the real state. `pats` / `drumPats` / `activeId` / `activeDrumId` are **compatibility views** (`layerLib` / `partView`), and `setPats` / `setDrumPats` fold an edited per-layer library back through `mergeLayer` — that is what let ~190 per-layer call sites survive the model change unedited. `mergeLayer` handles edits, additions (a new id = a new pattern) and removals (a missing id = the pattern goes). A bar-count change touches **only the edited layer's part** — it used to carry across all three, which is what made adding a drum bar lengthen the synth. Delete these views as call sites get rewritten.
 
@@ -183,12 +183,12 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   finishes; everything else loops to fill and is snapped at the boundary, as
   before. `cycleBars(pat)` is what the song page's bar dots count — bars the
   pattern *sounds* for, so a dot can't be drawn that the playhead never lights.
-- **The master is editable and visible** in the `+` button's hold menu. It
+- **The master is editable and visible** in a pattern chip's hold menu. It
   decides the pattern's length, so leaving it purely implicit would mean a
   pattern playing a length you could neither account for nor change, made
   permanent by a stray first tap on the wrong layer.
 - **×2** (`doublePattern`, in `barOpsRow` and the SEQUENCE drawer) doubles the ACTIVE part and copies its data into the new half — the fast way to get a second nearly-identical pass to vary. A 1-bar drum loop under a doubled melody doesn't want doubling; it wants to keep looping to fill.
-- **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the playable loop length in steps, now `1..bars*16` — it is the single source of truth for length; bar count is just its allocation. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
+- **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the part's total sounding length in steps, kept as the **sum of `barLens`** — it is no longer a column bound and no longer the source of truth (`barLens` is); see "Length is PER BAR" above. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
 - **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **chips only** (`barChips`) — tap or drag them to page — then a bar readout (pattern name · visible/total) and a **`+`**. A tap on the `+` adds a bar; a **press-and-hold (~450ms) or right-click** opens the pattern drawer on mobile. Adding a bar is the constant gesture and it used to cost a trip through the drawer, so it got the tap and the drawer got the deliberate one. The readout is now a plain label — it stopped being the drawer handle. The hold is the one sheet opener that isn't `onClick`, so it needs `sheetGuardR`: the sheet opens with the finger still down, the backdrop mounts under it, and that press's trailing click would dismiss the sheet instantly (the same trap the onClick-not-onPointerDown rule guards against). The backdrop ignores clicks for 400ms after the stamp. The `+` swallows its own trailing click after a hold too, or the drawer would arrive with a surprise extra bar. On desktop the hold is not wired at all — the sidebar's `+BAR` is always visible — so a long press there is just a slow tap. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
 - **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
@@ -238,8 +238,8 @@ A column of keys down the left of every grid — synth/lead show the note name (
 
 The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
-- **Parts** each run their own cursor (`freeR.current[layer] = {step, nextAt}`) at `absStepDur * part.speedMult`, looping within their own `gridLen`. They drift apart inside the pattern — that's the polymeter.
-- **The master clock is one pattern long** (`patLen = bars * COLS` absolute steps). When it wraps, the song advances to its next entry and every part cursor resets to step 0. That single rule replaced sync/free/random and the old `cycleLen = min over populated layers` fudge, which existed only to invent a shared bar for three independent lanes.
+- **Parts** each run their own cursor (`freeR.current[layer] = {step, nextAt}`). `lf.step` indexes `partSeq(part)` — the ordered list of columns that part plays — and each tick lasts `absStepDur * colMult(part, s)`, priced from the bar the step is in. They drift apart inside the pattern; that's the polymeter.
+- **The master clock is one pattern long**, but counted in the MASTER PART'S OWN STEPS (`patCycle(pat).steps`) and priced per tick from that step's bar — not `bars * COLS` absolute steps, and not a uniform multiplier. See "Speed is PER BAR" and "One part is the pattern's MASTER" above for why both of those stopped being single multiplications. When it wraps, the song advances to its next entry and every part cursor resets to step 0. That single rule replaced sync/free/random and the old `cycleLen = min over populated layers` fudge, which existed only to invent a shared bar for three independent lanes.
 
 ### Controls & interaction conventions
 
@@ -271,30 +271,24 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   DUP, DEL and the master selector. The `+` is a plain "add a pattern" again;
   it briefly carried this menu, which meant the ops acted on whichever pattern
   happened to be *selected* rather than on one you had pointed at. A **bar
-  chip's**
-  hold (`barOpsMenu`, opened from the bar strip, which hit-tests the bar from
-  the pointer x exactly as `_scrubTo` does) carries the **bar-scoped** ops —
-  RAND / CLR / MUT8 / CPY / PST, DUP BAR and DELETE BAR *n* — plus **SPEED**,
-  which is the one thing there that is *not* bar-scoped. `speedMult` is a
-  property of the whole part, so that section carries its own header saying so
-  rather than letting the "BAR *n*" title imply otherwise. It moved off the
-  STEP sheet, where it was the only control that wasn't a step lane. Read it
-  from `editPat.speedMult`, not the `activePatSpeed` memo — that is declared
-  thousands of lines below the menu and would be `undefined` at build time.
-  (Per-BAR speed would be a different thing again: `layerStepDur` is currently
-  one rate per part, and the master cycle is `steps × mult`, so varying it
-  across bars means both stop being a single multiplication. Not built; ask
-  before assuming a request for it.) They were briefly
-  together under the `+`, which put "randomise this bar" two rows from "delete
-  this pattern" under a button that makes patterns. Opening the bar menu
-  **selects that bar first** (the same `goToBar` a tap does), so every existing
-  bar-scoped implementation — all of which act on the *visible* bar — needed no
-  changes, and you can see what you are about to change. The song header's
-  DUP/DEL are gone; the palette's `+` is a few pixels away and carries them.
-  `patPlusProps` must be declared **above** `songPage`: Babel lowers `const` to
+  chip's** hold (`barOpsMenu`, opened from the bar strip, which hit-tests the
+  bar from the pointer x exactly as `_scrubTo` does) carries the **bar-scoped**
+  ops — RAND / CLR / MUT8 / CPY / PST, DUP BAR, DELETE BAR *n* and **SPEED**
+  (per bar, and hold a speed for every bar — see per-bar speed above). SPEED
+  moved off the STEP sheet, where it was the only control that wasn't a step
+  lane. Read the current rate from `partBarMults(editPat)[bar]`, never a
+  component-level memo: anything declared below the menu in the body is
+  `undefined` at build time.
+  They were briefly together under the `+`, which put "randomise this bar" two
+  rows from "delete this pattern" under a button that makes patterns. Opening
+  the bar menu **selects that bar first** (the same `goToBar` a tap does), so
+  every existing bar-scoped implementation — all of which act on the *visible*
+  bar — needed no changes, and you can see what you are about to change. The
+  song header's DUP/DEL are gone; the palette's `+` is a few pixels away.
+  `patChipProps` must be declared **above** `songPage`: Babel lowers `const` to
   `var`, so spreading it before assignment installs nothing at all, silently.
   Note the desktop sidebar keeps its own always-visible RAND/CLR/MUT8/CPY/PST
-  row — a different surface, deliberately left alone.
+  row — a different surface, deliberately left alone. Its SPEED row is gone.
 - **The song page's palette chips fold the hold into their OWN pointer handler**
   rather than using `patChipProps`, because they are also the **drag source**
   for placing a pattern into a slot and the drag has to be able to cancel the
