@@ -4527,6 +4527,38 @@ export default function LoudLight(){
   // this was subtracted. On a phone in portrait it changes nothing, because
   // the grid is width-bound there and the height term never binds.
   const _barStripExtra=(_barRows-1)*(BAR_ROW_H+BAR_ROW_GAP);
+  // ── The SONG STRIP above the grid ────────────────────────────────────────
+  // Two rows of the song lane, on every part page, in PORTRAIT ONLY. The space
+  // is free there and only there: the grid is width-bound in portrait (370px of
+  // a 390px phone), so the vertical room the interface gave back cannot become
+  // grid and would otherwise stay empty. Landscape is the opposite — the grid is
+  // height-bound, and two rows would take ~19% of the layout that already has
+  // the smaller grid — so landscape keeps the rail and shows no strip.
+  //
+  // Its height is a function of its WIDTH (square cells, eight across), which is
+  // why the grid's size term subtracts it in `vw` rather than in px. For a
+  // parent inset by `pad` each side: strip = (100vw - 2*pad)/COLS*rows ... which
+  // is `_laneBoxPad` again, resolved against that width.
+  const SONG_STRIP=IS_MOBILE&&!isLandscape;
+  const SONG_STRIP_ROWS=2;
+  // The strip's height as a CSS length in viewport units, for the grid's
+  // `calc()`. pad is the horizontal inset of the column the strip sits in.
+  // The chips move below the grid ONLY where the song strip took their place.
+  // In landscape and on desktop nothing displaced them, the transport is in the
+  // rail rather than under your thumb, and leaving them put is the smaller
+  // change. One row, two positions — never two copies.
+  const _barStripRow=(pad)=>(
+    <div style={{display:"flex",width:"100%"}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
+  );
+  const _songStripCss=(pad)=>{
+    if(!SONG_STRIP)return "0px";
+    const gap=4,gutter=10,rows=SONG_STRIP_ROWS;
+    // height = rows*cell + (rows-1)*gap, cell = (W - gutter - (COLS-1)*gap)/COLS
+    const kW=rows/SONG_COLS;                                   // coefficient on W
+    const c=rows*(gutter+(SONG_COLS-1)*gap)/SONG_COLS-(rows-1)*gap;
+    // W = 100vw - 2*pad, plus the 6px gap between the strip and the grid box
+    return "("+(kW*100).toFixed(4)+"vw - "+(kW*2*pad+c-6).toFixed(4)+"px)";
+  };
   const curBar        = Math.max(0,Math.min(barCount-1,barPage));
   const barOff        = curBar*COLS;
   // Which bar the playhead is in right now (-1 when stopped). `step`/`drumStep`
@@ -5142,6 +5174,228 @@ export default function LoudLight(){
   const patBarsBadge=(p)=>{
     return null;
   };
+  // ── THE SONG LANE — one body, two mounts ───────────────────────────────
+  // The SONG page, where it takes whatever the mixer leaves, and a fixed
+  // two-row strip above the grid on every part page (portrait only). Do not
+  // fork it: the drop targeting, the seam logic, the repeat pips and the bar
+  // dots are all in here, and a second copy would drift on the first fix.
+  //
+  // paddingRight leaves a strip that is NOT a slot. The cells set
+  // touch-action:none so a drag can move a pattern anywhere in 2D, which means
+  // a touch starting on a cell can never scroll — without that gutter the lane
+  // is unscrollable by finger. It is also why the strip above the grid is two
+  // rows rather than one: one row leaves nowhere to put the gutter.
+  // The window's height has to track its own WIDTH, because the cells are
+  // square and flex-sized: eight across a 366px column is 41px a cell, and the
+  // same lane on an SE is 39px. There is no CSS height that follows a width —
+  // but a PERCENTAGE PADDING resolves against the parent's width, which is the
+  // one hook that does. For `rows` rows of SONG_COLS square cells with a 4px
+  // gap and the 10px scroll gutter:
+  //     cell  = (W - gutter - (COLS-1)*gap) / COLS
+  //     height = rows*cell + (rows-1)*gap
+  // which is linear in W, so it lands exactly as `calc(p% - qpx)`. At two rows
+  // that is calc(25% - 5.5px): 86px on a 390px phone, 82px on an SE, both
+  // exactly two rows with no clipped third.
+  const _laneBoxPad=(rows)=>{
+    const gap=4,gutter=10;
+    const p=(rows*100/SONG_COLS).toFixed(4);
+    const q=(rows*(gutter+(SONG_COLS-1)*gap)/SONG_COLS-(rows-1)*gap).toFixed(4);
+    return "calc("+p+"% - "+q+"px)";
+  };
+  const _songLaneBody=(fixedRows)=>(
+    <div style={Object.assign({width:"100%",overflowY:"auto",overscrollBehavior:"contain",
+      paddingRight:10,boxSizing:"border-box",display:"flex",flexDirection:"column",gap:4},
+      // The song page gives the lane whatever the mixer leaves. Above the grid
+      // it is a FIXED window that scrolls, because the lane grows a row per
+      // eight slots and eight rows is taller than any phone has spare.
+      fixedRows?{position:"absolute",inset:0}:{flex:"1 1 auto",minHeight:0})}>
+      {Array.from({length:_songRows},(_,row)=>(
+        <div key={row} style={{display:"flex",gap:4}}>
+          {Array.from({length:SONG_COLS},(_,col)=>{
+            const idx=row*SONG_COLS+col;
+            const id=song[idx];
+            const pat=id!=null?patterns.find(p=>p.id===id):null;
+            const isCursor=idx===_songPlayingSlot;
+            const col0=id!=null?_patColorOf(id):null;
+            // Run length, drawn on the first slot of a repeat so a long
+            // stretch of the same pattern reads as "x4" without collapsing
+            // the individually tappable cells.
+            const rep=_rep(idx);
+            // Bars the entry SOUNDS for, not bars it was allocated — the
+            // dots are lit by the playhead, so counting the allocation drew
+            // dots that could never light (four dots for a pattern whose
+            // only composed part is one bar long).
+            const pbars=pat?cycleBars(pat):1;
+            // A run's badge counts PLAYS, not cells, so it agrees with the
+            // pips: two cells at x2 each is a run of 4. Only drawn when the
+            // run spans more than one cell — a single cell's repeats are
+            // already spelled out by its pips.
+            const runStart=id!=null&&(idx===0||song[idx-1]!==id);
+            let run=0,plays=0;
+            if(runStart){let j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}
+            const _ov=patternDrag&&patternDrag.overSongCell;
+            const isHover=!!(_ov&&_ov.cell===idx);
+            // Seam k draws as a caret on cell k's LEFT edge. A seam at the
+            // end of a row has no cell to its right on that row, so it
+            // draws on this cell's right edge instead.
+            const seamL=!!(_ov&&_ov.seam===idx);
+            const seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);
+            return(
+              <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
+                style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
+                  // The border is always THERE and only changes colour.
+                  // These cells are flex:1 with flex-basis 0, and under
+                  // border-box a flex item's base size is floored at its
+                  // border — so dropping the border on a filled cell made it
+                  // 2px narrower than its empty neighbours, and with
+                  // aspect-ratio:1 that came back as 2px of height too, so
+                  // filling a slot knocked the whole grid out of alignment.
+                  // It also skewed the rects _songMeasure caches for drops.
+                  border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
+                  boxSizing:"border-box",minWidth:0,
+                  outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
+                  outlineOffset:"-1px",
+                  boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
+                  color:pat?"#0e1c2b":"transparent",fontSize:17,fontWeight:700,
+                  touchAction:"none",cursor:"pointer",userSelect:"none",
+                  transition:"background .08s, outline .08s"}}
+                onPointerDown={(e)=>{
+                  e.stopPropagation();
+                  const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
+                  let dragging=false,held=false;
+                  // Press and hold a filled slot to set its repeat count —
+                  // the same gesture that opens a step's params. Movement
+                  // past the drag threshold cancels it, so holding never
+                  // steals a drag.
+                  const holdT=id==null?null:setTimeout(()=>{
+                    held=true;
+                    setRepPopup({idx,x:startX,y:startY});
+                  },450);
+                  const onMove=(ev)=>{
+                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                    if(id==null)return;                       // nothing to drag out of an empty slot
+                    if(held)return;
+                    if(!dragging){
+                      if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+                      if(holdT)clearTimeout(holdT);
+                      dragging=true;
+                      _songMeasure();
+                      setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
+                    }
+                    const h=_songHit(ev.clientX,ev.clientY);
+                    // Hovering your own cell isn't a target; hovering the
+                    // seams either side of it is a no-op reorder, so those
+                    // aren't marked either.
+                    const over=(h&&((h.cell!=null&&h.cell===idx)||(h.seam!=null&&(h.seam===idx||h.seam===idx+1))))?null:h;
+                    setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:over}:null);
+                  };
+                  const onUp=(ev)=>{
+                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+                    if(holdT)clearTimeout(holdT);
+                    document.removeEventListener("pointermove",onMove);
+                    document.removeEventListener("pointerup",onUp);
+                    document.removeEventListener("pointercancel",onUp);
+                    // The hold already did the work; releasing must not also
+                    // count as a tap on the slot.
+                    if(held)return;
+                    if(!dragging){
+                      pushHistory();
+                      if(id==null){
+                        // Tap an empty slot: place the selected pattern.
+                        setSong(sg=>{const r=[...sg];r[idx]=activePatternId;return r;});
+                        setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
+                      } else {
+                        // Tap a filled slot: make that pattern the one you're editing.
+                        setActivePatId(id);
+                      }
+                      return;
+                    }
+                    const t=_songHit(ev.clientX,ev.clientY);
+                    pushHistory();
+                    if(t&&t.seam!=null){
+                      // Onto a seam: reorder — pull this slot out and drop
+                      // it back in between the two you aimed at.
+                      _songMove(idx,t.seam);
+                    } else if(t){
+                      if(t.cell!==idx){
+                        setSong(sg=>{const r=[...sg];r[t.cell]=id;r[idx]=null;return r;});
+                        // The repeat count belongs to the slot's contents,
+                        // so it travels with them.
+                        setSongRep(rp=>{const r=[...rp];r[t.cell]=r[idx];r[idx]=1;return r;});
+                      }
+                    } else {
+                      // Dragged off the grid: the slot empties. The pattern
+                      // itself stays in the palette.
+                      setSong(sg=>{const r=[...sg];r[idx]=null;return r;});
+                      setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
+                    }
+                    setPatternDrag(null);
+                  };
+                  document.addEventListener("pointermove",onMove);
+                  document.addEventListener("pointerup",onUp);
+                  document.addEventListener("pointercancel",onUp);
+                }}
+                onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
+                {pat?pat.name:""}
+                {(seamL||seamR)&&(
+                  <div style={{position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2,
+                    [seamL?"left":"right"]:-3.5,background:"rgba(232,220,205,0.95)",
+                    boxShadow:"0 0 6px rgba(232,220,205,0.6)",pointerEvents:"none",zIndex:2}}/>
+                )}
+                {runStart&&run>1&&(
+                  <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
+                    color:"rgba(10,20,32,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                )}
+                {/* Bar dots — one per bar of the pattern, above the symbol,
+                    mirroring the repeat pips below it. On the playing cell
+                    the current bar's dot swells on every quarter note, so
+                    the song page carries the tempo. They flex to fit: real
+                    dots up to 8 bars, and past that they close into a
+                    segmented bar where the lit one still reads as it moves
+                    (32 countable dots don't fit in a phone-sized cell). */}
+                {pat&&(pbars>1||isCursor)&&(
+                  <div style={{position:"absolute",left:4,right:4,top:3,display:"flex",
+                    alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,
+                    pointerEvents:"none"}}>
+                    {Array.from({length:pbars},(_,k)=>{
+                      const lit=isCursor&&k===_pulseBar;
+                      return(
+                        <div key={lit?"p"+k+"-"+songPulse:k}
+                          className={lit?"barpulse":undefined}
+                          style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
+                            height:3,borderRadius:pbars<=8?2:0,
+                            background:lit?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.4)"}}/>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* Repeat pips — one per play, along the bottom edge. The
+                    one that's sounding lights up, so a x4 cell reads as
+                    progress rather than a static count. */}
+                {pat&&rep>1&&(
+                  <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
+                    justifyContent:"center",gap:2,pointerEvents:"none"}}>
+                    {Array.from({length:rep},(_,k)=>(
+                      <div key={k} style={{width:4,height:4,borderRadius:2,
+                        background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.45)"}}/>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+  const songLane=(fixedRows)=>!fixedRows?_songLaneBody(fixedRows):(
+    <div style={{position:"relative",width:"100%",height:0,paddingTop:_laneBoxPad(fixedRows),flexShrink:0}}>
+      {_songLaneBody(fixedRows)}
+    </div>
+  );
+
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
       justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
@@ -5275,194 +5529,8 @@ export default function LoudLight(){
             </button>
           )}
         </div>
-        {/* The lane is capped by whatever the mixer leaves and scrolls inside
-            that, rather than the whole page scrolling. paddingRight leaves a
-            strip that isn't a slot: the cells set touch-action:none so a drag
-            can move a pattern anywhere in 2D, which means a touch starting on a
-            cell can never scroll, and without a gutter there'd be nothing to
-            drag on. Desktop scrolls on the wheel regardless. */}
-        <div style={{width:"100%",flex:"1 1 auto",minHeight:0,overflowY:"auto",overscrollBehavior:"contain",
-          paddingRight:10,boxSizing:"border-box",display:"flex",flexDirection:"column",gap:4}}>
-          {Array.from({length:_songRows},(_,row)=>(
-            <div key={row} style={{display:"flex",gap:4}}>
-              {Array.from({length:SONG_COLS},(_,col)=>{
-                const idx=row*SONG_COLS+col;
-                const id=song[idx];
-                const pat=id!=null?patterns.find(p=>p.id===id):null;
-                const isCursor=idx===_songPlayingSlot;
-                const col0=id!=null?_patColorOf(id):null;
-                // Run length, drawn on the first slot of a repeat so a long
-                // stretch of the same pattern reads as "x4" without collapsing
-                // the individually tappable cells.
-                const rep=_rep(idx);
-                // Bars the entry SOUNDS for, not bars it was allocated — the
-                // dots are lit by the playhead, so counting the allocation drew
-                // dots that could never light (four dots for a pattern whose
-                // only composed part is one bar long).
-                const pbars=pat?cycleBars(pat):1;
-                // A run's badge counts PLAYS, not cells, so it agrees with the
-                // pips: two cells at x2 each is a run of 4. Only drawn when the
-                // run spans more than one cell — a single cell's repeats are
-                // already spelled out by its pips.
-                const runStart=id!=null&&(idx===0||song[idx-1]!==id);
-                let run=0,plays=0;
-                if(runStart){let j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}
-                const _ov=patternDrag&&patternDrag.overSongCell;
-                const isHover=!!(_ov&&_ov.cell===idx);
-                // Seam k draws as a caret on cell k's LEFT edge. A seam at the
-                // end of a row has no cell to its right on that row, so it
-                // draws on this cell's right edge instead.
-                const seamL=!!(_ov&&_ov.seam===idx);
-                const seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);
-                return(
-                  <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
-                    style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
-                      // The border is always THERE and only changes colour.
-                      // These cells are flex:1 with flex-basis 0, and under
-                      // border-box a flex item's base size is floored at its
-                      // border — so dropping the border on a filled cell made it
-                      // 2px narrower than its empty neighbours, and with
-                      // aspect-ratio:1 that came back as 2px of height too, so
-                      // filling a slot knocked the whole grid out of alignment.
-                      // It also skewed the rects _songMeasure caches for drops.
-                      border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
-                      boxSizing:"border-box",minWidth:0,
-                      outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
-                      outlineOffset:"-1px",
-                      boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
-                      color:pat?"#0e1c2b":"transparent",fontSize:17,fontWeight:700,
-                      touchAction:"none",cursor:"pointer",userSelect:"none",
-                      transition:"background .08s, outline .08s"}}
-                    onPointerDown={(e)=>{
-                      e.stopPropagation();
-                      const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
-                      let dragging=false,held=false;
-                      // Press and hold a filled slot to set its repeat count —
-                      // the same gesture that opens a step's params. Movement
-                      // past the drag threshold cancels it, so holding never
-                      // steals a drag.
-                      const holdT=id==null?null:setTimeout(()=>{
-                        held=true;
-                        setRepPopup({idx,x:startX,y:startY});
-                      },450);
-                      const onMove=(ev)=>{
-                        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                        if(id==null)return;                       // nothing to drag out of an empty slot
-                        if(held)return;
-                        if(!dragging){
-                          if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                          if(holdT)clearTimeout(holdT);
-                          dragging=true;
-                          _songMeasure();
-                          setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
-                        }
-                        const h=_songHit(ev.clientX,ev.clientY);
-                        // Hovering your own cell isn't a target; hovering the
-                        // seams either side of it is a no-op reorder, so those
-                        // aren't marked either.
-                        const over=(h&&((h.cell!=null&&h.cell===idx)||(h.seam!=null&&(h.seam===idx||h.seam===idx+1))))?null:h;
-                        setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:over}:null);
-                      };
-                      const onUp=(ev)=>{
-                        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                        if(holdT)clearTimeout(holdT);
-                        document.removeEventListener("pointermove",onMove);
-                        document.removeEventListener("pointerup",onUp);
-                        document.removeEventListener("pointercancel",onUp);
-                        // The hold already did the work; releasing must not also
-                        // count as a tap on the slot.
-                        if(held)return;
-                        if(!dragging){
-                          pushHistory();
-                          if(id==null){
-                            // Tap an empty slot: place the selected pattern.
-                            setSong(sg=>{const r=[...sg];r[idx]=activePatternId;return r;});
-                            setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
-                          } else {
-                            // Tap a filled slot: make that pattern the one you're editing.
-                            setActivePatId(id);
-                          }
-                          return;
-                        }
-                        const t=_songHit(ev.clientX,ev.clientY);
-                        pushHistory();
-                        if(t&&t.seam!=null){
-                          // Onto a seam: reorder — pull this slot out and drop
-                          // it back in between the two you aimed at.
-                          _songMove(idx,t.seam);
-                        } else if(t){
-                          if(t.cell!==idx){
-                            setSong(sg=>{const r=[...sg];r[t.cell]=id;r[idx]=null;return r;});
-                            // The repeat count belongs to the slot's contents,
-                            // so it travels with them.
-                            setSongRep(rp=>{const r=[...rp];r[t.cell]=r[idx];r[idx]=1;return r;});
-                          }
-                        } else {
-                          // Dragged off the grid: the slot empties. The pattern
-                          // itself stays in the palette.
-                          setSong(sg=>{const r=[...sg];r[idx]=null;return r;});
-                          setSongRep(rp=>{const r=[...rp];r[idx]=1;return r;});
-                        }
-                        setPatternDrag(null);
-                      };
-                      document.addEventListener("pointermove",onMove);
-                      document.addEventListener("pointerup",onUp);
-                      document.addEventListener("pointercancel",onUp);
-                    }}
-                    onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
-                    {pat?pat.name:""}
-                    {(seamL||seamR)&&(
-                      <div style={{position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2,
-                        [seamL?"left":"right"]:-3.5,background:"rgba(232,220,205,0.95)",
-                        boxShadow:"0 0 6px rgba(232,220,205,0.6)",pointerEvents:"none",zIndex:2}}/>
-                    )}
-                    {runStart&&run>1&&(
-                      <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
-                        color:"rgba(10,20,32,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
-                    )}
-                    {/* Bar dots — one per bar of the pattern, above the symbol,
-                        mirroring the repeat pips below it. On the playing cell
-                        the current bar's dot swells on every quarter note, so
-                        the song page carries the tempo. They flex to fit: real
-                        dots up to 8 bars, and past that they close into a
-                        segmented bar where the lit one still reads as it moves
-                        (32 countable dots don't fit in a phone-sized cell). */}
-                    {pat&&(pbars>1||isCursor)&&(
-                      <div style={{position:"absolute",left:4,right:4,top:3,display:"flex",
-                        alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,
-                        pointerEvents:"none"}}>
-                        {Array.from({length:pbars},(_,k)=>{
-                          const lit=isCursor&&k===_pulseBar;
-                          return(
-                            <div key={lit?"p"+k+"-"+songPulse:k}
-                              className={lit?"barpulse":undefined}
-                              style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
-                                height:3,borderRadius:pbars<=8?2:0,
-                                background:lit?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.4)"}}/>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {/* Repeat pips — one per play, along the bottom edge. The
-                        one that's sounding lights up, so a x4 cell reads as
-                        progress rather than a static count. */}
-                    {pat&&rep>1&&(
-                      <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
-                        justifyContent:"center",gap:2,pointerEvents:"none"}}>
-                        {Array.from({length:rep},(_,k)=>(
-                          <div key={k} style={{width:4,height:4,borderRadius:2,
-                            background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.45)"}}/>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+
+        {songLane(null)}
       </div>
       {/* Repeat picker. Sits ABOVE the press point on purpose: it opens while
           your finger is still down, and the trailing click of that same press
@@ -10455,8 +10523,14 @@ export default function LoudLight(){
             {/* SYNTH EDIT grid */}
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
-              <div style={{width:"min(100%,calc(100dvh - "+((isLandscape?32:150)+_barStripExtra)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
-                  <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
+              {(()=>{const SZ="min(100%,calc(100dvh - "+((isLandscape?32:150)+_barStripExtra)+"px - "+_songStripCss(10)+"))";return(<>
+              {/* The song, above the grid. Same width as the grid box so the two
+                  read as one instrument rather than two panels. */}
+              {SONG_STRIP&&(
+                <div style={{width:SZ,flexShrink:0,marginBottom:6}}>{songLane(SONG_STRIP_ROWS)}</div>
+              )}
+              <div style={{width:SZ,aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+                  {!SONG_STRIP&&_barStripRow(rowKeyPad)}
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
@@ -10493,7 +10567,9 @@ export default function LoudLight(){
                   </div>
                   </div>
 
+                  {SONG_STRIP&&_barStripRow(rowKeyPad)}
                 </div>
+              </>);})()}
               </div>
             )}
 
@@ -10517,10 +10593,18 @@ export default function LoudLight(){
                   // each row so the cells themselves get the full width.
                   const SIZE=isLandscape
                     ?`min(calc(100vw - 190px), calc(100dvh - ${32+_barStripExtra}px))`
-                    :`min(calc(100vw - 20px), calc(100dvh - ${150+_barStripExtra}px))`;
+                    :`min(calc(100vw - 20px), calc(100dvh - ${150+_barStripExtra}px - ${_songStripCss(10)}))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
-                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                      {/* The song, above the drum grid too — a part page is a
+                          part page, and carrying it on one but not the other is
+                          the kind of split that makes a layout feel arbitrary. */}
+                      {SONG_STRIP&&(
+                        <div style={{width:SIZE,flexShrink:0}}>{songLane(SONG_STRIP_ROWS)}</div>
+                      )}
+                      {!SONG_STRIP&&(
+                        <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                      )}
                       {/* Voice keys — tap to hear the drum on its own. */}
                       <div style={{width:SIZE,display:"flex",flexShrink:0,position:"relative"}}>
                       {drumRowKeys}
@@ -10600,6 +10684,11 @@ export default function LoudLight(){
                         )})}
                       </div>
                       </div>
+                      {/* Chips below the drum grid too, for the same reason —
+                          the song strip took the top of the page. */}
+                      {SONG_STRIP&&(
+                        <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                      )}
                     </div>
                   );
                 })()}
