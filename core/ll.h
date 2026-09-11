@@ -50,7 +50,7 @@ enum ll_param {
   LL_P_DRUM_FXTRIM,  /* 0..100 */
   LL_P_DRUM_AUDIBLE, /* 0/1 — mute/solo outcome for the drum layer */
   LL_P_SONG_MODE,    /* 0/1 */
-  LL_P_LOOP,         /* 0/1 */
+  LL_P_LOOP,         /* 0 off, 1 loop one bar, 2 loop the whole pattern */
   LL_P_LOOP_BAR,     /* bar index */
   LL_P_LOOP_PAT,     /* pattern id, -1 none */
   LL_P_ACTIVE_PAT,   /* pattern id being edited */

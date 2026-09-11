@@ -1521,7 +1521,7 @@ const SESSION_DEFAULTS = Object.freeze({
   vPitchRate:0, vPitchRange:1, vGhostRate:0,
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
-  loopMode:false, loopBar:-1, loopPat:null, varyMode:{synth:false,lead:false,drums:false},
+  loopMode:0, loopBar:-1, loopPat:null, varyMode:{synth:false,lead:false,drums:false},
 });
 
 
@@ -1905,6 +1905,18 @@ const jitterStepParam=(sp,vp)=>{
   };
 };
 
+// ─── History hook for the controls defined OUTSIDE the component ─────────────
+// KnobSlider and RangeSlider are module-level, so they cannot see pushHistory.
+// One mutable hook the component fills in beats threading an `onEdit` prop
+// through the ~50 call sites, and it means EVERY knob in the app gets undo from
+// one change rather than fifty.
+//
+// `mark` is called on the first change of a gesture, NOT on pointerdown:
+// pushHistory does not dedupe, so a snapshot per touch would fill the ring with
+// no-ops and undo would look broken for several presses. A gesture that moved
+// nothing leaves no trace.
+const HIST={mark:()=>{}};
+
 // ─── KnobSlider with accent color ─────────────────────────────────────────────
 function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const ref=useRef(null);
@@ -1915,12 +1927,19 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   // moves the value half its range — finer than tracking the pointer 1:1, and no
   // jump-to-position. Ctrl/Cmd held = extra-fine relative (Pro Tools style).
   // Double-click resets.
+  // Both the drag and the double-tap reset open a history entry, but only if
+  // they actually change the value.
+  const emit=useCallback((nv,d)=>{
+    if(nv===value&&(!d||d.marked))return;
+    if(nv!==value&&(!d||!d.marked)){HIST.mark();if(d)d.marked=true;}
+    onChange(nv);
+  },[value,onChange]);
   const onDown=useCallback(e=>{
     e.stopPropagation();
-    if(isDoubleTap(e)){drag.current=null;onChange(def!=null?def:((min<0&&max>0)?0:min));return;} // clear so the held 2nd tap can't resume a stale drag
+    if(isDoubleTap(e)){drag.current=null;emit(def!=null?def:((min<0&&max>0)?0:min),null);return;} // clear so the held 2nd tap can't resume a stale drag
     try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
-    drag.current={fine:e.ctrlKey||e.metaKey,lx:e.clientX,ly:e.clientY,v:value};
-  },[value,def,min,max,onChange]);
+    drag.current={fine:e.ctrlKey||e.metaKey,lx:e.clientX,ly:e.clientY,v:value,marked:false};
+  },[value,def,min,max,emit]);
   const onMove=useCallback(e=>{
     if(!e.buttons||!drag.current)return;e.stopPropagation();
     const d=drag.current,rect=ref.current.getBoundingClientRect();
@@ -1930,11 +1949,11 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
     // Ballistic by default; Ctrl/Cmd = a fixed ultra-fine (1200px = full range).
     const inc=d.fine?pd*((max-min)/1200):ballisticDelta(pd,dim,max-min);
     d.v=Math.max(min,Math.min(max,d.v+inc));
-    onChange(Math.round(d.v));
-  },[min,max,onChange,vertical]);
+    emit(Math.round(d.v),d);
+  },[min,max,emit,vertical]);
   // Double-click resets: to `def` if given, else 0 for bipolar tracks (center)
   // or the minimum otherwise.
-  const onReset=useCallback(()=>{onChange(def!=null?def:((min<0&&max>0)?0:min));},[def,min,max,onChange]);
+  const onReset=useCallback(()=>{emit(def!=null?def:((min<0&&max>0)?0:min),null);},[def,min,max,emit]);
   const onUp=useCallback(()=>{drag.current=null;},[]); // end the drag on release so it can't linger
   if(vertical){
     return(
@@ -1989,8 +2008,10 @@ function RangeSlider({label,accent,lo,hi}){
   const loAxis={aMin:Math.min(f2p(lo.toFreq(lo.min)),f2p(lo.toFreq(lo.max))),aMax:Math.max(f2p(lo.toFreq(lo.min)),f2p(lo.toFreq(lo.max)))};
   const hiAxis={aMin:Math.min(f2p(hi.toFreq(hi.min)),f2p(hi.toFreq(hi.max))),aMax:Math.max(f2p(hi.toFreq(hi.min)),f2p(hi.toFreq(hi.max)))};
   const GAP=3;
-  const setLo=p=>lo.onChange(Math.round(Math.max(lo.min,Math.min(lo.max,lo.fromFreq(p2f(p))))));
-  const setHi=p=>hi.onChange(Math.round(Math.max(hi.min,Math.min(hi.max,hi.fromFreq(p2f(p))))));
+  // Marked on the first thumb move of a gesture, not on the press — see HIST.
+  const _mark=()=>{const d=drag.current;if(d&&d.marked)return;if(d)d.marked=true;HIST.mark();};
+  const setLo=p=>{const v=Math.round(Math.max(lo.min,Math.min(lo.max,lo.fromFreq(p2f(p)))));if(v===lo.val)return;_mark();lo.onChange(v);};
+  const setHi=p=>{const v=Math.round(Math.max(hi.min,Math.min(hi.max,hi.fromFreq(p2f(p)))));if(v===hi.val)return;_mark();hi.onChange(v);};
   const onDown=useCallback(e=>{
     e.stopPropagation();
     const rect=ref.current.getBoundingClientRect();
@@ -2001,7 +2022,7 @@ function RangeSlider({label,accent,lo,hi}){
     if(Math.min(loD,hiD)<=grabPct) which=loD<=hiD?"lo":"hi"; // grabbed a thumb (point)
     else if(xPos>loPos&&xPos<hiPos) which="band";           // grabbed the line → move both
     else which=loD<=hiD?"lo":"hi";                          // outside the band → nearer thumb
-    if(which!=="band"&&isDoubleTap(e,which)){drag.current=null;const t=which==="lo"?lo:hi;t.onChange(t.def);return;}
+    if(which!=="band"&&isDoubleTap(e,which)){drag.current=null;const t=which==="lo"?lo:hi;if(t.val!==t.def){HIST.mark();t.onChange(t.def);}return;}
     try{ref.current.setPointerCapture(e.pointerId);}catch(_){}
     drag.current=which==="band"
       ?{which,fine:e.ctrlKey||e.metaKey,lx:e.clientX,loPos,hiPos}
@@ -3593,10 +3614,20 @@ export default function LoudLight(){
   const _lpKey = activeLayer==="drums" ? "synth" : activeLayer;
   const _lp = layerParams[_lpKey];
   const _setLP = (key)=>(val)=>setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
+  // The DISCRETE per-layer controls — waveform, the octave buttons, the INV
+  // toggles — push a history entry outright. The continuous ones don't come
+  // through here: they are KnobSliders, and those mark themselves on the first
+  // move of a drag, so routing them through this would push on every
+  // pointermove. (pushHistory is declared further down; Babel lowers const to
+  // var, so call it from inside the closure rather than capturing it here.)
+  const _setLPStep = (key)=>(val)=>{
+    if(layerParams[_lpKey][key]!==val)pushHistory();
+    setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
+  };
 
   // Existing UI references {waveform, setWaveform, ...} continue to work; they now
   // read/write the active layer's slot in layerParams.
-  const waveform = _lp.waveform,         setWaveform = _setLP("waveform");
+  const waveform = _lp.waveform,         setWaveform = _setLPStep("waveform");
   const detune = _lp.detune,             setDetune = _setLP("detune");
   const attack = _lp.attack,             setAttack = _setLP("attack");
   const decay = _lp.decay,               setDecay = _setLP("decay");
@@ -3604,16 +3635,16 @@ export default function LoudLight(){
   const vcfCutoff = _lp.vcfCutoff,       setVcfCutoff = _setLP("vcfCutoff");
   const vcfRes = _lp.vcfRes,             setVcfRes = _setLP("vcfRes");
   const filterEnvAmt = _lp.filterEnvAmt, setFilterEnvAmt = _setLP("filterEnvAmt");
-  const octaveLP = _lp.octave,           setOctaveLP = _setLP("octave");
+  const octaveLP = _lp.octave,           setOctaveLP = _setLPStep("octave");
   const dlySend = _lp.dlySend,           setDlySend = _setLP("dlySend");
   const rvSend  = _lp.rvSend??0,         setRvSend  = _setLP("rvSend");
   const mixLvl  = _lp.mix??85,           setMixLvl  = _setLP("mix");
   const subLvl  = _lp.subLevel??0,       setSubLvl  = _setLP("subLevel");
   const spread  = _lp.spread??0,         setSpread  = _setLP("spread");
   const velAmp     = _lp.velAmp??100,    setVelAmp    = _setLP("velAmp");
-  const velAmpInv  = !!_lp.velAmpInv,    setVelAmpInv = _setLP("velAmpInv");
+  const velAmpInv  = !!_lp.velAmpInv,    setVelAmpInv = _setLPStep("velAmpInv");
   const velFlt     = _lp.velFlt??100,    setVelFlt    = _setLP("velFlt");
-  const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLP("velFltInv");
+  const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLPStep("velFltInv");
   const velEnv     = _lp.velEnv??0,      setVelEnv    = _setLP("velEnv");
   const velEnvInv  = !!_lp.velEnvInv,    setVelEnvInv = _setLP("velEnvInv");
   const glideLP    = _lp.glide??0,       setGlideLP   = _setLP("glide");
@@ -3767,7 +3798,18 @@ export default function LoudLight(){
     drums:{step:0,nextAt:0,bar:0},
   });
   useEffect(()=>{songBarR.current=songBar;},[songBar]);
-  useEffect(()=>{songModeR.current=songMode;},[songMode]);
+  // songModeR is filled in at the DERIVATION, below — not here. This used to be
+  // `useEffect(()=>{songModeR.current=songMode;},[songMode])`, which was fine
+  // while songMode was a useState declared above it. It became a derived const
+  // BELOW this line, and a dependency array is evaluated during render: `[songMode]`
+  // read a Babel-hoisted `var` that had not been assigned yet, so the dep was
+  // `[undefined]` on every render, the effect ran once on mount and never again,
+  // and songModeR froze at the first render's value — false, because the project
+  // restore had not landed yet. The JS engine then played the active pattern
+  // instead of the song, forever. The core was fine: its mirror effect sits
+  // below the declaration, so its dep was real. The ORACLE is what found it —
+  // a behavioural harness could not, because both engines look busy.
+  // Rule: a ref that shadows a DERIVED value is assigned where it is derived.
 
   const drumPatsR   =useRef([initDrum]);
   const activeDrumIdR=useRef(initDrum.id);
@@ -3823,6 +3865,7 @@ export default function LoudLight(){
   // The song plays when there IS a song. Nothing to switch, nothing to persist,
   // and nothing that can be left in the wrong position by a project you loaded.
   const songMode=songSeq.length>0;
+  songModeR.current=songMode;
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
@@ -4001,7 +4044,7 @@ export default function LoudLight(){
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.TRANSPOSE,transpose);},[transpose]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.SWING,swing);},[swing]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.SONG_MODE,songMode?1:0);},[songMode]);
-  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP,loopMode?1:0);},[loopMode]);
+  useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP,loopMode===2?2:loopMode?1:0);},[loopMode]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_BAR,loopBar);},[loopBar]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_PAT,loopPat==null?-1:loopPat);},[loopPat]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.ACTIVE_PAT,activePatternId==null?-1:activePatternId);},[activePatternId]);
@@ -4217,6 +4260,14 @@ export default function LoudLight(){
   // body runs only when called, long after the ref is initialized, and the share
   // restore sets the flag true AFTER applyShareState's own history push.)
   const pushHistory = ()=>{loadedFromShareR.current=false;pushHistoryR.current();};
+  // Let the module-level controls (KnobSlider, RangeSlider) open a history
+  // entry. Reassigned every render, like pushHistoryR itself — the empty-deps
+  // closure trap applies here too.
+  HIST.mark=pushHistory;
+  // A scrubber marks history on its FIRST real change, never on the press:
+  // pushHistory does not dedupe, so a snapshot per touch would fill the ring
+  // with no-ops and undo would do nothing for several presses running.
+  const histOnce=(d)=>{if(d&&d.marked)return;if(d)d.marked=true;pushHistory();};
   const undo = ()=>{
     if(!historyR.current.length){showFlash("NOTHING TO UNDO");return;}
     redoR.current.push(captureSnapshotR.current());
@@ -4679,10 +4730,51 @@ export default function LoudLight(){
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
   // LOOP starts on the bar you are ON when you switch it on, and from then on
   // it follows your bar selection (see goToBar). Every LOOP button goes here.
-  const toggleLoop=()=>{
-    if(loopMode){setLoopMode(false);setLoopBar(-1);setLoopPat(null);}
-    else{setLoopMode(true);setLoopBar(curBar);setLoopPat(activePatternId);}
+  // ── LOOP: tap loops the BAR, hold loops the PATTERN ──────────────────────
+  // `loopMode` is a SCOPE now, not a switch: 0 off, 1 one bar, 2 the whole
+  // pattern. A number rather than a second flag because every existing read of
+  // it is a truthy test — `if(loopMode)`, `loopR.current`, `loopMode?S.loopOn`
+  // — so they all keep working unchanged, and an old save carrying `true` reads
+  // as the bar loop it always was. Nothing new to persist, which for once means
+  // the multi-site rule costs nothing.
+  //
+  // The scheduler already did nearly all of this: LOOP pinned the pattern AND
+  // held the song's place AND pinned one bar. Pattern loop is the first two
+  // without the third, so it is one flag (`barLock`) split out of `inLoop`,
+  // in both engines.
+  const loopHoldR=useRef({tmr:0,held:false});
+  const _loopHoldEnd=()=>{if(loopHoldR.current.tmr){clearTimeout(loopHoldR.current.tmr);loopHoldR.current.tmr=0;}};
+  // Read the live refs, not the render's values: a hold spans 450ms and a
+  // state update, so the closure that started the gesture is already stale.
+  const setLoopScope=(n)=>{
+    if(!n){setLoopMode(0);setLoopBar(-1);setLoopPat(null);return;}
+    setLoopMode(n);
+    setLoopBar(Math.max(0,barPageR.current));
+    setLoopPat(activePatternIdR.current);
+    // Only the hold announces itself. On a one-bar pattern the two scopes sound
+    // identical, so without this the deliberate gesture would look like it did
+    // nothing at all — the same reason an all-bars SPEED write flashes.
+    if(n===2)showFlash("LOOP PATTERN");
   };
+  const toggleLoop=()=>setLoopScope(loopR.current===1?0:1);
+  const loopBtnProps={
+    "aria-label":"Loop — tap for this bar, hold for the whole pattern",
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();loopHoldR.current.held=true;setLoopScope(loopR.current===2?0:2);},
+    onPointerDown:(e)=>{
+      e.stopPropagation();loopHoldR.current.held=false;_loopHoldEnd();
+      loopHoldR.current.tmr=setTimeout(()=>{loopHoldR.current.tmr=0;loopHoldR.current.held=true;setLoopScope(loopR.current===2?0:2);},450);
+    },
+    onPointerUp:()=>_loopHoldEnd(), onPointerLeave:()=>_loopHoldEnd(),
+    onPointerCancel:()=>{_loopHoldEnd();loopHoldR.current.held=false;},
+    // Swallow the hold's trailing click, or every "loop the pattern" is
+    // followed instantly by "…and now just this bar".
+    onClick:(e)=>{e.stopPropagation();if(loopHoldR.current.held){loopHoldR.current.held=false;return;}toggleLoop();},
+  };
+  // Pattern scope gets a second, inset outline: the bar strip is the real
+  // readout (every chip underlined rather than one), but the strip isn't on
+  // screen on the landscape song page and a scope you can't see is a scope you
+  // can't trust.
+  const loopBtnStyle=loopMode===2?Object.assign({},S.loopOn,{boxShadow:"inset 0 0 0 3px rgba(159,180,199,0.22)"}):(loopMode?S.loopOn:{});
   // Switching to a different pattern while LOOP is on moves the loop with you —
   // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
   // which the pin deliberately ignores.
@@ -4709,7 +4801,7 @@ export default function LoudLight(){
   const goToBar=(bi)=>{
     setBarPage(bi);
     setFollowSeq(false);
-    if(loopMode)setLoopBar(bi);
+    if(loopMode===1)setLoopBar(bi);
   };
 
   // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
@@ -5501,7 +5593,7 @@ export default function LoudLight(){
         const setLeadFx=v=>setLayerParams(lps=>({...lps,lead:{...lps.lead,fxTrim:v}}));
         const anySolo=trackSolo.synth||trackSolo.lead||trackSolo.drums;
         const msBtn=(label,active,color,onClick)=>(
-          <button onClick={e=>{e.stopPropagation();onClick();}}
+          <button onClick={e=>{e.stopPropagation();HIST.mark();onClick();}}
             style={{width:"100%",height:24,flexShrink:0,fontSize:9,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",padding:0,
               border:"1px solid "+(active?color:"rgba(168,190,212,0.2)"),
               background:active?color+"22":"transparent",
@@ -5512,15 +5604,17 @@ export default function LoudLight(){
         // double-tap-to-default.
         const dragStart=(e,val,onChange,axis,def)=>{
           e.stopPropagation();
-          if(isDoubleTap(e,axis)){onChange(def);return;}
+          if(isDoubleTap(e,axis)){if(val!==def){HIST.mark();onChange(def);}return;}
           const r=e.currentTarget.getBoundingClientRect();
           const dim=axis[0]==="v"?r.height:r.width;
-          let cur=val,last=axis[0]==="v"?e.clientY:e.clientX;
+          let cur=val,last=axis[0]==="v"?e.clientY:e.clientX,marked=false;
           const update=ev=>{
             const now=axis[0]==="v"?ev.clientY:ev.clientX;
             const pd=axis[0]==="v"?(last-now):(now-last);   // up / right = more
             last=now;
             cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            // First real move of the drag opens the history entry — see HIST.
+            if(!marked&&Math.round(cur)!==val){marked=true;HIST.mark();}
             onChange(Math.round(cur));
           };
           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
@@ -5874,7 +5968,9 @@ export default function LoudLight(){
           // is `loopBar % barCount`. Without the wrap a short part's page showed
           // LOOP on with no bar marked at all — which is how the silence it
           // used to cause went unexplained.
-          const isLoop=loopMode&&bi===((loopBar%barCount)+barCount)%barCount;
+          // Pattern scope underlines EVERY bar — the strip is what says how wide
+          // the loop is, and "all of them" is exactly what it should read as.
+          const isLoop=loopMode===2?true:!!loopMode&&bi===((loopBar%barCount)+barCount)%barCount;
           const has=_barHasNotes(bi);
           // Bars past this part's loop end hold no content of their own — the
           // part repeats its own length through them (loop to fill), which is
@@ -6100,7 +6196,14 @@ export default function LoudLight(){
   //
   // Switching TO user seeds the key from whatever scale was showing, so it
   // starts as the notes you were already playing rather than resetting to C.
+  // Every key change opens a history entry. These are single, discrete edits —
+  // no gesture to dedupe across — so they push outright rather than through
+  // histOnce. Undo used to carry `scale`/`userMask`/`userRoot` in the snapshot
+  // and never take one, so the state was there and the STEP to get back to it
+  // was not.
   const chooseScale=k=>{
+    if(k===scale)return;
+    pushHistory();
     if(k==="user"&&scale!=="user"){
       const f=curFreqs;
       let m=0;
@@ -6117,11 +6220,14 @@ export default function LoudLight(){
   const toggleUserNote=pc=>{
     const on=!!(userMask&(1<<pc));
     if(on){
+      // Refused before anything is pushed: a no-op must not cost an undo step.
       if(popCount12(userMask)<=1){showFlash("A KEY NEEDS AT LEAST ONE NOTE","warn");return;}
+      pushHistory();
       const next=userMask&~(1<<pc);
       setUserMask(next);
       if(userRoot===pc){for(let i=1;i<12;i++){const c=(pc+i)%12;if(next&(1<<c)){setUserRoot(c);break;}}}
     }else{
+      pushHistory();
       setUserMask(userMask|(1<<pc));
       auditionFreq(261.63*Math.pow(2,pc/12));   // hear what you just added
     }
@@ -6130,6 +6236,7 @@ export default function LoudLight(){
   // are built from and the octave lines land on. It's the rarer decision, so it
   // gets the deliberate gesture and the tap stays as toggling.
   const setUserTonic=pc=>{
+    if(userRoot!==pc||!(userMask&(1<<pc)))pushHistory();
     setUserRoot(pc);
     setUserMask(m=>m|(1<<pc));
     auditionFreq(261.63*Math.pow(2,pc/12));
@@ -6213,7 +6320,7 @@ export default function LoudLight(){
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:3,marginTop:5}}>
             {[["MAJ",[0,2,4,5,7,9,11]],["MIN",[0,2,3,5,7,8,10]],["PENT",[0,2,4,7,9]],["ALL",[0,1,2,3,4,5,6,7,8,9,10,11]]].map(([lbl,ivs])=>(
               <button key={lbl} type="button"
-                onClick={()=>setUserMask(ivs.reduce((m,i)=>m|(1<<((userRoot+i)%12)),0))}
+                onClick={()=>{const m=ivs.reduce((a,i)=>a|(1<<((userRoot+i)%12)),0);if(m===userMask)return;pushHistory();setUserMask(m);}}
                 style={{padding:"4px 0",borderRadius:5,border:"1px solid rgba(168,190,212,0.16)",background:"transparent",
                   color:"rgba(178,199,219,0.55)",fontSize:compact?7:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{lbl}</button>
             ))}
@@ -6721,7 +6828,7 @@ export default function LoudLight(){
         // nothing to force. Only LOOP has to come off: it solos one bar, which
         // would not play the song.
         restore={loop:loopR.current};
-        loopR.current=false;setLoopMode(false);
+        loopR.current=0;setLoopMode(0);
         // Start at the first populated bar (startStop only does this when its
         // `songMode` state closure is true; force via the ref so the bounce
         // starts from the top even if the user wasn't viewing song mode).
@@ -7035,7 +7142,14 @@ export default function LoudLight(){
     // on this clock — see playSynthLayerStep / playDrumStep call sites below.
     const absStepDur=60/bpmR.current/4;
 
-    const inLoop=loopR.current;
+    // LOOP is a scope, not a switch: 1 loops one BAR, 2 loops the whole
+    // PATTERN. `inLoop` is "LOOP is on at all" — it pins the pattern and holds
+    // the song's place, which both scopes want. `barLock` is the extra pin onto
+    // a single bar, which only scope 1 wants; without it every part runs its own
+    // full length and the master its full cycle, exactly as with LOOP off, and
+    // the only thing LOOP is still doing is not advancing the song.
+    const inLoop=!!loopR.current;
+    const barLock=loopR.current===2?false:inLoop;
     // LOOP does NOT drop you out of the song any more. In song mode it parks
     // the song on its CURRENT entry and cycles one bar of that entry's pattern;
     // switch LOOP off and the song carries on from where it was held.
@@ -7062,7 +7176,7 @@ export default function LoudLight(){
     // LOOP was switched on and stays put — NOT whatever page you're on now. It
     // is a bar INDEX, so it clamps into a shorter song entry. Otherwise: the
     // whole pattern.
-    const loopBarIdx=inLoop?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;
+    const loopBarIdx=barLock?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;
     // LOOP pins a bar of the PATTERN, and a part shorter than the pattern does
     // not have that bar. A 16-bar synth over an 8-bar drum part, looping bar
     // 12, handed the drums column 176 of a part that is 128 columns wide: the
@@ -7090,15 +7204,15 @@ export default function LoudLight(){
     const mSeq=mPart?partSeq(mPart):null;
     // The master wraps too: it is a part like any other, and it can be the
     // SHORT one (an 8-bar master under a 16-bar drum part).
-    const mLoopBar=(inLoop&&mPart)?loopBarOf(mPart):0;
-    const loopMasterLen=(inLoop&&mPart)?Math.max(1,partBarLens(mPart)[mLoopBar]||COLS):COLS;
+    const mLoopBar=(barLock&&mPart)?loopBarOf(mPart):0;
+    const loopMasterLen=(barLock&&mPart)?Math.max(1,partBarLens(mPart)[mLoopBar]||COLS):COLS;
     const masterDur=(i)=>{
       if(!mPart)return absStepDur;
       // In LOOP every tick is the pinned bar's, so its rate is constant.
-      const col=inLoop?mLoopBar*COLS:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
+      const col=barLock?mLoopBar*COLS:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
       return absStepDur*colMult(mPart,col);
     };
-    const patLen=Math.max(1,inLoop?loopMasterLen:cyc.steps);
+    const patLen=Math.max(1,barLock?loopMasterLen:cyc.steps);
     const curPart=(layer)=>{
       const part=curPat.parts&&curPat.parts[layer];
       if(!part)return null;
@@ -7127,9 +7241,9 @@ export default function LoudLight(){
         const len=seq.length;
         // In LOOP the cursor runs across the pinned bar's own columns — its own
         // length, so looping a 14-step bar loops 14 steps, not 16.
-        const lBar=inLoop?loopBarOf(pat):0;
-        const loopLen=inLoop?Math.max(1,partBarLens(pat)[lBar]||COLS):0;
-        const s=inLoop?lBar*COLS+(lf.step%loopLen):seq[lf.step%len];
+        const lBar=barLock?loopBarOf(pat):0;
+        const loopLen=barLock?Math.max(1,partBarLens(pat)[lBar]||COLS):0;
+        const s=barLock?lBar*COLS+(lf.step%loopLen):seq[lf.step%len];
         // Priced from the bar THIS step is in, so it has to come after `s`.
         // It is both how long the note sounds and how far the cursor moves.
         const layerStepDur=absStepDur*colMult(pat,s);
@@ -7211,7 +7325,7 @@ export default function LoudLight(){
         // Advance the cursor, not the column: with per-bar lengths the next
         // column is wherever the sequence says, and (s+1) would walk straight
         // into a short bar's dead tail.
-        const ns=inLoop?(lf.step+1)%loopLen:(lf.step+1)%len;
+        const ns=barLock?(lf.step+1)%loopLen:(lf.step+1)%len;
         lf.step=ns;
         lf.nextAt+=layerStepDur;
       }
@@ -7252,7 +7366,7 @@ export default function LoudLight(){
       // about where you are in the pattern, not how many ticks have gone by.
       const cs=stepR.current;
       const mcol=(mSeq&&mSeq.length)?mSeq[cs%mSeq.length]:cs;
-      const pb=inLoop?loopBarIdx:Math.floor(mcol/COLS);
+      const pb=barLock?loopBarIdx:Math.floor(mcol/COLS);
       const pq=pb*4+Math.floor((mcol%COLS)/4);
       if(songPulseR.current!==pq){songPulseR.current=pq;setSongPulse(pq);}
     }
@@ -8406,8 +8520,18 @@ export default function LoudLight(){
   // (audible, transient, shown via perfMix) and — if record-armed during
   // playback — writes onto the current step. Outside motion mode it edits the
   // persistent base mix (the normal mixer behavior).
+  // One history entry per drag, opened on the first value that actually
+  // differs — same rule as every other scrubber (see HIST). Motion mode writes
+  // automation rather than the base mix and pushes through writeMotion's own
+  // callers, so only the base-mix branch marks here.
+  const mixDragR=useRef(null);
   const onMixDrag=(row,key,val)=>{
-    if(!motionEnabledR.current){setDrumMix(row,key,val);return;}
+    if(!motionEnabledR.current){
+      const cur=fillDrumMix(drumMixR.current)[row];
+      const tag=row+":"+key;
+      if(cur&&cur[key]!==val&&mixDragR.current!==tag){mixDragR.current=tag;pushHistory();}
+      setDrumMix(row,key,val);return;
+    }
     const linked=_linkedRows(row,key);
     linked.forEach(rr=>drumEngine.current.setVoiceMix&&drumEngine.current.setVoiceMix(DRUM_VOICES[rr].key,{[key]:val}));
     setPerfMix(pm=>{const n={...pm};linked.forEach(rr=>{n[rr]={...(n[rr]||{}),[key]:val};});return n;});
@@ -8417,6 +8541,7 @@ export default function LoudLight(){
     }
   };
   const onMixUp=(row,key)=>{
+    mixDragR.current=null;
     if(!motionEnabledR.current)return;
     recDragR.current=null;
     const linked=_linkedRows(row,key);
@@ -8784,8 +8909,8 @@ export default function LoudLight(){
   const bpmDraggingR = useRef(false);
   const handleBpmDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    if(isDoubleTap(e)){setBpm(120);return;}
-    bpmDragData.current = {lastY: e.clientY, val: bpmR.current};
+    if(isDoubleTap(e)){if(bpmR.current!==120)pushHistory();setBpm(120);return;}
+    bpmDragData.current = {lastY: e.clientY, val: bpmR.current, marked:false};
     bpmDraggingR.current=true;setBpmDragging(true);
     bpmDragRef.current.setPointerCapture(e.pointerId);
   },[]);
@@ -8795,6 +8920,7 @@ export default function LoudLight(){
     const d=bpmDragData.current;
     const dy = e.clientY - d.lastY; d.lastY=e.clientY;
     d.val = Math.max(40, Math.min(300, d.val - ballisticNudge(dy,0.5)));
+    if(Math.round(d.val)!==bpmR.current)histOnce(d);
     setBpm(Math.round(d.val));
   },[]);
   const handleBpmUp = useCallback(()=>{bpmDraggingR.current=false;setBpmDragging(false);},[]);
@@ -8806,8 +8932,8 @@ export default function LoudLight(){
 
   const handleStDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    if(isDoubleTap(e)){setTranspose(0);return;}
-    stDragData.current = {lastY: e.clientY, val: transpR.current};
+    if(isDoubleTap(e)){if(transpR.current!==0)pushHistory();setTranspose(0);return;}
+    stDragData.current = {lastY: e.clientY, val: transpR.current, marked:false};
     stDraggingR.current=true;setStDragging(true);
     stDragRef.current.setPointerCapture(e.pointerId);
   },[]);
@@ -8817,6 +8943,7 @@ export default function LoudLight(){
     const d=stDragData.current;
     const dy = e.clientY - d.lastY; d.lastY=e.clientY;
     d.val = Math.max(-24, Math.min(24, d.val - ballisticNudge(dy,1/6)));
+    if(Math.round(d.val)!==transpR.current)histOnce(d);
     setTranspose(Math.round(d.val));
   },[]);
   const handleStUp = useCallback(()=>{stDraggingR.current=false;setStDragging(false);},[]);
@@ -8827,8 +8954,8 @@ export default function LoudLight(){
   const swingDraggingR = useRef(false);
   const handleSwingDown = useCallback(e=>{
     e.preventDefault();e.stopPropagation();
-    if(isDoubleTap(e)){setSwing(0);return;}
-    swingDragData.current = {lastY: e.clientY, val: swingR.current};
+    if(isDoubleTap(e)){if(swingR.current!==0)pushHistory();setSwing(0);return;}
+    swingDragData.current = {lastY: e.clientY, val: swingR.current, marked:false};
     swingDraggingR.current=true;setSwingDragging(true);
     swingDragRef.current.setPointerCapture(e.pointerId);
   },[]);
@@ -8838,6 +8965,7 @@ export default function LoudLight(){
     const d=swingDragData.current;
     const dy = e.clientY - d.lastY; d.lastY=e.clientY;
     d.val = Math.max(0, Math.min(100, d.val - ballisticNudge(dy,1/3)));
+    if(Math.round(d.val)!==swingR.current)histOnce(d);
     setSwing(Math.round(d.val));
   },[]);
   const handleSwingUp = useCallback(()=>{swingDraggingR.current=false;setSwingDragging(false);},[]);
@@ -9055,7 +9183,7 @@ export default function LoudLight(){
       if(e.button===2)return;                 // right-click is handled by onContextMenu
       e.stopPropagation();
       const t=tempoChipR.current, f=tempoFldOf(tempoFieldR.current);
-      t.held=false;t.moved=false;t.swallow=false;_tempoHoldEnd();
+      t.held=false;t.moved=false;t.swallow=false;t.marked=false;_tempoHoldEnd();
       t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();
       // Capture BEFORE the hold fires, so the drag that follows keeps landing
       // here once the finger has wandered off a 42px chip.
@@ -9076,6 +9204,7 @@ export default function LoudLight(){
       const f=tempoFldOf(tempoFieldR.current);
       const dy=e.clientY-t.lastY; t.lastY=e.clientY;
       t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));
+      if(Math.round(t.val)!==Math.round(f.get()))histOnce(t);
       f.set(t.val);
     },
     onPointerUp:()=>{
@@ -9107,12 +9236,13 @@ export default function LoudLight(){
   // has to be read off the window rather than the chip.
   useEffect(()=>{
     if(!tempoPop||!tempoPop.sticky)return;
-    const st={y:null,val:tempoFldOf(tempoFieldR.current).get()};
+    const st={y:null,val:tempoFldOf(tempoFieldR.current).get(),marked:false};
     const mv=(e)=>{
       const f=tempoFldOf(tempoFieldR.current);
       if(st.y===null){st.y=e.clientY;return;}
       const dy=e.clientY-st.y; st.y=e.clientY;
       st.val=Math.max(f.min,Math.min(f.max,st.val-ballisticNudge(dy,f.gain)));
+      if(Math.round(st.val)!==Math.round(f.get()))histOnce(st);
       f.set(st.val);
     };
     const kd=(e)=>{if(e.key==="Escape")setTempoPop(null);};
@@ -10522,7 +10652,7 @@ export default function LoudLight(){
             <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
             <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
             <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-            <button style={Object.assign({},S.loopBtnBottom,loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
+            <button style={Object.assign({},S.loopBtnBottom,loopBtnStyle)} {...loopBtnProps}>LOOP</button>
             <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
           </div>
         </div>
@@ -10879,7 +11009,7 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
             </div>
           </div>
@@ -10892,7 +11022,7 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopMode?S.loopOn:{})} onClick={()=>toggleLoop()}>LOOP</button>
+              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
               <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>

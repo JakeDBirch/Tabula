@@ -8,7 +8,9 @@
     "audit": "node build.mjs --audit-only",
     "build:ios": "node build.mjs --ios",
     "build:core": "node core/build.mjs",
-    "test:core": "node core/build.mjs"
+    "test:core": "node core/build.mjs",
+    "test:oracle": "node core/test/oracle.mjs",
+    "test:play": "node core/test/songplay.mjs"
   },
   "devDependencies": {
     "@babel/cli": "^7.24.0",

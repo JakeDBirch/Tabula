@@ -12,7 +12,11 @@
 #include "ll_engine.h"
 
 typedef struct {
-  ll_pattern*pat; int inSong, inLoop, loopBarIdx, loopOff;
+  /* inLoop: LOOP is on at all — pin the pattern and hold the song's place.
+   * barLock: and pin ONE bar of it. LL_P_LOOP is 0 off / 1 bar / 2 pattern, so
+   * a whole-pattern loop is inLoop without barLock: everything runs its own
+   * full length, the song just doesn't advance. */
+  ll_pattern*pat; int inSong, inLoop, barLock, loopBarIdx, loopOff;
   int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen, mLoopBar;
 } ctx_t;
 
@@ -38,7 +42,9 @@ static int pat_cycle_steps(ll_pattern*p,int mLayer){
 }
 
 static int build_ctx(ctx_t*c){
-  c->inSong=G.p[LL_P_SONG_MODE]>0.5f; c->inLoop=G.p[LL_P_LOOP]>0.5f;
+  c->inSong=G.p[LL_P_SONG_MODE]>0.5f;
+  c->inLoop=G.p[LL_P_LOOP]>0.5f;
+  c->barLock=G.p[LL_P_LOOP]>1.5f?0:c->inLoop;
   ll_pattern*cur=0;
   if(c->inSong&&G.songLen){
     if(G.songPos<0||G.songPos>=G.songLen)G.songPos=0;
@@ -51,7 +57,7 @@ static int build_ctx(ctx_t*c){
   c->pat=cur;
   int bars=cur->bars<1?1:cur->bars;
   int lb=(int)G.p[LL_P_LOOP_BAR]; if(lb<0)lb=0; if(lb>bars-1)lb=bars-1;
-  c->loopBarIdx=c->inLoop?lb:-1;
+  c->loopBarIdx=c->barLock?lb:-1;
   c->loopOff=c->loopBarIdx*LL_COLS;   /* the PATTERN's bar; each part wraps it */
   c->mLayer=master_layer(cur);
   c->mHead=c->mLayer>=0?part_head(cur,c->mLayer):0;
@@ -59,19 +65,19 @@ static int build_ctx(ctx_t*c){
   /* The master is a part like any other and can be the SHORT one, so it wraps
    * the pinned bar into its own length exactly as the others do. */
   c->mLoopBar=0; c->loopMasterLen=LL_COLS;
-  if(c->inLoop&&c->mHead){
+  if(c->barLock&&c->mHead){
     int pb=c->mHead->bars<1?1:c->mHead->bars;
     c->mLoopBar=c->loopBarIdx%pb;
     int l=c->mHead->barLens[c->mLoopBar];
     c->loopMasterLen=l>0?l:LL_COLS;
   }
-  c->patLen=c->inLoop?c->loopMasterLen:pat_cycle_steps(cur,c->mLayer);
+  c->patLen=c->barLock?c->loopMasterLen:pat_cycle_steps(cur,c->mLayer);
   if(c->patLen<1)c->patLen=1;
   return 1;
 }
 static double master_dur(ctx_t*c,int i){
   if(!c->mHead)return c->absStep;
-  int col=c->inLoop?c->mLoopBar*LL_COLS:c->mHead->seq[i%c->mHead->seqLen];
+  int col=c->barLock?c->mLoopBar*LL_COLS:c->mHead->seq[i%c->mHead->seqLen];
   return c->absStep*col_mult(c->mHead,col);
 }
 
@@ -159,10 +165,10 @@ static void part_tick(ctx_t*c,int layer){
    * free-running cursor obeys. Without it an 8-bar part under a 16-bar one was
    * read past the end of its grid and fell silent for every loop bar past 8. */
   int lBar=0, loopLen=0;
-  if(c->inLoop){ int pb=h->bars<1?1:h->bars; lBar=c->loopBarIdx%pb;
+  if(c->barLock){ int pb=h->bars<1?1:h->bars; lBar=c->loopBarIdx%pb;
                  int l=h->barLens[lBar]; loopLen=l>0?l:LL_COLS; }
   int st=G.cur[layer].step;
-  int s=c->inLoop?lBar*LL_COLS+(st%loopLen):h->seq[st%len];
+  int s=c->barLock?lBar*LL_COLS+(st%loopLen):h->seq[st%len];
   double stepDur=c->absStep*col_mult(h,s);
   double at=G.cur[layer].nextAt;
   float sw=G.p[LL_P_SWING];
@@ -171,7 +177,7 @@ static void part_tick(ctx_t*c,int layer){
   if(audible){ if(layer==LL_DRUMS)play_drum_step(P,s,playAt,stepDur); else play_synth_step(layer,P,s,playAt,stepDur); }
   ev_push(LL_EV_STEP,layer,s,playAt);
   if(G.playPatId!=P->id){ G.playPatId=P->id; ev_push(LL_EV_PLAYPAT,P->id,0,at); }
-  G.cur[layer].step=c->inLoop?(st+1)%loopLen:(st+1)%len;
+  G.cur[layer].step=c->barLock?(st+1)%loopLen:(st+1)%len;
   G.cur[layer].nextAt=at+stepDur;
 }
 /* The master's events are STEP BOUNDARIES: at G.mNext, step G.mstep begins.
@@ -197,7 +203,7 @@ static void master_tick(ctx_t*c){
   }
   G.mFirst=0;
   int mcol=c->mHead?c->mHead->seq[st%c->mHead->seqLen]:st;
-  int pb=c->inLoop?c->loopBarIdx:mcol/LL_COLS;
+  int pb=c->barLock?c->loopBarIdx:mcol/LL_COLS;
   int pq=pb*4+(mcol%LL_COLS)/4;
   if(pq!=G.pulse){ G.pulse=pq; ev_push(LL_EV_PULSE,pq,0,t); }
   G.mNext=t+master_dur(c,st);

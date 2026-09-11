@@ -39,15 +39,27 @@ const buildFixture=(scenario)=>({
     // bar of the pattern, and the drums have to wrap it into their own length.
     if(${JSON.stringify(!!scenario.shortDrums)}){ A.parts.drums=resizePatBars(A.parts.drums,1); }
     const patterns=[syncPatBars(A),syncPatBars(B)];
-    const song=new Array(64).fill(null); song[0]=A.id; song[1]=B.id; const songRep=new Array(64).fill(1); songRep[1]=2;
+    // songMode is DERIVED from the song's contents now — the song plays when
+    // there is a song — so "free-running" has to mean an EMPTY song, not a flag
+    // the app no longer reads. This fixture went on writing a songMode:false
+    // flag beside a populated song, which quietly put every scenario in song
+    // mode and is why two of them were failing. (No backticks in here: the
+    // whole fixture is a template literal, and one ends it early — the same
+    // trap the CSS block has.)
+    const song=new Array(64).fill(null); const songRep=new Array(64).fill(1);
+    if(${JSON.stringify(!!scenario.song)}){ song[0]=A.id; song[1]=B.id; songRep[1]=2; }
+    // A song of PLAIN patterns (B only): B is one 16-step bar at 1x, so this
+    // isolates "does the song ADVANCE in step" from "does a master with bar
+    // lengths [16,14] and a half-speed bar cycle in step".
+    if(${JSON.stringify(!!scenario.plainSong)}){ song[0]=B.id; song[1]=B.id; song[2]=B.id; }
     const sc=${JSON.stringify(scenario)};
     const state=packProject({ver:PROJ_VER,bpm:120,scale:'major',userMask:USER_MASK_DEF,userRoot:0,transpose:sc.transpose||0,swing:sc.swing||0,speedMult:1,
       layerParams:{synth:{waveform:'sawtooth',detune:8,attack:8,decay:400,sustain:40,vcfCutoff:80,vcfRes:15,filterEnvAmt:40,octave:0,dlySend:50,rvSend:30,mix:85,fxTrim:100,subLevel:0,spread:50,glide:0,velAmp:100,velFlt:100,velEnv:0},
                    lead:{waveform:'square',detune:0,attack:8,decay:300,sustain:40,vcfCutoff:70,vcfRes:10,filterEnvAmt:20,octave:1,dlySend:30,rvSend:20,mix:85,fxTrim:100,subLevel:50,spread:0,glide:sc.leadGlide||0,monoSingle:true}},
       dlyIdx:3,dlyFbPct:45,dlyHpVal:8,dlyLpVal:78,rvSize:50,rvDamp:40,rvLfDamp:0,rvPreDelay:0,rvMod:0,dlyToRev:0,drumLevel:85,drumFxTrim:100,
       drumMix:defaultDrumMix(),trackMute:{synth:false,lead:false,drums:false},trackSolo:{synth:false,lead:false,drums:false},activeKit:'808-kit',
-      loopMode:!!sc.loop,loopBar:sc.loopBar??-1,loopPat:sc.loop?A.id:null,varyMode:{synth:false,lead:false,drums:false},
-      patterns,activePatId:A.id,song,songRep,songMode:!!sc.song,songView:false,activeLayer:'synth'});
+      loopMode:sc.loop||0,loopBar:sc.loopBar??-1,loopPat:sc.loop?A.id:null,varyMode:{synth:false,lead:false,drums:false},
+      patterns,activePatId:A.id,song,songRep,activeLayer:'synth'});
     localStorage.setItem('tnori-autosave',JSON.stringify(state));
     return {A:A.id,B:B.id};
   })()`});
@@ -157,14 +169,19 @@ const compare=(js,core,sr,horizon,label)=>{
 };
 
 const SCENARIOS=[
+  {name:'song of plain 1-bar patterns',plainSong:true,seconds:11,horizon:10},
   {name:'song, swing 30, transpose 2',song:true,swing:30,transpose:2,seconds:11,horizon:10},
   {name:'pattern A free-running, lead glide',song:false,leadGlide:40,seconds:7,horizon:6},
-  {name:'LOOP bar 2 of A',loop:true,loopBar:1,seconds:5,horizon:4},
+  {name:'LOOP bar 2 of A',loop:1,loopBar:1,seconds:5,horizon:4},
   // Bar 2 of a 2-bar pattern whose drum part is only 1 bar: the drums have no
   // bar 2 and must wrap to their bar 1 rather than falling silent. Both
   // engines had this wrong in the same way, so only a test that asserts the
   // drums SOUND catches it — this one asserts the two agree on when.
-  {name:'LOOP past a short part',loop:true,loopBar:1,shortDrums:true,seconds:5,horizon:4},
+  {name:'LOOP past a short part',loop:1,loopBar:1,shortDrums:true,seconds:5,horizon:4},
+  // LOOP scope 2: the whole pattern, with the song on. `inLoop` still pins the
+  // pattern and holds the song's place; `barLock` is what is off, so every part
+  // runs its own full length and the master its full cycle.
+  {name:'LOOP the whole pattern, song on',loop:2,song:true,seconds:9,horizon:8},
 ];
 for(const sc of SCENARIOS){
   console.log('\n── '+sc.name+' ──');
@@ -175,4 +192,33 @@ for(const sc of SCENARIOS){
   console.log(`   sr ${c.sr}, JS attacks ${j.att.length}, core attacks ${core.length}`);
   compare(j.att,core,c.sr,sc.horizon,sc.name);
 }
+
+// ── What pattern-loop MEANS, not just that the two engines agree ──────────
+// The oracle only proves the engines match; a bug written into both passes it,
+// which is exactly how the loop-wrap silence survived. So state the behaviour
+// directly: looping the WHOLE pattern must sound the same as free-running that
+// pattern — same attacks, same times — because that is what it is, plus a hold
+// on the song's place. If `barLock` leaked back in, this collapses to one bar
+// and the two lists stop matching.
+console.log('\n── pattern loop plays the whole pattern ──');
+{
+  const free=await captureJS({song:false},9);
+  const held=await captureJS({song:true,loop:2},9);
+  const norm=(a)=>{const t0=Math.min(...a.map(x=>x.t));
+    return a.map(x=>(x.l===2?`D${x.row}v${Math.round(x.vel)}`:`S${x.l}h${x.hz.toFixed(1)}`)+'@'+Math.round((x.t-t0)*1000))
+            .filter(x=>parseInt(x.split('@')[1],10)<8000).sort();};
+  const F=norm(free.att),H=norm(held.att);
+  ck(F.length>0&&H.length>0,`both runs sounded (${F.length} free, ${H.length} held)`);
+  const miss=F.filter(x=>!H.includes(x)), extra=H.filter(x=>!F.includes(x));
+  ck(miss.length===0&&extra.length===0,
+     `LOOP-the-pattern is identical to free-running it (${F.length} attacks, ${miss.length} missing, ${extra.length} extra)`);
+  for(const m of [...miss.slice(0,6),...extra.slice(0,6)])console.log('     '+m);
+  // …and it is NOT just bar 1 on repeat: bar 2 of A is 14 steps at half speed,
+  // so a bar-locked run has strictly fewer distinct attacks over the horizon.
+  const bar1=await captureJS({song:true,loop:1,loopBar:0},9);
+  const B=norm(bar1.att);
+  ck(new Set(H.map(x=>x.split('@')[0])).size>new Set(B.map(x=>x.split('@')[0])).size,
+     `and wider than the bar loop (${new Set(H.map(x=>x.split('@')[0])).size} distinct vs ${new Set(B.map(x=>x.split('@')[0])).size})`);
+}
+
 await b.close(); console.log(fail?`\nORACLE FAIL: ${fail}`:'\nORACLE PASS'); process.exit(fail?1:0);
