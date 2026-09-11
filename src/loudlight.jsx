@@ -1522,7 +1522,6 @@ const SESSION_DEFAULTS = Object.freeze({
   vVelJitter:0, vFltJitter:0, vDlyJitter:0,
   vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
   loopMode:false, loopBar:-1, loopPat:null, varyMode:{synth:false,lead:false,drums:false},
-  songMode:false, songView:false,
 });
 
 
@@ -3710,12 +3709,14 @@ export default function LoudLight(){
   // ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
   // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
   // Each cell = pattern ID for that layer at that bar, or null = silence.
-  // songMode is the persistent playback intent: when true, the song matrix drives
-  // playback. Toggled only by the SONG chip. Loop mode in transport overrides it.
-  const [songMode,     setSongMode]     = useState(false);
-  // songView is the UI gate: when true, the matrix is shown; when false, the
-  // pattern grid is shown. Decoupled from songMode so tapping a pill in song
-  // view leaves the view without changing the playback source.
+  // songMode — the playback intent — is DERIVED now (see `songSeq` below), not a
+  // toggle. It used to be a persisted flag switched by the SONG chip, which was
+  // also the chip that opened the song page: one control doing navigation and
+  // playback routing at once. The song lane is on every part page now, so the
+  // arrangement is never off-screen, and its contents are the honest switch —
+  // a song with entries in it is a song, and the app plays it.
+  // songView is the UI gate for the song PAGE, which now exists only in mobile
+  // landscape, the one layout with nowhere to put the lane (see songPage).
   const [songView,     setSongView]     = useState(false);
   // ── THE SONG ───────────────────────────────────────────────────────────
   // A linear list of pattern ids. A pattern is all three parts, so there is
@@ -3819,6 +3820,9 @@ export default function LoudLight(){
   },[song,songRep]);
   const songSeqR=useRef(songSeq);
   useEffect(()=>{songSeqR.current=songSeq;},[songSeq]);
+  // The song plays when there IS a song. Nothing to switch, nothing to persist,
+  // and nothing that can be left in the wrong position by a project you loaded.
+  const songMode=songSeq.length>0;
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
@@ -4112,7 +4116,6 @@ export default function LoudLight(){
     patterns:_mapProjectPats({patterns},packPat).patterns,
     activePatId:activePatternId,
     song:[...song],songRep:[...songRep],
-    songMode,songView,
     activeLayer,
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
@@ -4172,8 +4175,6 @@ export default function LoudLight(){
     _adoptPatterns(s);
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix):defaultDrumMix()); // global mix (snapshots always carry it)
     _adoptSong(s);
-    if(s.songMode!=null)setSongMode(s.songMode);
-    if(s.songView!=null)setSongView(s.songView);
 
     // Undo/redo snapshots — fall back to defaults for any field a previous
     // snapshot didn't carry (so undo across a feature-add boundary doesn't
@@ -4265,7 +4266,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4347,8 +4348,6 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     _adoptSong(s);
-    setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
-    setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
 
     setSelDevId(row.id);setNameDraft(row.name);
     showFlash("LOADED "+row.name);
@@ -4430,7 +4429,7 @@ export default function LoudLight(){
     setLoopMode(false);setLoopBar(-1);setLoopPat(null);setVaryMode({synth:false,lead:false,drums:false});
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
-    setSongMode(false);setSongView(false);
+    setSongView(false);
     setSong(Array(64).fill(null));setSongRep(Array(64).fill(1));
     setSongBar(-1);songBarR.current=-1;
     setSongBarLayer({synth:-1,lead:-1,drums:-1});
@@ -4519,45 +4518,133 @@ export default function LoudLight(){
   const _barPerRow=Math.max(1,Math.min(BAR_ROW_MAX,barCount));
   const _barRows=Math.ceil(barCount/_barPerRow);
   const BAR_ROW_H=22, BAR_ROW_GAP=2;
-  // What the extra rows cost the grid. Both grid-sizing expressions budget for
-  // a ONE-row strip (the 32px / 150px terms below); a wrapped strip is taller
-  // than that, and the grid cannot absorb it — its 16 rows of cells have an
-  // intrinsic minimum, so instead of shrinking it overflowed the bottom of the
-  // screen. Verified: 32 bars on an SE in landscape clipped the grid until
-  // this was subtracted. On a phone in portrait it changes nothing, because
-  // the grid is width-bound there and the height term never binds.
+  // The strip's own height, and what its extra rows cost the grid. The strip
+  // sits OUTSIDE the grid's square box — it used to be inside it, which is the
+  // whole of the "the bar numbers are covering the note grid" bug: a box with
+  // aspect-ratio 1 is exactly as tall as it is wide, so anything sharing it
+  // with the grid comes straight off the grid's height, and the cells went
+  // 23.1px wide by 20.2px tall. Nothing was overlapping; the grid had been
+  // squashed by precisely the height of the chips. Two chip rows made it
+  // obvious, one row had been quietly costing the same thing for months.
+  const _barStripPx=_barRows*BAR_ROW_H+(_barRows-1)*BAR_ROW_GAP;
   const _barStripExtra=(_barRows-1)*(BAR_ROW_H+BAR_ROW_GAP);
   // ── The SONG STRIP above the grid ────────────────────────────────────────
-  // Two rows of the song lane, on every part page, in PORTRAIT ONLY. The space
-  // is free there and only there: the grid is width-bound in portrait (370px of
-  // a 390px phone), so the vertical room the interface gave back cannot become
-  // grid and would otherwise stay empty. Landscape is the opposite — the grid is
-  // height-bound, and two rows would take ~19% of the layout that already has
-  // the smaller grid — so landscape keeps the rail and shows no strip.
-  //
-  // Its height is a function of its WIDTH (square cells, eight across), which is
-  // why the grid's size term subtracts it in `vw` rather than in px. For a
-  // parent inset by `pad` each side: strip = (100vw - 2*pad)/COLS*rows ... which
-  // is `_laneBoxPad` again, resolved against that width.
+  // The song lane, on every part page, in PORTRAIT ONLY. The space is free there
+  // and only there: the grid is width-bound in portrait (370px of a 390px
+  // phone), so the vertical room the interface gave back cannot become grid and
+  // would otherwise stay empty. Landscape is the opposite — height-bound, on the
+  // layout that already has the smaller grid — so landscape keeps the rail and
+  // shows no strip. It is not a fixed number of rows: the grid takes its square
+  // out of the column first, reserving one lane row, and the lane grows into
+  // whatever is left (three rows on a 15, two with sixteen bars, one on an SE).
   const SONG_STRIP=IS_MOBILE&&!isLandscape;
-  const SONG_STRIP_ROWS=2;
-  // The strip's height as a CSS length in viewport units, for the grid's
-  // `calc()`. pad is the horizontal inset of the column the strip sits in.
+  // The song PAGE survives in exactly one layout: mobile landscape. Everywhere
+  // else the lane rides along — above the grid in portrait, in the sidebar on
+  // desktop — and the page is a second copy of something already on screen.
+  // Landscape is the one that cannot carry it: the grid is height-bound there
+  // and the ~150px going spare beside it on an SE would make a slot 14px wide,
+  // which is not a target. Derived rather than gated at each mount so rotating
+  // out of landscape with the page open cannot leave it showing.
+  const songPageOn=songView&&IS_MOBILE&&isLandscape;
   // The chips move below the grid ONLY where the song strip took their place.
   // In landscape and on desktop nothing displaced them, the transport is in the
   // rail rather than under your thumb, and leaving them put is the smaller
   // change. One row, two positions — never two copies.
   const _barStripRow=(pad)=>(
-    <div style={{display:"flex",width:"100%"}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
+    <div style={{display:"flex",width:"100%",flexShrink:0}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
   );
-  const _songStripCss=(pad)=>{
-    if(!SONG_STRIP)return "0px";
-    const gap=4,gutter=10,rows=SONG_STRIP_ROWS;
-    // height = rows*cell + (rows-1)*gap, cell = (W - gutter - (COLS-1)*gap)/COLS
-    const kW=rows/SONG_COLS;                                   // coefficient on W
-    const c=rows*(gutter+(SONG_COLS-1)*gap)/SONG_COLS-(rows-1)*gap;
-    // W = 100vw - 2*pad, plus the 6px gap between the strip and the grid box
-    return "("+(kW*100).toFixed(4)+"vw - "+(kW*2*pad+c-6).toFixed(4)+"px)";
+  // ── The grid's height budget, MEASURED ───────────────────────────────────
+  // Both grid-sizing expressions used to subtract a hand-tuned constant from
+  // 100dvh — 150px on a phone, 32px in landscape — standing for "everything in
+  // the column that is not the grid". No constant can be right: that total
+  // includes the pattern chip row, which WRAPS as you add patterns. The 150 was
+  // out by ~70px on an SE and it never showed, because the width term bound
+  // first and the height term was simply never consulted. The moment a song
+  // lane and a wrapped bar strip joined the column it had to bind, and didn't.
+  //
+  // So the content area measures itself: one ResizeObserver writes its real
+  // height into `--ch` on the element, and the grid sizes against that. No
+  // React state and so no re-render, and no feedback loop either — the area is
+  // `flex:1` inside a fixed column with `overflow:hidden`, so its height does
+  // not depend on anything the grid does inside it.
+  // ── The lane is ONE LINE that scrolls ────────────────────────────────────
+  // It used to wrap into rows and grow to fill whatever height was going, which
+  // made its height a function of the layout and the layout a function of its
+  // height. A song is linear, so the control is linear: one row of slots, eight
+  // on screen, scrolling sideways, with a track underneath. Its height is now
+  // ONE cell plus that track — a constant the rest of the column can budget for
+  // without negotiating.
+  const laneElR=useRef(null), trackElR=useRef(null), thumbElR=useRef(null);
+  const laneRef=useCallback((el)=>{laneElR.current=el;if(el)_syncLaneTrack();},[]);
+  const trackRef=useCallback((el)=>{trackElR.current=el;},[]);
+  const thumbRef=useCallback((el)=>{thumbElR.current=el;if(el)_syncLaneTrack();},[]);
+  // The thumb is written imperatively rather than from state: it moves on every
+  // scroll event and a re-render per frame of a flick is not worth paying.
+  const _syncLaneTrack=()=>{
+    const el=laneElR.current,th=thumbElR.current; if(!el||!th)return;
+    const sw=el.scrollWidth||1,cw=el.clientWidth||1;
+    const frac=Math.max(0.06,Math.min(1,cw/sw));
+    const pos=sw>cw?el.scrollLeft/(sw-cw):0;
+    th.style.width=(frac*100).toFixed(2)+"%";
+    th.style.left=((1-frac)*pos*100).toFixed(2)+"%";
+    if(trackElR.current)trackElR.current.style.opacity=cw>=sw-1?"0.25":"1";
+  };
+  // Drag the track to pan. The slots set touch-action:none so a drag on one can
+  // move a pattern in 2D, which means a touch starting on a slot can never
+  // scroll — the track is what you grab instead, and it doubles as the readout
+  // of where you are in a 64-slot song.
+  const _lanePanStart=(e)=>{
+    const el=laneElR.current; if(!el)return;
+    e.preventDefault(); e.stopPropagation();
+    const r=e.currentTarget.getBoundingClientRect();
+    const to=(cx)=>{
+      const sw=el.scrollWidth,cw=el.clientWidth; if(sw<=cw)return;
+      const frac=cw/sw, usable=r.width*(1-frac);
+      const p=usable>0?Math.max(0,Math.min(1,(cx-r.left-r.width*frac/2)/usable)):0;
+      el.scrollLeft=p*(sw-cw);
+    };
+    to(e.clientX);
+    const mv=(ev)=>to(ev.clientX);
+    const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+    document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+  };
+  // Dragging a pattern toward either end of the lane pans it, so a drop can
+  // land past the eight slots on screen. The cached hit rects move with the
+  // scroll, so re-measure whenever it actually moved.
+  const _laneEdgeScroll=(x)=>{
+    const el=laneElR.current; if(!el)return;
+    const r=el.getBoundingClientRect(), zone=Math.min(52,r.width*0.18);
+    let d=0;
+    if(x<r.left+zone)d=-Math.ceil((r.left+zone-x)/3);
+    else if(x>r.right-zone)d=Math.ceil((x-(r.right-zone))/3);
+    if(!d)return;
+    const was=el.scrollLeft; el.scrollLeft=was+d;
+    if(el.scrollLeft!==was){_syncLaneTrack();_songMeasure();}
+  };
+  const _contentRO=useRef(null);
+  const contentRef=useCallback((el)=>{
+    if(_contentRO.current){_contentRO.current.disconnect();_contentRO.current=null;}
+    if(!el)return;
+    const set=()=>{el.style.setProperty("--ch",el.clientHeight+"px");};
+    set();
+    if(typeof ResizeObserver!=="undefined"){const ro=new ResizeObserver(set);ro.observe(el);_contentRO.current=ro;}
+  },[]);
+  // How wide the grid box may be: the narrower of the column it sits in and
+  // what the column's remaining HEIGHT allows. `factor` is the box's height as
+  // a fraction of its width — 1 for the square synth grid, DRUM_ROWS/COLS for
+  // the drums, which are 13 rows of 16 and so never square. The chrome term is
+  // real furniture now (the 6px padding top and bottom, the bar strip at its
+  // actual wrapped height, the 6px gap above it) plus, where the song strip
+  // shows, ONE reserved lane row; the lane grows into everything past that.
+  const gridSizeCss=(pad,factor)=>{
+    const f=factor||1;
+    // 12 = the column's 6px padding top and bottom; then the bar strip at its
+    // real wrapped height; then, where the song strip shows, the 6px gap below
+    // the lane, the 2px above the strip, and the lane block — one row of slots
+    // and its track, a fixed height now rather than a share of the column.
+    let h="var(--ch,100dvh) - "+(12+_barStripPx+(SONG_STRIP?8:0))+"px";
+    if(SONG_STRIP)h+=" - ("+_laneBlockCss(pad)+")";
+    return "min(100%,calc(("+h+")"+(f===1?"":" / "+f.toFixed(4))+"))";
   };
   const curBar        = Math.max(0,Math.min(barCount-1,barPage));
   const barOff        = curBar*COLS;
@@ -4825,6 +4912,23 @@ export default function LoudLight(){
     }
     return -1;
   })();
+  // The track is written imperatively, so it has to be re-synced after any
+  // render that changed the lane's content width — adding a slot, mainly.
+  useEffect(()=>{_syncLaneTrack();});
+  // Keep the sounding slot in view. The lane shows eight at a time now, so a
+  // longer song would otherwise play off the end of it. Gated on FOLLOW, which
+  // already means "keep the editor on what's playing" — scrolling the lane out
+  // from under someone who deliberately scrolled it is the same mistake the
+  // bar strip's page-follow makes if you let it.
+  useEffect(()=>{
+    if(!playing||!songMode||!followSeq)return;
+    const el=laneElR.current; if(!el)return;
+    const cell=el.querySelector('[data-song-bar="'+_songPlayingSlot+'"]');
+    if(!cell)return;
+    const cr=cell.getBoundingClientRect(),er=el.getBoundingClientRect();
+    if(cr.left<er.left)el.scrollLeft-=(er.left-cr.left)+LANE_GAP;
+    else if(cr.right>er.right)el.scrollLeft+=(cr.right-er.right)+LANE_GAP;
+  },[_songPlayingSlot,playing,songMode,followSeq]);
   // Which pass through a repeated slot is playing (0-based), for lighting the
   // pips one at a time.
   const _songPlayingPass = (()=>{
@@ -4841,10 +4945,14 @@ export default function LoudLight(){
   // then one more row than it needs — so there is always somewhere to drop the
   // next pattern without the page being mostly empty squares.
   const SONG_COLS=8;
-  const _songRows=(()=>{
+  // How many slots to draw: enough for the song plus ONE empty one to place
+  // into, and never fewer than fill the visible line. Growing by a slot as you
+  // fill the last one is the whole point of the linear form — there is no grid
+  // shape to round up to, so the control is exactly as long as the song.
+  const _songCells=(()=>{
     let last=-1;
     for(let i=0;i<64;i++)if(song[i]!=null)last=i;
-    return Math.max(2,Math.min(64/SONG_COLS,Math.floor(last/SONG_COLS)+2));
+    return Math.max(SONG_COLS,Math.min(64,last+2));
   })();
   useEffect(()=>{ if(delArm==null)return; const t=setTimeout(()=>setDelArm(null),4000); return ()=>clearTimeout(t); },[delArm]);
   useEffect(()=>{ setDelArm(null); },[activePatternId]);
@@ -4916,9 +5024,7 @@ export default function LoudLight(){
   // VISIBLE BAR of the layer you're editing, not the whole pattern — that has
   // always been true and has never been written down anywhere you could see it,
   // which is exactly the kind of thing a menu can say for free.
-  const patChipR=useRef({tmr:0,held:false});
   const patMenuAtR=useRef(0);
-  const _patChipEnd=()=>{if(patChipR.current.tmr){clearTimeout(patChipR.current.tmr);patChipR.current.tmr=0;}};
   // Opening a chip's menu SELECTS that pattern first — the same thing a tap on
   // it does — so ×2 and the master selector, which read the pattern you are
   // editing rather than an id, act on the one you actually pressed.
@@ -4926,36 +5032,8 @@ export default function LoudLight(){
     patMenuAtR.current=Date.now();setDelArm(null);
     setActivePatId(id);setPatMenu({id,x,y});
   };
-  // A pattern chip's second function, spread into the two plain chip rows.
-  // (The song palette's chips are also a DRAG source, so they fold the same
-  // hold into their own pointer handler instead — see songPage.)
-  const patChipProps=(id)=>({
-    onPointerDown:(e)=>{
-      e.stopPropagation();
-      patChipR.current.held=false;_patChipEnd();
-      const x=e.clientX,y=e.clientY;
-      patChipR.current.tmr=setTimeout(()=>{
-        patChipR.current.tmr=0;patChipR.current.held=true;_openPatOpsFor(id,x,y);
-      },450);
-    },
-    onPointerMove:(e)=>{if(e.buttons)_patChipEnd();},
-    onPointerUp:()=>{_patChipEnd();},
-    onPointerCancel:()=>{_patChipEnd();patChipR.current.held=false;},
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_patChipEnd();
-      patChipR.current.held=true;_openPatOpsFor(id,e.clientX,e.clientY);},
-    onClick:(e)=>{
-      e.stopPropagation();
-      // Swallow the hold's trailing click. Harmless here (it would only
-      // re-select what the hold already selected) but kept for the same reason
-      // everywhere else: the idiom should behave identically wherever it is.
-      if(patChipR.current.held){patChipR.current.held=false;return;}
-      // Tapping the chip you are already on has nothing to select, so it does
-      // the same thing the hold does. Read the ref, not the render's value —
-      // this fires long after the render that built the handler.
-      if(activePatternIdR.current===id){_openPatOpsFor(id,e.clientX,e.clientY);return;}
-      setActivePatId(id);
-    },
-  });
+  // (A pattern chip's gestures live in `paletteChipProps` — one set for every
+  // chip row, because every chip is now also a drag source for the song lane.)
   const setPatternMaster=(layer)=>{
     pushHistory();
     setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
@@ -5180,39 +5258,43 @@ export default function LoudLight(){
   // fork it: the drop targeting, the seam logic, the repeat pips and the bar
   // dots are all in here, and a second copy would drift on the first fix.
   //
-  // paddingRight leaves a strip that is NOT a slot. The cells set
-  // touch-action:none so a drag can move a pattern anywhere in 2D, which means
-  // a touch starting on a cell can never scroll — without that gutter the lane
-  // is unscrollable by finger. It is also why the strip above the grid is two
-  // rows rather than one: one row leaves nowhere to put the gutter.
-  // The window's height has to track its own WIDTH, because the cells are
-  // square and flex-sized: eight across a 366px column is 41px a cell, and the
-  // same lane on an SE is 39px. There is no CSS height that follows a width —
-  // but a PERCENTAGE PADDING resolves against the parent's width, which is the
-  // one hook that does. For `rows` rows of SONG_COLS square cells with a 4px
-  // gap and the 10px scroll gutter:
-  //     cell  = (W - gutter - (COLS-1)*gap) / COLS
-  //     height = rows*cell + (rows-1)*gap
-  // which is linear in W, so it lands exactly as `calc(p% - qpx)`. At two rows
-  // that is calc(25% - 5.5px): 86px on a 390px phone, 82px on an SE, both
-  // exactly two rows with no clipped third.
-  const _laneBoxPad=(rows)=>{
-    const gap=4,gutter=10;
-    const p=(rows*100/SONG_COLS).toFixed(4);
-    const q=(rows*(gutter+(SONG_COLS-1)*gap)/SONG_COLS-(rows-1)*gap).toFixed(4);
-    return "calc("+p+"% - "+q+"px)";
+  // ── Geometry ─────────────────────────────────────────────────────────────
+  // ONE line of square slots, SONG_COLS of them across the visible width,
+  // overflowing sideways. `SONG_COLS` stopped meaning "columns of a grid" and
+  // means "slots on screen at once": the cells take a fixed flex-basis of
+  // `(100% - gaps)/SONG_COLS`, and a percentage inside a horizontally
+  // overflowing flex row resolves against the SCROLLPORT, so eight fit exactly
+  // and the rest run off the end.
+  //
+  // The slots set `touch-action:none` so a drag can move a pattern in 2D, which
+  // means a touch starting on one can never scroll the lane. The **track**
+  // underneath is what you grab instead — it is the scroll affordance and the
+  // position readout in one, and dragging a pattern to either end pans as well
+  // (`_laneEdgeScroll`). That is the same trade the old `paddingRight` gutter
+  // made, except a track says what it is.
+  //
+  // Its height is therefore a CONSTANT the column can budget for — one cell,
+  // the 4px gap and the 6px track — rather than a number negotiated with the
+  // rest of the layout:
+  //
+  //     cell   = (100vw - 2*pad - (SONG_COLS-1)*gap) / SONG_COLS
+  //     block  = cell + gap + track
+  //
+  // linear in the viewport width, so it lands exactly as `<k>vw - <c>px`.
+  // Returned without the `calc(` so it can be embedded in a larger one.
+  const LANE_GAP=4, LANE_TRACK=6;
+  const _laneCellCss=(pad)=>"calc((100% - "+((SONG_COLS-1)*LANE_GAP)+"px) / "+SONG_COLS+")";
+  const _laneBlockCss=(pad)=>{
+    const k=(100/SONG_COLS).toFixed(4);
+    const c=((2*pad+(SONG_COLS-1)*LANE_GAP)/SONG_COLS-LANE_GAP-LANE_TRACK).toFixed(4);
+    return k+"vw - "+c+"px";
   };
-  const _songLaneBody=(fixedRows)=>(
-    <div style={Object.assign({width:"100%",overflowY:"auto",overscrollBehavior:"contain",
-      paddingRight:10,boxSizing:"border-box",display:"flex",flexDirection:"column",gap:4},
-      // The song page gives the lane whatever the mixer leaves. Above the grid
-      // it is a FIXED window that scrolls, because the lane grows a row per
-      // eight slots and eight rows is taller than any phone has spare.
-      fixedRows?{position:"absolute",inset:0}:{flex:"1 1 auto",minHeight:0})}>
-      {Array.from({length:_songRows},(_,row)=>(
-        <div key={row} style={{display:"flex",gap:4}}>
-          {Array.from({length:SONG_COLS},(_,col)=>{
-            const idx=row*SONG_COLS+col;
+  const songLane=()=>(
+    <div style={{width:"100%",flexShrink:0,display:"flex",flexDirection:"column",gap:LANE_GAP}}>
+      <div ref={laneRef} className="songscroll" onScroll={()=>_syncLaneTrack()}
+        style={{width:"100%",overflowX:"auto",overflowY:"hidden",overscrollBehavior:"contain",
+          display:"flex",gap:LANE_GAP,flexShrink:0}}>
+        {Array.from({length:_songCells},(_,idx)=>{
             const id=song[idx];
             const pat=id!=null?patterns.find(p=>p.id===id):null;
             const isCursor=idx===_songPlayingSlot;
@@ -5235,24 +5317,23 @@ export default function LoudLight(){
             if(runStart){let j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}
             const _ov=patternDrag&&patternDrag.overSongCell;
             const isHover=!!(_ov&&_ov.cell===idx);
-            // Seam k draws as a caret on cell k's LEFT edge. A seam at the
-            // end of a row has no cell to its right on that row, so it
-            // draws on this cell's right edge instead.
+            // Seam k draws as a caret on cell k's LEFT edge. The seam past the
+            // last slot has no cell to its right, so it draws on that cell's
+            // right edge instead.
             const seamL=!!(_ov&&_ov.seam===idx);
-            const seamR=!!(_ov&&_ov.seam===idx+1&&(idx+1)%SONG_COLS===0);
+            const seamR=!!(_ov&&_ov.seam===idx+1&&idx===_songCells-1);
             return(
-              <div key={col} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
-                style={{flex:1,aspectRatio:"1",maxHeight:80,borderRadius:5,position:"relative",
+              <div key={idx} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
+                style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:5,position:"relative",
                   display:"flex",alignItems:"center",justifyContent:"center",
                   background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
-                  // The border is always THERE and only changes colour.
-                  // These cells are flex:1 with flex-basis 0, and under
-                  // border-box a flex item's base size is floored at its
-                  // border — so dropping the border on a filled cell made it
-                  // 2px narrower than its empty neighbours, and with
-                  // aspect-ratio:1 that came back as 2px of height too, so
-                  // filling a slot knocked the whole grid out of alignment.
-                  // It also skewed the rects _songMeasure caches for drops.
+                  // The border is always THERE and only changes colour. Under
+                  // border-box a flex item's base size is floored at its own
+                  // border, so dropping the border on a filled cell made it 2px
+                  // narrower than its empty neighbours, and with aspect-ratio:1
+                  // that came back as 2px of height too — a filled slot knocked
+                  // the whole line out of alignment. It also skewed the rects
+                  // _songMeasure caches for drops.
                   border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
                   boxSizing:"border-box",minWidth:0,
                   outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
@@ -5284,6 +5365,7 @@ export default function LoudLight(){
                       _songMeasure();
                       setPatternDrag({patId:id,name:pat?pat.name:"",accent:col0,x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null,sourceCell:{barIdx:idx}});
                     }
+                    _laneEdgeScroll(ev.clientX);
                     const h=_songHit(ev.clientX,ev.clientY);
                     // Hovering your own cell isn't a target; hovering the
                     // seams either side of it is a no-op reorder, so those
@@ -5386,205 +5468,26 @@ export default function LoudLight(){
               </div>
             );
           })}
-        </div>
-      ))}
-    </div>
-  );
-  const songLane=(fixedRows)=>!fixedRows?_songLaneBody(fixedRows):(
-    <div style={{position:"relative",width:"100%",height:0,paddingTop:_laneBoxPad(fixedRows),flexShrink:0}}>
-      {_songLaneBody(fixedRows)}
+      </div>
+      {/* The scroll track: the one part of the lane that is not a slot, so the
+          one part a finger can pan it by — and the readout of where you are in
+          a song longer than the eight slots on screen. */}
+      <div ref={trackRef} onPointerDown={_lanePanStart} aria-hidden="true"
+        style={{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,
+          background:"rgba(186,208,230,0.06)",touchAction:"none",cursor:"pointer"}}>
+        <div ref={thumbRef} style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
+          borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
+      </div>
     </div>
   );
 
-  const songPage=(
-    <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
-      justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
-      {/* PATTERNS — the selector. Tap a chip to make it active (what the part
-          pages edit); DRAG one onto a song slot to place it there, which is the
-          workflow the old pattern pills had. Both, because tapping is easier on
-          a phone and dragging is faster once you know where a section goes. */}
-      <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
-        {/* Names the pattern the palette's + will act on when you hold it —
-            the highlighted chip says so too, but not while your thumb is over
-            the row. DUP / DEL and the rest moved onto that + (hold it), so the
-            header is a label now rather than a control strip. */}
-        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
-          <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>PATTERNS</div>
-          <span style={{fontSize:11,fontWeight:700,color:_patColorOf(activePatternId),marginRight:1}}>
-            {(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
-        </div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-          {patterns.map((p,i)=>{
-            const sel=p.id===activePatternId;
-            const col=patCol(i);
-            // Show at a glance whether a pattern has anything in it at all.
-            const empty=PART_LAYERS.every(l=>{
-              const g=p.parts[l]&&p.parts[l].grid;
-              return !g||!g.some(row=>row&&row.some(Boolean));
-            });
-            const dragging=patternDrag&&patternDrag.fromPalette&&patternDrag.patId===p.id;
-            return(
-              <div key={p.id} data-palette-chip={p.id}
-                onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();_openPatOpsFor(p.id,e.clientX,e.clientY);}}
-                onPointerDown={(e)=>{
-                  e.stopPropagation();
-                  const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
-                  let moved=false,held=false;
-                  _songMeasure();
-                  // These chips are the drag source for placing a pattern into
-                  // a slot, so the hold folds into their own handler rather
-                  // than using patChipProps: the drag has to be able to cancel
-                  // it. A wobble under 6px does NOT — only a real drag does.
-                  let hTmr=setTimeout(()=>{hTmr=0;held=true;_openPatOpsFor(p.id,startX,startY);},450);
-                  const endHold=()=>{if(hTmr){clearTimeout(hTmr);hTmr=0;}};
-                  const hit=(ev)=>_songHit(ev.clientX,ev.clientY);
-                  const onMove=(ev)=>{
-                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                    if(!moved){
-                      if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
-                      moved=true;endHold();
-                      setPatternDrag({patId:p.id,name:p.name,accent:col,fromPalette:true,
-                        x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
-                    }
-                    setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:hit(ev)}:null);
-                  };
-                  const onUp=(ev)=>{
-                    if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
-                    document.removeEventListener("pointermove",onMove);
-                    document.removeEventListener("pointerup",onUp);
-                    document.removeEventListener("pointercancel",onUp);
-                    endHold();
-                    // The hold already opened this chip's menu and selected it.
-                    if(held){ held=false; return; }
-                    if(!moved){
-                      // A tap selects; a tap on the one already selected opens
-                      // its menu, the same as a hold.
-                      if(activePatternIdR.current===p.id)_openPatOpsFor(p.id,ev.clientX,ev.clientY);
-                      else setActivePatId(p.id);
-                      return;
-                    }
-                    const t=hit(ev);
-                    if(t){
-                      // On a slot: fill it, replacing whatever was there. On a
-                      // seam: insert, sliding the rest of the song right. Either
-                      // way this becomes the pattern you're editing, so dragging
-                      // one in and going straight to a part page works.
-                      pushHistory();
-                      if(t.seam!=null){ if(_songInsert(t.seam,p.id,1))setActivePatId(p.id); }
-                      else{
-                        setSong(sg=>{const r=[...sg];r[t.cell]=p.id;return r;});
-                        setSongRep(rp=>{const r=[...rp];r[t.cell]=1;return r;});
-                        setActivePatId(p.id);
-                      }
-                    }
-                    setPatternDrag(null);
-                  };
-                  document.addEventListener("pointermove",onMove);
-                  document.addEventListener("pointerup",onUp);
-                  document.addEventListener("pointercancel",onUp);
-                }}
-                style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",
-                  alignItems:"center",justifyContent:"center",gap:5,cursor:"grab",userSelect:"none",
-                  touchAction:"none",
-                  border:"1px solid "+(sel?col:"rgba(168,190,212,0.16)"),
-                  background:sel?col+"22":"transparent",
-                  color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)"),
-                  opacity:dragging?0.35:1,
-                  fontSize:13,fontWeight:700,lineHeight:1}}>
-                {p.name}
-                {patBarsBadge(p)}
-              </div>
-            );
-          })}
-          {patterns.length<MAX_PATTERNS&&(
-            <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
-              style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
-                justifyContent:"center",cursor:"pointer",userSelect:"none",touchAction:"none",
-                border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
-                color:"rgba(178,199,219,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
-          )}
-        </div>
-      </div>
-      {/* SONG — played top-left to bottom-right, gaps skipped. Eight across, so
-          a slot is a real touch target rather than a 21px sliver: a slot holds a
-          whole pattern now (up to MAX_BARS long), so there was never any need to
-          show all 64 at once. Starts at two rows and grows a row at a time as
-          you fill it, up to the full 64. */}
-      <div style={{width:"100%",maxWidth:640,flex:"1 1 auto",minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
-        <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
-          <span>SONG</span>
-          <span style={{flex:1,minWidth:0,color:"rgba(178,199,219,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
-          </span>
-          {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
-              selected chip, this acts on the arrangement. */}
-          {songSeq.length>0&&(
-            <button type="button" aria-label="Flatten the whole song into one new pattern"
-              title="Flatten the whole song into one new pattern"
-              onClick={()=>collapseSong()}
-              style={{flexShrink:0,height:24,padding:"0 10px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
-                fontFamily:"inherit",fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
-                border:"1px solid rgba(168,190,212,0.28)",background:"rgba(168,190,212,0.05)",color:"rgba(178,199,219,0.75)"}}>
-              SONG → PATTERN
-            </button>
-          )}
-        </div>
-
-        {songLane(null)}
-      </div>
-      {/* Repeat picker. Sits ABOVE the press point on purpose: it opens while
-          your finger is still down, and the trailing click of that same press
-          would otherwise land on whatever is underneath. The backdrop dismisses
-          on pointerDOWN for the same reason — a click handler there would eat
-          the release of the press that opened it (the sheet-opener trap). */}
-      {repPopup&&(()=>{
-        const W=4*38+3*6, vw=(typeof window!=="undefined"?window.innerWidth:360);
-        const left=Math.max(8,Math.min(vw-W-8,repPopup.x-W/2));
-        const above=repPopup.y-64;
-        const top=above<8?repPopup.y+22:above;
-        const cur=_rep(repPopup.idx);
-        const acc=_patColorOf(song[repPopup.idx]);
-        return(
-          <Fragment>
-            <div onPointerDown={(e)=>{e.stopPropagation();setRepPopup(null);}}
-              style={{position:"fixed",inset:0,zIndex:60,background:"transparent"}}/>
-            <div style={{position:"fixed",left,top,zIndex:61,display:"flex",gap:6,padding:6,
-              borderRadius:9,background:"rgba(28,25,21,0.97)",
-              border:"1px solid rgba(168,190,212,0.22)",
-              boxShadow:"0 6px 20px rgba(0,0,0,0.5)",touchAction:"none"}}
-              onPointerDown={e=>e.stopPropagation()}>
-              {Array.from({length:SONG_MAX_REP},(_,k)=>{
-                const n=k+1, on=n===cur;
-                return(
-                  <div key={n} role="button" aria-label={"Play "+n+" time"+(n===1?"":"s")}
-                    onClick={()=>{
-                      if(n!==cur){pushHistory();setSongRep(rp=>{const r=[...rp];r[repPopup.idx]=n;return r;});}
-                      setRepPopup(null);
-                    }}
-                    style={{width:38,height:38,borderRadius:7,display:"flex",flexDirection:"column",
-                      alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",userSelect:"none",
-                      border:"1px solid "+(on?acc:"rgba(168,190,212,0.18)"),
-                      background:on?acc+"22":"transparent",
-                      color:on?acc:"rgba(178,199,219,0.7)",fontSize:13,fontWeight:700,lineHeight:1}}>
-                    <span>{n}</span>
-                    <div style={{display:"flex",gap:1.5}}>
-                      {Array.from({length:n},(_,j)=>(
-                        <div key={j} style={{width:3,height:3,borderRadius:1.5,
-                          background:on?acc:"rgba(178,199,219,0.4)"}}/>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Fragment>
-        );
-      })()}
-      {/* MIX — vertical faders. Lives on the SONG page because that's the view
-          you balance a whole arrangement from; it used to sit in the desktop
-          sidebar and again inside the PROJECT menu, which is two places to keep
-          in step and neither of them where you're listening. */}
-      {(()=>{
+  // ── MIX — vertical faders ────────────────────────────────────────────────
+  // Lives at the top of the FX sheet (mobile) and the FX page (desktop). It was
+  // on the SONG page, and the SONG page is gone; FX is the right inheritor
+  // rather than a consolation, because the per-channel trim beside each fader
+  // is an FX send scaler — "how much of this channel" and "what the FX are"
+  // belong on one screen. One body, two mounts: don't fork it.
+  const mixerBody=(()=>{
         const polyMix=layerParams.synth?.mix??85;
         const monoMix=layerParams.lead?.mix??85;
         const setSynthMix=v=>setLayerParams(lps=>({...lps,synth:{...lps.synth,mix:v}}));
@@ -5682,7 +5585,188 @@ export default function LoudLight(){
             </div>
           </div>
         );
-      })()}
+      })();
+
+  // ── PALETTE CHIP — one gesture set, every chip row ───────────────────────
+  // A pattern chip is a selector AND the drag source for placing that pattern
+  // into a song slot. The song page used to be the only place you could drag
+  // from, because it was the only place the lane was; the lane is on the part
+  // pages now, so the chips there have to be able to do it too — otherwise
+  // removing the song page would take arranging with it.
+  //
+  // The hold folds into this handler rather than using patChipProps, because
+  // the drag has to be able to CANCEL it. A wobble under 6px does not; only a
+  // real drag does.
+  // ── The pattern + ────────────────────────────────────────────────────────
+  // Tap adds an empty pattern; HOLD (or right-click) makes one out of the whole
+  // song. Both halves add a pattern, which is what makes them one control
+  // rather than two crammed together — and SONG → PATTERN needed a home once
+  // the song page stopped being somewhere portrait and desktop could reach.
+  // The usual hold trap applies: swallow the trailing click, or flattening the
+  // song is followed immediately by a stray empty pattern behind the result.
+  // Deferred calls, never bare references: addPattern and collapseSong are
+  // declared further down and Babel lowers const to var.
+  const addPatR=useRef({tmr:0,held:false});
+  const _addHoldEnd=()=>{if(addPatR.current.tmr){clearTimeout(addPatR.current.tmr);addPatR.current.tmr=0;}};
+  const _collapseFromAdd=()=>{
+    if(!songSeqR.current.length){showFlash("NO SONG TO FLATTEN");return;}
+    collapseSong();
+  };
+  const addChipProps={
+    "aria-label":"New pattern (hold to flatten the whole song into one)",
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();addPatR.current.held=true;_collapseFromAdd();},
+    onPointerDown:(e)=>{
+      e.stopPropagation();addPatR.current.held=false;_addHoldEnd();
+      addPatR.current.tmr=setTimeout(()=>{addPatR.current.tmr=0;addPatR.current.held=true;_collapseFromAdd();},450);
+    },
+    onPointerUp:()=>_addHoldEnd(), onPointerLeave:()=>_addHoldEnd(), onPointerCancel:()=>{_addHoldEnd();addPatR.current.held=false;},
+    onClick:(e)=>{e.stopPropagation();if(addPatR.current.held){addPatR.current.held=false;return;}addPattern();},
+  };
+  const paletteChipProps=(pat,accent)=>({
+    "data-palette-chip":pat.id,
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_openPatOpsFor(pat.id,e.clientX,e.clientY);},
+    onPointerDown:(e)=>{
+      e.stopPropagation();
+      const pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;
+      let moved=false,held=false;
+      _songMeasure();
+      // These chips are the drag source for placing a pattern into
+      // a slot, so the hold folds into their own handler rather
+      // than using patChipProps: the drag has to be able to cancel
+      // it. A wobble under 6px does NOT — only a real drag does.
+      let hTmr=setTimeout(()=>{hTmr=0;held=true;_openPatOpsFor(pat.id,startX,startY);},450);
+      const endHold=()=>{if(hTmr){clearTimeout(hTmr);hTmr=0;}};
+      const hit=(ev)=>_songHit(ev.clientX,ev.clientY);
+      const onMove=(ev)=>{
+        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+        if(!moved){
+          if(Math.abs(ev.clientX-startX)<6&&Math.abs(ev.clientY-startY)<6)return;
+          moved=true;endHold();
+          setPatternDrag({patId:pat.id,name:pat.name,accent:accent,fromPalette:true,
+            x:ev.clientX,y:ev.clientY,overDrop:false,overSongCell:null});
+        }
+        _laneEdgeScroll(ev.clientX);
+        setPatternDrag(d=>d?{...d,x:ev.clientX,y:ev.clientY,overSongCell:hit(ev)}:null);
+      };
+      const onUp=(ev)=>{
+        if(ev.pointerId!==pointerId&&ev.pointerId!==undefined)return;
+        document.removeEventListener("pointermove",onMove);
+        document.removeEventListener("pointerup",onUp);
+        document.removeEventListener("pointercancel",onUp);
+        endHold();
+        // The hold already opened this chip's menu and selected it.
+        if(held){ held=false; return; }
+        // A CANCELLED pointer is not a tap. The landscape rail's chips sit in a
+        // scrolling column, and the scroll cancels the pointer — which would
+        // otherwise read as "you tapped the chip you started the scroll on".
+        if(ev.type==="pointercancel"){ setPatternDrag(null); return; }
+        if(!moved){
+          // A tap selects; a tap on the one already selected opens
+          // its menu, the same as a hold.
+          if(activePatternIdR.current===pat.id)_openPatOpsFor(pat.id,ev.clientX,ev.clientY);
+          else setActivePatId(pat.id);
+          return;
+        }
+        const t=hit(ev);
+        if(t){
+          // On a slot: fill it, replacing whatever was there. On a
+          // seam: insert, sliding the rest of the song right. Either
+          // way this becomes the pattern you're editing, so dragging
+          // one in and going straight to a part page works.
+          pushHistory();
+          if(t.seam!=null){ if(_songInsert(t.seam,pat.id,1))setActivePatId(pat.id); }
+          else{
+            setSong(sg=>{const r=[...sg];r[t.cell]=pat.id;return r;});
+            setSongRep(rp=>{const r=[...rp];r[t.cell]=1;return r;});
+            setActivePatId(pat.id);
+          }
+        }
+        setPatternDrag(null);
+      };
+      document.addEventListener("pointermove",onMove);
+      document.addEventListener("pointerup",onUp);
+      document.addEventListener("pointercancel",onUp);
+    },
+  });
+
+  const songPage=(
+    <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"flex-start",padding:"6px 10px",boxSizing:"border-box",gap:8,minHeight:0}}>
+      {/* PATTERNS — the selector. Tap a chip to make it active (what the part
+          pages edit); DRAG one onto a song slot to place it there, which is the
+          workflow the old pattern pills had. Both, because tapping is easier on
+          a phone and dragging is faster once you know where a section goes. */}
+      <div style={{width:"100%",maxWidth:640,flexShrink:0}}>
+        {/* Names the pattern the palette's + will act on when you hold it —
+            the highlighted chip says so too, but not while your thumb is over
+            the row. DUP / DEL and the rest moved onto that + (hold it), so the
+            header is a label now rather than a control strip. */}
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
+          <div style={{flex:1,fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>PATTERNS</div>
+          <span style={{fontSize:11,fontWeight:700,color:_patColorOf(activePatternId),marginRight:1}}>
+            {(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+          {patterns.map((p,i)=>{
+            const sel=p.id===activePatternId;
+            const col=patCol(i);
+            // Show at a glance whether a pattern has anything in it at all.
+            const empty=PART_LAYERS.every(l=>{
+              const g=p.parts[l]&&p.parts[l].grid;
+              return !g||!g.some(row=>row&&row.some(Boolean));
+            });
+            const dragging=patternDrag&&patternDrag.fromPalette&&patternDrag.patId===p.id;
+            return(
+              <div key={p.id} {...paletteChipProps(p,col)}
+                style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",
+                  alignItems:"center",justifyContent:"center",gap:5,cursor:"grab",userSelect:"none",
+                  touchAction:"none",
+                  border:"1px solid "+(sel?col:"rgba(168,190,212,0.16)"),
+                  background:sel?col+"22":"transparent",
+                  color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)"),
+                  opacity:dragging?0.35:1,
+                  fontSize:13,fontWeight:700,lineHeight:1}}>
+                {p.name}
+                {patBarsBadge(p)}
+              </div>
+            );
+          })}
+          {patterns.length<MAX_PATTERNS&&(
+            <div role="button" {...addChipProps}
+              style={{minWidth:38,height:36,padding:"0 10px",borderRadius:7,display:"flex",alignItems:"center",
+                justifyContent:"center",cursor:"pointer",userSelect:"none",touchAction:"none",
+                border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
+                color:"rgba(178,199,219,0.45)",fontSize:15,fontWeight:600,lineHeight:1}}>+</div>
+          )}
+        </div>
+      </div>
+      {/* SONG — played top-left to bottom-right, gaps skipped. Eight across, so
+          a slot is a real touch target rather than a 21px sliver: a slot holds a
+          whole pattern now (up to MAX_BARS long), so there was never any need to
+          show all 64 at once. Starts at two rows and grows a row at a time as
+          you fill it, up to the full 64. */}
+      <div style={{width:"100%",maxWidth:640,flex:"1 1 auto",minHeight:0,display:"flex",flexDirection:"column",gap:5}}>
+        <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,display:"flex",gap:8,alignItems:"center"}}>
+          <span>SONG</span>
+          <span style={{flex:1,minWidth:0,color:"rgba(178,199,219,0.3)",letterSpacing:1,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {songSeq.length?songSeq.length+" step"+(songSeq.length===1?"":"s"):"tap a slot to place "+(patterns.find(p=>p.id===activePatternId)||{name:""}).name}
+          </span>
+          {/* COLLAPSE sits on the SONG row, not with DUP/DEL — those act on the
+              selected chip, this acts on the arrangement. */}
+          {songSeq.length>0&&(
+            <button type="button" aria-label="Flatten the whole song into one new pattern"
+              title="Flatten the whole song into one new pattern"
+              onClick={()=>collapseSong()}
+              style={{flexShrink:0,height:24,padding:"0 10px",borderRadius:6,display:"flex",alignItems:"center",gap:4,
+                fontFamily:"inherit",fontSize:8,letterSpacing:1,fontWeight:700,lineHeight:1,userSelect:"none",cursor:"pointer",
+                border:"1px solid rgba(168,190,212,0.28)",background:"rgba(168,190,212,0.05)",color:"rgba(178,199,219,0.75)"}}>
+              SONG → PATTERN
+            </button>
+          )}
+        </div>
+
+        {songLane()}
+      </div>
 
     </div>
   );
@@ -5884,11 +5968,14 @@ export default function LoudLight(){
   const patternChipsRow=(
     <div style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
-        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls)"} aria-pressed={sel}
-          {...patChipProps(p.id)}
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
+          {...paletteChipProps(p,col)}
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
-            fontSize:IS_MOBILE?13:11,
+            // A chip is a drag source now, so it must own the gesture. (The
+            // landscape rail deliberately does NOT set this: that column
+            // scrolls, and there is no lane in landscape to drag onto.)
+            fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab",
             border:"1px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.16)"),
             background:sel?col+"22":"transparent",
             color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
@@ -5897,7 +5984,7 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
+        <div role="button" {...addChipProps}
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
             fontSize:IS_MOBILE?15:13,fontWeight:600,touchAction:"none",
@@ -5911,8 +5998,8 @@ export default function LoudLight(){
   const patternChipsRail=(
     <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
-        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls)"} aria-pressed={sel}
-          {...patChipProps(p.id)}
+        <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
+          {...paletteChipProps(p,col)}
           style={Object.assign({},_patChipBase,{
             padding:"9px 4px",borderRadius:14,fontSize:13,
             border:"1.5px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.18)"),
@@ -5923,7 +6010,7 @@ export default function LoudLight(){
         </div>
       ))}
       {patterns.length<MAX_PATTERNS&&(
-        <div role="button" aria-label="New pattern" onClick={(e)=>{e.stopPropagation();addPattern();}}
+        <div role="button" {...addChipProps}
           style={Object.assign({},_patChipBase,{
             padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,touchAction:"none",
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
@@ -6181,7 +6268,7 @@ export default function LoudLight(){
     vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
     loopMode,loopBar,loopPat,varyMode,
     patterns,activePatId:activePatternId,
-    song,songRep,songMode,songView,activeLayer
+    song,songRep,activeLayer
   });
 
   const applyShareState=rawState=>{
@@ -6236,8 +6323,6 @@ export default function LoudLight(){
      ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     _adoptSong(s);
-    setSongMode(s.songMode!=null?s.songMode:SESSION_DEFAULTS.songMode);
-    setSongView(s.songView!=null?s.songView:(s.songMode?true:SESSION_DEFAULTS.songView));
 
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
     const sharedKit=DRUM_KITS.find(k=>k.id===s.activeKit)?s.activeKit:DEFAULT_KIT;
@@ -6632,8 +6717,10 @@ export default function LoudLight(){
       // (it solos one pattern, which would not play the song).
       const haveSong=songSeq.length>0;
       if(haveSong){
-        restore={mode:songModeR.current,loop:loopR.current};
-        songModeR.current=true;setSongMode(true);
+        // songMode is derived from the song now, so `haveSong` IS song mode —
+        // nothing to force. Only LOOP has to come off: it solos one bar, which
+        // would not play the song.
+        restore={loop:loopR.current};
         loopR.current=false;setLoopMode(false);
         // Start at the first populated bar (startStop only does this when its
         // `songMode` state closure is true; force via the ref so the bounce
@@ -6667,7 +6754,7 @@ export default function LoudLight(){
       // Safety: never leave the master muted or the FX feedback flushed if the
       // bounce bailed out between the silence step and its restore.
       try{const c=bell.current.ctx;if(c&&bell.current.master){bell.current.master.gain.setValueAtTime(bell.current.masterLevel,c.currentTime);bell.current.setRvSize&&bell.current.setRvSize(rvSize);bell.current.setDlyFb&&bell.current.setDlyFb(dlyFbPct/100);}}catch(e){}
-      if(restore){songModeR.current=restore.mode;setSongMode(restore.mode);loopR.current=restore.loop;setLoopMode(restore.loop);}
+      if(restore){loopR.current=restore.loop;setLoopMode(restore.loop);}
       exportingR.current=false;setExporting(false);
     }
   };
@@ -6731,7 +6818,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep,songMode,songView]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -9465,6 +9552,58 @@ export default function LoudLight(){
         </div>
       )}
 
+      {/* Repeat picker — mounted at the ROOT, not inside the song page. It is
+          opened by holding a filled song SLOT, and slots are on the part pages
+          now; left where it was, the hold would set the state and show nothing
+          on every layout but landscape. */}
+      {/* Repeat picker. Sits ABOVE the press point on purpose: it opens while
+          your finger is still down, and the trailing click of that same press
+          would otherwise land on whatever is underneath. The backdrop dismisses
+          on pointerDOWN for the same reason — a click handler there would eat
+          the release of the press that opened it (the sheet-opener trap). */}
+      {repPopup&&(()=>{
+        const W=4*38+3*6, vw=(typeof window!=="undefined"?window.innerWidth:360);
+        const left=Math.max(8,Math.min(vw-W-8,repPopup.x-W/2));
+        const above=repPopup.y-64;
+        const top=above<8?repPopup.y+22:above;
+        const cur=_rep(repPopup.idx);
+        const acc=_patColorOf(song[repPopup.idx]);
+        return(
+          <Fragment>
+            <div onPointerDown={(e)=>{e.stopPropagation();setRepPopup(null);}}
+              style={{position:"fixed",inset:0,zIndex:60,background:"transparent"}}/>
+            <div style={{position:"fixed",left,top,zIndex:61,display:"flex",gap:6,padding:6,
+              borderRadius:9,background:"rgba(28,25,21,0.97)",
+              border:"1px solid rgba(168,190,212,0.22)",
+              boxShadow:"0 6px 20px rgba(0,0,0,0.5)",touchAction:"none"}}
+              onPointerDown={e=>e.stopPropagation()}>
+              {Array.from({length:SONG_MAX_REP},(_,k)=>{
+                const n=k+1, on=n===cur;
+                return(
+                  <div key={n} role="button" aria-label={"Play "+n+" time"+(n===1?"":"s")}
+                    onClick={()=>{
+                      if(n!==cur){pushHistory();setSongRep(rp=>{const r=[...rp];r[repPopup.idx]=n;return r;});}
+                      setRepPopup(null);
+                    }}
+                    style={{width:38,height:38,borderRadius:7,display:"flex",flexDirection:"column",
+                      alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",userSelect:"none",
+                      border:"1px solid "+(on?acc:"rgba(168,190,212,0.18)"),
+                      background:on?acc+"22":"transparent",
+                      color:on?acc:"rgba(178,199,219,0.7)",fontSize:13,fontWeight:700,lineHeight:1}}>
+                    <span>{n}</span>
+                    <div style={{display:"flex",gap:1.5}}>
+                      {Array.from({length:n},(_,j)=>(
+                        <div key={j} style={{width:3,height:3,borderRadius:1.5,
+                          background:on?acc:"rgba(178,199,219,0.4)"}}/>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Fragment>
+        );
+      })()}
       {/* Synth-panel param popup */}
       {paramPopup&&(()=>{
         const vw=window.innerWidth, vh=window.innerHeight;
@@ -9612,7 +9751,6 @@ export default function LoudLight(){
                       // Clicking an already-active layer opens its sound page
                       // (mirrors mobile). It TOGGLES, because the SOUND tab is
                       // gone and a one-way door needs the tab row to get back.
-                      if(songView){setSongView(false);setPage("sound");return;}
                       if(isActive){setPage(pg=>pg==="sound"?"edit":"sound");}
                       else{switchLayer(layer);}
                     }}>
@@ -9631,14 +9769,11 @@ export default function LoudLight(){
                   // dead control, and with the SOUND tab gone it is also the
                   // only way in.
                   if(activeLayer!=="drums"){
+                    // Persist the current view on layer select, like POLY/MONO.
+                    // STEP is hidden for drums, so the effect below falls a
+                    // parked STEP page back to EDIT; every other page is kept.
                     switchLayer("drums");
-                    // Persist the current view on layer select, like POLY/MONO —
-                    // only snap to the grid when coming from song view. STEP is
-                    // hidden for drums, so the effect below falls a parked STEP
-                    // page back to EDIT; every other page is kept.
-                    if(songView){setSongView(false);setPage("edit");}
-                  }else if(songView){setSongView(false);setPage("sound");}
-                  else{setPage(pg=>pg==="sound"?"edit":"sound");}
+                  }else{setPage(pg=>pg==="sound"?"edit":"sound");}
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 {/* Pattern selection is the chip row below the layer boxes. */}
@@ -9693,18 +9828,18 @@ export default function LoudLight(){
             </div>
           )}
 
-          {/* SONG mode toggle — sits below the layer boxes */}
+          {/* THE SONG — in the sidebar, where the ▦ SONG button used to be a
+              door to a page. The sidebar had a `flex:1` spacer here holding the
+              PROJECT button down; the lane takes that space, which is the only
+              thing the desktop layout had going spare. It is the same lane the
+              phone carries above its grid: one body, every mount. */}
           {!IS_MOBILE&&(
-            <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6}}>
-              <button style={{width:"100%",padding:"8px 0",borderRadius:8,border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.12)"),background:songView?"rgba(178,199,219,0.06)":"transparent",color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .12s"}}
-                onClick={()=>{if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);}}}>
-                <span style={{fontSize:14,lineHeight:1}}>▦</span> SONG
-              </button>
+            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column",gap:4,
+              borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginTop:2}}>
+              <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,flexShrink:0}}>SONG</div>
+              {songLane()}
             </div>
           )}
-
-
-          {!IS_MOBILE&&<div style={{flex:1,minHeight:0}}/>}
 
           {/* PROJECT menu — one button, everything behind it. Save/load, cloud
               and share used to be a permanently-open column here; none of it is
@@ -9723,9 +9858,7 @@ export default function LoudLight(){
         <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
           {/* Page content — always present, fills 1fr */}
           <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
-            {/* SONG page — pattern palette + one linear lane */}
-            {songView&&songPage}
-            {!songView&&(<>
+            <>
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
@@ -10362,6 +10495,7 @@ export default function LoudLight(){
                 for every layer (these buses are shared), drums included. */}
             {page==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+                <div style={{marginBottom:14}}>{mixerBody}</div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
                   {globalFxSections}
@@ -10379,7 +10513,7 @@ export default function LoudLight(){
                 that — which is the same rule, and it was already how the layer
                 boxes behaved, so the tab was a second door to one room. */}
             {[["edit","EDIT"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
+              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>setPage(p)}>{lbl}</button>
             ))}
           </div>
           {/* Transport — always visible, centered. VARY toggle removed; it lives
@@ -10483,7 +10617,7 @@ export default function LoudLight(){
                mean going to SONG and coming back. Hidden on the song page,
                which has its own palette (and that one is also the drag source
                for placing patterns into slots). */}
-          {!isLandscape&&!songView&&(
+          {!isLandscape&&(
           <div style={{padding:"0 12px 6px",flexShrink:0}}>
             {patternChipsRow}
           </div>
@@ -10514,23 +10648,30 @@ export default function LoudLight(){
               {patternDrag.name}
             </div>
           )}
-          {/* ── CONTENT AREA — full height grid ── */}
-          <div style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
+          {/* ── CONTENT AREA — full height grid ──
+               Measures itself into `--ch`; every grid size below is a fraction
+               of that rather than of 100dvh minus a guess. */}
+          <div ref={contentRef} style={{flex:1,minHeight:0,overflow:"hidden",position:"relative"}}>
 
             {/* SONG page — pattern palette + one linear lane */}
-            {songView&&songPage}
+            {songPageOn&&songPage}
 
             {/* SYNTH EDIT grid */}
-            {!songView&&activeLayer!=="drums"&&(
+            {!songPageOn&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
-              {(()=>{const SZ="min(100%,calc(100dvh - "+((isLandscape?32:150)+_barStripExtra)+"px - "+_songStripCss(10)+"))";return(<>
+              {(()=>{const SZ=gridSizeCss(10);return(<>
               {/* The song, above the grid. Same width as the grid box so the two
-                  read as one instrument rather than two panels. */}
+                  read as one instrument rather than two panels. It GROWS: the
+                  square below has already taken its bite (one lane row reserved),
+                  so everything still going spare lands here. */}
               {SONG_STRIP&&(
-                <div style={{width:SZ,flexShrink:0,marginBottom:6}}>{songLane(SONG_STRIP_ROWS)}</div>
+                <div style={{width:SZ,flexShrink:0,display:"flex",flexDirection:"column",marginBottom:6}}>{songLane()}</div>
               )}
+              {!SONG_STRIP&&<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
+              {/* The square IS the grid. The bar strip is a sibling, not a child:
+                  inside an aspect-ratio:1 box its height came straight off the
+                  cells and they stopped being square. */}
               <div style={{width:SZ,aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
-                  {!SONG_STRIP&&_barStripRow(rowKeyPad)}
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
@@ -10566,15 +10707,14 @@ export default function LoudLight(){
                     })}
                   </div>
                   </div>
-
-                  {SONG_STRIP&&_barStripRow(rowKeyPad)}
                 </div>
+              {SONG_STRIP&&<div style={{width:SZ,marginTop:2,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
               </>);})()}
               </div>
             )}
 
             {/* DRUMS EDIT grid */}
-            {!songView&&activeLayer==="drums"&&(
+            {!songPageOn&&activeLayer==="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box",overflow:"hidden"}}>
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
@@ -10591,16 +10731,16 @@ export default function LoudLight(){
                   // flows right → same direction as synth playback. Voice
                   // labels are transparent overlays on the leftmost portion of
                   // each row so the cells themselves get the full width.
-                  const SIZE=isLandscape
-                    ?`min(calc(100vw - 190px), calc(100dvh - ${32+_barStripExtra}px))`
-                    :`min(calc(100vw - 20px), calc(100dvh - ${150+_barStripExtra}px - ${_songStripCss(10)}))`;
+                  // 13 rows of 16 columns — the drum grid is never square, so
+                  // its height budget divides by that ratio rather than by one.
+                  const SIZE=gridSizeCss(10,DRUM_ROWS/COLS);
                   return(
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0,width:"100%"}}>
                       {/* The song, above the drum grid too — a part page is a
                           part page, and carrying it on one but not the other is
                           the kind of split that makes a layout feel arbitrary. */}
                       {SONG_STRIP&&(
-                        <div style={{width:SIZE,flexShrink:0}}>{songLane(SONG_STRIP_ROWS)}</div>
+                        <div style={{width:SIZE,flexShrink:0,display:"flex",flexDirection:"column"}}>{songLane()}</div>
                       )}
                       {!SONG_STRIP&&(
                         <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
@@ -10713,18 +10853,12 @@ export default function LoudLight(){
                 <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
               </button>
-              {/* SONG chip — toggles the matrix view. Song mode (the playback intent)
-                   stays on once enabled; LOOP holds the song's place rather than
-                   overriding it. */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.12)"),borderRadius:9,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>{
-                  if(songView){ setSongView(false); }
-                  else{ setSongMode(true);setSongView(true); }
-                  setActiveSheet(null);
-                }}>
-                <span style={{fontSize:16,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1}}>▦</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>SONG</span>
-              </button>
+              {/* The ▦ SONG chip is GONE. The song lane is two rows above the
+                   grid on this very page: a chip that navigates to a copy of
+                   something already on screen is a door to the room you are
+                   standing in, and it was also the only thing switching the
+                   playback intent, which is derived now. Three chips, each
+                   wider for it. */}
               {/* FX chip — global reverb/delay design */}
               <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                 onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
@@ -10772,7 +10906,7 @@ export default function LoudLight(){
                   <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1.1}}>{tempoFld.show(tempoVal)}</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>{tempoFld.unit}</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.1)"),borderRadius:8,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ if(songView){setSongView(false);}else{setSongMode(true);setSongView(true);} setActiveSheet(null); }}>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(songView?"rgba(178,199,219,0.5)":songMode?"rgba(178,199,219,0.25)":"rgba(168,190,212,0.1)"),borderRadius:8,background:songView?"rgba(178,199,219,0.06)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{ setSongView(v=>!v); setActiveSheet(null); }}>
                   <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
@@ -11147,6 +11281,7 @@ export default function LoudLight(){
                 {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="fx"&&(
                   <div>
+                    <div style={{marginBottom:16}}>{mixerBody}</div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                       {globalFxSections}
@@ -11304,7 +11439,9 @@ const CSS=`
   /* Song-page bar dot: a quick swell on each quarter note. Restarted by giving
      the lit dot a key that changes every quarter, which remounts it. */
   @keyframes barpulse{0%{transform:scaleY(2.6);opacity:1}100%{transform:scaleY(1);opacity:.9}}
-  .barpulse{animation:barpulse .26s ease-out;}
+  .songscroll{scrollbar-width:none;-ms-overflow-style:none}
+.songscroll::-webkit-scrollbar{display:none;width:0;height:0}
+.barpulse{animation:barpulse .26s ease-out;}
   select option{background:#111;color:#fff;}
   .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .left-col select{min-width:0;}
