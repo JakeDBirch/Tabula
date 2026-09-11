@@ -4499,6 +4499,27 @@ export default function LoudLight(){
   const activeDrumPat = drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
   const editPat       = activeLayer==="drums"?activeDrumPat:activePat;
   const barCount      = patBars(editPat);
+  // ── The bar strip WRAPS at 8 ─────────────────────────────────────────────
+  // A row of 16 chips on a phone is ~20px each, and 32 is ~10px: a target you
+  // cannot hit and a number you cannot print in it. Eight is the most a row
+  // ever holds, so a chip is never narrower than an eighth of the strip — wide
+  // enough to always carry its bar number, and to take a thumb. Rows of eight
+  // rather than a balanced split (9 bars as 5+4) because bars are read in
+  // fours and eights: row 1 is bars 1-8, and the last row simply ends early.
+  // It costs ~24px per extra row, which is vertical space the grid cannot use
+  // anyway — it is width-bound on a phone.
+  const BAR_ROW_MAX=8;
+  const _barPerRow=Math.max(1,Math.min(BAR_ROW_MAX,barCount));
+  const _barRows=Math.ceil(barCount/_barPerRow);
+  const BAR_ROW_H=22, BAR_ROW_GAP=2;
+  // What the extra rows cost the grid. Both grid-sizing expressions budget for
+  // a ONE-row strip (the 32px / 150px terms below); a wrapped strip is taller
+  // than that, and the grid cannot absorb it — its 16 rows of cells have an
+  // intrinsic minimum, so instead of shrinking it overflowed the bottom of the
+  // screen. Verified: 32 bars on an SE in landscape clipped the grid until
+  // this was subtracted. On a phone in portrait it changes nothing, because
+  // the grid is width-bound there and the height term never binds.
+  const _barStripExtra=(_barRows-1)*(BAR_ROW_H+BAR_ROW_GAP);
   const curBar        = Math.max(0,Math.min(barCount-1,barPage));
   const barOff        = curBar*COLS;
   // Which bar the playhead is in right now (-1 when stopped). `step`/`drumStep`
@@ -4910,9 +4931,16 @@ export default function LoudLight(){
   // Component-level, not a per-render object: the hold spans a pointerdown and
   // a pointerup with a state update (and therefore a re-render) in between.
   const spdHoldR=useRef({tmr:0,held:false});
-  const _barAt=(clientX,el)=>{
+  // Row from y, column from x. The strip stopped being one row of `barCount`
+  // the moment it wrapped, and a 1-D hit test would have gone on reporting
+  // bar 1 for every chip in the second row.
+  const _barAt=(clientX,clientY,el)=>{
     const rect=el.getBoundingClientRect();
-    return Math.max(0,Math.min(barCount-1,Math.floor(((clientX-rect.left)/rect.width)*barCount)));
+    const rowH=rect.height/_barRows;
+    const r=Math.max(0,Math.min(_barRows-1,Math.floor((clientY-rect.top)/rowH)));
+    const c=Math.max(0,Math.min(_barPerRow-1,Math.floor(((clientX-rect.left)/rect.width)*_barPerRow)));
+    // A short last row clamps: the empty columns after its end belong to it.
+    return Math.max(0,Math.min(barCount-1,r*_barPerRow+c));
   };
   const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
   const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
@@ -5602,10 +5630,10 @@ export default function LoudLight(){
   // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
   // ops, where the buttons can be a real touch size — a row of 18px glyphs above
   // the grid was too small to hit on the phone.
-  const _scrubTo=(clientX,el)=>{
-    const rect=el.getBoundingClientRect();
-    const i=Math.floor(((clientX-rect.left)/rect.width)*barCount);
-    const bi=Math.max(0,Math.min(barCount-1,i));
+  const _scrubTo=(clientX,clientY,el)=>{
+    // One hit test, not two: this had its own copy of the column maths and
+    // would have gone on scrubbing along row 1 while the taps landed in row 2.
+    const bi=_barAt(clientX,clientY,el);
     // Picking a bar is a deliberate "work on this one": it drops FOLLOW and
     // takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
     // you can slide the loop from bar to bar without leaving the grid.
@@ -5629,17 +5657,17 @@ export default function LoudLight(){
     setPage(pg=>pg==="step"?"edit":"step");
   };
   const barChips=(
-      <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",gap:2,height:22,touchAction:"none",cursor:"pointer"}}
+      <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",flexDirection:"column",gap:BAR_ROW_GAP,touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
-             const bar=_barAt(e.clientX,e.currentTarget),x=e.clientX,y=e.clientY;
+             const bar=_barAt(e.clientX,e.clientY,e.currentTarget),x=e.clientX,y=e.clientY;
              // Tapping the bar you are ALREADY on opens STEP (see
              // _openStepFor). Recorded before _scrubTo, which is what makes
              // the bar current.
              barHoldR.current.wasCur=(bar===curBar);
              barHoldR.current.moved=false;
-             _scrubTo(e.clientX,e.currentTarget);
+             _scrubTo(e.clientX,e.clientY,e.currentTarget);
              // Hold a chip for that bar's own ops. The tap has already selected
              // it, so the menu acts on what you are looking at.
              barHoldR.current.held=false;_barHoldEnd();
@@ -5648,7 +5676,7 @@ export default function LoudLight(){
              },450);
            }}
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();
-             barHoldR.current.moved=true;_barHoldEnd();_scrubTo(e.clientX,e.currentTarget);}}
+             barHoldR.current.moved=true;_barHoldEnd();_scrubTo(e.clientX,e.clientY,e.currentTarget);}}
            onPointerUp={e=>{
              _barHoldEnd();
              // A right-click's own pointerup must not ALSO fire the tap-again:
@@ -5660,14 +5688,20 @@ export default function LoudLight(){
              // where the release lands on a bar you were dragging to rather
              // than one you deliberately tapped twice.
              if(!barHoldR.current.held&&!barHoldR.current.moved&&barHoldR.current.wasCur)
-               _openStepFor(_barAt(e.clientX,e.currentTarget),e.clientX,e.clientY);
+               _openStepFor(_barAt(e.clientX,e.clientY,e.currentTarget),e.clientX,e.clientY);
              barHoldR.current.wasCur=false;
            }}
            onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;barHoldR.current.wasCur=false;}}
            onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barHoldEnd();
              barHoldR.current.held=true;barHoldR.current.wasCur=false;
-             const bar=_barAt(e.clientX,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
-        {Array.from({length:barCount},(_,bi)=>{
+             const bar=_barAt(e.clientX,e.clientY,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
+        {Array.from({length:_barRows},(_,row)=>(
+        // A GRID of `_barPerRow` columns, not a flex row: every chip is then
+        // the same width whatever row it is in, and a short last row ends
+        // early instead of its few chips stretching to fill the strip.
+        <div key={row} style={{display:"grid",gridTemplateColumns:"repeat("+_barPerRow+",1fr)",gap:2,height:BAR_ROW_H}}>
+        {Array.from({length:Math.min(_barPerRow,barCount-row*_barPerRow)},(_,col)=>{
+          const bi=row*_barPerRow+col;
           const isCur=bi===curBar, isPlaying=bi===playingBar;
           // Three states have to stay tellable apart on the same chip: the bar
           // you're EDITING (light fill), the bar that's SOUNDING (gold inset
@@ -5681,22 +5715,26 @@ export default function LoudLight(){
           // gridLen that stopped short reads. It is no longer "everything after
           // the cut", because there is no single cut any more.
           const past=(_barLens[bi]||0)===0;
-          const wide=barCount<=8;   // number the chips while they're readable
           return(
-            <div key={bi} style={{position:"relative",flex:1,minWidth:2,borderRadius:3,
+            <div key={bi} style={{position:"relative",minWidth:0,borderRadius:3,
               display:"flex",alignItems:"center",justifyContent:"center",
               background:isCur?"rgba(255,206,130,0.62)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.17)":"rgba(186,208,230,0.07)",
               boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
               color:isCur?"rgba(10,20,32,0.8)":isLoop?C_LOOP:"rgba(178,199,219,0.45)",
               fontSize:9,fontWeight:700,lineHeight:1,pointerEvents:"none",
               transition:"background .08s"}}>
-              {wide?bi+1:""}
-              {/* Underline, not a ring or a fill: it survives a 2px-wide chip on
-                  a 32-bar pattern and doesn't collide with the other two states. */}
+              {/* Always numbered now. It used to be hidden past 8 bars,
+                  because past 8 bars a chip was too narrow to print a number
+                  in — which is the same reason the strip now wraps at 8. */}
+              {bi+1}
+              {/* Underline, not a ring or a fill: it doesn't collide with the
+                  other two states (editing fill, sounding ring). */}
               {isLoop?<div style={{position:"absolute",left:1,right:1,bottom:1,height:2,borderRadius:1,background:C_LOOP}}/>:null}
             </div>
           );
         })}
+        </div>
+        ))}
       </div>
   );
   // The + that used to sit at the end of this strip is GONE. It added a bar on
@@ -5707,7 +5745,7 @@ export default function LoudLight(){
   // corner of a phone screen. (The "bars" SHEET keeps its opener on drums,
   // which have no step lanes: tapping the bar you are already on.)
   const barStrip=(
-    <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -10389,7 +10427,7 @@ export default function LoudLight(){
             {/* SYNTH EDIT grid */}
             {!songView&&activeLayer!=="drums"&&(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 10px",boxSizing:"border-box"}}>
-              <div style={{width:"min(100%,calc(100dvh - "+(isLandscape?32:150)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div style={{width:"min(100%,calc(100dvh - "+((isLandscape?32:150)+_barStripExtra)+"px))",aspectRatio:"1",display:"flex",flexDirection:"column",flexShrink:0}}>
                   <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
@@ -10449,7 +10487,9 @@ export default function LoudLight(){
                   // flows right → same direction as synth playback. Voice
                   // labels are transparent overlays on the leftmost portion of
                   // each row so the cells themselves get the full width.
-                  const SIZE=isLandscape?`min(calc(100vw - 190px), calc(100dvh - 32px))`:`min(calc(100vw - 20px), calc(100dvh - 150px))`;
+                  const SIZE=isLandscape
+                    ?`min(calc(100vw - 190px), calc(100dvh - ${32+_barStripExtra}px))`
+                    :`min(calc(100vw - 20px), calc(100dvh - ${150+_barStripExtra}px))`;
                   return(
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0}}>
                       <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
