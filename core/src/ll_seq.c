@@ -13,7 +13,7 @@
 
 typedef struct {
   ll_pattern*pat; int inSong, inLoop, loopBarIdx, loopOff;
-  int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen;
+  int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen, mLoopBar;
 } ctx_t;
 
 static ll_pattern* find_pat(int id){ if(id<0)return 0; for(int i=0;i<LL_MAX_PATTERNS;i++)if(G.pat[i].used&&G.pat[i].id==id)return &G.pat[i]; return 0; }
@@ -52,19 +52,26 @@ static int build_ctx(ctx_t*c){
   int bars=cur->bars<1?1:cur->bars;
   int lb=(int)G.p[LL_P_LOOP_BAR]; if(lb<0)lb=0; if(lb>bars-1)lb=bars-1;
   c->loopBarIdx=c->inLoop?lb:-1;
-  c->loopOff=c->loopBarIdx*LL_COLS;
+  c->loopOff=c->loopBarIdx*LL_COLS;   /* the PATTERN's bar; each part wraps it */
   c->mLayer=master_layer(cur);
   c->mHead=c->mLayer>=0?part_head(cur,c->mLayer):0;
   c->absStep=G.sr*60.f/(G.p[LL_P_BPM]>1.f?G.p[LL_P_BPM]:1.f)/4.f;
-  c->loopMasterLen=LL_COLS;
-  if(c->inLoop&&c->mHead){ int l=c->loopBarIdx<c->mHead->bars?c->mHead->barLens[c->loopBarIdx]:0; c->loopMasterLen=l>0?l:LL_COLS; }
+  /* The master is a part like any other and can be the SHORT one, so it wraps
+   * the pinned bar into its own length exactly as the others do. */
+  c->mLoopBar=0; c->loopMasterLen=LL_COLS;
+  if(c->inLoop&&c->mHead){
+    int pb=c->mHead->bars<1?1:c->mHead->bars;
+    c->mLoopBar=c->loopBarIdx%pb;
+    int l=c->mHead->barLens[c->mLoopBar];
+    c->loopMasterLen=l>0?l:LL_COLS;
+  }
   c->patLen=c->inLoop?c->loopMasterLen:pat_cycle_steps(cur,c->mLayer);
   if(c->patLen<1)c->patLen=1;
   return 1;
 }
 static double master_dur(ctx_t*c,int i){
   if(!c->mHead)return c->absStep;
-  int col=c->inLoop?c->loopOff:c->mHead->seq[i%c->mHead->seqLen];
+  int col=c->inLoop?c->mLoopBar*LL_COLS:c->mHead->seq[i%c->mHead->seqLen];
   return c->absStep*col_mult(c->mHead,col);
 }
 
@@ -147,10 +154,15 @@ static void part_tick(ctx_t*c,int layer){
   ll_pattern*P=c->pat;
   ll_phead*h=part_head(P,layer);
   int len=h->seqLen;
-  int loopLen=0;
-  if(c->inLoop){ int l=c->loopBarIdx<h->bars?h->barLens[c->loopBarIdx]:0; loopLen=l>0?l:LL_COLS; }
+  /* LOOP pins a bar of the PATTERN; a part shorter than the pattern does not
+   * have it. Wrap into this part's own length — the loop-to-fill rule the
+   * free-running cursor obeys. Without it an 8-bar part under a 16-bar one was
+   * read past the end of its grid and fell silent for every loop bar past 8. */
+  int lBar=0, loopLen=0;
+  if(c->inLoop){ int pb=h->bars<1?1:h->bars; lBar=c->loopBarIdx%pb;
+                 int l=h->barLens[lBar]; loopLen=l>0?l:LL_COLS; }
   int st=G.cur[layer].step;
-  int s=c->inLoop?c->loopOff+(st%loopLen):h->seq[st%len];
+  int s=c->inLoop?lBar*LL_COLS+(st%loopLen):h->seq[st%len];
   double stepDur=c->absStep*col_mult(h,s);
   double at=G.cur[layer].nextAt;
   float sw=G.p[LL_P_SWING];

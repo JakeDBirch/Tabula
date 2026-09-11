@@ -35,6 +35,9 @@ const buildFixture=(scenario)=>({
     // Pattern B — one bar
     const s2=B.parts.synth; s2.grid[5][0]=true; s2.grid[6][8]=true; s2.durs[6][8]=2;
     const d2=B.parts.drums; d2.grid[V.BD][0]=true; d2.grid[V.SD][8]=true; d2.grid[V.CH][14]=true; d2.rat[V.CH][14]=4;
+    // A part SHORTER than the pattern, for the loop-wrap scenario: LOOP pins a
+    // bar of the pattern, and the drums have to wrap it into their own length.
+    if(${JSON.stringify(!!scenario.shortDrums)}){ A.parts.drums=resizePatBars(A.parts.drums,1); }
     const patterns=[syncPatBars(A),syncPatBars(B)];
     const song=new Array(64).fill(null); song[0]=A.id; song[1]=B.id; const songRep=new Array(64).fill(1); songRep[1]=2;
     const sc=${JSON.stringify(scenario)};
@@ -157,6 +160,11 @@ const SCENARIOS=[
   {name:'song, swing 30, transpose 2',song:true,swing:30,transpose:2,seconds:11,horizon:10},
   {name:'pattern A free-running, lead glide',song:false,leadGlide:40,seconds:7,horizon:6},
   {name:'LOOP bar 2 of A',loop:true,loopBar:1,seconds:5,horizon:4},
+  // Bar 2 of a 2-bar pattern whose drum part is only 1 bar: the drums have no
+  // bar 2 and must wrap to their bar 1 rather than falling silent. Both
+  // engines had this wrong in the same way, so only a test that asserts the
+  // drums SOUND catches it — this one asserts the two agree on when.
+  {name:'LOOP past a short part',loop:true,loopBar:1,shortDrums:true,seconds:5,horizon:4},
 ];
 for(const sc of SCENARIOS){
   console.log('\n── '+sc.name+' ──');

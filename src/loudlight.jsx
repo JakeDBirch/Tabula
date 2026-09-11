@@ -4499,6 +4499,13 @@ export default function LoudLight(){
   const activeDrumPat = drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
   const editPat       = activeLayer==="drums"?activeDrumPat:activePat;
   const barCount      = patBars(editPat);
+  // The PATTERN's bar count — the longest part's. `barCount` above is the
+  // VISIBLE PART's, and the two differ the moment a pattern holds parts of
+  // different lengths. Anything pattern-scoped has to use this one: the LOOP
+  // pin is a bar of the pattern, and clamping it against the visible part meant
+  // merely LOOKING at an 8-bar drum part dragged a loop on bar 12 back to bar
+  // 8 — permanently, and for every part.
+  const patBarCount   = patBars(patterns.find(p2=>p2.id===activePatternId)||editPat);
   // ── The bar strip WRAPS at 8 ─────────────────────────────────────────────
   // A row of 16 chips on a phone is ~20px each, and 32 is ~10px: a target you
   // cannot hit and a number you cannot print in it. Eight is the most a row
@@ -4561,9 +4568,13 @@ export default function LoudLight(){
   // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
   // which the pin deliberately ignores.
   useEffect(()=>{ if(loopMode)setLoopPat(activePatternId); },[loopMode,activePatternId]);
-  // A pattern that shrank (DEL BAR, or switching to a shorter one) must not
-  // leave the loop pinned past the end.
-  useEffect(()=>{ if(loopMode&&loopBar>barCount-1)setLoopBar(Math.max(0,barCount-1)); },[loopMode,loopBar,barCount]);
+  // A pattern that shrank (DEL BAR, or switching to a shorter pattern) must not
+  // leave the loop pinned past the end. Against the PATTERN's bars, not the
+  // visible part's — see patBarCount. The comment here used to say "switching
+  // to a shorter one", which was true when patterns were per-layer; now
+  // switching LAYER changes the visible part without changing the pattern, and
+  // clamping on that rewrote the pin for a part that simply loops to fill.
+  useEffect(()=>{ if(loopMode&&loopBar>patBarCount-1)setLoopBar(Math.max(0,patBarCount-1)); },[loopMode,loopBar,patBarCount]);
   // The one way a DELIBERATE bar change happens — a chip tap or drag, ADD BAR,
   // DUP BAR, ×2. Three things travel together, and they went out of step as
   // soon as each caller did its own thing:
@@ -5706,7 +5717,12 @@ export default function LoudLight(){
           // Three states have to stay tellable apart on the same chip: the bar
           // you're EDITING (light fill), the bar that's SOUNDING (gold inset
           // ring) and the bar LOOP is holding (steel underline, LOOP's colour).
-          const isLoop=loopMode&&bi===loopBar;
+          // The loop marker follows the same wrap the audio does: LOOP pins a
+          // bar of the PATTERN, and on a part shorter than the pattern that bar
+          // is `loopBar % barCount`. Without the wrap a short part's page showed
+          // LOOP on with no bar marked at all — which is how the silence it
+          // used to cause went unexplained.
+          const isLoop=loopMode&&bi===((loopBar%barCount)+barCount)%barCount;
           const has=_barHasNotes(bi);
           // Bars past this part's loop end hold no content of their own — the
           // part repeats its own length through them (loop to fill), which is
@@ -6892,7 +6908,15 @@ export default function LoudLight(){
     // is a bar INDEX, so it clamps into a shorter song entry. Otherwise: the
     // whole pattern.
     const loopBarIdx=inLoop?Math.max(0,Math.min(patBars(curPat)-1,Math.max(0,loopBarR.current))):-1;
-    const loopOff=loopBarIdx*COLS;
+    // LOOP pins a bar of the PATTERN, and a part shorter than the pattern does
+    // not have that bar. A 16-bar synth over an 8-bar drum part, looping bar
+    // 12, handed the drums column 176 of a part that is 128 columns wide: the
+    // grid read `undefined` and the whole layer fell silent, with nothing on
+    // screen to say why. Wrap the bar into the part's own length — exactly the
+    // loop-to-fill rule the free-running cursor already obeys, so bar 12 of the
+    // pattern is bar 12 % 8 = bar 4 of the drums, which is what would have been
+    // sounding there anyway.
+    const loopBarOf=(part)=>{const pb=Math.max(1,partBars(part));return ((loopBarIdx%pb)+pb)%pb;};
     // The cycle length in absolute steps. Everything re-synchronises here:
     // parts loop inside it at their own gridLen and speed, and the song
     // advances when it wraps (unless LOOP is holding it).
@@ -6909,11 +6933,14 @@ export default function LoudLight(){
     // tick would drift against the parts within the first bar.
     const mPart=cyc.layer?curPat.parts[cyc.layer]:null;
     const mSeq=mPart?partSeq(mPart):null;
-    const loopMasterLen=(inLoop&&mPart)?Math.max(1,partBarLens(mPart)[loopBarIdx]||COLS):COLS;
+    // The master wraps too: it is a part like any other, and it can be the
+    // SHORT one (an 8-bar master under a 16-bar drum part).
+    const mLoopBar=(inLoop&&mPart)?loopBarOf(mPart):0;
+    const loopMasterLen=(inLoop&&mPart)?Math.max(1,partBarLens(mPart)[mLoopBar]||COLS):COLS;
     const masterDur=(i)=>{
       if(!mPart)return absStepDur;
       // In LOOP every tick is the pinned bar's, so its rate is constant.
-      const col=inLoop?loopOff:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
+      const col=inLoop?mLoopBar*COLS:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
       return absStepDur*colMult(mPart,col);
     };
     const patLen=Math.max(1,inLoop?loopMasterLen:cyc.steps);
@@ -6945,8 +6972,9 @@ export default function LoudLight(){
         const len=seq.length;
         // In LOOP the cursor runs across the pinned bar's own columns — its own
         // length, so looping a 14-step bar loops 14 steps, not 16.
-        const loopLen=inLoop?Math.max(1,partBarLens(pat)[loopBarIdx]||COLS):0;
-        const s=inLoop?loopOff+(lf.step%loopLen):seq[lf.step%len];
+        const lBar=inLoop?loopBarOf(pat):0;
+        const loopLen=inLoop?Math.max(1,partBarLens(pat)[lBar]||COLS):0;
+        const s=inLoop?lBar*COLS+(lf.step%loopLen):seq[lf.step%len];
         // Priced from the bar THIS step is in, so it has to come after `s`.
         // It is both how long the note sounds and how far the cursor moves.
         const layerStepDur=absStepDur*colMult(pat,s);
