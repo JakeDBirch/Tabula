@@ -4962,6 +4962,17 @@ export default function LoudLight(){
             {cell("PST", ()=>act(()=>pastePatId(activePatternId)),isDrum||!clipboard)}
             {cell("⧉ DUP",()=>act(()=>duplicateBar()),barCount>=MAX_BARS)}
           </div>
+          {/* The three ways to gain a bar, together — ⧉ DUP above is the
+              fourth and sits with the content ops it copies. ＋ BAR used to be
+              a dedicated button in the bar strip; it is here now, with the rest
+              of the bar structure, and the strip got its corner back. */}
+          <div style={{padding:"7px 10px 3px",fontSize:8,letterSpacing:1.6,fontWeight:600,
+            color:"rgba(178,199,219,0.3)",background:"rgba(10,18,28,0.92)"}}>
+            BARS · {barCount}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {cell("＋ BAR",()=>act(()=>addBar()),barCount>=MAX_BARS)}
+            {cell("×2",    ()=>act(()=>doublePattern()),barCount*2>MAX_BARS)}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("✕ DELETE BAR "+(bm.bar+1),()=>act(()=>deleteBarAt(bm.bar)),only,true)}
           </div>
@@ -5082,17 +5093,15 @@ export default function LoudLight(){
   // The bar count on a pattern chip, drawn as a bar-line sandwich — |8| rather
   // than "8b". It reads as a measure count instead of a unit abbreviation, and
   // it is the one piece of information on the chip besides the name, so it can
-  // afford to be legible: 10px rather than 8, and less dimmed. Blank at one
-  // bar, since |1| on every chip is noise.
+  // A pattern chip is its NAME and nothing else. It carried its bar count for
+  // a while — "8b", then |8| — and the count is simply not what you are reading
+  // a chip for: you are picking a pattern. Next to a one-glyph name a bracketed
+  // number reads as part of the name, or as a quantity of the wrong thing, and
+  // the bar strip below spells the count out in chips anyway. Kept as a stub
+  // rather than deleted because the three chip rows call it in one place each,
+  // and the argument for leaving it out is worth having written down.
   const patBarsBadge=(p)=>{
-    const n=patBars(p);
-    if(n<=1)return null;
-    // ASCII pipes on purpose. U+2758 (light vertical bar) is the prettier rule,
-    // but DM Sans arrives from Google Fonts as a latin subset that does not
-    // carry it, so on a device it would be tofu or a mismatched fallback — and
-    // that is exactly the kind of thing you only find on a phone you cannot
-    // attach a debugger to.
-    return <span style={{fontSize:10,opacity:0.75,fontWeight:600,letterSpacing:1}}>{"|"+n+"|"}</span>;
+    return null;
   };
   const songPage=(
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",
@@ -5690,32 +5699,21 @@ export default function LoudLight(){
         })}
       </div>
   );
-  // The + beside the bar readout: a TAP adds a bar, a HOLD (or right-click)
-  // opens the full pattern/bar sheet. Adding a bar is the thing you reach for
-  // constantly and it used to cost two taps through the drawer; the drawer is
-  // the rarer trip, so it gets the deliberate gesture.
-  const barPlusR=useRef({tmr:0,held:false});
-  const _barPlusEnd=()=>{
-    if(barPlusR.current.tmr){clearTimeout(barPlusR.current.tmr);barPlusR.current.tmr=0;}
-  };
-  const _openBarSheet=()=>{
-    // Opened mid-gesture (finger still down), so the trailing click of this
-    // same press would otherwise land on the backdrop that just mounted under
-    // it and dismiss the sheet instantly. sheetGuardR makes the backdrop
-    // ignore clicks for a beat after a hold-open — the same trap the
-    // onClick-not-onPointerDown rule guards against for tap-opened sheets.
-    sheetGuardR.current=Date.now();
-    setActiveSheet(sh=>sh==="bars"?null:"bars");
-  };
+  // The + that used to sit at the end of this strip is GONE. It added a bar on
+  // a tap and opened the pattern/bar sheet on a hold — and both of those live
+  // on the bar chips now: ＋ BAR is in a chip's hold menu with the rest of the
+  // bar structure, where DUP and DELETE already were. A dedicated button for
+  // one op that the menu beside it also carries is a control paying rent in the
+  // corner of a phone screen. (The "bars" SHEET keeps its opener on drums,
+  // which have no step lanes: tapping the bar you are already on.)
   const barStrip=(
     <div style={{display:"flex",alignItems:"center",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
-      {/* Bar readout — which pattern you're editing and where you are in it.
-          The pattern pills that used to name it are gone from the part pages. */}
-      <span style={{fontSize:IS_MOBILE?10:9,letterSpacing:0.5,pointerEvents:"none",display:"flex",gap:4,alignItems:"center",flexShrink:0,whiteSpace:"nowrap"}}>
-        <span style={{color:_patColorOf(activePatternId),fontWeight:700}}>{(patterns.find(p2=>p2.id===activePatternId)||{name:""}).name}</span>
-        <span style={{color:"rgba(178,199,219,0.4)"}}>{curBar+1}/{barCount}</span>
-      </span>
+      {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
+          and the strip it sat on is ALREADY both of those: one chip per bar
+          with the current one lit, under a row of pattern chips with the
+          selected one lit. A third copy of what two rows of controls say, in
+          the corner where the grid wants the width. */}
       {/* Row-key toggle. It lives here rather than on the column itself because
           a collapsed column has nowhere to put a handle that isn't width you
           were trying to get back — and the bar strip is on screen on every part
@@ -5731,35 +5729,6 @@ export default function LoudLight(){
           color:rowKeysOpen?"#ffd28a":"rgba(178,199,219,0.5)",
           fontSize:IS_MOBILE?13:12,lineHeight:1,
           cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",flexShrink:0,touchAction:"none"}}>♪</div>
-      <div role="button" aria-label="Add bar (hold for pattern and bar controls)"
-        onPointerDown={e=>{
-          e.stopPropagation();
-          barPlusR.current.held=false;
-          _barPlusEnd();
-          if(!IS_MOBILE)return;   // desktop has the sidebar; hold opens nothing
-          barPlusR.current.tmr=setTimeout(()=>{
-            barPlusR.current.tmr=0;barPlusR.current.held=true;_openBarSheet();
-          },450);
-        }}
-        onPointerMove={e=>{if(e.buttons)_barPlusEnd();}}
-        onPointerUp={()=>{_barPlusEnd();if(barPlusR.current.held)sheetGuardR.current=Date.now();}}
-        onPointerCancel={()=>{_barPlusEnd();barPlusR.current.held=false;}}
-        onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barPlusEnd();barPlusR.current.held=true;_openBarSheet();}}
-        onClick={e=>{
-          e.stopPropagation();
-          // The hold already did its work; swallow its trailing click so the
-          // sheet doesn't come with a surprise extra bar.
-          if(barPlusR.current.held){barPlusR.current.held=false;return;}
-          if(barCount>=MAX_BARS)return;
-          addBar();
-        }}
-        style={{display:"flex",alignItems:"center",justifyContent:"center",
-          height:IS_MOBILE?24:22,width:IS_MOBILE?30:26,borderRadius:5,
-          border:"1px solid "+(activeSheet==="bars"?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),
-          background:activeSheet==="bars"?"rgba(232,220,205,0.12)":"transparent",
-          color:barCount>=MAX_BARS&&activeSheet!=="bars"?"rgba(178,199,219,0.2)":activeSheet==="bars"?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.6)",
-          fontSize:IS_MOBILE?15:13,fontWeight:400,lineHeight:1,
-          cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",flexShrink:0,touchAction:"none"}}>+</div>
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -8834,14 +8803,19 @@ export default function LoudLight(){
   // One table, so the chip and the drawer's own three scrubbers cannot drift:
   // same ranges, same ballistic gearing, same defaults as the drawer widgets
   // these were lifted from.
+  //
+  // `live` is the STATE value, not the ref: the refs are written by effects,
+  // which run after the render that changed them, so a readout driven off
+  // get() lags the drag by a frame. `label` is the full word the full-screen
+  // readout spells out — `unit` is the chip's own cramped abbreviation.
   const TEMPO_FIELDS=[
-    {key:"bpm",  unit:"BPM", min:40,  max:300, gain:0.5, reset:120,
+    {key:"bpm",  unit:"BPM", label:"BPM",       min:40,  max:300, gain:0.5, reset:120, live:bpm,
      get:()=>bpmR.current,    set:(v)=>setBpm(Math.round(v)),
      show:(v)=>String(Math.round(v))},
-    {key:"st",   unit:"ST",  min:-24, max:24,  gain:1/6, reset:0,
+    {key:"st",   unit:"ST",  label:"SEMITONES", min:-24, max:24,  gain:1/6, reset:0,   live:transpose,
      get:()=>transpR.current, set:(v)=>setTranspose(Math.round(v)),
      show:(v)=>{const n=Math.round(v);return n===0?"0":(n>0?"+"+n:String(n));}},
-    {key:"swing",unit:"SWG", min:0,   max:100, gain:1/3, reset:0,
+    {key:"swing",unit:"SWG", label:"SWING",     min:0,   max:100, gain:1/3, reset:0,   live:swing,
      get:()=>swingR.current,  set:(v)=>setSwing(Math.round(v)),
      show:(v)=>String(Math.round(v))},
   ];
@@ -8850,10 +8824,10 @@ export default function LoudLight(){
   const tempoVal=tempoField==="bpm"?bpm:tempoField==="st"?transpose:swing;
   const tempoChipR=useRef({tmr:0,held:false,on:false,moved:false,swallow:false,startY:0,lastY:0,val:0});
   const _tempoHoldEnd=()=>{const t=tempoChipR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
-  const _tempoPopAt=(el,sticky)=>{
-    const r=el.getBoundingClientRect();
+  // The readout is full-screen, so it needs nothing about where the chip is.
+  const _tempoPopOpen=(sticky)=>{
     tempoPopAtR.current=Date.now();
-    setTempoPop({cx:r.left+r.width/2,top:r.top,bottom:r.bottom,sticky:!!sticky});
+    setTempoPop({sticky:!!sticky});
   };
   const tempoChipProps={
     onPointerDown:(e)=>{
@@ -8862,12 +8836,11 @@ export default function LoudLight(){
       const t=tempoChipR.current, f=tempoFldOf(tempoFieldR.current);
       t.held=false;t.moved=false;t.swallow=false;_tempoHoldEnd();
       t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();
-      const el=e.currentTarget;
       // Capture BEFORE the hold fires, so the drag that follows keeps landing
       // here once the finger has wandered off a 42px chip.
-      try{el.setPointerCapture(e.pointerId);}catch(_){}
+      try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
       t.tmr=setTimeout(()=>{ t.tmr=0;t.held=true;t.lastY=t.startY;
-        t.val=tempoFldOf(tempoFieldR.current).get(); _tempoPopAt(el,false); },450);
+        t.val=tempoFldOf(tempoFieldR.current).get(); _tempoPopOpen(false); },450);
     },
     onPointerMove:(e)=>{
       const t=tempoChipR.current;
@@ -8900,7 +8873,7 @@ export default function LoudLight(){
       // STICKY instead: it tracks the bare pointer until a click or ESC.
       e.preventDefault();e.stopPropagation();_tempoHoldEnd();
       const t=tempoChipR.current;t.on=false;t.held=false;t.swallow=true;
-      _tempoPopAt(e.currentTarget,true);
+      _tempoPopOpen(true);
     },
     onClick:(e)=>{
       e.stopPropagation();
@@ -8973,33 +8946,37 @@ export default function LoudLight(){
     );
   })();
 
-  // The hold-to-edit readout. It sits ABOVE the chip (below only if there is no
-  // room), because the chip is exactly where the finger is. Pointer-transparent
-  // in hold mode — the chip owns the pointer for the length of the drag — and
-  // a click-catcher in sticky mode, where nothing else would dismiss it.
-  const tempoPopup=!tempoPop?null:(()=>{
-    const W=140,H=86,vw=window.innerWidth,vh=window.innerHeight;
-    const left=Math.max(8,Math.min(vw-W-8,tempoPop.cx-W/2));
-    const up=tempoPop.top-H-14;
-    const top=up>=8?up:Math.max(8,Math.min(vh-H-8,tempoPop.bottom+14));
-    return(
-      <div style={{position:"fixed",inset:0,zIndex:600,
-          pointerEvents:tempoPop.sticky?"all":"none"}}
-        onPointerDown={tempoPop.sticky?()=>{if(Date.now()-tempoPopAtR.current>400)setTempoPop(null);}:undefined}>
-        <div style={{position:"absolute",left,top,width:W,height:H,
-          display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,
-          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-          borderRadius:14,border:"1px solid rgba(168,190,212,0.2)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)"}}>
-          <span style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.45)"}}>{tempoFld.unit}</span>
-          <span style={{fontSize:34,fontWeight:700,lineHeight:1,
-            color:"#ffc46a",textShadow:"0 0 18px rgba(255,196,106,0.45)"}}>{tempoFld.show(tempoVal)}</span>
-          <span style={{fontSize:7,letterSpacing:1.6,color:"rgba(178,199,219,0.3)"}}>
-            {tempoPop.sticky?"MOVE · CLICK TO CLOSE":"DRAG"}</span>
-        </div>
-      </div>
-    );
-  })();
+  // ── ONE full-screen readout for every tempo scrubber ─────────────────────
+  // The drawer's three widgets each carried their own copy of this overlay, and
+  // the TEMPO chip's hold put up a small card floating above the chip instead.
+  // That read as a different control doing a different thing, when it is the
+  // same gesture on the same value — so there is now one readout and it is the
+  // drawer's: the screen goes dark and the number is the only thing on it.
+  // Which matters more than it looks, because the whole point of scrubbing from
+  // the chip is that you are mid-take: the value has to be legible at arm's
+  // length and nothing else may be under your thumb.
+  //
+  // Whichever scrubber is live picks the field. The drawer's widgets set
+  // `tempoField` on pointerdown as well, but this is derived from the drag
+  // flags rather than from that, so the readout cannot name one field while
+  // another is moving.
+  const scrubFld = bpmDragging   ? tempoFldOf("bpm")
+                 : stDragging    ? tempoFldOf("st")
+                 : swingDragging ? tempoFldOf("swing")
+                 : tempoPop      ? tempoFld : null;
+  // Pointer-transparent while a finger is down — the chip and the drawer
+  // widgets own the pointer for the length of the drag. A right-click scrub
+  // (sticky) has no button down and nothing else would dismiss it, so there it
+  // is a click-catcher, guarded against the press that opened it.
+  const scrubSticky = !!(tempoPop&&tempoPop.sticky&&!bpmDragging&&!stDragging&&!swingDragging);
+  const scrubOverlay = !scrubFld ? null : (
+    <div style={Object.assign({},S.bpmOverlay,scrubSticky?{pointerEvents:"all"}:null)}
+      onPointerDown={scrubSticky?()=>{if(Date.now()-tempoPopAtR.current>400)setTempoPop(null);}:undefined}>
+      <div style={S.bpmOverlayNum}>{scrubFld.show(scrubFld.live)}</div>
+      <div style={S.bpmOverlayLbl}>{scrubFld.label}</div>
+      <div style={S.bpmOverlayHint}>{scrubSticky?"move · click to close":"↑ drag ↓"}</div>
+    </div>
+  );
 
   // Per-pattern speed: the SPEED selector reads/writes the active pat's
   // speedMult so each pattern can have its own playback rate. Falls back to
@@ -9436,35 +9413,11 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
-      {tempoPopup}
+      {scrubOverlay}
       {exportMenuEl}
 
-      {/* Chain drag ghost */}
-
-      {/* Swing drag overlay */}
-      {swingDragging&&(
-        <div style={S.bpmOverlay}>
-          <div style={S.bpmOverlayNum}>{swing}</div>
-          <div style={S.bpmOverlayLbl}>SWING</div>
-          <div style={S.bpmOverlayHint}>↑ drag ↓</div>
-        </div>
-      )}
-      {bpmDragging&&(
-        <div style={S.bpmOverlay}>
-          <div style={S.bpmOverlayNum}>{bpm}</div>
-          <div style={S.bpmOverlayLbl}>BPM</div>
-          <div style={S.bpmOverlayHint}>↑ drag ↓</div>
-        </div>
-      )}
-
-      {/* ST drag overlay */}
-      {stDragging&&(
-        <div style={S.bpmOverlay}>
-          <div style={S.bpmOverlayNum}>{stLabel}</div>
-          <div style={S.bpmOverlayLbl}>SEMITONES</div>
-          <div style={S.bpmOverlayHint}>↑ drag ↓</div>
-        </div>
-      )}
+      {/* The BPM / ST / SWING drag overlays used to be three more copies of
+          the readout, mounted here. They are `scrubOverlay` above now. */}
 
 
       {/* ── Layout ── */}
@@ -9522,10 +9475,11 @@ export default function LoudLight(){
                 return(
                   <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
                     onClick={()=>{
-                      // Clicking an already-active layer jumps into its sound page
-                      // (mirrors mobile). Clicking a different one just switches.
+                      // Clicking an already-active layer opens its sound page
+                      // (mirrors mobile). It TOGGLES, because the SOUND tab is
+                      // gone and a one-way door needs the tab row to get back.
                       if(songView){setSongView(false);setPage("sound");return;}
-                      if(isActive){setPage("sound");}
+                      if(isActive){setPage(pg=>pg==="sound"?"edit":"sound");}
                       else{switchLayer(layer);}
                     }}>
                     <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
@@ -9537,15 +9491,20 @@ export default function LoudLight(){
               <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
                 onClick={()=>{
                   // Stepping into DRUMS lands on the grid editor (the main drum
-                  // workspace). The mixer / kit live on the SOUND tab; global FX
-                  // on the FX tab. (POLY/MONO keep layer→sound since "sound" is
-                  // their per-layer instrument; drums "sound" is the shared kit.)
-                  if(activeLayer!=="drums")switchLayer("drums");
-                  // Persist the current view (SOUND / VARY / EDIT) on layer select,
-                  // exactly like POLY/MONO — only snap to the grid when coming from
-                  // song view. STEP is hidden for drums, so the effect below falls
-                  // a parked STEP page back to EDIT; every other page is kept.
-                  if(songView){setSongView(false);setPage("edit");}
+                  // workspace); the kit and mixer are its sound page, global FX
+                  // on the FX tab. Tapping DRUMS again opens that page, exactly
+                  // as POLY/MONO do — it used to do nothing at all, which was a
+                  // dead control, and with the SOUND tab gone it is also the
+                  // only way in.
+                  if(activeLayer!=="drums"){
+                    switchLayer("drums");
+                    // Persist the current view on layer select, like POLY/MONO —
+                    // only snap to the grid when coming from song view. STEP is
+                    // hidden for drums, so the effect below falls a parked STEP
+                    // page back to EDIT; every other page is kept.
+                    if(songView){setSongView(false);setPage("edit");}
+                  }else if(songView){setSongView(false);setPage("sound");}
+                  else{setPage(pg=>pg==="sound"?"edit":"sound");}
                 }}>
                 <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
                 {/* Pattern selection is the chip row below the layer boxes. */}
@@ -10281,8 +10240,11 @@ export default function LoudLight(){
           {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
               moved inside the VARY page along with an in-page enable toggle. */}
           <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {/* No STEP tab: tapping the bar you are already on opens it. */}
-            {[["edit","EDIT"],["sound","SOUND"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
+            {/* No STEP tab: tapping the bar you are already on opens it. No
+                SOUND tab either: tapping the LAYER you are already on opens
+                that — which is the same rule, and it was already how the layer
+                boxes behaved, so the tab was a second door to one room. */}
+            {[["edit","EDIT"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
               <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>{setPage(p);if(songView)setSongView(false);}}>{lbl}</button>
             ))}
           </div>
@@ -10331,9 +10293,13 @@ export default function LoudLight(){
                   selected through the compat views and its ＋ added a part
                   rather than a pattern. */}
               {patternChipsRail}
-              {/* per-layer function pills — STEP / SOUND / VARY */}
-              <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
-              {[["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
+              {/* Per-layer function pills. SOUND is not one of them any more:
+                  tapping the layer you are already on opens it, which is the
+                  house rule and was already wired above. VARY keeps a pill
+                  because it has no such gesture — and while VARY is parked the
+                  whole row goes, divider and all. */}
+              {VARY_ON&&<div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>}
+              {(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[]).map(([key,lbl,on])=>(
                 <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
                   style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
                     border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
@@ -10388,13 +10354,16 @@ export default function LoudLight(){
             {patternChipsRow}
           </div>
           )}
-          {/* ── PER-LAYER FUNCTION PILLS — STEP / SOUND / VARY (portrait) ──
-               First-class home-screen access to the pattern's step drawer, the
-               layer's sound page, and per-layer variation. (These were formerly
-               reached only by tapping the already-active layer/pattern.) */}
-          {!isLandscape&&(
+          {/* ── PER-LAYER FUNCTION PILLS (portrait) ──
+               SOUND has no pill any more: tapping the layer you are already on
+               opens it, which is the house rule and was already wired into the
+               layer bar directly above. On a phone that row was ~40px of a
+               height-bound grid spent on a second door to one room. VARY keeps
+               a pill because it has no such gesture, and while VARY is parked
+               the row does not render at all. */}
+          {!isLandscape&&VARY_ON&&(
           <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
-            {[["sound","SOUND",activeSheet==="sound"],...(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[])].map(([key,lbl,on])=>(
+            {[["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
               <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
                 style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
                   border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
