@@ -423,6 +423,26 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   note behind it. The drum grid handles pointers per cell, so there is nothing
   to bubble into and its band captures directly; a tap there is a no-op rather
   than a hit. That asymmetry is the same one the two-finger shift has.
+- **On DESKTOP, everything that is not the grid is in the side panel.** The
+  EDIT/FX tabs and the transport (↶ ↷ ▶ LOOP FOLLOW) used to take two `auto`
+  rows under the page. The desktop grid is `min(width, height)` of that column
+  and the column is far wider than it is tall, so those ~103px came **straight
+  off the grid**. In the sidebar they cost it nothing: the SONG block there is
+  `flex:1` and had been holding ~450px of slack ever since the song lane became
+  a single line. The grid goes 684 → 804px on a 1280×900 window, and the right
+  column is now nothing but the page. Three rows, because 220px will not hold
+  five controls: the pages, then ↶ ↷ ▶, then the two toggles. **↶ and ↷ stay
+  adjacent** — they are a pair you click in runs, and putting the play button
+  between them would make redo a longer trip every time.
+  - The desktop square had the **same bar-strip-inside-it bug** the phone had
+    (832 wide by 805 tall — a whole row short), and the bigger grid made it
+    obvious. The strip is a sibling now, and `gridPx` is **derived in render**
+    from a measured box rather than computed inside the ResizeObserver: the
+    strip wraps with the bar count, which an observer on the container never
+    sees. It must be declared below BOTH `editBox` and `_barStripPx` — placed
+    above either, Babel's `var` hoisting gives `undefined`, the square falls
+    back to `80%` of a parent that is itself shrink-wrapping to the square, and
+    you get 36px of grid with no error at all.
 - **UNDO / REDO are glyphs, not words** (`S.histBtn`, square, same height as the
   rest of the transport so the row still reads as one row). `↶` and `↷` are
   unambiguous, and the row has better uses for the ~80px two labels were

@@ -6342,19 +6342,36 @@ export default function LoudLight(){
     </div>
   );
 
-  // Measure edit area for square grid — callback ref re-runs when element mounts/unmounts
-  const [gridPx, setGridPx] = useState(null);
+  // Measure the edit area, then size the square in RENDER — the observer stores
+  // the box, not the answer. The bar strip is a sibling of the square now (it
+  // used to be inside it, which on a box that is as tall as it is wide took its
+  // height straight off the cells: 832 wide by 805 tall, a whole row short),
+  // and the strip WRAPS with the bar count, which a ResizeObserver does not see.
+  // Deriving in render means a bar-count change re-sizes the grid for free.
+  const [editBox, setEditBox] = useState(null);
   const [editOuter, setEditOuter] = useState(null);
   const editOuterRef = useCallback(node => setEditOuter(node), []);
   useEffect(()=>{
     if(!editOuter) return;
     const ro = new ResizeObserver(entries=>{
       const {width,height} = entries[0].contentRect;
-      setGridPx(Math.floor(Math.min(width,height)) - 16);
+      setEditBox({w:Math.floor(width),h:Math.floor(height)});
     });
     ro.observe(editOuter);
     return ()=>ro.disconnect();
   },[editOuter]);
+
+  // The desktop square: the narrower of the box's width and what is left of its
+  // height once the bar strip above it has had its share. `_barStripPx` is the
+  // strip at its real wrapped height, so 32 bars costs the grid four rows'
+  // worth rather than one.
+  //
+  // It has to be declared BELOW both `editBox` and `_barStripPx`. Babel lowers
+  // const to var, so a derivation placed above either one reads `undefined` —
+  // which it did, silently, and the square fell back to `80%` of a parent that
+  // was itself shrink-wrapping to the square. 36px of grid, no error.
+  const gridPx = !editBox ? null
+    : Math.max(120, Math.min(editBox.w, editBox.h - _barStripPx - 6) - 16);
 
   // ── Share / Export / Import ──────────────────────────────────────────────
   // includeSamples: encode recorded USER samples (base64 WAV) into the state.
@@ -9971,6 +9988,40 @@ export default function LoudLight(){
             </div>
           )}
 
+          {/* TABS + TRANSPORT — in the side panel, under the song. Everything
+              that is not the grid lives on one side now, and the grid gets the
+              whole of the other. Three rows because 220px will not hold five
+              controls: the pages, then undo/play/redo, then the two toggles.
+              Order is unchanged from where they used to be, so the group reads
+              the same — it has only moved. */}
+          {!IS_MOBILE&&(
+            <div style={{flexShrink:0,display:"flex",flexDirection:"column",gap:6,
+              borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:8,marginTop:6}}>
+              {/* No STEP tab: tapping the bar you are already on opens it. No
+                  SOUND tab either: tapping the LAYER you are already on opens
+                  that — the same rule, and the layer boxes already behaved that
+                  way, so the tab was a second door to one room. */}
+              <div style={{display:"flex",gap:4}}>
+                {[["edit","EDIT"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([pg,lbl])=>(
+                  <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{},pg==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})}
+                    onClick={()=>setPage(pg)}>{lbl}</button>
+                ))}
+              </div>
+              {/* ↶ ↷ stay ADJACENT — they are a pair you click in runs, and
+                  putting the play button between them would make redo a longer
+                  trip every time. Order unchanged from the old row. */}
+              <div style={{display:"flex",gap:6,alignItems:"center",justifyContent:"center"}}>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button style={Object.assign({},S.loopBtnBottom,{flex:1,minWidth:0,padding:0},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
+                <button style={Object.assign({},S.loopBtnBottom,{flex:1,minWidth:0,padding:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              </div>
+            </div>
+          )}
+
           {/* PROJECT menu — one button, everything behind it. Save/load, cloud
               and share used to be a permanently-open column here; none of it is
               wanted mid-take, and the space is better spent on the mixer. */}
@@ -9985,22 +10036,30 @@ export default function LoudLight(){
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr auto auto",overflow:"hidden"}}>
-          {/* Page content — always present, fills 1fr */}
+        {/* The right column is nothing but the page now. The tabs and the
+            transport used to take two `auto` rows under it, and the desktop grid
+            is HEIGHT-bound — it is `min(width,height)-16` of this box, and the
+            box is far wider than it is tall — so those ~103px came straight off
+            the grid. In the sidebar they cost it nothing: the SONG block there
+            is `flex:1` and was holding ~450px of slack ever since the song lane
+            became a single line. 684 -> 832px on a 1280x900 window. */}
+        <div style={{flex:1,minWidth:0,minHeight:0,display:"grid",gridTemplateRows:"1fr",overflow:"hidden"}}>
+          {/* Page content — always present, fills the column */}
           <div ref={editOuterRef} style={{minHeight:0,overflow:"hidden",position:"relative"}}>
             <>
             {activeLayer!=="drums"&&page==="edit"&&(
               <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",flexDirection:"column",flexShrink:0}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0,gap:6}}>
               {/* The bar strip starts where the grid does, not where the key
                   column does — the chips are a scrubber over the pattern, and
                   hanging them out to the left of the grid just reads as a
-                  misalignment. */}
-              <div style={{display:"flex",width:"100%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
+                  misalignment. It is a SIBLING of the square, never a child:
+                  see the aspect-ratio lesson. */}
+              <div style={{display:"flex",width:gridPx||"80%"}}><div style={{width:rowKeyPad,flexShrink:0}}/>{barStrip}</div>
               {/* Row keys sit OUTSIDE the grid container: the grid's pointer
                   handlers live on that container and hit-test a column from its
                   own width, so a key column inside it would be read as column 0. */}
-              <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
+              <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",position:"relative",flexShrink:0}}>
               {rowKeys}
               <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
@@ -10635,26 +10694,6 @@ export default function LoudLight(){
             </>)}
           </div>
 
-          {/* Tabs — always visible. VARY replaces the old SET tab; SET's contents
-              moved inside the VARY page along with an in-page enable toggle. */}
-          <div style={{...S.tabs, flexShrink:0, paddingTop:8}}>
-            {/* No STEP tab: tapping the bar you are already on opens it. No
-                SOUND tab either: tapping the LAYER you are already on opens
-                that — which is the same rule, and it was already how the layer
-                boxes behaved, so the tab was a second door to one room. */}
-            {[["edit","EDIT"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([p,lbl])=>(
-              <button key={p} style={Object.assign({},S.tab,page===p?S.tabOn:{},p==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})} onClick={()=>setPage(p)}>{lbl}</button>
-            ))}
-          </div>
-          {/* Transport — always visible, centered. VARY toggle removed; it lives
-              inside the VARY page now (tab still glows orange while enabled). */}
-          <div style={{flexShrink:0,display:"flex",gap:6,alignItems:"center",justifyContent:"center",paddingTop:8,borderTop:"1px solid rgba(168,190,212,0.08)"}}>
-            <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-            <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-            <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-            <button style={Object.assign({},S.loopBtnBottom,loopBtnStyle)} {...loopBtnProps}>LOOP</button>
-            <button style={Object.assign({},S.loopBtnBottom,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
-          </div>
         </div>
         {/* DRAG GHOST — floating pill that follows pointer (desktop) */}
         {patternDrag&&(
