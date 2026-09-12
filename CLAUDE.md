@@ -831,6 +831,7 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 ## Critical lessons (don't relearn)
 
 - **`return_react2`**: module-level arrow functions returning JSX broke the old artifact viewer's CJS transform. Inline JSX; never extract to a top-level `const X = () => <jsx>`. The build audit guards this — keep it.
+- **A FLAG MAY PARK A UI. IT MAY NOT PARK SOMETHING THAT DECIDES WHAT SAVED WORK SOUNDS LIKE.** `VARY_ON=false` gated the pages, the openers and the scheduler's per-bar re-roll — but not the effect that fills the varied-grid caches, and not the two playback reads that prefer a cached variation over `pat.grid`. `varyMode` is persisted, so a parked build generated a random variation of every VARY project **once, on load**, and then played it for ever, because the thing that would have re-rolled it was the one part that *was* gated. Notes dropped, ghost notes added where the author never put them, identical every bar, no control anywhere, nothing on the grid to say so. It shipped for four days and surfaced as "my projects don't sound the same" plus "the material looks changed" — both true. Two rules: **gate every read of parked state, not the obvious one** (the ghost overlay taught this and these reads still missed it), and **if a feature's surface is the problem, shrink the surface — do not park the feature.** Verified both ways round by `_varypark.mjs`, which asserts the parked build plays the LITERAL grid, not merely a stable one.
 - **A dependency array is evaluated DURING RENDER, so an effect must not sit above the value it depends on.** `songMode` moved from a `useState` near the top of the body to a derived `const` 130 lines further down. The effect that mirrors it into `songModeR` stayed where it was — above the new declaration — and `[songMode]` then read a Babel-hoisted `var` that had not been assigned yet. The dep was `[undefined]` on every render: the effect ran once on mount and never again, and `songModeR` froze at the first render's value — `false`, because the project restore had not landed yet. **The JS scheduler played the active pattern instead of the song, for every project with a song.** The core was unaffected: its mirror effect happens to sit below the declaration, so its dep was real. Rule: **a ref that shadows a DERIVED value is assigned where it is derived** (`songModeR.current=songMode;` on the next line), not by an effect that can drift above it. Same family as the undefined-ref trap below, but it fails silently in a dependency array rather than in a JSX value.
   - It is also the clearest case yet for the oracle: only the core was right, so the two engines disagreed and `core/test/oracle.mjs` found it in one run. A behavioural test would not have — the transport looked like it was playing, because it was. The guard that WOULD have caught it is `core/test/songplay.mjs` (`npm run test:play`), which asserts the song's playhead visits more than one slot; it is the shape to reach for when both engines could be wrong together.
 - **useCallback empty-deps trap**: `useCallback(fn, [])` baked first-render closures over `pushHistory` etc. Fix is ref-based: `pushHistoryR.current` reassigned each render, stable callbacks invoke `.current()`. Same for `captureSnapshotR`. Don't collapse back to direct closures.
@@ -947,19 +948,52 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   host (background audio at last), AUv3 / Core MIDI / Link.
   The (a)-vs-(b) question is settled by the shape of the work: a C core inside
   AVAudioEngine is (b), and it is also a perfectly good (a).
-- **VARY is parked**, not deleted — `VARY_ON=false` in the source, one line to
-  bring back. Note `VARY_ON` gates the scheduler's re-roll, the pages and the
-  openers — but for a while it did **not** gate the grid's ghost overlay, which
-  read `varyMode[layer]` directly. `varyMode` is persisted, so a project saved
-  while VARY was on kept painting gold "added note" rings on the grid with the
-  audio not varying and no control anywhere to switch it off. Now gated
-  (`activeVary`, `VARY_ON&&varyMode.drums`). Worth remembering for anything else
-  put behind a flag: **the flag has to cover every read of the parked state, not
-  just the obvious one** — and a persisted setting outlives the UI that set it. It was spending a tab, a rail slot and a sheet on something not
-  yet load-bearing while the everyday layout was short of room. Note the VARY
-  page also carries the tuning knobs MUT8 reads, so MUT8 currently works but
-  isn't adjustable. Jake wants to circle back once the crucial layout and
-  workflow are settled.
+- **VARY is BACK ON** (`VARY_ON=true`), and how it came back is the lesson. It
+  was parked for four days to reclaim a tab, a rail slot and a mobile sheet.
+  But `varyMode` is **persisted**, and three reads of it were never gated on the
+  flag: the `[varyMode]` effect that fills `variedGrids` / `variedDrumGrids`,
+  and the two playback reads in `playSynthLayerStep` and `playDrumStep`. So a
+  parked build **generated a one-time random variation on load and then played
+  it for ever** — the per-bar re-roll, the only part that *was* gated, never ran
+  to replace it. Every project saved with VARY on played a frozen mutation of
+  itself: notes dropped, ghost notes added where you never put them, identical
+  on every bar and every pass, with no control anywhere and nothing on the grid
+  to say so. Reported as "things aren't sounding the same" and "the sequences
+  look different as though the underlying material is changed" — both were
+  literally true. iOS was unaffected only because the core does not implement
+  VARY at all, so the shell played the grid as written.
+  - Measured, not argued (`_varypark.mjs`): a 2-bar drum part that asks for
+    VARY gives **4 distinct bars / 121 hits** with the flag on, **1 distinct
+    bar / 46 hits** with it off — and 46 is now exactly the grid as written.
+    Before the gating fix the parked build played **145** hits of a frozen
+    mutation. The harness asserts the literal signature, not merely a stable
+    one, so "parked plays what you wrote" is checked rather than "parked plays
+    the same thing every time".
+  - **The rule this earns:** a flag may park a feature's UI. It may not park a
+    feature that **decides what saved work sounds like** — that is a silent edit
+    to everything already on disk. The ghost-overlay incident taught half of
+    this ("the flag has to cover every read of the parked state"); these two
+    playback reads are the half that was missed, and they were the half that
+    mattered. If the surface is the problem, shrink the surface.
+  - Both positions of the flag are correct now, so re-parking is safe — it
+    simply means those projects play as written rather than varying.
+  - **And the surface shrank, which is what should have happened instead of
+    parking.** The portrait VARY pill row is gone: a full-width row above the
+    grid, ~25px, which on an SE was the difference between a width-bound grid
+    at 355px and a height-bound one at **330px**. VARY is **a layer button's
+    HOLD** now (`layerBtnProps`) — the house rule that a hold menu hangs off
+    the thing it acts on, and VARY is per-layer, so the hold switches to that
+    layer and opens its VARY surface. A lit layer carries an amber inset ring
+    while its VARY is on, so a persisted switch can't be invisible again. The
+    hold swallows its trailing click (or the tap's own job — open SOUND on the
+    layer you are already on — fires straight after it) and the ref is
+    component-level, both for the usual reasons. Landscape keeps its rail slot:
+    a column has room a stacked layout doesn't. Asserted by `_vary.mjs`, which
+    also checks the grid still spans the width on a 15 and an SE.
+  - Worth knowing before the core becomes the default: **the core does not
+    implement VARY**, so with the flag on the web (JS engine) and the phone
+    (core) play a VARY project differently. Either VARY gets ported or it
+    gates the core default.
 - **Beyond the wrapper**: if Beta App Review ever bounces it under 4.2 ("not sufficiently different from a mobile web browsing experience"), the substantive answers are native audio, not more web: **AUv3** so Loud Light loads as an instrument inside GarageBand/Logic, **Ableton Link** for tempo sync, **Core MIDI** in/out for hardware. Each is wanted anyway.
 - **Selling it (task #88)**: the end goal is a paid iOS app + site, with project storage as the premium feature. Three things follow that aren't built yet: the premium gate must live in **RLS, not the client** (the publishable key is in the JS, so any signed-in user can hit PostgREST directly — an `entitlements` table written only by a service-role webhook, with the write policy on `projects` checking it); in-app **account deletion** is an App Store requirement; and the free Supabase plan can't ship (7-day pausing, thin backups). Naming is settled — the "Tabula"/"tabla" App Store collision is what the Loud Light rename fixed.
 - Long-form content beyond 64 bars is not planned.

@@ -212,14 +212,29 @@ const C_VARY="#e6b872";
 // fallback, and it is still what an inactive note and the brand furniture use.
 const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
-// VARY is PARKED, not deleted. It was taking a tab, a rail slot and a mobile
-// sheet — real estate the parts of the app you use on every take were short of
-// — for something that isn't load-bearing yet. Flip this to true to bring the
-// whole thing back: the state, the persistence, the per-layer toggles and the
-// grid overlays are all still here and still correct. Note the VARY page also
-// carries the tuning knobs MUT8 reads (DROP / SHIFT / PITCH / GHOST rates), so
-// while this is false MUT8 keeps working but is no longer adjustable.
-const VARY_ON=false;
+// VARY is BACK ON, and the reason it came back is the whole argument against
+// parking a feature that projects can be saved with.
+//
+// It was parked for four days on the grounds that it was taking a tab, a rail
+// slot and a mobile sheet for something not yet load-bearing. But VARY is a
+// PLAYBACK-time re-roll — the scheduler regenerates a varied grid at each bar
+// boundary and never writes it back — and `varyMode` is PERSISTED. So parking
+// it did not merely hide a control: it silently changed what every project
+// saved with it on actually plays, from "a fresh roll every bar" to the literal
+// grid, identically, for ever. Measured (`_varypark.mjs`): a 2-bar drum part
+// that asks for VARY gives 4 distinct bars and 130 hits with this true, and 1
+// distinct bar and 90 hits with it false.
+//
+// And the way it surfaced is worth remembering. A part whose bars are the SAME
+// only sounded different because VARY differed them, so parking it exposed the
+// repetition — reported as "one drum pattern had two sets of identical bars,
+// which is very unlike me". The material had always been that; VARY was doing
+// the varying.
+//
+// The rule: a flag may park a feature's UI. It may not park a feature that
+// DECIDES WHAT SAVED WORK SOUNDS LIKE — that is a silent edit to everything
+// already on disk. If the surface is the problem, shrink the surface.
+const VARY_ON=true;
 // The row keys (tap a key to audition that row, and read its note name) are
 // PARKED, not deleted — the function is wanted, the trigger was not: a ♪ button
 // in the corner of the bar strip is not where you reach for it. One flag, the
@@ -4076,9 +4091,12 @@ export default function LoudLight(){
         }
       };
       // Both parts come straight off the unified store — no parked library.
-      if(varyMode.synth)regenSynth(layerLib(patternsR.current||[],"synth"));
-      if(varyMode.lead) regenSynth(layerLib(patternsR.current||[],"lead"));
-      if(varyMode.drums){
+      // Parked, generate nothing: an unread cache is harmless but a filled one
+      // is how the frozen mutation happened, and the caches are also what the
+      // grid overlays draw from.
+      if(VARY_ON&&varyMode.synth)regenSynth(layerLib(patternsR.current||[],"synth"));
+      if(VARY_ON&&varyMode.lead) regenSynth(layerLib(patternsR.current||[],"lead"));
+      if(VARY_ON&&varyMode.drums){
         for(const dp of (drumPatsR.current||[])){
           if(!dp||!dp.grid)continue;
           const vRhythm=(dp.vRhythm||0)/100;
@@ -4874,6 +4892,38 @@ export default function LoudLight(){
     // followed instantly by "…and now just this bar".
     onClick:(e)=>{e.stopPropagation();if(loopHoldR.current.held){loopHoldR.current.held=false;return;}toggleLoop();},
   };
+  // ── A LAYER BUTTON'S HOLD OPENS VARY ─────────────────────────────────────
+  // VARY is PER LAYER, so its switch belongs on the layer — the house rule that
+  // each hold menu hangs off the thing it acts on. It replaces a full-width
+  // pill row above the grid in portrait, which was ~25px and, on an SE, the
+  // difference between a width-bound grid at 355px and a height-bound one at
+  // 330px. A hold costs no layout at all.
+  // The hold ref is COMPONENT-LEVEL because the gesture spans a pointerdown and
+  // a pointerup with a state change — and a re-render — in between, and the
+  // click it swallows is the trailing one every hold in here has to eat.
+  const layerHoldR=useRef({tmr:0,held:false});
+  const _layerHoldEnd=()=>{if(layerHoldR.current.tmr){clearTimeout(layerHoldR.current.tmr);layerHoldR.current.tmr=0;}};
+  const _openVaryFor=(lyr,sheet)=>{
+    if(!VARY_ON)return;
+    if(activeLayer!==lyr)switchLayer(lyr);
+    // The sheet mounts under the finger, so its backdrop must ignore the
+    // opening press's own trailing click.
+    sheetGuardR.current=Date.now();
+    if(sheet)setActiveSheet("vary"); else setPage("vary");
+  };
+  // `onTap` differs per mount (a sheet on mobile, a page on desktop), so it is
+  // passed in rather than baked in.
+  const layerBtnProps=(lyr,onTap,sheet)=>({
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();layerHoldR.current.held=true;_openVaryFor(lyr,sheet);},
+    onPointerDown:(e)=>{
+      layerHoldR.current.held=false;_layerHoldEnd();
+      if(!VARY_ON)return;
+      layerHoldR.current.tmr=setTimeout(()=>{layerHoldR.current.tmr=0;layerHoldR.current.held=true;_openVaryFor(lyr,sheet);},450);
+    },
+    onPointerUp:()=>_layerHoldEnd(), onPointerLeave:()=>_layerHoldEnd(),
+    onPointerCancel:()=>{_layerHoldEnd();layerHoldR.current.held=false;},
+    onClick:(e)=>{if(layerHoldR.current.held){layerHoldR.current.held=false;return;}onTap();},
+  });
   // Pattern scope gets a second, inset outline: the bar strip is the real
   // readout (every chip underlined rather than one), but the strip isn't on
   // screen on the landscape song page and a scope you can't see is a scope you
@@ -7157,7 +7207,15 @@ export default function LoudLight(){
     const layerLP = layerParamsR.current[layer];
     const freqs = curFreqsR.current;
     const ratio = stR(transpR.current);
-    const vary = !!varyModeR.current[layer];
+    // VARY_ON, not just the project's switch. `varyMode` is PERSISTED, so a
+    // project saved with VARY on still says so while the feature is parked —
+    // and this read was ungated, so a parked build played the cached variation
+    // anyway. Worse, the cache was filled once on load and the per-bar re-roll
+    // (which IS gated) never ran to replace it: the project played a FROZEN
+    // random mutation of itself, the same on every bar and every pass, with no
+    // control anywhere to switch it off. Exactly the trap the ghost overlay
+    // taught and this read did not learn: the flag has to cover EVERY read.
+    const vary = VARY_ON && !!varyModeR.current[layer];
     const useGrid = vary ? (variedGrids.current.get(pat.id)||pat.grid) : pat.grid;
     const rawSp = (pat.params&&pat.params[s])?pat.params[s]:null;
     const sp = vary&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
@@ -7226,7 +7284,7 @@ export default function LoudLight(){
   // per-cell velocity + ratchet.
   const playDrumStep=(pat,s,at,stepDur)=>{
     if(!pat||!pat.grid||!drumEngine.current.ready)return;
-    const dvary = !!varyModeR.current.drums;
+    const dvary = VARY_ON && !!varyModeR.current.drums;   // see playSynthLayerStep
     const useGrid = dvary ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
     const useVel  = dvary ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
     // Does this pat carry any recorded motion? If so we apply the per-step
@@ -10913,8 +10971,9 @@ export default function LoudLight(){
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={{flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"}}
-                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
+                  style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"},
+                    VARY_ON&&varyMode[lyr]?{boxShadow:"inset 0 0 0 2px rgba(230,184,114,0.55)"}:{})}
+                  {...layerBtnProps(lyr,()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} },true)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {/* PATTERN CHIPS — the same selector as portrait and desktop,
@@ -10971,26 +11030,16 @@ export default function LoudLight(){
             {patternChipsRow}
           </div>
           )}
-          {/* ── PER-LAYER FUNCTION PILLS (portrait) ──
-               SOUND has no pill any more: tapping the layer you are already on
-               opens it, which is the house rule and is wired into the layer
-               icons in the transport row. On a phone that row was ~40px of a
-               height-bound grid spent on a second door to one room. VARY keeps
-               a pill because it has no such gesture, and while VARY is parked
-               the row does not render at all. */}
-          {!isLandscape&&VARY_ON&&(
-          <div style={{display:"flex",gap:6,flexShrink:0,padding:"2px 12px 8px"}}>
-            {[["vary","VARY",activeSheet==="vary"||activeVary]].map(([key,lbl,on])=>(
-              <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
-                style={{flex:1,padding:"10px 0",borderRadius:9,fontFamily:"inherit",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:2,
-                  border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
-                  background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
-                  color:on?(key==="vary"?"#e6b872":"rgba(226,236,247,0.9)"):"rgba(178,199,219,0.5)"}}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-          )}
+          {/* The portrait VARY PILL ROW was here, and it is gone. It was a
+              full-width row above the grid — ~25px, which on an SE is the
+              difference between a width-bound grid at 355px and a height-bound
+              one at 330px — spent on one switch. That cost is exactly why VARY
+              got parked in the first place, and parking it turned out to be far
+              more expensive than the row (see `VARY_ON`). So the surface
+              shrinks instead: VARY is on a LAYER BUTTON'S HOLD now, which is
+              the thing it acts on (VARY is per-layer), costs no layout at all,
+              and is the house tap/hold split. Landscape keeps its rail slot —
+              a column has the room a stacked layout doesn't. */}
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
             <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#0e1c2b",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
@@ -11260,13 +11309,14 @@ export default function LoudLight(){
               <div style={{display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
-                  onClick={()=>{
+                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"},
+                    VARY_ON&&varyMode[lyr]?{boxShadow:"inset 0 0 0 2px rgba(230,184,114,0.55)"}:{})}
+                  {...layerBtnProps(lyr,()=>{
                     // Tapping the layer you are already on opens its sound
                     // page, and toggles back out — the house rule.
                     if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
                     else{switchLayer(lyr);}
-                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
+                  },true)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
               ))}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
