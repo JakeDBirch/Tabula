@@ -201,6 +201,17 @@ const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
 const C_VARY="#e6b872";
+// ── The note's lit colour, PER PART ───────────────────────────────────────
+// It was one amber for both synth layers — the icon's filament — so switching
+// layer changed nothing you could see on the grid. Tinting it to the part's own
+// accent makes POLY and MONO tell themselves apart at a glance and ties the
+// grid to the layer buttons and the mixer strip; the drum grid has been doing
+// exactly this per voice all along. Brighter and more saturated than the
+// accents themselves, because a mid-alpha colour on this navy reads as mud —
+// the same trap the note fill's alpha floor was raised for. Amber stays as the
+// fallback, and it is still what an inactive note and the brand furniture use.
+const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
+const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
 // VARY is PARKED, not deleted. It was taking a tab, a rail slot and a mobile
 // sheet — real estate the parts of the app you use on every take were short of
 // — for something that isn't load-bearing yet. Flip this to true to bring the
@@ -209,6 +220,14 @@ const C_VARY="#e6b872";
 // carries the tuning knobs MUT8 reads (DROP / SHIFT / PITCH / GHOST rates), so
 // while this is false MUT8 keeps working but is no longer adjustable.
 const VARY_ON=false;
+// The row keys (tap a key to audition that row, and read its note name) are
+// PARKED, not deleted — the function is wanted, the trigger was not: a ♪ button
+// in the corner of the bar strip is not where you reach for it. One flag, the
+// same way VARY is parked, and the lesson VARY taught applies here too: the flag
+// has to cover EVERY read of the parked state, because `rowKeysOpen` is
+// persisted in localStorage and would otherwise leave the column open on an
+// install that had it open, with nothing anywhere to close it.
+const ROWKEYS_ON=false;
 // ── THE NATIVE AUDIO CORE ────────────────────────────────────────────────────
 // One DSP core in C (core/), hosted in an AudioWorklet here and inside
 // AVAudioEngine in the iOS shell. It owns the sequencer AND the voices; the
@@ -2066,6 +2085,73 @@ function RangeSlider({label,accent,lo,hi}){
       </div>
     </div>
   );
+}
+// ─── LLIcon — the glyphs for the controls that are shapes, not words ─────────
+// POLY / MONO / DRUMS / LOOP / FOLLOW carry icons rather than labels: five
+// words, each on a button that has to be reachable on a 220px sidebar and a
+// 390px phone, and the words were what stopped them fitting in one row. The
+// shapes say the same thing — POLY is several notes at once, MONO is one, the
+// kit is a drum — and the layer accents do the rest of the identifying.
+//
+// A FUNCTION DECLARATION, not `const LLIcon = () => <svg/>`: a module-level
+// arrow returning JSX is the CJS-transform footgun the build audit greps for.
+// KnobSlider, RangeSlider and StepPicker are all declarations for the same
+// reason. (Do not name the token in a comment either — the audit greps the CJS
+// output, comments and all, so writing it here fails the build. It just did.)
+//
+// One component with a switch rather than five, so size, stroke and alignment
+// cannot drift apart between them. `currentColor` throughout, so a button tints
+// its icon by setting `color` — the same way the text labels behaved.
+function LLIcon({name,size}){
+  const S=size||16, sw=1.6;
+  const common={width:S,height:S,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",
+    strokeWidth:sw,strokeLinecap:"round",strokeLinejoin:"round",
+    style:{display:"block",flexShrink:0,overflow:"visible"}};
+  if(name==="poly")return(
+    // Several notes at once, INTERSPERSED rather than stacked: a chord is a
+    // handful of voices that are not in a line. Solid and equal weight — the
+    // first cut faded them to 45% opacity and the icon read as dusty rather
+    // than as three of something.
+    <svg {...common} aria-hidden="true">
+      <circle cx="8.4"  cy="8.6"  r="3.5" fill="currentColor" stroke="none"/>
+      <circle cx="16.2" cy="11.4" r="3.2" fill="currentColor" stroke="none"/>
+      <circle cx="10.8" cy="16.8" r="3.0" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="mono")return(
+    // One voice, and visibly BIGGER than any of POLY's three — the contrast is
+    // the whole message.
+    <svg {...common} aria-hidden="true">
+      <circle cx="12" cy="12" r="5.6" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="drums")return(
+    // A kick seen face-on, with the beater about to strike it. The beater is
+    // HORIZONTAL and at the drum's centre height on purpose: the first cut ran
+    // it out of the lower-left at 45°, which is a magnifying glass, and that is
+    // exactly what it looked like.
+    <svg {...common} aria-hidden="true">
+      <circle cx="15" cy="12" r="6.4" strokeWidth="2"/>
+      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+      <path d="M0.9 12 h2.9" strokeWidth="1.8"/>
+      <circle cx="5.9" cy="12" r="2.1" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="loop")return(
+    // A loop: round the track and back to the start.
+    <svg {...common} aria-hidden="true">
+      <path d="M6.4 8.6 h11.2 a3.4 3.4 0 0 1 0 6.8 H6.4 a3.4 3.4 0 0 1 0 -6.8"/>
+      <path d="M8.8 6.2 L6.2 8.6 L8.8 11"/>
+    </svg>
+  );
+  if(name==="follow")return(
+    // Forward: keep up with what is playing.
+    <svg {...common} aria-hidden="true">
+      <path d="M4 12 h14"/>
+      <path d="M13.4 7.4 L18 12 L13.4 16.6"/>
+    </svg>
+  );
+  return null;
 }
 function StepPicker({label,display,sub,onDec,onInc,accent}){
   const col=accent||"rgba(255,255,255,0.6)";
@@ -4758,7 +4844,10 @@ export default function LoudLight(){
   };
   const toggleLoop=()=>setLoopScope(loopR.current===1?0:1);
   const loopBtnProps={
-    "aria-label":"Loop — tap for this bar, hold for the whole pattern",
+    // The NAME is "Loop"; the hint lives in `title`. A whole sentence as the
+    // accessible name is read out on every focus, and it is not what the
+    // control is called.
+    "aria-label":"Loop",
     onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();loopHoldR.current.held=true;setLoopScope(loopR.current===2?0:2);},
     onPointerDown:(e)=>{
       e.stopPropagation();loopHoldR.current.held=false;_loopHoldEnd();
@@ -6016,21 +6105,9 @@ export default function LoudLight(){
           with the current one lit, under a row of pattern chips with the
           selected one lit. A third copy of what two rows of controls say, in
           the corner where the grid wants the width. */}
-      {/* Row-key toggle. It lives here rather than on the column itself because
-          a collapsed column has nowhere to put a handle that isn't width you
-          were trying to get back — and the bar strip is on screen on every part
-          page, drums included, with nothing column-aligned depending on it. */}
-      <div role="button" aria-label={rowKeysOpen?"Hide the row keys":"Show the row keys"}
-        aria-pressed={rowKeysOpen}
-        title={rowKeysOpen?"Hide the note keys beside the grid":"Show the note keys beside the grid"}
-        onClick={e=>{e.stopPropagation();toggleRowKeys();}}
-        style={{display:"flex",alignItems:"center",justifyContent:"center",
-          height:IS_MOBILE?24:22,width:IS_MOBILE?26:24,borderRadius:5,
-          border:"1px solid "+(rowKeysOpen?"rgba(255,214,150,0.45)":"rgba(168,190,212,0.18)"),
-          background:rowKeysOpen?"rgba(255,214,150,0.12)":"transparent",
-          color:rowKeysOpen?"#ffd28a":"rgba(178,199,219,0.5)",
-          fontSize:IS_MOBILE?13:12,lineHeight:1,
-          cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",flexShrink:0,touchAction:"none"}}>♪</div>
+      {/* The ♪ row-key toggle was here. It is gone while ROWKEYS_ON is false —
+          the column is worth having, the corner of the bar strip is not where
+          you reach for it. The strip is bar chips and nothing else again. */}
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -6146,7 +6223,7 @@ export default function LoudLight(){
     color:lit?"#ffd28a":"rgba(178,199,219,0.45)",
     boxShadow:lit?"0 0 6px rgba(255,214,150,0.35)":"none",
     transition:"background .12s, box-shadow .12s, color .12s"});
-  const rowKeys=!rowKeysOpen?null:(
+  const rowKeys=!(ROWKEYS_ON&&rowKeysOpen)?null:(
     <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
       display:"flex",flexDirection:"column",touchAction:"none"}}>
       {Array.from({length:ROWS},(_,r)=>{
@@ -6172,7 +6249,7 @@ export default function LoudLight(){
   // Same idea on the drum page: the voice under your finger, at the level its
   // mixer strip is set to. The drum grid spaces its rows by 2, so this column
   // does too or the labels walk away from the rows they name.
-  const drumRowKeys=!rowKeysOpen?null:(
+  const drumRowKeys=!(ROWKEYS_ON&&rowKeysOpen)?null:(
     <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
       display:"flex",flexDirection:"column",gap:2,touchAction:"none"}}>
       {DRUM_VOICES.map((voice,r)=>{
@@ -9882,48 +9959,41 @@ export default function LoudLight(){
             </>
           )}
 
-          {/* Layer boxes — select layer + pattern, replaces old pills + layer selector */}
+          {/* Layer boxes — one ROW of three, icons rather than words. They were
+              three stacked full-width boxes carrying POLY / MONO / DRUMS in
+              7px caps: 81px of a column that had better uses, to say something
+              the accent colours were already saying. The shapes say it too —
+              POLY is several notes at once, MONO is one, DRUMS is a kick with
+              its beater — and the grid's notes now carry the same colour, so
+              the button and what it edits are tied together.
+              `data-layer-box` stays: it is the drop target id. */}
           {!IS_MOBILE&&(
             <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:6,marginBottom:6,display:"flex",flexDirection:"column",gap:4}}>
-              {/* POLY / MONO layer boxes — layer selection only; the pattern
-                  chips sit under all three. */}
-              {[
-                ["synth","POLY","#a8c5a0","168,197,160"],
-                ["lead", "MONO","#79b8f2","121,184,242"]
-              ].map(([layer,label,accent,accentRgb])=>{
+              <div style={{display:"flex",gap:4}}>
+              {[["synth","POLY","168,197,160"],["lead","MONO","121,184,242"],["drums","DRUMS","196,114,122"]].map(([layer,label,rgb])=>{
                 const isActive=activeLayer===layer;
+                const over=patternDrag?.overLayerBox===layer;
                 return(
-                  <div key={layer} data-layer-box={layer} style={{border:"1px solid "+(patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.85)`:isActive?`rgba(${accentRgb},0.55)`:"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:patternDrag?.overLayerBox===layer?`rgba(${accentRgb},0.18)`:isActive?`rgba(${accentRgb},0.06)`:"transparent",transition:"all .1s"}}
+                  <div key={layer} data-layer-box={layer} role="button" aria-label={label} aria-pressed={isActive}
+                    title={label}
+                    style={{flex:1,minWidth:0,height:34,display:"flex",alignItems:"center",justifyContent:"center",
+                      border:"1px solid "+(over?`rgba(${rgb},0.85)`:isActive?`rgba(${rgb},0.55)`:"rgba(168,190,212,0.1)"),
+                      borderRadius:8,cursor:"pointer",
+                      background:over?`rgba(${rgb},0.18)`:isActive?`rgba(${rgb},0.06)`:"transparent",
+                      color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s"}}
                     onClick={()=>{
-                      // Clicking an already-active layer opens its sound page
-                      // (mirrors mobile). It TOGGLES, because the SOUND tab is
-                      // gone and a one-way door needs the tab row to get back.
+                      // Clicking the layer you are ALREADY on opens its sound
+                      // page, and toggles back — the house rule, and with no
+                      // SOUND tab a one-way door would need the tab row to
+                      // escape. DRUMS behaves identically; it used to do
+                      // nothing at all, which was a dead control.
                       if(isActive){setPage(pg=>pg==="sound"?"edit":"sound");}
                       else{switchLayer(layer);}
                     }}>
-                    <div style={{fontSize:7,letterSpacing:2,color:isActive?`rgba(${accentRgb},0.6)`:"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>{label}</div>
-                    {/* Pattern selection is the chip row below these boxes. */}
+                    <LLIcon name={layer==="synth"?"poly":layer==="lead"?"mono":"drums"} size={18}/>
                   </div>
                 );
               })}
-              {/* DRUMS layer box */}
-              <div style={{border:"1px solid "+(activeLayer==="drums"?"rgba(196,114,122,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,padding:"5px 6px",cursor:"pointer",background:activeLayer==="drums"?"rgba(196,114,122,0.06)":"transparent",transition:"all .1s"}}
-                onClick={()=>{
-                  // Stepping into DRUMS lands on the grid editor (the main drum
-                  // workspace); the kit and mixer are its sound page, global FX
-                  // on the FX tab. Tapping DRUMS again opens that page, exactly
-                  // as POLY/MONO do — it used to do nothing at all, which was a
-                  // dead control, and with the SOUND tab gone it is also the
-                  // only way in.
-                  if(activeLayer!=="drums"){
-                    // Persist the current view on layer select, like POLY/MONO.
-                    // STEP is hidden for drums, so the effect below falls a
-                    // parked STEP page back to EDIT; every other page is kept.
-                    switchLayer("drums");
-                  }else{setPage(pg=>pg==="sound"?"edit":"sound");}
-                }}>
-                <div style={{fontSize:7,letterSpacing:2,color:activeLayer==="drums"?"rgba(196,114,122,0.6)":"rgba(178,199,219,0.25)",fontWeight:500,marginBottom:4}}>DRUMS</div>
-                {/* Pattern selection is the chip row below the layer boxes. */}
               </div>
               {/* PATTERN — directly under the layer labels, because switching
                   pattern is something you do while editing a part, not a trip
@@ -10007,17 +10077,20 @@ export default function LoudLight(){
                     onClick={()=>setPage(pg)}>{lbl}</button>
                 ))}
               </div>
-              {/* ↶ ↷ stay ADJACENT — they are a pair you click in runs, and
-                  putting the play button between them would make redo a longer
-                  trip every time. Order unchanged from the old row. */}
-              <div style={{display:"flex",gap:6,alignItems:"center",justifyContent:"center"}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-                <button style={Object.assign({},S.playBtn,{width:44,height:44,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-              </div>
-              <div style={{display:"flex",gap:6}}>
-                <button style={Object.assign({},S.loopBtnBottom,{flex:1,minWidth:0,padding:0},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
-                <button style={Object.assign({},S.loopBtnBottom,{flex:1,minWidth:0,padding:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              {/* ONE transport row, not two. LOOP and FOLLOW were words, and
+                  the words are what stopped five controls fitting across 220px;
+                  as icons they join the row and the panel goes from three rows
+                  to two. ↶ ↷ stay ADJACENT — a pair you click in runs, and the
+                  play button between them would make redo a longer trip every
+                  time. */}
+              <div style={{display:"flex",gap:5,alignItems:"center",justifyContent:"center"}}>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+                <button title="Loop — tap for this bar, hold for the whole pattern" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
+                <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
+                  style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                  onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={18}/></button>
               </div>
             </div>
           )}
@@ -10107,8 +10180,9 @@ export default function LoudLight(){
                           const vel=p?(p.vel??100):100;
                           const b=0.55+(vel/127)*0.45;
                           const inactive=colPastEnd(activePat,ci);
-                          const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;
-                          const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;
+                          const _nc=noteRgb(activeLayer);
+                          const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;
+                          const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
                           const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;
                           const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
@@ -10720,8 +10794,9 @@ export default function LoudLight(){
           {isLandscape&&(
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
-                <button key={lyr} data-layer-box={lyr} style={{flexShrink:0,padding:"8px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}>{lbl}</button>
+                <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
+                  style={{flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"}}
+                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {/* PATTERN CHIPS — the same selector as portrait and desktop,
@@ -10761,25 +10836,12 @@ export default function LoudLight(){
           </div>
           )}
 
-          {/* ── PERSISTENT LAYER BAR — top of screen (portrait) ── */}
-          {!isLandscape&&(
-          <div style={{display:"flex",gap:6,padding:"8px 12px 6px",flexShrink:0}}>
-            {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
-              <button key={lyr} data-layer-box={lyr} style={{flex:1,padding:"7px 0",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF)":activeLayer===lyr?c+"99)":cf+"0.15)"),borderRadius:8,background:patternDrag?.overLayerBox===lyr?cf+"0.18)":activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",fontSize:8,letterSpacing:1.2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                onClick={()=>{
-                  if(activeLayer===lyr){
-                    // already on this layer — step into its sound page
-                    setActiveSheet(s=>s==="sound"?null:"sound");
-                  }else{
-                    switchLayer(lyr);
-                  }
-                }}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-          )}
-          {/* ── PATTERN CHIPS — immediately under the layer labels ──
+          {/* The portrait LAYER BAR used to be here, a full-width row of its
+              own at the top of the screen. As icons the three of them are
+              114px, so they fit beside the transport at the bottom — which is
+              where your thumb already is, and which takes the page from three
+              rows of buttons to two. */}
+          {/* ── PATTERN CHIPS — the top of the page now ──
                A pattern is all three parts, so this is one selector for the
                whole app rather than the old per-layer pills. It lives here
                because switching pattern is a thing you do mid-edit; it used to
@@ -10787,14 +10849,14 @@ export default function LoudLight(){
                which has its own palette (and that one is also the drag source
                for placing patterns into slots). */}
           {!isLandscape&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0}}>
+          <div style={{padding:"6px 12px 6px",flexShrink:0}}>
             {patternChipsRow}
           </div>
           )}
           {/* ── PER-LAYER FUNCTION PILLS (portrait) ──
                SOUND has no pill any more: tapping the layer you are already on
-               opens it, which is the house rule and was already wired into the
-               layer bar directly above. On a phone that row was ~40px of a
+               opens it, which is the house rule and is wired into the layer
+               icons in the transport row. On a phone that row was ~40px of a
                height-bound grid spent on a second door to one room. VARY keeps
                a pill because it has no such gesture, and while VARY is parked
                the row does not render at all. */}
@@ -10860,7 +10922,7 @@ export default function LoudLight(){
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(255,214,150,${b})`;const glow=inactive?"none":`0 0 4px rgba(255,214,150,${b*0.5}),0 0 10px rgba(255,214,150,${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(255,214,150,${b*0.28}),0 0 7px rgba(255,214,150,${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                         {vSGrid&&Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           if(ac>=gridLen)return null;
@@ -11041,15 +11103,40 @@ export default function LoudLight(){
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
               </button>
             </div>
-            {/* Row 2: persistent transport */}
-            <div style={{display:"flex",alignItems:"center",padding:"0 10px 10px",gap:5}}>
+            {/* Row 2: the layers AND the transport. They were two rows until
+                 POLY / MONO / DRUMS became glyphs — 114px for the three of
+                 them, which fits beside the five transport controls on a 375px
+                 phone with room to spare. Two groups pushed apart rather than
+                 one run of eight, so "what am I editing" and "what is it
+                 doing" stay tellable apart at a glance. */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+                <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
+                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  onClick={()=>{
+                    // Tapping the layer you are already on opens its sound
+                    // page, and toggles back out — the house rule.
+                    if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
+                    else{switchLayer(lyr);}
+                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
+              ))}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
               <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
               <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
-              <button style={Object.assign({},S.loopBtnBottom,{flex:1,height:36},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              {/* Icons, not words. LOOP and FOLLOW were the two widest things
+                  in this row; as glyphs they are square and the row stops being
+                  a negotiation about label width. */}
+              <button title="Loop — tap for this bar, hold for the whole pattern" aria-label="Loop"
+                style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
+              <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
+                style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={19}/></button>
+              </div>
             </div>
           </div>
           )}
@@ -11061,8 +11148,11 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},loopBtnStyle)} {...loopBtnProps}>LOOP</button>
-              <button style={Object.assign({},S.loopBtnBottom,{width:"100%",height:30,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})} onClick={()=>setFollowSeq(f=>!f)}>FOLLOW</button>
+              <button title="Loop — tap for this bar, hold for the whole pattern" aria-label="Loop"
+                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
+              <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
+                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={17}/></button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
@@ -11655,6 +11745,11 @@ const S={
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
+  // A square button whose content is a glyph rather than a word. Same height as
+  // the transport's round play button so the row reads as one row.
+  iconBtn:   {width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",padding:0,
+              borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",
+              color:"rgba(168,190,212,0.5)",cursor:"pointer",flexShrink:0,transition:"all .12s",fontFamily:"inherit"},
   loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
   // UNDO / REDO carry a glyph and no word, so they are square rather than
   // word-width: the arrows are unambiguous and the row has better uses for
