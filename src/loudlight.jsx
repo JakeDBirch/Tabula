@@ -4664,6 +4664,13 @@ export default function LoudLight(){
   // squashed by precisely the height of the chips. Two chip rows made it
   // obvious, one row had been quietly costing the same thing for months.
   const _barStripPx=_barRows*BAR_ROW_H+(_barRows-1)*BAR_ROW_GAP;
+  // The strip ROW's outer height — the chips plus `barStrip`'s own
+  // `marginBottom`. The drums page has to reserve exactly this much for the
+  // strip it hangs under its (shorter) grid, or the two blocks come out
+  // different heights and the centred block moves the grid's top edge. Derived
+  // from the same constants the strip is built from rather than measured or
+  // guessed: if you change that margin, change it here.
+  const _stripRowPx=_barStripPx+(IS_MOBILE?4:5);
   const _barStripExtra=(_barRows-1)*(BAR_ROW_H+BAR_ROW_GAP);
   // ── The SONG STRIP above the grid ────────────────────────────────────────
   // The song lane, on every part page, in PORTRAIT ONLY. The space is free there
@@ -10239,7 +10246,7 @@ export default function LoudLight(){
                   const dVaryShow=VARY_ON&&varyMode.drums&&playing;
               const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
               return(
-              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+              <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6}}>
                 {/* (RAND/CLR live in the action row — no duplicate header here.) */}
                 {/* Grid — voice labels are transparent overlays inside each row.
                     Tap a cell to toggle; click-and-drag vertically on a cell to
@@ -10251,9 +10258,16 @@ export default function LoudLight(){
                     handlers are PER CELL rather than on the container, so this
                     column could sit inside it; it stays outside anyway so both
                     grids are built the same way. */}
-                <div style={{width:dw||"80%",height:dh||"auto",flexShrink:0,display:"flex",position:"relative"}}>
+                {/* Reserve the SYNTH square's height — 13 rows against 16 made
+                    the drum block ~150px shorter here, and a centred block
+                    that changes height moves the grid's top edge every time
+                    you switch layer. See the mobile mount for why this is a
+                    spacer rather than a constraining wrapper. */}
+                <div style={{position:"relative",width:"100%",display:"flex",alignItems:"flex-start",justifyContent:"center",flexShrink:0}}>
+                <div style={{width:dw||"80%",height:dw||"80%",flexShrink:0,pointerEvents:"none"}}/>
+                <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:dw||"80%",height:dh||"auto",display:"flex"}}>
                 {drumRowKeys}
-                <div ref={drumGridRef} style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
+                <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
                   {lenEdgeDrums}
                   {DRUM_VOICES.map((voice,r)=>{
                     const dc=drumColor(r,linkHat,linkTom);
@@ -10331,6 +10345,7 @@ export default function LoudLight(){
                       })}
                     </div>
                   )})}
+                </div>
                 </div>
                 </div>
 
@@ -10965,21 +10980,48 @@ export default function LoudLight(){
                   // 13 rows of 16 columns — the drum grid is never square, so
                   // its height budget divides by that ratio rather than by one.
                   const SIZE=gridSizeCss(10,DRUM_ROWS/COLS);
+                  // The SQUARE the synth page reserves. The drum grid is 13 rows
+                  // to the synth's 16, so its block is ~70px shorter on a phone
+                  // and ~150px on desktop — and with the block centred, that
+                  // difference moved the grid's TOP EDGE (and the song lane
+                  // above it) every time you switched to DRUMS and back. The
+                  // drums reserve the same height and hang from the top of it,
+                  // so the boundary holds still and the difference shows as
+                  // space underneath. Not by constraining the grid to the
+                  // square: in landscape the drum grid is deliberately WIDER
+                  // than it (438px vs 356px on a phone, same height), so the
+                  // reservation is a sibling spacer and the grid is positioned
+                  // over it.
+                  const SQ=gridSizeCss(10);
                   return(
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flexShrink:0,width:"100%"}}>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:0,flexShrink:0,width:"100%"}}>
                       {/* The song, above the drum grid too — a part page is a
                           part page, and carrying it on one but not the other is
                           the kind of split that makes a layout feel arbitrary. */}
                       {SONG_STRIP&&(
-                        <div style={{width:SIZE,flexShrink:0,display:"flex",flexDirection:"column"}}>{songLane()}</div>
+                        <div style={{width:SIZE,flexShrink:0,display:"flex",flexDirection:"column",marginBottom:6}}>{songLane()}</div>
                       )}
                       {!SONG_STRIP&&(
+                        // Landscape: the synth page puts no gap between the
+                        // strip and the grid, so neither does this one — the
+                        // two blocks have to be the same height or the centred
+                        // block moves the boundary again.
                         <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                       )}
-                      {/* Voice keys — tap to hear the drum on its own. */}
-                      <div style={{width:SIZE,display:"flex",flexShrink:0,position:"relative"}}>
+                      {/* The reservation, and the real content hanging from the
+                          top of it. The bar chips come WITH the grid rather than
+                          staying where the synth page leaves them: they are a
+                          control for the grid, and 70px of nothing between the
+                          two reads as broken. So the spacer reserves the square
+                          AND the strip row, and the block ends up exactly as
+                          tall as the synth's however short the drum grid is. */}
+                      <div style={{position:"relative",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0}}>
+                      <div style={{width:SQ,aspectRatio:"1",flexShrink:0,pointerEvents:"none"}}/>
+                      {SONG_STRIP&&<div style={{height:2+_stripRowPx,flexShrink:0,pointerEvents:"none"}}/>}
+                      <div style={{position:"absolute",top:0,left:0,right:0,display:"flex",flexDirection:"column",alignItems:"center"}}>
+                      <div style={{width:SIZE,display:"flex",position:"relative"}}>
                       {drumRowKeys}
-                      <div ref={drumGridRef} style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
+                      <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
                         {lenEdgeDrums}
                         {DRUM_VOICES.map((voice,r)=>{
                           const dc=drumColor(r,linkHat,linkTom);
@@ -11058,8 +11100,10 @@ export default function LoudLight(){
                       {/* Chips below the drum grid too, for the same reason —
                           the song strip took the top of the page. */}
                       {SONG_STRIP&&(
-                        <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                        <div style={{width:SIZE,flexShrink:0,display:"flex",marginTop:2}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                       )}
+                      </div>
+                      </div>
                     </div>
                   );
                 })()}

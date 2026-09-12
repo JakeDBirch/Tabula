@@ -437,6 +437,32 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   note behind it. The drum grid handles pointers per cell, so there is nothing
   to bubble into and its band captures directly; a tap there is a no-op rather
   than a hit. That asymmetry is the same one the two-finger shift has.
+- **The grid's TOP EDGE does not move when you switch layer.** The drum grid is
+  13 rows to the synth's 16, so the drums block is ~70px shorter on a phone and
+  ~150px on desktop — and both blocks are **centred** in the content area, so
+  that difference used to push the grid (and the song lane above it) down by
+  half of it on every trip to DRUMS and back. The drums now **reserve the synth
+  square's height** and hang from the top of it; the difference shows as space
+  underneath. `_gridtop.mjs` asserts it across portrait, an SE, desktop and
+  landscape.
+  - **The reservation is a SIBLING SPACER, not a wrapper around the grid.** In
+    the height-bound layout (mobile landscape) the drum grid is deliberately
+    *wider* than the square — 438px against 356px on a phone, at the same height
+    — so constraining it to the square would shrink it by a fifth to fix a
+    layout that was never broken. So a `width:SQ; aspect-ratio:1` spacer
+    reserves the height, and the grid is absolutely positioned over it at its
+    own width. The harness guards the other half of this too: the drum cells
+    must stay square and never come out smaller than the synth's, or a "fix"
+    that squashed the grid into the square would pass every other check.
+  - **The bar chips travel WITH the grid**, so in portrait they sit right under
+    the drum grid rather than 70px below it where the synth page leaves them.
+    They are a control for the grid and a void between the two reads as broken;
+    the spacer therefore reserves the strip row as well (`_stripRowPx` — the
+    chips plus `barStrip`'s own margin, derived from the same constants the
+    strip is built from, not measured or guessed).
+  - `data-drumgrid="1"` marks both drum-grid mounts, the way `data-grid` marks
+    the synth's. Before it there was no way to measure the drum grid from a
+    harness at all.
 - **On DESKTOP, everything that is not the grid is in the side panel.** The
   EDIT/FX tabs and the transport (↶ ↷ ▶ LOOP FOLLOW) used to take two `auto`
   rows under the page. The desktop grid is `min(width, height)` of that column
