@@ -212,29 +212,21 @@ const C_VARY="#e6b872";
 // fallback, and it is still what an inactive note and the brand furniture use.
 const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
-// VARY is BACK ON, and the reason it came back is the whole argument against
-// parking a feature that projects can be saved with.
+// VARY IS DELETED. It re-rolled the grid at every bar boundary at PLAYBACK
+// time — a fresh drop/shift/ghost each pass, never written back — and it is
+// gone: a part plays what is written in it. The one piece kept is `MUT8_PARAMS`,
+// the tuning MUT8 reads, because MUT8 is a deliberate edit you can see and undo
+// rather than something the scheduler does behind you.
 //
-// It was parked for four days on the grounds that it was taking a tab, a rail
-// slot and a mobile sheet for something not yet load-bearing. But VARY is a
-// PLAYBACK-time re-roll — the scheduler regenerates a varied grid at each bar
-// boundary and never writes it back — and `varyMode` is PERSISTED. So parking
-// it did not merely hide a control: it silently changed what every project
-// saved with it on actually plays, from "a fresh roll every bar" to the literal
-// grid, identically, for ever. Measured (`_varypark.mjs`): a 2-bar drum part
-// that asks for VARY gives 4 distinct bars and 130 hits with this true, and 1
-// distinct bar and 90 hits with it false.
-//
-// And the way it surfaced is worth remembering. A part whose bars are the SAME
-// only sounded different because VARY differed them, so parking it exposed the
-// repetition — reported as "one drum pattern had two sets of identical bars,
-// which is very unlike me". The material had always been that; VARY was doing
-// the varying.
-//
-// The rule: a flag may park a feature's UI. It may not park a feature that
-// DECIDES WHAT SAVED WORK SOUNDS LIKE — that is a silent edit to everything
-// already on disk. If the surface is the problem, shrink the surface.
-const VARY_ON=true;
+// It was PARKED behind a flag first, and that is the part worth remembering.
+// `varyMode` is persisted, and three reads of it were never gated: the effect
+// that filled the varied-grid caches and the two playback reads that preferred
+// a cached variation over `pat.grid`. So a parked build generated a variation
+// ONCE on load and played it for ever — the per-bar re-roll, the only gated
+// part, never ran to replace it. Every project that had ever used VARY played a
+// frozen random mutation of itself, identical every bar, with no control
+// anywhere and nothing on the grid to say so. Deleting beats parking precisely
+// because there is no flag left to get half-applied.
 // The row keys (tap a key to audition that row, and read its note name) are
 // PARKED, not deleted — the function is wanted, the trigger was not: a ♪ button
 // in the corner of the bar strip is not where you reach for it. One flag, the
@@ -1488,13 +1480,6 @@ const migrateDrumPatRows=(pat)=>{
   }
   return out;
 };
-// Normalize a saved varyMode into the per-layer object shape. Legacy saves
-// stored a single boolean (global VARY) — upgrade it by applying to all
-// layers. Missing → all off.
-const normVary=(v)=>{
-  if(v&&typeof v==="object")return {synth:!!v.synth,lead:!!v.lead,drums:!!v.drums};
-  const b=!!v; return {synth:b,lead:b,drums:b};
-};
 // Legacy saves named patterns with letters ("A","B",…). The
 // app now uses abstract glyphs assigned by index. On load, any name that isn't
 // already one of the glyph symbols gets reassigned to its index-based glyph so
@@ -1551,11 +1536,7 @@ const SESSION_DEFAULTS = Object.freeze({
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
-  vDropRate:13, vShiftRate:17, vShiftRange:1,
-  vPitchRate:0, vPitchRange:1, vGhostRate:0,
-  vVelJitter:0, vFltJitter:0, vDlyJitter:0,
-  vRhyJitter:0, vOctJitter:0, vGlideJitter:0, vDurJitter:0,
-  loopMode:0, loopBar:-1, loopPat:null, varyMode:{synth:false,lead:false,drums:false},
+  loopMode:0, loopBar:-1, loopPat:null,
 });
 
 
@@ -1828,6 +1809,13 @@ const downloadBlob=(data,filename,type)=>{
 // wrap inside it. Defaults to the whole grid, which for a 1-bar pattern is
 // exactly the old behaviour. Multi-bar patterns pass one bar at a time so VARY
 // keeps meaning what it always meant: a fresh roll every bar.
+// MUT8's tuning. It used to be thirteen pieces of React state edited on the
+// VARY page; VARY is gone and MUT8 is not, so the values it actually used
+// survive as one frozen table. These are the defaults those states carried —
+// MUT8 has always run on them in practice, because the page that could change
+// them was parked before anyone did.
+const MUT8_PARAMS=Object.freeze({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,
+  ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0,glideJitter:0,durJitter:0});
 const genVariation=(grid,vp={},c0=0,w=null)=>{
   const W=w!=null?w:gridW(grid);
   const C0=c0|0, C1=Math.min(gridW(grid),C0+W);
@@ -1899,45 +1887,7 @@ const genVariation=(grid,vp={},c0=0,w=null)=>{
   return g;
 };
 
-// Generate a variation that is guaranteed not to silence a pattern that had
-// audible notes. genVariation can shift/drop notes such that nothing lands
-// within the active gridLen (the playable window) — when that happens we
-// fall back to the original grid for this cycle rather than play silence.
-// This is the fix for the "VARY on kills sound" bug.
-// c0/w scope the roll to one bar (see genVariation). The anti-silence guard is
-// scoped the same way — it asks "did THIS bar lose all its notes", not "did the
-// whole pattern", so a 32-bar pattern with an intentionally empty bar 7 doesn't
-// get a note forced into it.
-const safeVaryGrid=(grid,vp,gridLen,c0=0,w=null)=>{
-  const W=gridW(grid);
-  const len=Math.max(1,Math.min(W,gridLen||W));
-  const C0=c0|0, C1=Math.min(W,len,C0+(w!=null?w:W));
-  const hasInWindow=(g)=>{
-    for(let r=0;r<ROWS;r++)for(let c=C0;c<C1;c++)if(g[r]&&g[r][c])return true;
-    return false;
-  };
-  if(C1<=C0)return grid.map(r=>[...r]);
-  const origHas=hasInWindow(grid);
-  const varied=genVariation(grid,vp,C0,C1-C0);
-  if(origHas&&!hasInWindow(varied))return grid.map(r=>[...r]);
-  return varied;
-};
 
-// Jitter a step's params by vary settings
-const jitterStepParam=(sp,vp)=>{
-  if(!sp)return sp;
-  const jit=(v,amt,lo,hi)=>Math.max(lo,Math.min(hi,v+Math.round((Math.random()*2-1)*amt)));
-  return{
-    vel: vp.velJitter>0   ? jit(sp.vel, vp.velJitter*0.4, 0,127) : sp.vel,
-    flt: vp.fltJitter>0   ? jit(sp.flt, vp.fltJitter*0.25,0,100) : sp.flt,
-    dly: vp.dlyJitter>0   ? jit(sp.dly, vp.dlyJitter*0.4, 0,100) : sp.dly,
-    rev: sp.rev??0, // preserve through vary; no rev-specific jitter knob yet
-    rhy: vp.rhyJitter>0&&Math.random()<vp.rhyJitter/100 ? [1,1,2,3,4][Math.floor(Math.random()*5)] : sp.rhy,
-    oct: vp.octJitter>0   &&Math.random()<vp.octJitter/100 ? Math.max(0,Math.min(4,sp.oct+(Math.random()<.5?1:-1))) : sp.oct,
-    glide: vp.glideJitter>0 ? (Math.random()<vp.glideJitter/100?1:sp.glide) : sp.glide,
-    dur:   vp.durJitter>0   ? jit(sp.dur??0, vp.durJitter*0.8, -100, 100) : (sp.dur??0),
-  };
-};
 
 // ─── History hook for the controls defined OUTSIDE the component ─────────────
 // KnobSlider and RangeSlider are module-level, so they cannot see pushHistory.
@@ -3360,8 +3310,10 @@ export default function LoudLight(){
   useEffect(()=>{if(activeLayer==="drums"&&page==="step")setPage("edit");},[activeLayer,page]);
   // A project saved while VARY was open would restore onto a page that no
   // longer renders anything — a blank panel with no tab to leave it by.
-  useEffect(()=>{if(!VARY_ON&&page==="vary")setPage("edit");},[page]);
-  useEffect(()=>{if(!VARY_ON&&activeSheet==="vary")setActiveSheet(null);},[activeSheet]);
+  // A project saved while the VARY page was open must not land on a page that
+  // no longer exists.
+  useEffect(()=>{if(page==="vary")setPage("edit");},[page]);
+  useEffect(()=>{if(activeSheet==="vary")setActiveSheet(null);},[activeSheet]);
   const [bpm,       setBpm]       = useState(120);
   // Which global the TEMPO chip shows and edits — the last one touched in the
   // drawer. A state, not a choice, so it is deliberately NOT persisted: every
@@ -3494,8 +3446,6 @@ export default function LoudLight(){
   const [shifting,  setShifting]  = useState(false);
   // VARY is per-layer now — each layer toggles independently. Normalizer
   // upgrades legacy boolean saves (apply to all layers) to the object shape.
-  const [varyMode,  setVaryMode]  = useState({synth:false,lead:false,drums:false});
-  const [recMode,   setRecMode]   = useState(false);
   // Internal sampler — per-drum-voice user-recorded AudioBuffer. Stored in
   // state so the UI can show "loaded" indicators; mirrored to voiceSamplesR
   // for the scheduler to read without stale-closure issues. Session-only —
@@ -3591,7 +3541,6 @@ export default function LoudLight(){
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
   const longPressR   = useRef(null); // setTimeout id
-  const varyLongPressR = useRef(null);
   const patDropRef   = useRef(null); // sequence drawer drop zones
   const seqDropRef   = useRef(null);
   const activePtrsR  = useRef(new Set()); // active pointer IDs on grid — stateless multi-touch via isPrimary, this set just tracks "all up". Self-heals (cleared on every primary-down) so a missed up/cancel can't permanently lock editing.
@@ -3646,20 +3595,6 @@ export default function LoudLight(){
   // Long-press a filled song slot to set how many times it repeats.
   // {idx,x,y} while open.
   const [repPopup, setRepPopup] = useState(null);
-  // Vary params
-  const [vDropRate,  setVDropRate]  = useState(13);
-  const [vShiftRate, setVShiftRate] = useState(17);
-  const [vShiftRange,setVShiftRange]= useState(1);
-  const [vPitchRate, setVPitchRate] = useState(0);
-  const [vPitchRange,setVPitchRange]= useState(1);
-  const [vGhostRate, setVGhostRate] = useState(0);
-  const [vVelJitter, setVVelJitter] = useState(0);
-  const [vFltJitter, setVFltJitter] = useState(0);
-  const [vDlyJitter, setVDlyJitter] = useState(0);
-  const [vRhyJitter, setVRhyJitter] = useState(0);
-  const [vOctJitter, setVOctJitter] = useState(0);
-  const [vGlideJitter,setVGlideJitter]=useState(0);
-  const [vDurJitter,  setVDurJitter]  =useState(0);
 
   // Per-layer synth design params. One slot per synth-type layer.
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
@@ -3916,8 +3851,6 @@ export default function LoudLight(){
   const activeDrumIdR=useRef(initDrum.id);
   useEffect(()=>{drumPatsR.current=drumPats;},[drumPats]);
   useEffect(()=>{activeDrumIdR.current=activeDrumId;},[activeDrumId]);
-  const variedDrumGrids=useRef(new Map());
-  const variedDrumVels=useRef(new Map());
   const drumPillLongPressR=useRef(null);
   // Note: the legacy per-layer pattern chains were vestigial in
   // non-song mode. The song matrix is the arrangement primitive now.
@@ -3975,9 +3908,7 @@ export default function LoudLight(){
   const tempoFieldR=useRef("bpm");
   useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
   const loopR=useRef(false),activeIdR=useRef(activeId);
-  const transpR=useRef(0),varyModeR=useRef({synth:false,lead:false,drums:false}),recModeR=useRef(false),recSourceIdR=useRef(null);
-  const varyParamsR=useRef({dropRate:13,shiftRate:17,shiftRange:1,pitchRate:0,pitchRange:1,ghostRate:0,velJitter:0,fltJitter:0,dlyJitter:0,rhyJitter:0,octJitter:0,glideJitter:0,durJitter:0});
-  const variedGrids=useRef(new Map());
+  const transpR=useRef(0);
   // (prevFreqByRowR and cposR were used by the legacy unified scheduler;
   //  per-layer scheduling tracks last freq via layerLastFreqR instead.)
   // Per-layer glide tracking. Each layer's prev played freq + glide flag are
@@ -4071,72 +4002,10 @@ export default function LoudLight(){
   },[actPlayId,followSeq,playing,activeLayer]);
   useEffect(()=>{activeIdR.current=activeId;},[activeId]);
   useEffect(()=>{transpR.current=transpose;},[transpose]);
-  useEffect(()=>{
-    varyModeR.current=varyMode;
-    // Per-layer VARY. Wipe all cached variations on every toggle, then
-    // synchronously regenerate only the layers that are ON so the next
-    // scheduler tick already has a populated cache (avoids the cache-miss
-    // window that read as a playback break). safeVaryGrid guarantees a
-    // variation never silences a pat that had audible notes — the fix for
-    // "VARY on kills sound."
-    if(variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
-    if(variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
-    if(variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
-    try{
-      const vp=varyParamsR.current;
-      const regenSynth=(pats)=>{
-        for(const p of (pats||[])){
-          if(!p||!p.grid)continue;
-          variedGrids.current.set(p.id,safeVaryGrid(p.grid,vp,p.gridLen));
-        }
-      };
-      // Both parts come straight off the unified store — no parked library.
-      // Parked, generate nothing: an unread cache is harmless but a filled one
-      // is how the frozen mutation happened, and the caches are also what the
-      // grid overlays draw from.
-      if(VARY_ON&&varyMode.synth)regenSynth(layerLib(patternsR.current||[],"synth"));
-      if(VARY_ON&&varyMode.lead) regenSynth(layerLib(patternsR.current||[],"lead"));
-      if(VARY_ON&&varyMode.drums){
-        for(const dp of (drumPatsR.current||[])){
-          if(!dp||!dp.grid)continue;
-          const vRhythm=(dp.vRhythm||0)/100;
-          const vVelocity=(dp.vVelocity||0)/100;
-          const len=Math.max(1,Math.min(patW(dp),dp.gridLen||patW(dp)));
-          let vGrid=dp.grid.map(row=>row.map(on=>{
-            if(on&&Math.random()<vRhythm*0.45)return false;
-            if(!on&&Math.random()<vRhythm*0.18)return true;
-            return on;
-          }));
-          // Same anti-silence guard as synth — if the variation cleared every
-          // hit inside the playable window but the original had hits, keep the
-          // original this cycle.
-          const had=dp.grid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
-          const got=vGrid.some((row,ri)=>row.some((on,ci)=>on&&ci<len));
-          if(had&&!got)vGrid=dp.grid.map(row=>[...row]);
-          // Per-cell velocity jitter (vel is 2D now).
-          const baseVel=toDrumVel2D(dp.vel,gridW(dp.grid));
-          const vVel=baseVel.map(row=>row.map(vv=>Math.max(1,Math.min(127,Math.round(vv+(Math.random()*2-1)*vVelocity*50)))));
-          variedDrumGrids.current.set(dp.id,vGrid);
-          variedDrumVels.current.set(dp.id,vVel);
-        }
-      }
-    }catch(e){
-      console.warn("VARY: cache regen failed",e);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[varyMode]);
-  useEffect(()=>{
-    recModeR.current=recMode;
-    if(recMode) recSourceIdR.current=activeId; // lock source to active pattern at record start
-    else recSourceIdR.current=null;
-  },[recMode]);
   useEffect(()=>{swingR.current=swing;},[swing]);
   // Sync voiceSamples state → ref so the scheduler reads the latest map
   // without a stale closure dependency.
   useEffect(()=>{voiceSamplesR.current=voiceSamples;},[voiceSamples]);
-  useEffect(()=>{
-    varyParamsR.current={dropRate:vDropRate,shiftRate:vShiftRate,shiftRange:vShiftRange,pitchRate:vPitchRate,pitchRange:vPitchRange,ghostRate:vGhostRate,velJitter:vVelJitter,fltJitter:vFltJitter,dlyJitter:vDlyJitter,rhyJitter:vRhyJitter,octJitter:vOctJitter,glideJitter:vGlideJitter,durJitter:vDurJitter};
-  },[vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter]);
   // Per-layer params snapshot for the scheduler. Bell.play() now takes the layerP per call.
   const layerParamsR = useRef(layerParams);
   useEffect(()=>{layerParamsR.current=layerParams;},[layerParams]);
@@ -4269,9 +4138,7 @@ export default function LoudLight(){
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
-    varyMode,loopMode,loopBar,loopPat,
-    vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
-    vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter
+    loopMode,loopBar,loopPat,
   });};
   // Installs a unified pattern list from any load path, and bumps the id
   // counter past everything in it so a later-created pattern can't collide.
@@ -4337,14 +4204,9 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
-     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
-     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
-    setVaryMode(normVary(s.varyMode));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
@@ -4421,7 +4283,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4485,15 +4347,10 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
-     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
-     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter]
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
-    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Backfill missing fields on drum pats — older saves only carried
@@ -4592,18 +4449,10 @@ export default function LoudLight(){
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
-    setVDropRate(13);setVShiftRate(17);setVShiftRange(1);
-    setVPitchRate(0);setVPitchRange(1);setVGhostRate(0);
-    setVVelJitter(0);setVFltJitter(0);setVDlyJitter(0);
-    setVRhyJitter(0);setVOctJitter(0);setVGlideJitter(0);setVDurJitter(0);
     // Transient scheduler/UI state — clear so the next play starts fresh.
     stepR.current=0;
     if(layerLastFreqR)layerLastFreqR.current={synth:null,lead:null};
     if(layerLastGlideR)layerLastGlideR.current={synth:false,lead:false};
-    setRecMode(false);recModeR.current=false;
-    if(variedGrids&&variedGrids.current&&variedGrids.current.clear)variedGrids.current.clear();
-    if(variedDrumGrids&&variedDrumGrids.current&&variedDrumGrids.current.clear)variedDrumGrids.current.clear();
-    if(variedDrumVels&&variedDrumVels.current&&variedDrumVels.current.clear)variedDrumVels.current.clear();
     if(freeR&&freeR.current){
       for(const l of ["synth","lead","drums"]){
         if(freeR.current[l]) freeR.current[l]={step:0,nextAt:0,bar:0};
@@ -4892,38 +4741,8 @@ export default function LoudLight(){
     // followed instantly by "…and now just this bar".
     onClick:(e)=>{e.stopPropagation();if(loopHoldR.current.held){loopHoldR.current.held=false;return;}toggleLoop();},
   };
-  // ── A LAYER BUTTON'S HOLD OPENS VARY ─────────────────────────────────────
-  // VARY is PER LAYER, so its switch belongs on the layer — the house rule that
-  // each hold menu hangs off the thing it acts on. It replaces a full-width
-  // pill row above the grid in portrait, which was ~25px and, on an SE, the
-  // difference between a width-bound grid at 355px and a height-bound one at
-  // 330px. A hold costs no layout at all.
-  // The hold ref is COMPONENT-LEVEL because the gesture spans a pointerdown and
-  // a pointerup with a state change — and a re-render — in between, and the
-  // click it swallows is the trailing one every hold in here has to eat.
-  const layerHoldR=useRef({tmr:0,held:false});
-  const _layerHoldEnd=()=>{if(layerHoldR.current.tmr){clearTimeout(layerHoldR.current.tmr);layerHoldR.current.tmr=0;}};
-  const _openVaryFor=(lyr,sheet)=>{
-    if(!VARY_ON)return;
-    if(activeLayer!==lyr)switchLayer(lyr);
-    // The sheet mounts under the finger, so its backdrop must ignore the
-    // opening press's own trailing click.
-    sheetGuardR.current=Date.now();
-    if(sheet)setActiveSheet("vary"); else setPage("vary");
-  };
-  // `onTap` differs per mount (a sheet on mobile, a page on desktop), so it is
-  // passed in rather than baked in.
-  const layerBtnProps=(lyr,onTap,sheet)=>({
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();layerHoldR.current.held=true;_openVaryFor(lyr,sheet);},
-    onPointerDown:(e)=>{
-      layerHoldR.current.held=false;_layerHoldEnd();
-      if(!VARY_ON)return;
-      layerHoldR.current.tmr=setTimeout(()=>{layerHoldR.current.tmr=0;layerHoldR.current.held=true;_openVaryFor(lyr,sheet);},450);
-    },
-    onPointerUp:()=>_layerHoldEnd(), onPointerLeave:()=>_layerHoldEnd(),
-    onPointerCancel:()=>{_layerHoldEnd();layerHoldR.current.held=false;},
-    onClick:(e)=>{if(layerHoldR.current.held){layerHoldR.current.held=false;return;}onTap();},
-  });
+  // (A layer button's HOLD opened VARY for that layer. VARY is deleted, so the
+  // hold is too — the buttons are a plain tap again.)
   // Pattern scope gets a second, inset outline: the bar strip is the real
   // readout (every chip underlined rather than one), but the strip isn't on
   // screen on the landscape song page and a scope you can't see is a scope you
@@ -4959,18 +4778,11 @@ export default function LoudLight(){
   };
 
   // ── ADD / REMOVE BAR ───────────────────────────────────────────────────
-  // Resizing invalidates the cached VARY grids for that pattern (they're keyed
-  // by pat id and sized to the old width), so drop them and let the scheduler
-  // re-roll at the next bar boundary.
-  const _dropVaryCache=(id)=>{
-    try{variedGrids.current.delete(id);variedDrumGrids.current.delete(id);variedDrumVels.current.delete(id);}catch(e){}
-  };
   const setEditPatBars=(n)=>{
     const target=Math.max(1,Math.min(MAX_BARS,n));
     if(!editPat||target===patBars(editPat))return;
     const grew=target>patBars(editPat);
     pushHistory();
-    _dropVaryCache(editPat.id);
     if(activeLayer==="drums")setDrumPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     else setPats(ps=>ps.map(p=>p.id===editPat.id?resizePatBars(p,target):p));
     if(grew){
@@ -4995,7 +4807,6 @@ export default function LoudLight(){
     const n=patBars(editPat);
     if(n>=MAX_BARS)return;
     pushHistory();
-    _dropVaryCache(editPat.id);
     const off=curBar*COLS, dst=(curBar+1)*COLS, newW=(n+1)*COLS;
     const growPart=(part)=>{
       if(!part||!Array.isArray(part.grid))return part;
@@ -5054,7 +4865,6 @@ export default function LoudLight(){
     const n=patBars(editPat);
     if(n<=1||bar<0||bar>=n)return;
     pushHistory();
-    _dropVaryCache(editPat.id);
     const off=bar*COLS;
     const cut=(part)=>{
       if(!part||!Array.isArray(part.grid))return part;
@@ -5097,7 +4907,6 @@ export default function LoudLight(){
     const n=patBars(editPat);
     if(n*2>MAX_BARS){showFlash("MAX "+MAX_BARS+" BARS");return;}
     pushHistory();
-    _dropVaryCache(editPat.id);
     const oldW=n*COLS, W=oldW*2;
     const dbl=(part)=>{
       if(!part||!Array.isArray(part.grid))return part;
@@ -6625,9 +6434,7 @@ export default function LoudLight(){
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
-    vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,
-    vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,
-    loopMode,loopBar,loopPat,varyMode,
+    loopMode,loopBar,loopPat,
     patterns,activePatId:activePatternId,
     song,songRep,activeLayer
   });
@@ -6671,17 +6478,12 @@ export default function LoudLight(){
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
-    setVaryMode(normVary(s.varyMode));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     // Global mix: saved global drumMix, else seed from the first pattern's drums.
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["vDropRate",setVDropRate],["vShiftRate",setVShiftRate],["vShiftRange",setVShiftRange],
-     ["vPitchRate",setVPitchRate],["vPitchRange",setVPitchRange],["vGhostRate",setVGhostRate],
-     ["vVelJitter",setVVelJitter],["vFltJitter",setVFltJitter],["vDlyJitter",setVDlyJitter],
-     ["vRhyJitter",setVRhyJitter],["vOctJitter",setVOctJitter],["vGlideJitter",setVGlideJitter],["vDurJitter",setVDurJitter],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     _adoptSong(s);
 
@@ -7179,7 +6981,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,varyMode,loopMode,loopBar,loopPat,vDropRate,vShiftRate,vShiftRange,vPitchRate,vPitchRange,vGhostRate,vVelJitter,vFltJitter,vDlyJitter,vRhyJitter,vOctJitter,vGlideJitter,vDurJitter,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -7207,18 +7009,12 @@ export default function LoudLight(){
     const layerLP = layerParamsR.current[layer];
     const freqs = curFreqsR.current;
     const ratio = stR(transpR.current);
-    // VARY_ON, not just the project's switch. `varyMode` is PERSISTED, so a
-    // project saved with VARY on still says so while the feature is parked —
-    // and this read was ungated, so a parked build played the cached variation
-    // anyway. Worse, the cache was filled once on load and the per-bar re-roll
-    // (which IS gated) never ran to replace it: the project played a FROZEN
-    // random mutation of itself, the same on every bar and every pass, with no
-    // control anywhere to switch it off. Exactly the trap the ghost overlay
-    // taught and this read did not learn: the flag has to cover EVERY read.
-    const vary = VARY_ON && !!varyModeR.current[layer];
-    const useGrid = vary ? (variedGrids.current.get(pat.id)||pat.grid) : pat.grid;
-    const rawSp = (pat.params&&pat.params[s])?pat.params[s]:null;
-    const sp = vary&&rawSp?jitterStepParam(rawSp,varyParamsR.current):rawSp;
+    // The grid AS WRITTEN. VARY used to be able to substitute a varied copy
+    // here; it is gone, and the part of it that mattered most is that this read
+    // existed at all — it is how a parked VARY silently played a frozen random
+    // mutation of every project that had ever used it.
+    const useGrid = pat.grid;
+    const sp = (pat.params&&pat.params[s])?pat.params[s]:null;
     const rhy = sp ? Math.max(1,Math.round(sp.rhy??1)) : 1;
     const ratch = rhy;
     const subDur = stepDur / ratch;
@@ -7265,8 +7061,7 @@ export default function LoudLight(){
           const subC=(s+i)%plen;
           const subRaw=pat.params[subC];
           if(!subRaw)continue;
-          const subSp=vary?jitterStepParam(subRaw,varyParamsR.current):subRaw;
-          mods.push({at:at+i*stepDur,sp:subSp});
+          mods.push({at:at+i*stepDur,sp:subRaw});
         }
         if(mods.length===0)mods=null;
       }
@@ -7284,9 +7079,8 @@ export default function LoudLight(){
   // per-cell velocity + ratchet.
   const playDrumStep=(pat,s,at,stepDur)=>{
     if(!pat||!pat.grid||!drumEngine.current.ready)return;
-    const dvary = VARY_ON && !!varyModeR.current.drums;   // see playSynthLayerStep
-    const useGrid = dvary ? (variedDrumGrids.current.get(pat.id)||pat.grid) : pat.grid;
-    const useVel  = dvary ? (variedDrumVels.current.get(pat.id)||pat.vel)   : pat.vel;
+    const useGrid = pat.grid;   // as written — see playSynthLayerStep
+    const useVel  = pat.vel;
     // Does this pat carry any recorded motion? If so we apply the per-step
     // effective mix to each hitting voice's strip (sequence playback of the
     // automation); otherwise the per-pat-switch guard in play() handles it.
@@ -7510,56 +7304,9 @@ export default function LoudLight(){
         // It is both how long the note sounds and how far the cursor moves.
         const layerStepDur=absStepDur*colMult(pat,s);
         const at=lf.nextAt;
-        // Variation regenerates at every BAR boundary (s%COLS===0), not just at
-        // the top of the pattern. On a 1-bar pattern that IS step 0, so this is
-        // unchanged from before multi-bar patterns; on a 32-bar pattern it keeps
-        // VARY meaning "a fresh roll each bar" instead of once every 32 bars.
-        const _barC0=Math.floor(s/COLS)*COLS;
-        if(VARY_ON&&s%COLS===0&&varyModeR.current[layer]){
-          if(layer==="drums"){
-            const vRhythm=(pat.vRhythm||0)/100;
-            const vVelocity=(pat.vVelocity||0)/100;
-            const _bC1=Math.min(len,_barC0+COLS);
-            // Keep the bars we're NOT rerolling as they already were, so a long
-            // pattern varies bar-by-bar instead of the whole thing at once.
-            const prevG=variedDrumGrids.current.get(pat.id);
-            const inBar=ci=>ci>=_barC0&&ci<_bC1;
-            let vGrid=pat.grid.map((row,ri)=>row.map((on,ci)=>{
-              if(!inBar(ci))return (prevG&&prevG[ri]&&prevG[ri][ci]!==undefined)?prevG[ri][ci]:(ci<len&&on);
-              if(on&&Math.random()<vRhythm*0.45)return false;
-              if(!on&&Math.random()<vRhythm*0.18)return true;
-              return on;
-            }));
-            // Anti-silence guard (matches the toggle regen): if the variation
-            // cleared every hit inside THIS BAR, keep the bar's original hits.
-            const had=pat.grid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
-            const got=vGrid.some(row=>row.some((on,ci)=>on&&inBar(ci)));
-            if(had&&!got)vGrid=vGrid.map((row,ri)=>row.map((v,ci)=>inBar(ci)?!!(pat.grid[ri]&&pat.grid[ri][ci]):v));
-            const baseVel=toDrumVel2D(pat.vel,gridW(pat.grid));
-            const vVel=baseVel.map(row=>row.map(v=>Math.max(1,Math.min(127,Math.round(v+(Math.random()*2-1)*vVelocity*50)))));
-            variedDrumGrids.current.set(pat.id,vGrid);
-            variedDrumVels.current.set(pat.id,vVel);
-          } else {
-            // Only this bar rerolls; earlier bars keep the roll they got.
-            const prevS=variedGrids.current.get(pat.id);
-            const rolled=safeVaryGrid(pat.grid,varyParamsR.current,len,_barC0,COLS);
-            if(prevS&&prevS.length===rolled.length){
-              for(let ri=0;ri<rolled.length;ri++)
-                for(let ci=0;ci<rolled[ri].length;ci++)
-                  if(ci<_barC0||ci>=_barC0+COLS)rolled[ri][ci]=prevS[ri][ci];
-            }
-            variedGrids.current.set(pat.id,rolled);
-            // Self-record (synth-only) — vary the source pat and append.
-            if(layer==="synth"&&recModeR.current&&patsR.current.length<8){
-              const vp=varyParamsR.current;
-              const src=patsR.current.find(x=>x.id===recSourceIdR.current)||pat;
-              const rvg=genVariation(src.grid,vp);
-              const newParams=(src.params||defaultStepParams()).map(p2=>jitterStepParam(p2,vp));
-              const newPat={id:++_id,name:pickSym(patsR.current.map(p=>p.name)),grid:rvg,durs:src.durs?src.durs.map(rr=>[...rr]):mkDurs(gridW(src.grid)),params:newParams,gridLen:src.gridLen??16,bars:patBars(src),speedMult:src.speedMult??1};
-              setPats(ps=>{if(ps.length>=MAX_PATTERNS){recModeR.current=false;setRecMode(false);return ps;}return [...ps,newPat];});
-            }
-          }
-        }
+        // (The per-bar VARY re-roll lived here. VARY is gone: a part plays the
+        // grid as written, every pass. See `MUT8_PARAMS` for the one thing that
+        // survived it — MUT8's tuning.)
         // Play this layer's step.
         // Mute / solo gate — silence the play call but keep advancing the
         // scheduler clock so the layer stays in sync if it gets un-muted
@@ -7713,7 +7460,6 @@ export default function LoudLight(){
       setSongPulse(-1);songPulseR.current=-1;
       setSongBarLayer({synth:-1,lead:-1,drums:-1});
       layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
-      setRecMode(false);recModeR.current=false;
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
       releaseWakeLock();
       if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
@@ -7955,7 +7701,7 @@ export default function LoudLight(){
   // MUT8 mutates the BAR you're looking at, not the whole pattern — same as
   // RAND/CLR/CPY/PST. On a 1-bar pattern that's the entire thing, as before.
   const mutatePat1=()=>{pushHistory();return mutatePat((g,p2)=>{
-    return genVariation(g,varyParamsR.current,barOffIn(p2),COLS);
+    return genVariation(g,MUT8_PARAMS,barOffIn(p2),COLS);
   });};
 
   const handleGridDown=useCallback(e=>{
@@ -9612,11 +9358,6 @@ export default function LoudLight(){
     // part a hold and a tap would look identical without this.
     showFlash("EVERY BAR "+lbl);
   };
-  // VARY is per-layer; these drive the global indicators (tab tint, mobile
-  // chip). anyVary = at least one layer on; activeVary = the layer the user
-  // is currently looking at.
-  const anyVary = VARY_ON && (varyMode.synth||varyMode.lead||varyMode.drums);
-  const activeVary = VARY_ON && !!varyMode[activeLayer];
 
   // ── GLOBAL FX panel ──────────────────────────────────────────────────────
   // The reverb and delay *design* params. These are global
@@ -10240,8 +9981,8 @@ export default function LoudLight(){
                   that — the same rule, and the layer boxes already behaved that
                   way, so the tab was a second door to one room. */}
               <div style={{display:"flex",gap:4}}>
-                {[["edit","EDIT"],["fx","FX"],...(VARY_ON?[["vary","VARY"]]:[])].map(([pg,lbl])=>(
-                  <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{},pg==="vary"&&activeVary?{color:C_VARY,borderColor:C_VARY}:{})}
+                {[["edit","EDIT"],["fx","FX"]].map(([pg,lbl])=>(
+                  <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{})}
                     onClick={()=>setPage(pg)}>{lbl}</button>
                 ))}
               </div>
@@ -10316,7 +10057,6 @@ export default function LoudLight(){
                   // VARY visual feedback (synth/lead): the live varied grid for the
                   // active pattern while vary is on + playing. Drives the gold/dim
                   // overlay below; re-renders each step via `step`.
-                  const vSGrid=(activeVary&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
                   return(
                   <div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                     {Array.from({length:COLS},(_,c)=>{
@@ -10372,18 +10112,6 @@ export default function LoudLight(){
                       }
                       return rects;
                     })()}
-                    {vSGrid&&Array.from({length:COLS},(_,c)=>{
-                      const ac=barOff+c;
-                      if(ac>=gridLen)return null;
-                      const baseOn=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
-                      const vOn=!!(vSGrid[r]&&vSGrid[r][ac]);
-                      if(vOn===baseOn)return null;
-                      const L=`calc(${c/COLS}*(100% + 2px))`;
-                      const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
-                      return vOn
-                        ? <div key={"va"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>
-                        : <div key={"vd"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>;
-                    })}
                   </div>
                 );})}
               </div>
@@ -10397,15 +10125,6 @@ export default function LoudLight(){
               const dLen=(dPat?.gridLen)??16;
               const dw=gridPx||null;
               const dh=dw?Math.floor(dw*DRUM_ROWS/COLS):null;
-              // VARY visual feedback: while vary.drums is on AND playing, read the
-              // live varied grid so the editor animates the variation (gold ring on
-              // added hits, dim on dropped). Re-renders each step via drumStep.
-              // VARY_ON gates the overlay as well as the scheduler. Without it a project
-                  // saved while VARY was on still painted ghost rings on the grid while
-                  // the audio did NOT vary — a ring saying "this note is being added"
-                  // when it wasn't, and no control anywhere to switch it off.
-                  const dVaryShow=VARY_ON&&varyMode.drums&&playing;
-              const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
               return(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6}}>
                 {/* (RAND/CLR live in the action row — no duplicate header here.) */}
@@ -10446,8 +10165,6 @@ export default function LoudLight(){
                         const isQ=c%4===0;
                         // VARY overlay: gold ring where the live variation ADDED a
                         // hit, dim where it DROPPED one. Base grid stays editable.
-                        const varOn=vGridD?!!(vGridD[r]&&vGridD[r][ac]):on;
-                        const vAdd=vGridD&&varOn&&!on&&ac<dLen, vDrop=vGridD&&!varOn&&on;
                         // Velocity → brightness via alpha on the voice color.
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":dc+aHex;
@@ -10499,8 +10216,6 @@ export default function LoudLight(){
                             {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                               <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
                             ))}
-                            {vAdd&&<div style={{position:"absolute",inset:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>}
-                            {vDrop&&<div style={{position:"absolute",inset:0,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>}
                           </div>
                         );
                       })}
@@ -10707,54 +10422,6 @@ export default function LoudLight(){
               );
             })()}
 
-            {VARY_ON&&activeLayer==="drums"&&page==="vary"&&(()=>{
-              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const vRhythm=dPat?.vRhythm||0;
-              const vVelocity=dPat?.vVelocity||0;
-              const SliderRow=({label,value,onChange,accent})=>(
-                <div style={{marginBottom:16}}>
-                  <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:5}}>
-                    <span style={{fontSize:9,letterSpacing:2,color:accent||"rgba(178,199,219,0.5)",fontWeight:500}}>{label}</span>
-                    <span style={{fontSize:11,color:"rgba(178,199,219,0.7)",fontWeight:300,marginLeft:"auto"}}>{value}<span style={{fontSize:8,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
-                  </div>
-                  <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"ew-resize",touchAction:"none"}}
-                    onPointerDown={e=>{
-                      e.stopPropagation();
-                      const rect=e.currentTarget.getBoundingClientRect();
-                      if(isDoubleTap(e)){onChange(0);return;}
-                      const dim=rect.width;let cur=value,lx=e.clientX;
-                      const upd=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onChange(Math.round(cur));};
-                      const up=()=>{document.removeEventListener("pointermove",upd);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                      document.addEventListener("pointermove",upd);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                    }}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:value+"%",background:(accent||"rgba(178,199,219,0.4)")+"99",borderRadius:3}}/>
-                    <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${value}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 5px "+(accent||"rgba(178,199,219,0.5)")}}/>
-                  </div>
-                </div>
-              );
-              return(
-              <div style={{width:"100%",height:"100%",overflowY:"auto",padding:"16px 20px",boxSizing:"border-box"}}>
-                <div style={{maxWidth:420}}>
-                  {/* VARY enable toggle — per layer; this page is DRUMS. */}
-                  <button onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}
-                    style={{width:"100%",padding:"10px 14px",marginBottom:16,borderRadius:8,border:"1px solid "+(varyMode.drums?"#e6b872":"rgba(168,190,212,0.18)"),background:varyMode.drums?"rgba(230,184,114,0.14)":"transparent",color:varyMode.drums?"#e6b872":"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                    <span style={{width:8,height:8,borderRadius:"50%",background:varyMode.drums?"#e6b872":"rgba(178,199,219,0.25)",boxShadow:varyMode.drums?"0 0 6px #e6b872":"none"}}/>
-                    DRUMS VARY {varyMode.drums?"ON":"OFF"}
-                  </button>
-                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:16}}>DRUM VARY</div>
-                  <div style={{padding:"14px 16px",background:"rgba(186,208,230,0.04)",borderRadius:8,border:"1px solid rgba(186,208,230,0.08)",marginBottom:8}}>
-                    <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
-                    {SliderRow({label:"RHYTHM",value:vRhythm,onChange:v=>setDrumVary("vRhythm",v),accent:"#c8a840"})}
-                    {SliderRow({label:"VELOCITY",value:vVelocity,onChange:v=>setDrumVary("vVelocity",v),accent:"#7888d0"})}
-                  </div>
-                  <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.2)",lineHeight:1.6,marginTop:10}}>
-                    RHYTHM randomly drops existing hits and adds ghosts each loop cycle. VELOCITY jitters hit strengths around their set values.
-                  </div>
-                </div>
-              </div>
-              );
-            })()}
-
             {activeLayer!=="drums"&&page==="step"&&(
               <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
                 <div style={S.stepPageHdr}>
@@ -10806,44 +10473,7 @@ export default function LoudLight(){
                   })}
                 </div>
               )}
-            {/* VARY page — was "SET", now includes an in-page enable toggle. */}
-            {VARY_ON&&activeLayer!=="drums"&&page==="vary"&&(
-              <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                {/* Enable / disable — per layer; this page is POLY or MONO. */}
-                <button onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}
-                  style={{width:"100%",padding:"10px 14px",marginBottom:10,borderRadius:8,border:"1px solid "+(varyMode[activeLayer]?C_VARY:"rgba(168,190,212,0.18)"),background:varyMode[activeLayer]?"rgba(230,184,114,0.14)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(178,199,219,0.55)",fontSize:10,letterSpacing:2.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                  <span style={{width:8,height:8,borderRadius:"50%",background:varyMode[activeLayer]?C_VARY:"rgba(178,199,219,0.25)",boxShadow:varyMode[activeLayer]?"0 0 6px "+C_VARY:"none"}}/>
-                  {activeLayer==="lead"?"MONO":"POLY"} VARY {varyMode[activeLayer]?"ON":"OFF"}
-                </button>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
-                    <SynthSection title="RHYTHM VARY / MUT8" accent={C_VARY}>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="DROP"  value={vDropRate}  min={0} max={60} def={13} onChange={setVDropRate}  display={vDropRate+"%"}    accent={C_VARY}/>
-                        <KnobSlider vertical label="SHIFT" value={vShiftRate} min={0} max={60} def={17} onChange={setVShiftRate} display={vShiftRate+"%"}   accent={C_VARY}/>
-                        <KnobSlider vertical label="RANGE" value={vShiftRange}min={1} max={8}  onChange={setVShiftRange}display={vShiftRange+"st"} accent={C_VARY}/>
-                      </div>
-                    </SynthSection>
-                    <SynthSection title="MELODY VARY / MUT8" accent={C_VARY}>
-                      <div style={{display:"flex",gap:12,padding:"8px 16px 10px",height:160,alignItems:"stretch"}}>
-                        <KnobSlider vertical label="PITCH" value={vPitchRate} min={0} max={60} onChange={setVPitchRate} display={vPitchRate+"%"}   accent={C_VARY}/>
-                        <KnobSlider vertical label="RANGE" value={vPitchRange}min={1} max={12} onChange={setVPitchRange}display={vPitchRange+"st"} accent={C_VARY}/>
-                        <KnobSlider vertical label="GHOST" value={vGhostRate} min={0} max={60} onChange={setVGhostRate} display={vGhostRate+"%"}   accent={C_VARY}/>
-                      </div>
-                    </SynthSection>
-                    <SynthSection title="STEP VARY / MUT8" accent={C_VARY}>
-                      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-                        <KnobSlider label="VEL"   value={vVelJitter}   min={0} max={100} onChange={setVVelJitter}   display={vVelJitter+"%"}   accent={C_VARY}/>
-                        <KnobSlider label="FLT"   value={vFltJitter}   min={0} max={100} onChange={setVFltJitter}   display={vFltJitter+"%"}   accent={C_VARY}/>
-                        <KnobSlider label="DLY"   value={vDlyJitter}   min={0} max={100} onChange={setVDlyJitter}   display={vDlyJitter+"%"}   accent={C_VARY}/>
-                        <KnobSlider label="RHY"   value={vRhyJitter}   min={0} max={100} onChange={setVRhyJitter}   display={vRhyJitter+"%"}   accent={C_VARY}/>
-                        <KnobSlider label="OCT"   value={vOctJitter}   min={0} max={100} onChange={setVOctJitter}   display={vOctJitter+"%"}   accent={C_VARY}/>
-                        <KnobSlider label="GLIDE" value={vGlideJitter} min={0} max={100} onChange={setVGlideJitter} display={vGlideJitter+"%"} accent={C_VARY}/>
-                        <KnobSlider label="DUR"   value={vDurJitter}   min={0} max={100} onChange={setVDurJitter}   display={vDurJitter+"%"}   accent={C_VARY}/>
-                      </div>
-                    </SynthSection>
-                </div>
-              </div>
-            )}
+            {/* (The two VARY pages were here; VARY is deleted.) */}
             {activeLayer!=="drums"&&page==="sound"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
@@ -10971,9 +10601,8 @@ export default function LoudLight(){
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"},
-                    VARY_ON&&varyMode[lyr]?{boxShadow:"inset 0 0 0 2px rgba(230,184,114,0.55)"}:{})}
-                  {...layerBtnProps(lyr,()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} },true)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
+                  style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"})}
+                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {/* PATTERN CHIPS — the same selector as portrait and desktop,
@@ -10984,19 +10613,9 @@ export default function LoudLight(){
               {patternChipsRail}
               {/* Per-layer function pills. SOUND is not one of them any more:
                   tapping the layer you are already on opens it, which is the
-                  house rule and was already wired above. VARY keeps a pill
-                  because it has no such gesture — and while VARY is parked the
-                  whole row goes, divider and all. */}
-              {VARY_ON&&<div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>}
-              {(VARY_ON?[["vary","VARY",activeSheet==="vary"||activeVary]]:[]).map(([key,lbl,on])=>(
-                <button key={key} onClick={()=>setActiveSheet(s=>s===key?null:key)}
-                  style={{flexShrink:0,padding:"7px 0",borderRadius:8,fontFamily:"inherit",cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1.5,
-                    border:"1px solid "+(on?(key==="vary"?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.5)"):"rgba(168,190,212,0.14)"),
-                    background:on?(key==="vary"?"rgba(230,184,114,0.12)":"rgba(168,190,212,0.1)"):"transparent",
-                    color:on?(key==="vary"?"#e6b872":"rgba(226,236,247,0.9)"):"rgba(178,199,219,0.5)"}}>
-                  {lbl}
-                </button>
-              ))}
+                  house rule and was already wired above. VARY had the last pill
+                  on this row and VARY is deleted, so the row goes with it. */}
+              {/* (The landscape rail's VARY slot was here.) */}
             </div>
           )}
 
@@ -11035,11 +10654,8 @@ export default function LoudLight(){
               difference between a width-bound grid at 355px and a height-bound
               one at 330px — spent on one switch. That cost is exactly why VARY
               got parked in the first place, and parking it turned out to be far
-              more expensive than the row (see `VARY_ON`). So the surface
-              shrinks instead: VARY is on a LAYER BUTTON'S HOLD now, which is
-              the thing it acts on (VARY is per-layer), costs no layout at all,
-              and is the house tap/hold split. Landscape keeps its rail slot —
-              a column has the room a stacked layout doesn't. */}
+              more expensive than the row. VARY is deleted now, so the row is
+              gone for good rather than pending. */}
           {/* ── DRAG GHOST — floating pill that follows pointer ── */}
           {patternDrag&&(
             <div style={{position:"fixed",left:patternDrag.x-24,top:patternDrag.y-14,zIndex:9999,pointerEvents:"none",padding:"4px 12px",borderRadius:20,border:"1.5px solid "+patternDrag.accent,background:patternDrag.accent,color:"#0e1c2b",fontSize:14,fontWeight:700,letterSpacing:1,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",lineHeight:1,opacity:patternDrag.overDrop?1:0.85,transform:patternDrag.overDrop?"scale(1.1)":"scale(1)",transition:"transform 0.1s, opacity 0.1s"}}>
@@ -11079,8 +10695,7 @@ export default function LoudLight(){
                     {lenEdgeSynth}
                     {Array.from({length:ROWS},(_,r)=>{
                       const fromBot=ROWS-1-r;const isOct=fromBot%curShape.span===0;const isFifth=!isOct&&curShape.fifth>=0&&fromBot%curShape.span===curShape.fifth;
-                      const vSGrid=(activeVary&&playing&&activePat)?variedGrids.current.get(activePat.id):null;
-                      return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
+                          return(<div key={r} style={Object.assign({},S.gridRow,{background:isOct?"rgba(168,190,212,0.06)":isFifth?"rgba(160,190,170,0.03)":"transparent",position:"relative"})}>
                         {Array.from({length:COLS},(_,c)=>{
                           const ac=barOff+c;
                           const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
@@ -11090,17 +10705,6 @@ export default function LoudLight(){
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
                         {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
-                        {vSGrid&&Array.from({length:COLS},(_,c)=>{
-                          const ac=barOff+c;
-                          if(ac>=gridLen)return null;
-                          const baseOn=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
-                          const vOn=!!(vSGrid[r]&&vSGrid[r][ac]);
-                          if(vOn===baseOn)return null;
-                          const L=`calc(${c/COLS}*(100% + 2px))`;const W=`calc(${1/COLS}*(100% + 2px) - 2px)`;
-                          return vOn
-                            ? <div key={"va"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>
-                            : <div key={"vd"+c} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>;
-                        })}
                       </div>);
                     })}
                   </div>
@@ -11117,13 +10721,7 @@ export default function LoudLight(){
                 {(()=>{
                   const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
                   const dLen=dPat?.gridLen??16;
-                  // VARY_ON gates the overlay as well as the scheduler. Without it a project
-                  // saved while VARY was on still painted ghost rings on the grid while
-                  // the audio did NOT vary — a ring saying "this note is being added"
-                  // when it wasn't, and no control anywhere to switch it off.
-                  const dVaryShow=VARY_ON&&varyMode.drums&&playing;
-                  const vGridD=dVaryShow?variedDrumGrids.current.get(dPat.id):null;
-                  const GAP=2;
+                      const GAP=2;
                   // Drum grid is now oriented to match the synth grid: voices
                   // run vertically as rows, steps horizontally as columns. Time
                   // flows right → same direction as synth playback. Voice
@@ -11189,8 +10787,6 @@ export default function LoudLight(){
                               const isActive=playing&&ac===drumStep;
                               const inactive=colPastEnd(dPat,ac);
                               const isQ=step%4===0;
-                              const varOn=vGridD?!!(vGridD[r]&&vGridD[r][ac]):on;
-                              const vAdd=vGridD&&varOn&&!on&&ac<dLen, vDrop=vGridD&&!varOn&&on;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":dc+aHex;
                               return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
@@ -11241,8 +10837,6 @@ export default function LoudLight(){
                                 {on&&rt>1&&Array.from({length:rt-1},(_,i)=>(
                                   <div key={"r"+i} style={{position:"absolute",top:1,bottom:1,width:1,left:`${((i+1)/rt)*100}%`,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>
                                 ))}
-                                {vAdd&&<div style={{position:"absolute",inset:1,borderRadius:2,border:"1.5px solid "+C_VARY,boxShadow:"0 0 5px "+C_VARY+"aa",pointerEvents:"none"}}/>}
-                                {vDrop&&<div style={{position:"absolute",inset:0,borderRadius:2,background:"rgba(20,16,12,0.5)",pointerEvents:"none"}}/>}
                               </div>);
                             })}
                           </div>
@@ -11270,8 +10864,8 @@ export default function LoudLight(){
           {!isLandscape&&(
           <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.98)"}}>
             {/* Row 1: global chips — TEMPO / SONG / FX / PROJECT.
-                 (VARY moved up to the per-layer pill row; four chips here gives
-                 each more width and lets the labels be legible.) */}
+                 (There were four; VARY's has gone with VARY and SONG's with the
+                 song lane, which is on this very page.) */}
             <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
               <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
@@ -11309,14 +10903,13 @@ export default function LoudLight(){
               <div style={{display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"},
-                    VARY_ON&&varyMode[lyr]?{boxShadow:"inset 0 0 0 2px rgba(230,184,114,0.55)"}:{})}
-                  {...layerBtnProps(lyr,()=>{
+                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  onClick={()=>{
                     // Tapping the layer you are already on opens its sound
                     // page, and toggles back out — the house rule.
                     if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
                     else{switchLayer(lyr);}
-                  },true)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
+                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
               ))}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -11751,89 +11344,7 @@ export default function LoudLight(){
                     {projectMenuBody}
                   </div>
                 )}
-                {/* VARY sheet */}
-                {VARY_ON&&activeSheet==="vary"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:14}}>VARY</div>
-                    {activeLayer!=="drums"&&(
-                      <div>
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                          <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode[activeLayer]?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.2)"),background:varyMode[activeLayer]?"rgba(230,184,114,0.12)":"transparent",color:varyMode[activeLayer]?C_VARY:"rgba(168,190,212,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,[activeLayer]:!v[activeLayer]}))}>{(activeLayer==="lead"?"MONO":"POLY")+" VARY "+(varyMode[activeLayer]?"ON":"OFF")}</button>
-                        </div>
-                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8}}>RHYTHM</div>
-                        {[["DROP",vDropRate,setVDropRate,60],["SHIFT",vShiftRate,setVShiftRate,60],["RANGE",vShiftRange,setVShiftRange,8,"st"]].map(([label,val,setter,max,unit])=>(
-                          <div key={label} style={{marginBottom:10}}>
-                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
-                            </div>
-                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
-                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
-                            </div>
-                          </div>
-                        ))}
-                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8,marginTop:14}}>MELODY</div>
-                        {[["PITCH",vPitchRate,setVPitchRate,60],["RANGE",vPitchRange,setVPitchRange,12,"st"],["GHOST",vGhostRate,setVGhostRate,60]].map(([label,val,setter,max,unit])=>(
-                          <div key={label} style={{marginBottom:10}}>
-                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>{unit||"%"}</span></span>
-                            </div>
-                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(max,cur+ballisticDelta(pd,dim,max)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:(val/max*100)+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
-                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val/max*100}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
-                            </div>
-                          </div>
-                        ))}
-                        <div style={{fontSize:8,letterSpacing:1.5,color:C_VARY,fontWeight:600,marginBottom:8,marginTop:14}}>STEP</div>
-                        {[["VEL",vVelJitter,setVVelJitter],["FLT",vFltJitter,setVFltJitter],["DLY",vDlyJitter,setVDlyJitter],["RHY",vRhyJitter,setVRhyJitter],["OCT",vOctJitter,setVOctJitter],["GLIDE",vGlideJitter,setVGlideJitter],["DUR",vDurJitter,setVDurJitter]].map(([label,val,setter])=>(
-                          <div key={label} style={{marginBottom:10}}>
-                            <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                              <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:500,width:52}}>{label}</span>
-                              <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
-                            </div>
-                            <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setter(VDEF[label]??0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setter(Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:"rgba(230,184,114,0.45)",borderRadius:3}}/>
-                              <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* DRUMS VARY — enable + RHYTHM/VELOCITY (mobile parity with desktop). */}
-                    {activeLayer==="drums"&&(()=>{
-                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const vRhythm=dPat?.vRhythm||0, vVelocity=dPat?.vVelocity||0;
-                      const Row=(label,val,key,accent)=>(
-                        <div key={label} style={{marginBottom:12}}>
-                          <div style={{display:"flex",alignItems:"baseline",marginBottom:4}}>
-                            <span style={{fontSize:8,letterSpacing:1.5,color:accent,fontWeight:600,width:70}}>{label}</span>
-                            <span style={{fontSize:10,color:"rgba(178,199,219,0.7)",marginLeft:"auto"}}>{val}<span style={{fontSize:7,color:"rgba(178,199,219,0.35)",marginLeft:2}}>%</span></span>
-                          </div>
-                          <div style={{height:6,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                            onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumVary(key,0);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width;let cur=val,lx=e.clientX;const update=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));setDrumVary(key,Math.round(cur));};const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                            <div style={{position:"absolute",left:0,top:0,bottom:0,width:val+"%",background:accent+"99",borderRadius:3}}/>
-                            <div style={{position:"absolute",top:-4,bottom:-4,width:12,left:`calc(${val}% - 6px)`,background:"rgba(255,255,255,0.85)",borderRadius:3}}/>
-                          </div>
-                        </div>
-                      );
-                      return(
-                        <div>
-                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                            <button style={{padding:"4px 14px",borderRadius:20,border:"1px solid "+(varyMode.drums?"rgba(230,184,114,0.6)":"rgba(168,190,212,0.2)"),background:varyMode.drums?"rgba(230,184,114,0.12)":"transparent",color:varyMode.drums?C_VARY:"rgba(168,190,212,0.4)",fontSize:10,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setVaryMode(v=>({...v,drums:!v.drums}))}>{"DRUMS VARY "+(varyMode.drums?"ON":"OFF")}</button>
-                          </div>
-                          <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)",marginBottom:12}}>Re-generates each loop while VARY is on.</div>
-                          {Row("RHYTHM",vRhythm,"vRhythm","#c8a840")}
-                          {Row("VELOCITY",vVelocity,"vVelocity","#7888d0")}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                {/* (The VARY sheet was here.) */}
 
               </div>
             </>
