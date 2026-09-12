@@ -4642,19 +4642,23 @@ export default function LoudLight(){
   // merely LOOKING at an 8-bar drum part dragged a loop on bar 12 back to bar
   // 8 — permanently, and for every part.
   const patBarCount   = patBars(patterns.find(p2=>p2.id===activePatternId)||editPat);
-  // ── The bar strip WRAPS at 8 ─────────────────────────────────────────────
-  // A row of 16 chips on a phone is ~20px each, and 32 is ~10px: a target you
-  // cannot hit and a number you cannot print in it. Eight is the most a row
-  // ever holds, so a chip is never narrower than an eighth of the strip — wide
-  // enough to always carry its bar number, and to take a thumb. Rows of eight
-  // rather than a balanced split (9 bars as 5+4) because bars are read in
-  // fours and eights: row 1 is bars 1-8, and the last row simply ends early.
-  // It costs ~24px per extra row, which is vertical space the grid cannot use
-  // anyway — it is width-bound on a phone.
-  const BAR_ROW_MAX=8;
-  const _barPerRow=Math.max(1,Math.min(BAR_ROW_MAX,barCount));
-  const _barRows=Math.ceil(barCount/_barPerRow);
+  // ── The bar strip is ONE LINE THAT SCROLLS ───────────────────────────────
+  // It used to WRAP at eight chips a row — 16 bars was two rows, 32 was four —
+  // and that made its height a function of the visible part's bar count. Which
+  // moved everything above it: a 16-bar part and an 8-bar part in the same
+  // pattern gave the grid, and the song lane over it, two different positions,
+  // and switching layer jumped between them. Wrapping also cost the grid
+  // `_barStripExtra` on the height-bound layouts for the same reason.
+  // So it is the same shape the song lane settled on, for the same reason: a
+  // line is a line however long the thing is, and its height is a CONSTANT the
+  // rest of the column can budget for without negotiating. Eight chips across
+  // the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another
+  // name), the rest off the end, with a track underneath to pan it.
+  const BAR_COLS=8;
   const BAR_ROW_H=22, BAR_ROW_GAP=2;
+  const BAR_TRACK=5, BAR_TRACK_GAP=3;
+  const _barRows=1;
+  const _barPerRow=Math.max(1,Math.min(BAR_COLS,barCount));
   // The strip's own height, and what its extra rows cost the grid. The strip
   // sits OUTSIDE the grid's square box — it used to be inside it, which is the
   // whole of the "the bar numbers are covering the note grid" bug: a box with
@@ -4663,7 +4667,8 @@ export default function LoudLight(){
   // 23.1px wide by 20.2px tall. Nothing was overlapping; the grid had been
   // squashed by precisely the height of the chips. Two chip rows made it
   // obvious, one row had been quietly costing the same thing for months.
-  const _barStripPx=_barRows*BAR_ROW_H+(_barRows-1)*BAR_ROW_GAP;
+  // One chip row plus its track — the same on a 1-bar part and a 32-bar one.
+  const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK;
   // The strip ROW's outer height — the chips plus `barStrip`'s own
   // `marginBottom`. The drums page has to reserve exactly this much for the
   // strip it hangs under its (shorter) grid, or the two blocks come out
@@ -4671,7 +4676,10 @@ export default function LoudLight(){
   // from the same constants the strip is built from rather than measured or
   // guessed: if you change that margin, change it here.
   const _stripRowPx=_barStripPx+(IS_MOBILE?4:5);
-  const _barStripExtra=(_barRows-1)*(BAR_ROW_H+BAR_ROW_GAP);
+  // Zero now, and kept only because the grid-sizing expressions read it: the
+  // strip has no extra rows to cost the grid any more. Delete it when those
+  // expressions are next touched.
+  const _barStripExtra=0;
   // ── The SONG STRIP above the grid ────────────────────────────────────────
   // The song lane, on every part page, in PORTRAIT ONLY. The space is free there
   // and only there: the grid is width-bound in portrait (370px of a 390px
@@ -4976,6 +4984,10 @@ export default function LoudLight(){
     }));
     // Land on the copy, for the same reason ADD BAR does.
     goToBar(curBar+1);
+    // Same argument as ×2's flash: a duplicated bar is content you did not
+    // write, and if it arrives silently you meet it later as a pattern that
+    // isn't how you sequenced it.
+    showFlash("⧉ BAR "+(curBar+1)+" → "+(curBar+2));
   };
   // Delete THIS bar, not the last one. `removeBar` (the −BAR button) shrinks
   // the part from the end, which is fine for a button that says "one fewer bar"
@@ -5075,6 +5087,12 @@ export default function LoudLight(){
     }));
     // Land on the top of the copy — that's the half you're about to vary.
     goToBar(n);
+    // SAY SO. ×2 doubles the part and copies its content into the new half, so
+    // it leaves two identical sets of bars — and it sits in the bar chip's hold
+    // menu a thumb from `＋ BAR`. Silently, a mis-tap there reads later as "this
+    // pattern isn't how I sequenced it", which is exactly how it was reported.
+    // Undo is one tap away; the flash is what tells you to reach for it.
+    showFlash("×2 "+({synth:"POLY",lead:"MONO",drums:"DRUMS"}[L]||L)+" "+n+" → "+(n*2)+" BARS");
   };
 
   // ── SONG PAGE ──────────────────────────────────────────────────────────
@@ -5103,6 +5121,26 @@ export default function LoudLight(){
   // The track is written imperatively, so it has to be re-synced after any
   // render that changed the lane's content width — adding a slot, mainly.
   useEffect(()=>{_syncLaneTrack();});
+  // `barChips` has several mounts on screen at once (the strip, the bar sheet,
+  // the step sheet), so the thumbs are synced by walking the DOM rather than
+  // through a ref. No deps: it runs after every render, like the lane's.
+  useEffect(()=>{document.querySelectorAll("[data-barstrip]").forEach(_syncBarTrack);});
+  // Bring the chosen bar into view — but ONLY when the choice changes. Doing it
+  // every render would snap the row back the moment you scrolled it to look at
+  // bar 20 of a 32-bar part, which is the same mistake page-follow makes if you
+  // let it drive the strip.
+  const _barViewR=useRef(-1);
+  useEffect(()=>{
+    if(_barViewR.current===curBar)return;
+    _barViewR.current=curBar;
+    document.querySelectorAll("[data-barstrip]").forEach(el=>{
+      const c=el.querySelector('[data-bar="'+curBar+'"]'); if(!c)return;
+      const cr=c.getBoundingClientRect(),er=el.getBoundingClientRect();
+      if(cr.left<er.left)el.scrollLeft-=(er.left-cr.left)+BAR_ROW_GAP;
+      else if(cr.right>er.right)el.scrollLeft+=(cr.right-er.right)+BAR_ROW_GAP;
+      _syncBarTrack(el);
+    });
+  });
   // Keep the sounding slot in view. The lane shows eight at a time now, so a
   // longer song would otherwise play off the end of it. Gated on FOLLOW, which
   // already means "keep the editor on what's playing" — scrolling the lane out
@@ -5243,13 +5281,65 @@ export default function LoudLight(){
   // Row from y, column from x. The strip stopped being one row of `barCount`
   // the moment it wrapped, and a 1-D hit test would have gone on reporting
   // bar 1 for every chip in the second row.
+  // One row, so the hit test is 1-D again — but the row SCROLLS, so the pointer
+  // has to be read in the strip's own scrolled coordinates. `clientY` is unused
+  // and kept in the signature because every call site passes it and the 2-D
+  // version may well come back if the strip ever wraps again.
+  const _barPitch=(el)=>{
+    const w=el.clientWidth||1;
+    return (w-(BAR_COLS-1)*BAR_ROW_GAP)/BAR_COLS+BAR_ROW_GAP;
+  };
   const _barAt=(clientX,clientY,el)=>{
     const rect=el.getBoundingClientRect();
-    const rowH=rect.height/_barRows;
-    const r=Math.max(0,Math.min(_barRows-1,Math.floor((clientY-rect.top)/rowH)));
-    const c=Math.max(0,Math.min(_barPerRow-1,Math.floor(((clientX-rect.left)/rect.width)*_barPerRow)));
-    // A short last row clamps: the empty columns after its end belong to it.
-    return Math.max(0,Math.min(barCount-1,r*_barPerRow+c));
+    const x=clientX-rect.left+(el.scrollLeft||0);
+    return Math.max(0,Math.min(barCount-1,Math.floor(x/_barPitch(el))));
+  };
+  // The track's thumb, and panning it. Written imperatively and found through
+  // the DOM rather than through a ref, because `barChips` is ONE JSX value with
+  // several mounts on screen at once (the strip, the bar sheet, the step
+  // sheet) — a single ref would be whichever of them rendered last.
+  const _barWrapOf=(el)=>el&&el.closest&&el.closest("[data-barwrap]");
+  const _syncBarTrack=(el)=>{
+    const wrap=_barWrapOf(el); if(!wrap)return;
+    const th=wrap.querySelector("[data-barthumb]"); if(!th)return;
+    const sw=el.scrollWidth||1,cw=el.clientWidth||1;
+    const frac=Math.max(0.08,Math.min(1,cw/sw));
+    const pos=sw>cw?el.scrollLeft/(sw-cw):0;
+    th.style.width=(frac*100).toFixed(2)+"%";
+    th.style.left=((1-frac)*pos*100).toFixed(2)+"%";
+    const tr=wrap.querySelector("[data-bartrack]");
+    if(tr)tr.style.opacity=cw>=sw-1?"0.18":"1";
+  };
+  // Drag the track to pan. The chips set `touch-action:none` because dragging
+  // them SCRUBS through bars, so a touch starting on one can never scroll the
+  // row — the track is what you grab instead, exactly as on the song lane.
+  const _barPanStart=(e)=>{
+    const wrap=_barWrapOf(e.currentTarget); if(!wrap)return;
+    const el=wrap.querySelector("[data-barstrip]"); if(!el)return;
+    e.preventDefault(); e.stopPropagation();
+    const r=e.currentTarget.getBoundingClientRect();
+    const to=(cx)=>{
+      const sw=el.scrollWidth,cw=el.clientWidth; if(sw<=cw)return;
+      const frac=cw/sw, usable=r.width*(1-frac);
+      const p=usable>0?Math.max(0,Math.min(1,(cx-r.left-r.width*frac/2)/usable)):0;
+      el.scrollLeft=p*(sw-cw); _syncBarTrack(el);
+    };
+    to(e.clientX);
+    const mv=(ev)=>to(ev.clientX);
+    const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+    document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+  };
+  // Scrubbing toward either end pans, so you can drag the page to a bar that is
+  // off the end of the eight on screen — the song lane's `_laneEdgeScroll`.
+  const _barEdgeScroll=(x,el)=>{
+    if(!el)return;
+    const r=el.getBoundingClientRect(), zone=Math.min(44,r.width*0.16);
+    let d=0;
+    if(x<r.left+zone)d=-Math.ceil((r.left+zone-x)/3);
+    else if(x>r.right-zone)d=Math.ceil((x-(r.right-zone))/3);
+    if(!d)return;
+    const was=el.scrollLeft; el.scrollLeft=was+d;
+    if(el.scrollLeft!==was)_syncBarTrack(el);
   };
   const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
   const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
@@ -6010,7 +6100,11 @@ export default function LoudLight(){
     setPage(pg=>pg==="step"?"edit":"step");
   };
   const barChips=(
-      <div data-barstrip="1" style={{position:"relative",flex:1,display:"flex",flexDirection:"column",gap:BAR_ROW_GAP,touchAction:"none",cursor:"pointer"}}
+    <div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+      <div data-barstrip="1" className="barscroll"
+           onScroll={e=>_syncBarTrack(e.currentTarget)}
+           style={{position:"relative",display:"flex",gap:BAR_ROW_GAP,height:BAR_ROW_H,
+             overflowX:"auto",overflowY:"hidden",touchAction:"none",cursor:"pointer"}}
            onPointerDown={e=>{
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
@@ -6029,7 +6123,9 @@ export default function LoudLight(){
              },450);
            }}
            onPointerMove={e=>{if(!e.buttons)return;e.stopPropagation();
-             barHoldR.current.moved=true;_barHoldEnd();_scrubTo(e.clientX,e.clientY,e.currentTarget);}}
+             barHoldR.current.moved=true;_barHoldEnd();
+             _barEdgeScroll(e.clientX,e.currentTarget);
+             _scrubTo(e.clientX,e.clientY,e.currentTarget);}}
            onPointerUp={e=>{
              _barHoldEnd();
              // A right-click's own pointerup must not ALSO fire the tap-again:
@@ -6048,13 +6144,12 @@ export default function LoudLight(){
            onContextMenu={e=>{e.preventDefault();e.stopPropagation();_barHoldEnd();
              barHoldR.current.held=true;barHoldR.current.wasCur=false;
              const bar=_barAt(e.clientX,e.clientY,e.currentTarget);goToBar(bar);_openBarOps(bar,e.clientX,e.clientY);}}>
-        {Array.from({length:_barRows},(_,row)=>(
-        // A GRID of `_barPerRow` columns, not a flex row: every chip is then
-        // the same width whatever row it is in, and a short last row ends
-        // early instead of its few chips stretching to fill the strip.
-        <div key={row} style={{display:"grid",gridTemplateColumns:"repeat("+_barPerRow+",1fr)",gap:2,height:BAR_ROW_H}}>
-        {Array.from({length:Math.min(_barPerRow,barCount-row*_barPerRow)},(_,col)=>{
-          const bi=row*_barPerRow+col;
+        {Array.from({length:barCount},(_,bi)=>{
+          // A fixed flex BASIS, not `flex:1`: eight fit the visible width
+          // exactly however many bars there are, and the ninth is off the end
+          // rather than squeezing the other eight. The percentage resolves
+          // against the scrollport, which is what makes that work — the same
+          // trick the song lane's slots use.
           const isCur=bi===curBar, isPlaying=bi===playingBar;
           // Three states have to stay tellable apart on the same chip: the bar
           // you're EDITING (light fill), the bar that's SOUNDING (gold inset
@@ -6076,16 +6171,17 @@ export default function LoudLight(){
           // the cut", because there is no single cut any more.
           const past=(_barLens[bi]||0)===0;
           return(
-            <div key={bi} style={{position:"relative",minWidth:0,borderRadius:3,
+            <div key={bi} data-bar={bi} style={{position:"relative",borderRadius:3,
+              flex:"0 0 calc((100% - "+((BAR_COLS-1)*BAR_ROW_GAP)+"px) / "+BAR_COLS+")",
               display:"flex",alignItems:"center",justifyContent:"center",
               background:isCur?"rgba(255,206,130,0.62)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.17)":"rgba(186,208,230,0.07)",
               boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
               color:isCur?"rgba(10,20,32,0.8)":isLoop?C_LOOP:"rgba(178,199,219,0.45)",
               fontSize:9,fontWeight:700,lineHeight:1,pointerEvents:"none",
               transition:"background .08s"}}>
-              {/* Always numbered now. It used to be hidden past 8 bars,
-                  because past 8 bars a chip was too narrow to print a number
-                  in — which is the same reason the strip now wraps at 8. */}
+              {/* Always numbered. A chip is never narrower than an eighth of
+                  the strip, so the number always fits — past 8 bars it used to
+                  be hidden because there was nowhere to print it. */}
               {bi+1}
               {/* Underline, not a ring or a fill: it doesn't collide with the
                   other two states (editing fill, sounding ring). */}
@@ -6093,9 +6189,16 @@ export default function LoudLight(){
             </div>
           );
         })}
-        </div>
-        ))}
       </div>
+      {/* The track: drag it to pan, and read where you are in a 32-bar part.
+          Its height is part of the constant `_barStripPx`. */}
+      <div data-bartrack="1" onPointerDown={_barPanStart} aria-hidden="true"
+        style={{height:BAR_TRACK,borderRadius:BAR_TRACK/2,position:"relative",flexShrink:0,
+          background:"rgba(186,208,230,0.07)",cursor:"pointer",touchAction:"none"}}>
+        <div data-barthumb="1" style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
+          borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
+      </div>
+    </div>
   );
   // The + that used to sit at the end of this strip is GONE. It added a bar on
   // a tap and opened the pattern/bar sheet on a hold — and both of those live
@@ -11742,8 +11845,8 @@ const CSS=`
   /* Song-page bar dot: a quick swell on each quarter note. Restarted by giving
      the lit dot a key that changes every quarter, which remounts it. */
   @keyframes barpulse{0%{transform:scaleY(2.6);opacity:1}100%{transform:scaleY(1);opacity:.9}}
-  .songscroll{scrollbar-width:none;-ms-overflow-style:none}
-.songscroll::-webkit-scrollbar{display:none;width:0;height:0}
+  .songscroll,.barscroll{scrollbar-width:none;-ms-overflow-style:none}
+.songscroll::-webkit-scrollbar,.barscroll::-webkit-scrollbar{display:none;width:0;height:0}
 .barpulse{animation:barpulse .26s ease-out;}
   select option{background:#111;color:#fff;}
   .left-col button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
