@@ -5939,6 +5939,12 @@ export default function LoudLight(){
     // Picking a bar is a deliberate "work on this one": it drops FOLLOW and
     // takes LOOP with it. Dragging along the strip scrubs both, so with LOOP on
     // you can slide the loop from bar to bar without leaving the grid.
+    //
+    // But tapping the bar you are ALREADY on is not picking a bar — it is the
+    // gesture that opens STEP. Under FOLLOW the page is on the playing bar
+    // anyway, so that tap was clearing FOLLOW every single time you opened the
+    // step editor. A no-op move stays a no-op.
+    if(bi===barPageR.current)return;
     goToBar(bi);
   };
   // Tap or drag anywhere along the chips to move. The row is deliberately tall
@@ -5952,6 +5958,20 @@ export default function LoudLight(){
   // desktop (toggling back, since that page repeats the bar strip). Drums have
   // no step lanes, so STEP has always routed them to the bar sheet — which on
   // desktop is the bar-ops menu. The bar's OWN ops keep the hold, as before.
+  // LOOP and FOLLOW, for the mobile SHEETS. A bottom sheet covers the transport
+  // row, so opening the step editor put the two controls you use while playback
+  // is running out of reach — and the gesture that opens it was turning FOLLOW
+  // off on the way (see `_scrubTo`). Same components, same state, same handlers
+  // as the transport's: one body, several mounts.
+  const loopFollowPair=(sz)=>(
+    <div style={{display:"flex",gap:5,flexShrink:0}}>
+      <button title="Loop — tap for this bar, hold for the whole pattern"
+        style={Object.assign({},S.iconBtn,{width:sz,height:sz},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={Math.round(sz*0.5)}/></button>
+      <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
+        style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+        onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={Math.round(sz*0.5)}/></button>
+    </div>
+  );
   const _openStepFor=(bar,x,y)=>{
     if(IS_MOBILE){ const k=activeLayer==="drums"?"bars":"pattern";
       setActiveSheet(sh=>sh===k?null:k); return; }
@@ -11025,7 +11045,14 @@ export default function LoudLight(){
                       const grpLabel={fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600,marginBottom:5,display:"flex",alignItems:"center",gap:6};
                       return(
                         <div style={{marginBottom:12}}>
-                          <div style={grpLabel}>PATTERN</div>
+                          {/* Drums have no step lanes, so the STEP gesture routes
+                              them to THIS sheet — which covers the transport in
+                              exactly the same way. The pair comes here too. */}
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                            <div style={{...grpLabel,marginBottom:0}}>PATTERN</div>
+                            <div style={{flex:1}}/>
+                            {loopFollowPair(34)}
+                          </div>
                           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:12}}>
                             {ops.map(([l,f,d,danger])=>(
                               <button key={l} disabled={!!d} style={opBtn(d,danger)} onClick={d?undefined:f}>{l}</button>
@@ -11061,6 +11088,7 @@ export default function LoudLight(){
                         <div style={S.stepPageHdr}>
                           <div style={S.stepPagePat}>{activePat?.name||""}</div>
                           <div style={{flex:1}}/>
+                          {loopFollowPair(34)}
                         </div>
                         {/* The lanes show ONE bar at a time, and this sheet covers
                             the strip above the grid — so the chips come along, or
