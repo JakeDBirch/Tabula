@@ -242,6 +242,35 @@ const ROWKEYS_ON=false;
 // and receives playhead events. `LLCore` is core/host.js, inlined by build.mjs
 // before this script. Off by default while it is verified by ear; `?core=1`
 // on the URL switches it on for a session, `?core=0` forces it off.
+// ── DIAGNOSTIC MODE (`?diag=1`) ──────────────────────────────────────────
+// A read-only instrument for a fault that will not reproduce off the device.
+// It measures and displays; it NEVER changes what is scheduled or played, so
+// the VARY lesson (a flag may park a UI, never something that decides what
+// saved work sounds like) does not bite — there is nothing here to half-apply.
+// Off, every hook below is a single falsy test.
+//
+// What it watches, and why each one is here:
+//  • ticks/s — the scheduler interval runs at 40Hz. TWO schedulers would read
+//    ~80 and would schedule every step twice: the reported symptom exactly.
+//  • ctxs — more than one AudioContext means two engines sounding at once.
+//  • flams — the SAME drum voice retriggering within 15ms. That IS the symptom,
+//    counted at the engine, whatever caused it.
+//  • late / minHead — a hit scheduled at or behind `currentTime`.
+//  • now! — `src.start(t)` threw and the code fell back to `src.start()`, which
+//    plays IMMEDIATELY. A handful of those in one tick is a pile-up, and it is
+//    reachable whenever `t` is negative or not finite.
+const DIAG=(typeof location!=="undefined")&&/[?&]diag=1\b/.test(location.search);
+const DG={ticks:0,hits:0,late:0,minHead:9,flam:0,now:0,ctxs:0,last:{},t0:0,notes:[]};
+if(DIAG&&typeof window!=="undefined"){
+  for(const k of ["AudioContext","webkitAudioContext"]){
+    const C=window[k]; if(!C)continue;
+    window[k]=function(...a){DG.ctxs++;return new C(...a);};
+    window[k].prototype=C.prototype;
+  }
+}
+const dgNote=(m)=>{if(!DIAG)return;DG.notes.push(new Date().toISOString().slice(11,19)+" "+m);
+  if(DG.notes.length>60)DG.notes.shift();};
+
 // Scheduler catch-up tolerances — see the CATCH-UP GUARD in `scheduler`.
 // SCHED_LATE: how far past its onset a step may still be sounded. NOT a hair's
 // slop for float noise — 25ms, because the failure this guard exists to stop is
@@ -3025,6 +3054,17 @@ class DrumEngine{
   play(voice,t,vel,mix={},sample=null,patId=null){
     if(!this.ready)return;
     const ctx=this.ctx;
+    if(DIAG){
+      const head=t-ctx.currentTime;
+      DG.hits++; if(head<=0)DG.late++; if(head<DG.minHead)DG.minHead=head;
+      const prev=DG.last[voice];
+      // Same voice twice inside 15ms is a flam — the fault, counted where it
+      // actually happens rather than where I guessed it might.
+      if(prev!=null&&Math.abs(t-prev)<0.015){DG.flam++;
+        dgNote("FLAM "+voice+" gap "+Math.round((t-prev)*1000)+"ms head "+Math.round(head*1000)+"ms");}
+      DG.last[voice]=t;
+      if(!(t>=0)||!isFinite(t))dgNote("BAD ONSET "+voice+" t="+t);
+    }
     const v=Math.max(0.001,vel/127);
     // Hi-hat choke group: a closed hat OR a new open hat cuts any currently-
     // sounding open hat — so only ONE open hat ever rings (a real hi-hat is one
@@ -3087,7 +3127,9 @@ class DrumEngine{
         }catch(e){}
         endAt=t+gateDur+0.01;
       }
-      try{src.start(t);}catch(e){src.start();}
+      // start(t) throws on a negative or non-finite t, and the fallback plays
+      // the sample IMMEDIATELY — several of those in one tick land together.
+      try{src.start(t);}catch(e){if(DIAG){DG.now++;dgNote("start("+t+") threw on "+voice+" → played NOW");}src.start();}
       try{src.stop(endAt);}catch(e){}
       // Track sample-based OH for choke too — gate-aware end time.
       if(voice==="OH")this.activeOH={g,endT:endAt};
@@ -7217,6 +7259,7 @@ export default function LoudLight(){
   const lastResumeTryR=useRef(0);
   const resumeAudioR=useRef(null);
   const scheduler=useCallback(()=>{
+    if(DIAG)DG.ticks++;
     if(!bell.current.ready)return;
     const ctx=bell.current.ctx;
     // The transport's own watchdog. A context the OS interrupted just FREEZES
@@ -7622,6 +7665,50 @@ export default function LoudLight(){
   // The shell calls this after it has re-activated the AVAudioSession, which is
   // the half of the handshake a web page cannot do for itself.
   useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
+  // ── DIAGNOSTIC OVERLAY (`?diag=1`) ──────────────────────────────────────
+  // Built with plain DOM and written by an interval, NOT React state: an
+  // instrument that re-renders the app four times a second would perturb the
+  // very thing it is measuring (main-thread stalls), which would make its own
+  // readings worse the more closely you watched. Tap it to copy the report.
+  useEffect(()=>{
+    if(!DIAG)return;
+    const box=document.createElement("div");
+    box.setAttribute("data-diag","1");
+    box.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;padding:5px 8px;"
+      +"font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre;color:#ffd28a;"
+      +"background:rgba(6,14,22,0.92);border-bottom:1px solid rgba(255,210,138,0.35);"
+      +"-webkit-user-select:none;user-select:none;cursor:pointer;max-height:42vh;overflow:auto";
+    document.body.appendChild(box);
+    let prevTicks=0,prevHits=0,worstFlam=0,worstNow=0,worstLate=0;
+    const t=setInterval(()=>{
+      const ctx=(bell.current&&bell.current.ctx)||null;
+      // The interval is 500ms, so a raw delta is per HALF second. Scale it, or
+      // the "~40 expected" reference on screen is off by two and the reader
+      // concludes the scheduler is running at half rate.
+      const tps=(DG.ticks-prevTicks)*2; prevTicks=DG.ticks;
+      const hps=(DG.hits-prevHits)*2;   prevHits=DG.hits;
+      worstFlam=Math.max(worstFlam,DG.flam); worstNow=Math.max(worstNow,DG.now);
+      worstLate=Math.max(worstLate,DG.late);
+      const head=DG.minHead>8?"-":Math.round(DG.minHead*1000)+"ms";
+      box.textContent=
+        "BUILD "+BUILD_ID+"   engine "+(CORE_ON?"CORE":"JS")+"\n"
+        +"ctx "+(ctx?ctx.state+" "+ctx.sampleRate+"Hz":"none")+"   AudioContexts "+DG.ctxs+"\n"
+        +"sched "+tps+"/s (expect ~40; ~80 = TWO schedulers)\n"
+        +"drum hits "+hps+"/s   total "+DG.hits+"\n"
+        +"FLAMS "+DG.flam+"   played-NOW "+DG.now+"   late "+DG.late+"   min headroom "+head+"\n"
+        +(DG.notes.length?("\n"+DG.notes.slice(-8).join("\n")):"\n(no faults recorded yet)")
+        +"\n\n[tap to copy]";
+    },500);
+    box.addEventListener("click",()=>{
+      const txt=box.textContent.replace("[tap to copy]","")+"\n--- full log ---\n"+DG.notes.join("\n");
+      const done=()=>{const o=box.style.background;box.style.background="rgba(40,90,40,0.95)";
+        setTimeout(()=>{box.style.background=o;},400);};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,done);
+      else{const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);
+           ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();done();}
+    });
+    return()=>{clearInterval(t);box.remove();};
+  },[]);
   // ── Lock-screen / Control-Centre transport (iOS shell) ──────────────────
   // The shell owns MPRemoteCommandCenter and calls in here; the PAGE keeps the
   // transport, because everything that can refuse a play — an export in flight,

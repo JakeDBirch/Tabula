@@ -429,6 +429,27 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   hold. A wobble under the 6px threshold does not cancel it; only a real drag
   does. Three gestures on one element — tap, hold, drag — and all three are
   tested.
+- **`?diag=1` is a read-only instrument for faults that will not reproduce off
+  the device.** It measures and displays; it never changes what is scheduled or
+  played, which is why a flag is safe here in a way it was not for VARY — there
+  is nothing to half-apply. Off, every hook is one falsy test. On, a plain-DOM
+  overlay (written by an interval, **not** React state — an instrument that
+  re-rendered the app four times a second would worsen the main-thread stalls it
+  exists to measure) reports: the BUILD stamp, which engine is live, the
+  AudioContext state/rate, **AudioContexts created** (>1 = two engines
+  sounding), **scheduler ticks/s** (~40 is one scheduler, ~80 would be two,
+  scheduling every step twice), drum hits/s, **FLAMS** (the same voice
+  retriggering inside 15ms — the fault itself, counted at the engine rather than
+  inferred), **played-NOW** (`src.start(t)` threw and the code fell back to
+  `src.start()`, which plays immediately — a real pile-up path in the sample
+  branch, reachable on a negative or non-finite onset), late count and minimum
+  headroom, plus a timestamped log of the last faults. Tap it to copy the
+  report. `_diag.mjs` asserts it reads correctly, detects the fault, and is
+  entirely absent and inert without the flag.
+  - It exists because eight hypotheses were measured and eliminated against
+    fixtures built here, and the fault still reproduces only on Jake's phone.
+    When that happens, **stop hypothesising and ship an instrument** — the next
+    round is then data from the device instead of another guess.
 - **A LOOKAHEAD SCHEDULER MUST NEVER SCHEDULE INTO THE PAST.** The part loops
   ran `while(lf.nextAt < ctx.currentTime + LOOKAHEAD)` with no catch-up guard.
   If the main thread stalls — a big render, a GC pause, iOS handing the audio
