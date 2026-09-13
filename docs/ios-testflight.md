@@ -296,6 +296,18 @@ they are to bite:
    is doing. `UIBackgroundModes: audio` is declared and is now used; if
    background playback does NOT work, that is a bug to fix, not a key to
    remove.
+   **Lock-screen transport controls.** `NowPlayingController` registers
+   play / pause / toggle / stop with MPRemoteCommandCenter and publishes a Now
+   Playing entry (the selected pattern's name, the app icon). Lock the screen
+   while a song runs: you should get a transport with no scrubber, and pressing
+   pause there should actually stop the sequencer, not just the display.
+   **Expect this to be the half that doesn't work first time**, for a reason
+   that is not a bug: the session is `.playback` **with `.mixWithOthers`**, and
+   a mixable app is a secondary audio source that iOS does not generally make
+   the Now Playing app. If no controls appear, flip
+   `WebAppViewController.exclusiveAudio` to `true` and try again — that drops
+   the mix option, so Loud Light interrupts other audio instead of playing over
+   it. You cannot have both; pick the one you'd rather live with.
    **Ring/silent switch:** with the `.playback` session the sequencer should
    keep sounding on silent; this is now the shell's own engine, so it should
    take.

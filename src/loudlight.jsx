@@ -3766,9 +3766,16 @@ export default function LoudLight(){
   const SYNTH_LAYERS = ["synth","lead"];
   // Switching layers is now just "look at a different part of the same
   // pattern" — no saving, no loading, nothing that can go out of sync.
+  // Switching part turns FOLLOW ON. The bar page is shared across layers but
+  // each part has its own length, so the page you land on is wherever you left
+  // it — routinely nowhere near what is sounding. Arriving on the playing bar
+  // is what "show me this part" means; you can switch it straight back off.
+  // Only a REAL layer change does it: tapping the layer you are on opens SOUND
+  // (see the tap-again rule) and must not touch the transport.
   const switchLayer = (newLayer)=>{
     if(newLayer===activeLayer)return;
     setActiveLayer(newLayer);
+    setFollowSeq(true);
   };
 
 
@@ -7567,6 +7574,40 @@ export default function LoudLight(){
   // The shell calls this after it has re-activated the AVAudioSession, which is
   // the half of the handshake a web page cannot do for itself.
   useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
+  // ── Lock-screen / Control-Centre transport (iOS shell) ──────────────────
+  // The shell owns MPRemoteCommandCenter and calls in here; the PAGE keeps the
+  // transport, because everything that can refuse a play — an export in flight,
+  // an audio session iOS has not handed back yet — lives on this side. State
+  // goes back the other way so the lock screen shows a play you started in the
+  // app, rather than a second copy of "is it playing" that can drift.
+  //
+  // Registered through a REF, not a closure: an effect with [] deps bakes in
+  // the first render's `startStop` (the same trap as every other empty-deps
+  // callback in here) and the lock-screen buttons would then act on whatever
+  // the session looked like at launch.
+  const startStopR=useRef(startStop); startStopR.current=startStop;
+  useEffect(()=>{
+    window.__LL_REMOTE=(cmd)=>{
+      if(exportingR.current)return;            // a bounce is not interruptible
+      const on=playingR.current;
+      if(cmd==="play"&&on)return;              // idempotent: the lock screen can
+      if((cmd==="pause"||cmd==="stop")&&!on)return; // repeat a command it thinks failed
+      startStopR.current();
+    };
+    return()=>{delete window.__LL_REMOTE;};
+  },[]);
+  // Only the TITLE, not the pattern object — `patterns` gets a new identity on
+  // every grid edit, and a postMessage per note is noise the shell has to
+  // filter. The string changes when the name does, which is when it matters.
+  const _npTitle=useMemo(()=>{
+    const p=(patterns||[]).find(x=>x.id===activePatternId);
+    return (p&&p.name)||"Loud Light";
+  },[patterns,activePatternId]);
+  useEffect(()=>{
+    const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.transport;
+    if(!h)return;
+    try{h.postMessage({playing:!!playing,title:_npTitle});}catch(e){}
+  },[playing,_npTitle]);
   useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
     const onVisible=async()=>{

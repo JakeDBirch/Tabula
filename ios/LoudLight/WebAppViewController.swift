@@ -13,6 +13,22 @@ final class WebAppViewController: UIViewController {
     /// The DSP core in AVAudioEngine. Created after the audio session is
     /// configured, because it reads the session's sample rate at init.
     private var coreHost: CoreAudioHost!
+    /// Lock screen / Control Centre transport. Commands go to the page; the
+    /// page posts its state back over the `transport` handler.
+    private let nowPlaying = NowPlayingController()
+
+    /// Whether Loud Light takes the audio route for itself.
+    ///
+    /// `false` (the default) keeps `.mixWithOthers`, so the app plays OVER
+    /// whatever else is running and you can jam along with a reference track.
+    /// The cost is the lock screen: a mixable app is a secondary audio source
+    /// and iOS does not generally make it the Now Playing app, so the transport
+    /// registered in `NowPlayingController` may never appear.
+    ///
+    /// `true` drops the mix option — Loud Light interrupts other audio and owns
+    /// the lock screen. Flip it, run on a device, and keep whichever you prefer;
+    /// there is no configuration that gives both.
+    private static let exclusiveAudio = false
 
     /// Shown instead of a white screen when the payload fails to load. A blank
     /// launch on a device you can't attach a debugger to is indistinguishable
@@ -37,6 +53,8 @@ final class WebAppViewController: UIViewController {
         coreHost = CoreAudioHost()
         buildWebView()
         coreHost.webView = webView
+        nowPlaying.webView = webView
+        nowPlaying.activate()
         webView.load(URLRequest(url: BundleSchemeHandler.indexURL))
 
         // The audio session is deactivated out from under us by interruptions
@@ -93,6 +111,9 @@ final class WebAppViewController: UIViewController {
 
         let controller = WKUserContentController()
         controller.add(self, name: "saveFile")
+        // The page reports transport state here so the lock screen shows what
+        // is actually happening — including a play the user started in the app.
+        controller.add(self, name: "transport")
         // The page detects this handler and routes its audio to the core in
         // AVAudioEngine instead of an AudioContext — see core/host.js.
         coreHost.attach(to: controller)
@@ -169,7 +190,8 @@ final class WebAppViewController: UIViewController {
             // .mixWithOthers so Loud Light plays over whatever is already running
             // instead of stopping it — you should be able to jam along with a
             // reference track. Drop the option to make Loud Light exclusive.
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            let options: AVAudioSession.CategoryOptions = Self.exclusiveAudio ? [] : [.mixWithOthers]
+            try session.setCategory(.playback, mode: .default, options: options)
             try session.setActive(true)
         } catch {
             // Not fatal: audio still routes through WebKit's own session. Log so
@@ -280,6 +302,12 @@ extension WebAppViewController: WKScriptMessageHandler {
     /// equivalent: Save to Files, AirDrop it to a Mac, mail it to yourself.
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
+        if message.name == "transport" {
+            let body = message.body as? [String: Any]
+            nowPlaying.update(playing: (body?["playing"] as? Bool) ?? false,
+                              title: body?["title"] as? String)
+            return
+        }
         guard message.name == "saveFile",
               let body = message.body as? [String: Any],
               let name = body["name"] as? String,

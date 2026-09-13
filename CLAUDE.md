@@ -230,6 +230,13 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     move** that killed FOLLOW every single time you opened STEP. `_scrubTo`
     returns early when the bar does not change. Picking a *different* bar still
     clears it; `_stepsheet.mjs` asserts both halves.
+- **Switching PART turns FOLLOW on.** The bar page is shared across layers but
+  each part has its own length, so the page you land on is wherever you left it
+  — routinely nowhere near what is sounding. Arriving on the playing bar is what
+  "show me this part" means, and it is one tap to switch back off. Only a REAL
+  layer change does it (`switchLayer`): tapping the layer you are already on
+  opens SOUND under the tap-again rule and must not touch the transport.
+  `_layerfollow.mjs` asserts both halves on desktop, portrait and landscape.
 - **Page-follow rides the EXISTING `followSeq`** (the transport's FOLLOW), not a toggle of its own — FOLLOW already means "keep the editor on what's playing" and the visible bar is the finer grain of that. A separate `barFollow` was tried and rejected. Picking a bar from the chips clears FOLLOW, as does a grid edit: choosing a bar while the playhead is dragging the page is a contradiction, and the chips read as doing nothing if the page snaps straight back.
 - **Two mobile sheets, not one.** `activeSheet==="bars"` holds the pattern ops + bar ops; `activeSheet==="pattern"` holds the step lanes, and is opened by **tapping the bar you are already on** — there is no STEP chip any more. Drums have no step lanes, so that gesture routes to `"bars"` there, which is now the only way in: the `"bars"` sheet lost its opener with the strip's `+`, and everything on it that a synth part needs is in the bar chip's hold menu (`＋ BAR`, `⧉ DUP`, `×2`, `DELETE BAR`, and the content ops) or the pattern chip's (`DUP`, `DEL`). Sheet openers must be `onClick`, never `onPointerDown` — the backdrop mounts under the finger and the same tap's trailing click dismisses the sheet instantly. In render, `c` is the view column and `ac = barOff+c` is the data column. In the pointer handlers, `synthBarOffR()` / `drumBarOffR()` convert a hit-tested view column to absolute — they read live refs so the `[]`-dep useCallbacks don't bake in a stale page. **Paged, not scrolled**, deliberately: a scrolling grid needs a parent `overflow-x`, which is the iOS gesture-interception trap below.
 - **Bar-scoped ops.** RAND / CLR / CPY / PST / MUT8, the STEP-lane RST/RAND and the **two-finger shift** all act on the **visible bar**, not the whole pattern (`sliceCols`/`spliceCols`/`sliceFlat`/`spliceFlat`). DUP/DEL stay pattern-level and must carry `bars`. `⧉` (duplicate bar) *inserts* after the visible bar — it opens a gap with `openBarGap` and slides later bars right; overwriting the next bar instead is a bug that was caught once already. It must go through `setPatterns` and insert into **all three parts**: doing it through a per-layer view makes `mergeLayer` resize the other two, which appends a blank bar at the END rather than inserting one, and the parts slide out of alignment.
@@ -717,6 +724,33 @@ iPad from Xcode, and the TestFlight workflow went green on its first run
 (2026-09-08): payload built on Linux, then archive, sign and upload to App Store
 Connect from a `macos-26` runner in about 3½ minutes. So the whole chain is
 proven — no Mac needed for a build from here.
+
+**Lock-screen transport** (`ios/LoudLight/NowPlayingController.swift`).
+MPRemoteCommandCenter play / pause / toggle / stop, plus a Now Playing entry
+carrying the selected pattern's name and the app icon. **The page keeps the
+transport** — everything that can refuse a play (an export in flight, a session
+iOS has not handed back) lives on the web side — so a command becomes a call to
+`window.__LL_REMOTE`, and the page posts its state back over a `transport`
+message handler. One direction each way, no second copy of "is it playing" to
+drift. Every other command (skip, seek, scrub) is explicitly **disabled**: a
+lock screen that draws a skip button doing nothing is worse than one that
+doesn't draw it. `isLiveStream` is set, because a looping sequencer has no
+duration to scrub. Verified headlessly (`_remote.mjs`) by shimming
+`window.webkit`, exactly as the MIDI download bridge was.
+
+Two things gate whether it actually appears, and only one of them is code:
+
+- **It needs audio that survives the lock**, i.e. the core in AVAudioEngine.
+  Over a WebKit `AudioContext` these controls would be a dead UI.
+- **It needs Loud Light to be the system's Now Playing app, and a
+  `.mixWithOthers` session generally is not eligible** — a mixable app is a
+  secondary source and iOS gives the lock screen to the primary one. So the
+  lock-screen transport and "play over a reference track" are, as far as I can
+  tell, mutually exclusive. `WebAppViewController.exclusiveAudio` is the
+  one-line switch and defaults to **false** (keep mixing, i.e. no behaviour
+  change). Flip it, run on a device, keep whichever you prefer — this is a
+  product decision, not a setting to guess at from here. **Unverified on
+  hardware**, like everything else in the shell.
 
 **Background audio does not work — with Web Audio.** The shell now hosts the
 DSP core in AVAudioEngine (`CoreAudioHost`), which is not Web Audio, and the

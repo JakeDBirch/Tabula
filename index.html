@@ -1115,7 +1115,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-13 03:53Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-13 16:53Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -1857,7 +1857,13 @@ var drumPats=useMemo(function(){return layerLib(patterns,"drums");},[patterns]);
 // layer (see fillLayerParams + load paths).
 var activeLayerR=useRef("synth");useEffect(function(){activeLayerR.current=activeLayer;},[activeLayer]);var SYNTH_LAYERS=["synth","lead"];// Switching layers is now just "look at a different part of the same
 // pattern" — no saving, no loading, nothing that can go out of sync.
-var switchLayer=function switchLayer(newLayer){if(newLayer===activeLayer)return;setActiveLayer(newLayer);};// ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
+// Switching part turns FOLLOW ON. The bar page is shared across layers but
+// each part has its own length, so the page you land on is wherever you left
+// it — routinely nowhere near what is sounding. Arriving on the playing bar
+// is what "show me this part" means; you can switch it straight back off.
+// Only a REAL layer change does it: tapping the layer you are on opens SOUND
+// (see the tap-again rule) and must not touch the transport.
+var switchLayer=function switchLayer(newLayer){if(newLayer===activeLayer)return;setActiveLayer(newLayer);setFollowSeq(true);};// ── Song matrix (Phase 1: data + view + editing only; not yet wired to playback)
 // 16×16 grid: 4 row-groups of 4 layer-rows each. Bars 1-16 in top group, 17-32 next, etc.
 // Each cell = pattern ID for that layer at that bar, or null = silence.
 // songMode — the playback intent — is DERIVED now (see `songSeq` below), not a
@@ -3023,7 +3029,24 @@ var audioCtxs=useCallback(function(){return[bell.current&&bell.current.ctx,drumE
 // leaving a transport that looks like it is playing in silence.
 if(!audioStalledR.current){audioStalledR.current=true;setAudioStalled(true);}return _context37.a(2,false);}},_callee36);})),[]);// The shell calls this after it has re-activated the AVAudioSession, which is
 // the half of the handshake a web page cannot do for itself.
-useEffect(function(){window.__LL_RESUME_AUDIO=function(){resumeAudio();};return function(){delete window.__LL_RESUME_AUDIO;};},[]);useEffect(function(){resumeAudioR.current=resumeAudio;},[resumeAudio]);useEffect(function(){var onVisible=/*#__PURE__*/function(){var _ref64=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee37(){return _regenerator().w(function(_context38){while(1)switch(_context38.n){case 0:if(!(document.visibilityState!=="visible")){_context38.n=1;break;}return _context38.a(2);case 1:_context38.n=2;return resumeAudio();case 2:if(playingR.current)requestWakeLock();case 3:return _context38.a(2);}},_callee37);}));return function onVisible(){return _ref64.apply(this,arguments);};}();// pageshow fires on the way back from the bfcache; focus is the one that
+useEffect(function(){window.__LL_RESUME_AUDIO=function(){resumeAudio();};return function(){delete window.__LL_RESUME_AUDIO;};},[]);// ── Lock-screen / Control-Centre transport (iOS shell) ──────────────────
+// The shell owns MPRemoteCommandCenter and calls in here; the PAGE keeps the
+// transport, because everything that can refuse a play — an export in flight,
+// an audio session iOS has not handed back yet — lives on this side. State
+// goes back the other way so the lock screen shows a play you started in the
+// app, rather than a second copy of "is it playing" that can drift.
+//
+// Registered through a REF, not a closure: an effect with [] deps bakes in
+// the first render's `startStop` (the same trap as every other empty-deps
+// callback in here) and the lock-screen buttons would then act on whatever
+// the session looked like at launch.
+var startStopR=useRef(_startStop);startStopR.current=_startStop;useEffect(function(){window.__LL_REMOTE=function(cmd){if(exportingR.current)return;// a bounce is not interruptible
+var on=playingR.current;if(cmd==="play"&&on)return;// idempotent: the lock screen can
+if((cmd==="pause"||cmd==="stop")&&!on)return;// repeat a command it thinks failed
+startStopR.current();};return function(){delete window.__LL_REMOTE;};},[]);// Only the TITLE, not the pattern object — `patterns` gets a new identity on
+// every grid edit, and a postMessage per note is noise the shell has to
+// filter. The string changes when the name does, which is when it matters.
+var _npTitle=useMemo(function(){var p=(patterns||[]).find(function(x){return x.id===activePatternId;});return p&&p.name||"Loud Light";},[patterns,activePatternId]);useEffect(function(){var h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.transport;if(!h)return;try{h.postMessage({playing:!!playing,title:_npTitle});}catch(e){}},[playing,_npTitle]);useEffect(function(){resumeAudioR.current=resumeAudio;},[resumeAudio]);useEffect(function(){var onVisible=/*#__PURE__*/function(){var _ref64=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee37(){return _regenerator().w(function(_context38){while(1)switch(_context38.n){case 0:if(!(document.visibilityState!=="visible")){_context38.n=1;break;}return _context38.a(2);case 1:_context38.n=2;return resumeAudio();case 2:if(playingR.current)requestWakeLock();case 3:return _context38.a(2);}},_callee37);}));return function onVisible(){return _ref64.apply(this,arguments);};}();// pageshow fires on the way back from the bfcache; focus is the one that
 // reliably fires in a WKWebView app switch, where visibilitychange does not
 // always. Cheap to over-subscribe — resumeAudio is a no-op when running.
 var onPageShow=function onPageShow(){resumeAudio();};var onFocus=function onFocus(){resumeAudio();};document.addEventListener("visibilitychange",onVisible);window.addEventListener("pageshow",onPageShow);window.addEventListener("focus",onFocus);// The context itself announces the interruption. This is the signal that
