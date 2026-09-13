@@ -429,6 +429,53 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   hold. A wobble under the 6px threshold does not cancel it; only a real drag
   does. Three gestures on one element — tap, hold, drag — and all three are
   tested.
+- **A LOOKAHEAD SCHEDULER MUST NEVER SCHEDULE INTO THE PAST.** The part loops
+  ran `while(lf.nextAt < ctx.currentTime + LOOKAHEAD)` with no catch-up guard.
+  If the main thread stalls — a big render, a GC pause, iOS handing the audio
+  session back — the context clock keeps running while the loop does not, so
+  every step missed during the stall is still sitting in front of the cursor.
+  The loop then scheduled them all with an onset that had already gone, and
+  **Web Audio fires a past-dated source immediately**, so they all landed at
+  once. Measured on the pre-fix build: a 1.2s stall put 13 drum hits up to
+  968ms in the past and produced 7 **same-voice flams** — the same drum
+  retriggering within 15ms. Reported, exactly, as "multiple samples firing
+  right around the same time… a digital clipping clicky flamming vibe", and it
+  made the app nearly unusable. The drums carry it because they are transients;
+  the synth just smears.
+  - The fix is two-sided, because small and large lags want opposite treatment.
+    A **small** lag is absorbed by not sounding a step that is more than
+    `SCHED_LATE` past its onset — the cursor still advances, so position,
+    polymeter and the song are untouched. `SCHED_LATE` is **25ms, not a hair's
+    slop**, and that matters: the lookahead is 100ms, so a stall overruns it by
+    only a little at first, and a 1ms tolerance would drop a note that was a
+    mere 20ms late — trading the flam for a hole, which is the more audible
+    fault of the two. It is capped at HALF the step at the call site, and that
+    cap is what makes a flam impossible **by construction**: at most one late
+    step per voice can get through, so there is never a second to flam against.
+    A **gross** lag would
+    mean walking every missed step, thousands of them after a locked screen, so
+    past `SCHED_RESYNC` (0.25s) the clocks are moved forward **bodily, every
+    cursor by the same amount**, which keeps each part's phase relative to the
+    master.
+  - **The core never had it, and could not.** `ll_render` advances `G.frame` by
+    exactly the frames it renders — it is sample-driven, not wall-clock driven,
+    so it cannot fall behind. That is a real argument for `CORE_DEFAULT`, and it
+    means `?core=1` is a valid instant workaround on the web.
+  - **The oracle could not have caught this** and did not: there is no stall in
+    it, so both engines agree. `_burst.mjs` is the shape that does — stall the
+    main thread deliberately, then assert nothing is scheduled into the past and
+    no voice flams against itself. It fails on the pre-fix build at 400ms, 1.2s
+    and 3s, and passes after. Same family as the loop-wrap silence: **a
+    behavioural test that asserts what you HEAR is what catches the class the
+    oracle structurally cannot.**
+  - It also cost a long hunt, worth not repeating. Seven hypotheses were
+    measured and eliminated first — the shared master limiter, drum strips, FX
+    nodes, the drum mixer, sample-vs-synth, note density, project size, song and
+    pattern position, and a four-minute soak — all against fixtures built from
+    saved state, all negative, because **none of them stalled the main thread**.
+    What broke it open was asking what the fault actually SOUNDED like and what
+    cured it. "Multiple samples at once" named the mechanism in one sentence.
+    Ask that first.
 - **`deleteBarAt(bar)` deletes THAT bar; `removeBar` (−BAR) shrinks from the
   end.** Both are wanted and they are not the same op — a menu hanging off a
   particular chip has to be positional or its label is a lie. `deleteBarAt`

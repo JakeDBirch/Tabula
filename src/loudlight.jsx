@@ -242,6 +242,20 @@ const ROWKEYS_ON=false;
 // and receives playhead events. `LLCore` is core/host.js, inlined by build.mjs
 // before this script. Off by default while it is verified by ear; `?core=1`
 // on the URL switches it on for a session, `?core=0` forces it off.
+// Scheduler catch-up tolerances — see the CATCH-UP GUARD in `scheduler`.
+// SCHED_LATE: how far past its onset a step may still be sounded. NOT a hair's
+// slop for float noise — 25ms, because the failure this guard exists to stop is
+// SEVERAL steps landing together, and a SINGLE step 20ms late is inaudible as
+// lateness while a dropped kick is very audible indeed. The lookahead is 100ms,
+// so a stall only overruns it by a little at first: with a 1ms tolerance a
+// 120ms stall would drop a note that was a mere 20ms late, trading the flam for
+// a hole. At the call site this is additionally capped at HALF the step, which
+// is what makes a flam impossible by construction: at most one late step per
+// voice can ever get through, so there is never a second to flam against.
+// SCHED_RESYNC: past this much lag, stop walking the missed steps one by one
+// and move every clock forward together instead.
+const SCHED_LATE=0.025;
+const SCHED_RESYNC=0.25;
 const CORE_DEFAULT=false;
 // Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
 // the only audio that survives the screen locking), so there it is always on.
@@ -7225,6 +7239,34 @@ export default function LoudLight(){
     // on this clock — see playSynthLayerStep / playDrumStep call sites below.
     const absStepDur=60/bpmR.current/4;
 
+    // ── CATCH-UP GUARD — a lookahead scheduler must never schedule into the
+    // PAST. If the main thread stalls (a big render, a GC pause, iOS handing
+    // the audio session back) the context clock keeps running while this loop
+    // does not, so every step missed during the stall is still sitting in front
+    // of each cursor. The loops below would then schedule them all with an
+    // onset that has already gone — and Web Audio fires a past-dated source
+    // IMMEDIATELY, so they all land at once. A burst of overlapping one-shots
+    // sums into a click, which is how it was reported: "multiple samples firing
+    // right around the same time… a digital clipping clicky flamming vibe". The
+    // drums carry it because they are transients; the synth just smears.
+    //
+    // Two halves, because small and large lags want opposite treatment:
+    //  • A SMALL lag is absorbed by simply NOT SOUNDING a step whose onset has
+    //    already passed (see SCHED_LATE below). The cursor still advances, so
+    //    position, polymeter and the song are untouched — you lose the notes
+    //    that were already too late to play, which is the only honest thing to
+    //    do with them, instead of firing them all on top of each other.
+    //  • A GROSS lag would mean iterating every missed step — thousands of them
+    //    after a locked screen — which is its own freeze. So the clocks are
+    //    moved forward bodily, every cursor by the SAME amount, which keeps
+    //    each part's phase relative to the master intact.
+    const _now=ctx.currentTime;
+    const _lag=_now-nextNoteR.current;
+    if(_lag>SCHED_RESYNC){
+      nextNoteR.current+=_lag;
+      for(const l of PART_LAYERS){const lf=freeR.current[l];if(lf)lf.nextAt+=_lag;}
+    }
+
     // LOOP is a scope, not a switch: 1 loops one BAR, 2 loops the whole
     // PATTERN. `inLoop` is "LOOP is on at all" — it pins the pattern and holds
     // the song's place, which both scopes want. `barLock` is the extra pin onto
@@ -7344,7 +7386,13 @@ export default function LoudLight(){
         // 1/3 of a step late (full triplet); swing=0 ⇒ dead straight.
         const sw=swingR.current||0;
         const playAt=(sw>0&&(s%2===1))?at+(sw/100)*(layerStepDur/3):at;
-        if(isLayerAudibleR.current(layer)){
+        // Too late to sound → drop it rather than let Web Audio fire it now.
+        // See the catch-up guard above. The cursor still advances below, so
+        // position and polymeter are untouched. Capped at half a step so two
+        // hits of the same voice can never both get through and flam.
+        const lateTol=Math.min(SCHED_LATE,layerStepDur*0.5);
+        const onTime=playAt>=ctx.currentTime-lateTol;
+        if(onTime&&isLayerAudibleR.current(layer)){
           if(layer==="drums")playDrumStep(pat,s,playAt,layerStepDur);
           else playSynthLayerStep(layer,pat,s,playAt,layerStepDur);
         }
