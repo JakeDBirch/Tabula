@@ -4438,7 +4438,7 @@ export default function LoudLight(){
     setPatterns([p0]);setActivePatId(p0.id);
     // Seed the lead store with a fresh empty pat so switching to MONO after
     setActiveLayer("synth");
-    setLoopMode(false);setLoopBar(-1);setLoopPat(null);setVaryMode({synth:false,lead:false,drums:false});
+    setLoopMode(false);setLoopBar(-1);setLoopPat(null);
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongView(false);
