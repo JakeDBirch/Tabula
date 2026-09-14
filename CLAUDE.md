@@ -317,6 +317,53 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   - `data-playcol` marks the sounding column on the synth grid — a test hook,
     like `data-drumgrid`: the playhead is a background colour and there was
     otherwise no way to ask a harness where it is.
+  - **It shipped with a scheduler leak, and the shape of it is the lesson.**
+    `startPlaying` and `resumePlay` both **await** the engine bring-up, and
+    until that resolves `playingR` is still false — so a second tap walked
+    straight past the guard at the top and armed a SECOND interval. `tmrR`
+    holds one id, so the first was **orphaned**, and an orphan survives a pause
+    AND a stop, because those only clear the id they can see. Two schedulers
+    then advance the same cursors, each stealing steps from the other.
+    Reported as "I tried pause and it stalled, then afterwards it would only
+    play the first second or so then peter out" — the "afterwards" being the
+    orphan racing every later play. Measured with `?diag=1`: 40 ticks/s, 80
+    after one double-tap, 160 after four, and still 160 after a stop.
+    - **A guard before an `await` guards nothing.** `engagingR` is the lock that
+      makes those guards real, held across the whole async bring-up in a
+      `finally`. `_armScheduler` (clear, then set) is the belt to its braces —
+      either alone fixes the leak, which is why the negative control had to be
+      the code exactly as it shipped rather than one fix removed.
+    - **The play button had the same hole all along** and nobody hit it: you do
+      not double-tap PLAY. A pause button is a TOGGLE you tap repeatedly, which
+      is what made a latent race an everyday one. Adding a control can expose a
+      bug it did not cause.
+    - **A playhead test cannot see this** — the playhead keeps advancing, just
+      faster. `_pause.mjs` counts SCHEDULERS through `?diag=1`, which is the
+      instrument that already existed for exactly this readout.
+  - **Two things in the SHELL could kill audio for good, and a pause is what
+    tripped them.** Both are fixed; both were latent before the pause button.
+    - **The silent loop must not run natively.** It exists to keep WebKit's
+      audio session alive so a Web Audio context survives a lock. In the shell
+      there is no Web Audio to keep alive — the core is in AVAudioEngine — so
+      all it can do is churn WebKit's session against the app's, and since that
+      session stopped being `.mixWithOthers` a churn is a route change. Gated on
+      `CORE_NATIVE`, and a PAUSE never stops it anyway (see `_disengage(full)`).
+    - **`AVAudioEngine` stops itself on a configuration change** — a route
+      change, a call, the session being re-activated under it — and nothing
+      restarted it: `resume()` was only reachable from the foreground and
+      interruption paths. A live transport over a dead render block, which is
+      what "plays for a second and peters out, and stays dead until you
+      background the app" is. `CoreAudioHost` now observes
+      `.AVAudioEngineConfigurationChange`, **reconnects the source node** (a
+      configuration change tears the graph's connections down) and restarts —
+      plus a free watchdog on the 30Hz event timer, which asks `engine.isRunning`
+      directly rather than trusting a notification. The same argument as the JS
+      transport watchdogging its own AudioContext.
+  - **The lock screen gets three states, not two.** Held and stopped both report
+    `playing:false`; the page posts `paused` alongside it and
+    `NowPlayingController` maps them to `.playing` / `.paused` / `.stopped`, so
+    the lock screen stops offering to carry on with a performance that has been
+    rewound.
 
 - **LOOP is a HEADLAMP: each tap steps the window outward, then off.** Tap once
   and you loop the bar you are on; tap again within `LOOP_CHAIN_MS` (2s) and the

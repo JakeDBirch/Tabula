@@ -85,14 +85,27 @@ final class CoreAudioHost: NSObject {
         source = node
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleConfigChange(_:)),
+            name: .AVAudioEngineConfigurationChange,
+            object: engine
+        )
         resume()
         eventTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.drainEvents()
+            guard let self = self else { return }
+            // Free watchdog on a timer that has to tick anyway. Every lifecycle
+            // notification we listen for can be missed; an engine that is not
+            // running cannot be, because this asks it directly. Same argument
+            // as the JS transport watchdogging its own AudioContext.
+            if self.started && !self.engine.isRunning { self.resume() }
+            self.drainEvents()
         }
     }
 
     /// (Re)start the engine — after an interruption, on return to the
-    /// foreground. Idempotent; a running engine is left alone.
+    /// foreground, after a configuration change. Idempotent; a running engine is
+    /// left alone.
     func resume() {
         guard started, !engine.isRunning else { return }
         do {
@@ -100,6 +113,24 @@ final class CoreAudioHost: NSObject {
         } catch {
             NSLog("[LoudLight] core: engine start failed: %@", error.localizedDescription)
         }
+    }
+
+    /// AVAudioEngine STOPS ITSELF on a configuration change — a route change
+    /// (headphones in or out, a call, another app taking and giving back the
+    /// session, the audio session being re-activated under it). Nothing then
+    /// restarts it: `resume()` is only reached from the foreground and
+    /// interruption paths, so the app sits there with a live transport and a
+    /// dead render block. Heard as playback that runs for a second and peters
+    /// out, and it stays dead until you background the app and come back.
+    ///
+    /// Reconnecting the source node is required as well as restarting: a
+    /// configuration change tears the graph's connections down.
+    @objc private func handleConfigChange(_ note: Notification) {
+        NSLog("[LoudLight] core: engine configuration changed — rebuilding")
+        guard started, let node = source else { return }
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        resume()
     }
 
     // MARK: - Events back to the page

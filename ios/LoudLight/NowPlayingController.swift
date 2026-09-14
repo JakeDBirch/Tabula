@@ -34,6 +34,11 @@ final class NowPlayingController {
     /// them twice and the handler then runs twice per press.
     private var registered = false
     private var isPlaying = false
+    /// Held, as opposed to stopped. Both report "not playing", but the lock
+    /// screen should not offer to carry on with a performance that has been
+    /// rewound — `.paused` and `.stopped` are different states to iOS and the
+    /// page is the only thing that knows which one this is.
+    private var isPaused = false
     private var title = "Loud Light"
 
     // MARK: - Commands
@@ -86,8 +91,9 @@ final class NowPlayingController {
 
     // MARK: - State published by the page
 
-    func update(playing: Bool, title: String?) {
+    func update(playing: Bool, paused: Bool, title: String?) {
         isPlaying = playing
+        isPaused = paused
         if let t = title, !t.isEmpty { self.title = t }
         publish()
     }
@@ -106,7 +112,7 @@ final class NowPlayingController {
 
         let centre = MPNowPlayingInfoCenter.default()
         centre.nowPlayingInfo = info
-        centre.playbackState = isPlaying ? .playing : .paused
+        centre.playbackState = isPlaying ? .playing : (isPaused ? .paused : .stopped)
     }
 
     /// The app icon out of the web payload — the same file the home screen and

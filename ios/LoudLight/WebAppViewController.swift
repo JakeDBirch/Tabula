@@ -319,6 +319,7 @@ extension WebAppViewController: WKScriptMessageHandler {
         if message.name == "transport" {
             let body = message.body as? [String: Any]
             nowPlaying.update(playing: (body?["playing"] as? Bool) ?? false,
+                              paused: (body?["paused"] as? Bool) ?? false,
                               title: body?["title"] as? String)
             return
         }

@@ -7768,12 +7768,37 @@ export default function LoudLight(){
   // Everything a play needs that is not about POSITION. Shared by start and
   // resume so the two cannot drift — a resume that skipped the audio-session
   // work is silent on a phone that has been locked since you paused.
+  // ONE scheduler, by construction. `tmrR` holds a single id, so anything that
+  // starts an interval without clearing the last one ORPHANS it — and an orphan
+  // survives a pause AND a stop, because those only clear the id they can see.
+  // Two schedulers then advance the same cursors, each stealing steps from the
+  // other. Measured with ?diag=1: 40 ticks/s, 80 after one double-tap of the
+  // pause toggle, 160 after four, and it stays that way for every play
+  // afterwards. Everything that arms the scheduler goes through here.
+  const _armScheduler=()=>{
+    clearInterval(tmrR.current);
+    tmrR.current=setInterval(scheduler,25);
+  };
+  // The lock that makes the guards at the top of startPlaying / resumePlay mean
+  // anything. Both AWAIT `_engage`, and until that resolves `playingR` is still
+  // false — so a second tap walks straight past the guard into a second engage.
+  // The pause button is a toggle you tap repeatedly, which is exactly the
+  // gesture that lands in that window.
+  const engagingR=useRef(false);
   const _engage=async()=>{
     await startEngines();
     bell.current.stepDur=60/bpm/4*speedMult;
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
-    if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
-    if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
+    // The silent loop keeps WebKit's audio session alive so a Web Audio context
+    // survives a screen lock. In the SHELL there is no Web Audio to keep alive
+    // — the core runs in AVAudioEngine — so all it can do there is churn
+    // WebKit's own session against the app's, and since that session stopped
+    // being `.mixWithOthers` a churn is a route change, which stops
+    // AVAudioEngine. Don't create it at all natively.
+    if(!CORE_NATIVE){
+      if(!silentLoopR.current)silentLoopR.current=createSilentLoop();
+      if(silentLoopR.current){try{await silentLoopR.current.play();}catch(e){}}
+    }
     // Wake lock — prevent auto screen-off while playing
     await requestWakeLock();
     // MediaSession — lock screen transport controls + registers as audio app
@@ -7794,17 +7819,24 @@ export default function LoudLight(){
   };
   // Let go of the session housekeeping. Shared by stop and pause: a held
   // transport is not playing, so it must not hold the screen awake.
-  const _disengage=()=>{
+  // `full` = a real stop. A PAUSE leaves the silent loop alone, and that is not
+  // housekeeping: the loop is what holds WebKit's audio session open. Stopping
+  // it for a hold lets the session go, so the resume comes back to a frozen
+  // clock, and it takes the MEDIA SESSION with it — which is the lock-screen
+  // transport vanishing the moment you pause. A hold is meant to be brief: keep
+  // the session, drop the wake lock (nothing is sounding; let the screen
+  // sleep).
+  const _disengage=(full)=>{
     clearInterval(tmrR.current);
     if(CORE_ON)coreHost.stop();
     playingR.current=false;
     setPlaying(false);
-    if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
+    if(full&&silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
     releaseWakeLock();
     if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
   };
   const stopTransport=()=>{
-    _disengage();
+    _disengage(true);
     pausedR.current=false;setPaused(false);
     setStep(-1);setPlayId(null);setDrumStep(-1);
     setSongBar(-1);songBarR.current=-1;
@@ -7817,11 +7849,17 @@ export default function LoudLight(){
   // where you are is half of what a pause is for.
   const pauseTransport=()=>{
     if(!playingR.current)return;
-    try{pauseAtR.current=bell.current.ctx.currentTime;}catch(e){pauseAtR.current=0;}
-    _disengage();
+    // null, not 0, when there is no usable clock (with the core on, `bell` is a
+    // stand-in): 0 would make the resume shift every cursor by the whole age of
+    // the context — minutes into the future, and silence.
+    try{pauseAtR.current=bell.current.ctx.currentTime;}catch(e){pauseAtR.current=null;}
+    _disengage(false);
     pausedR.current=true;setPaused(true);
   };
   const startPlaying=async()=>{
+    if(engagingR.current)return;
+    engagingR.current=true;
+    try{
     await _engage();
     pausedR.current=false;setPaused(false);
     stepR.current=0;
@@ -7839,11 +7877,14 @@ export default function LoudLight(){
     nextNoteR.current=t0; // master clock for visual playhead + bar advance
     playingR.current=true;
     if(CORE_ON){ coreHost.play(); setPlaying(true); return; }
-    tmrR.current=setInterval(scheduler,25);setPlaying(true);
+    _armScheduler();setPlaying(true);
+    }finally{ engagingR.current=false; }
   };
   const resumePlay=async()=>{
-    if(playingR.current)return;
+    if(playingR.current||engagingR.current)return;
     if(!pausedR.current){ await startPlaying(); return; }
+    engagingR.current=true;
+    try{
     await _engage();
     // Shift every cursor by the length of the hold, so the gaps between steps
     // are what they were and the parts keep their phase against the master.
@@ -7858,14 +7899,15 @@ export default function LoudLight(){
     // every resume going down the "we fell behind" path, where a short hold
     // silently costs you the notes it spanned. Belt and braces, deliberately.
     let d=0;
-    try{ d=(bell.current.ctx.currentTime+0.05)-pauseAtR.current; }catch(e){ d=0; }
+    try{ d=pauseAtR.current==null?0:(bell.current.ctx.currentTime+0.05)-pauseAtR.current; }catch(e){ d=0; }
     if(!(d>0)||!isFinite(d))d=0.05;
     nextNoteR.current+=d;
     for(const layer of PART_LAYERS){ const lf=freeR.current[layer]; if(lf)lf.nextAt+=d; }
     pausedR.current=false;setPaused(false);
     playingR.current=true;
     if(CORE_ON){ coreHost.resumeTransport(); setPlaying(true); return; }
-    tmrR.current=setInterval(scheduler,25);setPlaying(true);
+    _armScheduler();setPlaying(true);
+    }finally{ engagingR.current=false; }
   };
   // The play button. Unchanged in meaning — play from the top, or stop and
   // rewind — which is why the MP3 bounce and every other caller still work.
@@ -7873,6 +7915,7 @@ export default function LoudLight(){
     // Read/write the LIVE ref (not the `playing` state closure) so rapid
     // programmatic start→stop calls (the MP3 bounce) resolve correctly within
     // one render. Button clicks are unaffected (state is settled there).
+    if(engagingR.current)return;
     if(playingR.current){ stopTransport(); return; }
     await startPlaying();
   };
@@ -7880,7 +7923,7 @@ export default function LoudLight(){
   // there is no position to hold, and a control that does nothing is better
   // dimmed than mysterious.
   const togglePause=async()=>{
-    if(exportingR.current)return;
+    if(exportingR.current||engagingR.current)return;
     if(playingR.current){ pauseTransport(); return; }
     if(pausedR.current){ await resumePlay(); }
   };
@@ -8012,8 +8055,8 @@ export default function LoudLight(){
   useEffect(()=>{
     const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.transport;
     if(!h)return;
-    try{h.postMessage({playing:!!playing,title:_npTitle});}catch(e){}
-  },[playing,_npTitle]);
+    try{h.postMessage({playing:!!playing,paused:!!paused,title:_npTitle});}catch(e){}
+  },[playing,paused,_npTitle]);
   // ── The lock screen or the mix — you cannot have both ───────────────────
   // A `.mixWithOthers` session is a SECONDARY audio source and iOS gives the
   // lock screen to the primary one, so the transport registered above simply
