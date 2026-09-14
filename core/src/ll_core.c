@@ -136,12 +136,24 @@ void ll_sample_commit(int voice,int kind,int nslots){
 }
 
 /* ── patterns: the wire format ──────────────────────────────────────────── */
+/* The scratch buffer takes its own region and NEVER comes out of the sample
+ * arena. ll_samples_clear rewinds that arena to zero so a kit can be replaced
+ * wholesale, and it has no way to invalidate a scratch pointer living inside
+ * it — so the next kit's frames were handed the very bytes G.scratch still
+ * pointed at, and the next pattern upload memcpy'd wire data straight into
+ * decoded drum audio. The kit then played back with pattern bytes smeared
+ * through it: clicks, buzz, and what sounds like several samples firing at
+ * once. Re-loading the kit rewrote the frames over the damage, which is how it
+ * was worked around on the device before it was understood.
+ * It aliased in both directions — a clear put samples on top of scratch, and a
+ * scratch GROWTH put scratch on top of samples — so moving it out is the fix
+ * rather than reordering anything. core/test/arena.c holds both directions. */
 uint8_t* ll_scratch(int bytes){
   if(bytes>G.scratchCap){
     int cap=bytes<(1<<16)?(1<<16):bytes;
-    uint8_t*s=(uint8_t*)arena_alloc((unsigned long)cap);   /* leaks the old one; rare */
+    uint8_t*s=(uint8_t*)arena_grow((unsigned long)cap);    /* NOT arena_alloc */
     if(!s)return 0;
-    G.scratch=s; G.scratchCap=cap;
+    G.scratch=s; G.scratchCap=cap;                         /* leaks the old one; rare */
   }
   return G.scratch;
 }
