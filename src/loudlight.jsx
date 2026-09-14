@@ -440,6 +440,34 @@ const DRUM_VOICES=[
   {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
+// ── DRUM ROW ORDER IS A DISPLAY CONCERN ONLY ─────────────────────────────
+// Kick at the BOTTOM, the way a drum machine's rows usually run. The tom group
+// reverses as a block but keeps its own order, so HI/MID/LO still read high to
+// low inside it.
+//
+// This is a display permutation and NOT a reorder of DRUM_VOICES, deliberately.
+// A row index IS the data index at every saved site — grid, vel, rat, motion
+// and the global drumMix are all positional — and it is ALSO the core's voice
+// index (`enum { LL_BD,LL_SD,LL_RM,… }` in ll.h is this list). Reordering the
+// array would therefore reinterpret every project ever saved AND send each row
+// to the wrong voice in the core, and would need a DRUM_ORDER_V bump, a new
+// historical table, a migration for the global mix, and a matching change in C.
+// Permuting only the render keeps every one of those correct by construction:
+// each rendered row still carries its own data index, so handlers, colours,
+// audio and saves never learn that the screen looks different.
+//
+// Voices missing from the list are appended rather than dropped — a new voice
+// must never become invisible because someone forgot to name it here.
+const DRUM_DISPLAY_KEYS=["CB","SH","CL","CY","OH","CH","HT","MT","LT","CP","RM","SD","BD"];
+const DRUM_DISPLAY=(function(){
+  const seen={},out=[];
+  for(const k of DRUM_DISPLAY_KEYS){
+    const i=DRUM_VOICES.findIndex(v=>v.key===k);
+    if(i>=0&&!seen[i]){seen[i]=1;out.push(i);}
+  }
+  for(let i=0;i<DRUM_VOICES.length;i++)if(!seen[i])out.push(i);
+  return out;
+})();
 // When a drum group is linked (linkHat / linkTom), its member channels collapse
 // to one shared color in BOTH the mixer and the sequencer — so e.g. closed+open
 // hat read as a single hi-hat, and the three toms read as one. Defeating a link
@@ -6422,7 +6450,7 @@ export default function LoudLight(){
   const drumRowKeys=!(ROWKEYS_ON&&rowKeysOpen)?null:(
     <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
       display:"flex",flexDirection:"column",gap:2,touchAction:"none"}}>
-      {DRUM_VOICES.map((voice,r)=>{
+      {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
         const lit=audRow===100+r;
         const dc=drumColor(r,linkHat,linkTom);
         return(
@@ -8789,7 +8817,14 @@ export default function LoudLight(){
     if(live){live.cancel();applyDrumShift(0,0,base);} // undo the paint; it already pushed history
     else pushHistory();                              // no paint in flight → own undo entry
     setShifting(true);
-    const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),Math.round((ev.clientY-sy)/ch),base);
+    // dRows is in DATA rows, and the grid is drawn in DRUM_DISPLAY order, which
+    // runs the other way — so a downward drag has to move DOWN the screen, not
+    // up. Negated rather than mapped through the permutation because the tom
+    // block keeps its own order: the display is not a rotation of the data, so
+    // a "rotate by one display row" is not expressible as a data rotate at all.
+    // This gets the direction right everywhere and is approximate only across
+    // the three toms.
+    const mv=ev=>applyDrumShift(Math.round((ev.clientX-sx)/cw),-Math.round((ev.clientY-sy)/ch),base);
     const up=()=>{
       document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);
       setShifting(false);
@@ -10476,7 +10511,7 @@ export default function LoudLight(){
                 {drumRowKeys}
                 <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
                   {lenEdgeDrums}
-                  {DRUM_VOICES.map((voice,r)=>{
+                  {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
                     <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
@@ -10960,7 +10995,7 @@ export default function LoudLight(){
           )}
 
           {/* ── PORTRAIT COLUMN ORDER ──────────────────────────────────────
-               Name, globals, song, patterns, transport, bar nav, grid.
+               Name, globals, transport, song, patterns, bar nav, grid.
                Everything that is not the grid is now ABOVE it, and the grid is
                last. The trade, stated plainly because it reverses an earlier
                one: the bar chips and the transport used to sit UNDER the grid
@@ -11023,26 +11058,7 @@ export default function LoudLight(){
           </div>
           )}
 
-          {/* 3. The song. A top-level row now rather than living inside the
-                 measured content area — which is why gridSizeCss no longer
-                 subtracts the lane: `--ch` has already had it taken out. */}
-          {SONG_STRIP&&!songPageOn&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0,display:"flex",flexDirection:"column"}}>
-            {songLane()}
-          </div>
-          )}
-
-          {/* 4. PATTERN CHIPS. A pattern is all three parts, so this is one
-                 selector for the whole app rather than the old per-layer
-                 pills. It sits here because switching pattern is a thing you
-                 do mid-edit; it used to mean going to SONG and coming back. */}
-          {!isLandscape&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0}}>
-            {patternChipsRow}
-          </div>
-          )}
-          {/* 5. Transport, with the layer buttons beside it. Below the pattern
-                 chips: you pick WHAT you are working on, then you drive it. */}
+          {/* 3. Transport, with the layer buttons beside it. */}
           {!isLandscape&&(
           <div style={{flexShrink:0}}>
             {/* Row 2: the layers AND the transport. They were two rows until
@@ -11082,6 +11098,24 @@ export default function LoudLight(){
             </div>
           </div>
           )}
+          {/* 4. The song. A top-level row now rather than living inside the
+                 measured content area — which is why gridSizeCss no longer
+                 subtracts the lane: `--ch` has already had it taken out. */}
+          {SONG_STRIP&&!songPageOn&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0,display:"flex",flexDirection:"column"}}>
+            {songLane()}
+          </div>
+          )}
+          {/* 5. PATTERN CHIPS. A pattern is all three parts, so this is one
+                 selector for the whole app rather than the old per-layer
+                 pills. It sits here because switching pattern is a thing you
+                 do mid-edit; it used to mean going to SONG and coming back. */}
+          {!isLandscape&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0}}>
+            {patternChipsRow}
+          </div>
+          )}
+
 
           {/* The portrait VARY PILL ROW was here, and it is gone. It was a
               full-width row above the grid — ~25px, which on an SE is the
@@ -11202,7 +11236,7 @@ export default function LoudLight(){
                       {drumRowKeys}
                       <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
                         {lenEdgeDrums}
-                        {DRUM_VOICES.map((voice,r)=>{
+                        {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
                           <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
