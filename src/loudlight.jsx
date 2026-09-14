@@ -4358,12 +4358,40 @@ export default function LoudLight(){
       : [row,...library];
     setLibrary(next);setSelDevId(pid);setNameDraft(nm);
     const ok=await storageSet("projects",JSON.stringify(next));
-    if(ok)showFlash("SAVED "+nm);
+    if(ok){showFlash("SAVED "+nm);markClean();}
     else{
       // Quota. Put the library back so the list matches what's on disk.
       setLibrary(library);
       showFlash("SAVE FAILED — DEVICE FULL","warn"); // recorded samples can be big
     }
+  };
+  // ── UNSAVED WORK, and the one-button save ────────────────────────────────
+  // `dirty` drives a visual cue on the SAVE chip. It is a REMINDER, not a
+  // guarantee: it is set by an effect over the project's CONTENT state rather
+  // than by comparing against the saved bytes, because a real comparison would
+  // mean packing the whole project on every keystroke.
+  //
+  // Two deliberate exclusions, both to keep it from crying wolf: `playing`,
+  // and the navigation/transport state (active layer, active pattern, LOOP)
+  // which the snapshot does carry but which nobody thinks of as work. A false
+  // NEGATIVE there is much cheaper than a badge that lights the moment you
+  // switch layer — this is a nudge to press save, and a nudge that is always on
+  // is not a nudge.
+  //
+  // The clean-hold window is the other imprecision worth naming: a load lands
+  // its state over more than one commit (the kit decodes asynchronously and
+  // `activeKit` is a content dep), so marking clean has to survive a moment
+  // rather than a single render.
+  const [dirty,setDirty]=useState(false);
+  const holdCleanR=useRef(0);
+  const markClean=(ms)=>{setDirty(false);holdCleanR.current=Date.now()+(ms||900);};
+  // SAVE, one tap, onto whatever project was last loaded or saved. With nothing
+  // picked it behaves exactly as the library's own SAVE AS does — makes a new
+  // project under the generated name — rather than doing nothing, which is what
+  // a disabled button here would amount to.
+  const quickSave=()=>{
+    const sel=library.find(p=>p.id===selDevId);
+    doSave(sel?sel.id:null,sel?sel.name:nameDraft);
   };
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   const doLoad=id=>{
@@ -4427,6 +4455,7 @@ export default function LoudLight(){
 
     setSelDevId(row.id);setNameDraft(row.name);
     showFlash("LOADED "+row.name);
+    markClean(2500);   // the kit decodes asynchronously — see markClean
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
     // doLoad so the previous kit's samples are cleared before the new fetch.
     // Legacy saves carry activeKit:"synth" (or nothing) which is no longer a
@@ -4535,7 +4564,7 @@ export default function LoudLight(){
     // Reload the default kit's samples rather than dropping to bare synth.
     if(DEFAULT_KIT!=="synth")loadKit(DEFAULT_KIT).catch(()=>{});
     else{setActiveKit("synth");}
-    showFlash("NEW PROJECT");
+    showFlash("NEW PROJECT");markClean(2500);
   };
   const newProject=()=>{
     const hasContent=pats.some(p=>p.grid.some(r=>r.some(c=>c)))||drumPats.some(p=>p.grid.some(r=>r.some(c=>c)));
@@ -4725,8 +4754,11 @@ export default function LoudLight(){
     // real wrapped height; then, where the song strip shows, the 6px gap below
     // the lane, the 2px above the strip, and the lane block — one row of slots
     // and its track, a fixed height now rather than a share of the column.
-    let h="var(--ch,100dvh) - "+(12+_barStripPx+(SONG_STRIP?8:0))+"px";
-    if(SONG_STRIP)h+=" - ("+_laneBlockCss(pad)+")";
+    // The song lane is a TOP-LEVEL row now, so it is outside the measured
+    // content area and must not be subtracted here — `--ch` has already had it
+    // taken out of it. Subtracting it again cost the grid the lane's height
+    // twice over.
+    const h="var(--ch,100dvh) - "+(12+_barStripPx)+"px";
     return "min(100%,calc(("+h+")"+(f===1?"":" / "+f.toFixed(4))+"))";
   };
   const curBar        = Math.max(0,Math.min(barCount-1,barPage));
@@ -6273,8 +6305,11 @@ export default function LoudLight(){
   // Horizontal row — desktop sidebar and mobile portrait. Wraps rather than
   // scrolls: 16 chips is the ceiling and a hidden chip is a chip you can't
   // reach, which is the whole complaint this row exists to fix.
+  // data-patrow marks it for the layout harnesses, the way data-grid and
+  // data-drumgrid mark the two grids — there was otherwise no way to measure
+  // where this row sits in the column.
   const patternChipsRow=(
-    <div style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
+    <div data-patrow="1" style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
         <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
           {...paletteChipProps(p,col)}
@@ -7133,6 +7168,8 @@ export default function LoudLight(){
         try{console.error("Loud Light: autosave restore failed —",e&&e.message,e);}catch(_){}
       }
       autosaveReadyR.current=true;
+      // A restored session is not unsaved WORK — it is where you left off.
+      markClean(2500);
     })();
   },[]);
   // Debounced LEAN persist (no samples → cheap, never janks). Skipped while
@@ -7148,6 +7185,15 @@ export default function LoudLight(){
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
   },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  // Unsaved-work flag. The autosave deps above minus `playing` and minus the
+  // navigation/transport state — see markClean for why those are left out.
+  useEffect(()=>{
+    if(!autosaveReadyR.current)return;
+    if(Date.now()<holdCleanR.current)return;
+    setDirty(true);
+  },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
+     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
+     trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
   // a stop, and never during playback / export / a share preview. A restore
@@ -10913,20 +10959,126 @@ export default function LoudLight(){
           </div>
           )}
 
-          {/* The portrait LAYER BAR used to be here, a full-width row of its
-              own at the top of the screen. As icons the three of them are
-              114px, so they fit beside the transport at the bottom — which is
-              where your thumb already is, and which takes the page from three
-              rows of buttons to two. */}
-          {/* ── PATTERN CHIPS — the top of the page now ──
-               A pattern is all three parts, so this is one selector for the
-               whole app rather than the old per-layer pills. It lives here
-               because switching pattern is a thing you do mid-edit; it used to
-               mean going to SONG and coming back. Hidden on the song page,
-               which has its own palette (and that one is also the drag source
-               for placing patterns into slots). */}
+          {/* ── PORTRAIT COLUMN ORDER ──────────────────────────────────────
+               Name, globals, song, transport, patterns, bar nav, grid.
+               Everything that is not the grid is now ABOVE it, and the grid is
+               last. The trade, stated plainly because it reverses an earlier
+               one: the bar chips and the transport used to sit UNDER the grid
+               precisely because the bottom of a phone is where your thumb is,
+               and the chips are dragged constantly. Putting the grid last
+               gives the thumb zone to the grid instead — which is the thing
+               you actually touch most — and makes the chrome a reach. Bar nav
+               stays adjacent to the grid, so the control that is dragged most
+               is the one that stays closest to it.
+               This costs the grid nothing: it is WIDTH-bound in portrait
+               (370px of a 390px phone), so the rows above it are spending
+               height the grid could never have used. */}
+
+          {/* 2. Globals — TEMPO / FX / PROJECT. */}
           {!isLandscape&&(
-          <div style={{padding:"6px 12px 6px",flexShrink:0}}>
+          <div style={{flexShrink:0}}>
+            <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
+              {/* TEMPO chip */}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+                aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
+                data-tempochip={tempoField} {...tempoChipProps}>
+                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
+              </button>
+              {/* The ▦ SONG chip is GONE. The song lane is two rows above the
+                   grid on this very page: a chip that navigates to a copy of
+                   something already on screen is a door to the room you are
+                   standing in, and it was also the only thing switching the
+                   playback intent, which is derived now. Three chips, each
+                   wider for it. */}
+              {/* FX chip — global reverb/delay design */}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
+                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.4)"}}>FX</span>
+              </button>
+              {/* SAVE — one tap onto the project you last loaded or saved. The
+                   cue for unsaved work is the CHIP going amber, the same "lit"
+                   language a playing note or the current bar uses, plus a dot:
+                   colour alone is a poor signal at 42px on a bright pavement,
+                   and the dot reads even when the chip does not. */}
+              <button data-save="1" data-dirty={dirty?"1":"0"}
+                aria-label={dirty?"Save — unsaved changes":"Save"}
+                title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
+                style={{flex:1,height:42,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
+                  border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.12)"),borderRadius:9,
+                  background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                onClick={quickSave}>
+                <span style={{fontSize:15,lineHeight:1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.4)"}}>SAVE</span>
+                {dirty&&<span style={{position:"absolute",top:6,right:8,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
+              </button>
+              {/* PROJECT chip */}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
+                <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
+              </button>
+            </div>
+          </div>
+          )}
+
+          {/* 3. The song. A top-level row now rather than living inside the
+                 measured content area — which is why gridSizeCss no longer
+                 subtracts the lane: `--ch` has already had it taken out. */}
+          {SONG_STRIP&&!songPageOn&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0,display:"flex",flexDirection:"column"}}>
+            {songLane()}
+          </div>
+          )}
+
+          {/* 4. Transport, with the layer buttons beside it. */}
+          {!isLandscape&&(
+          <div style={{flexShrink:0}}>
+            {/* Row 2: the layers AND the transport. They were two rows until
+                 POLY / MONO / DRUMS became glyphs — 114px for the three of
+                 them, which fits beside the five transport controls on a 375px
+                 phone with room to spare. Two groups pushed apart rather than
+                 one run of eight, so "what am I editing" and "what is it
+                 doing" stay tellable apart at a glance. */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+                <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
+                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  onClick={()=>{
+                    // Tapping the layer you are already on opens its sound
+                    // page, and toggles back out — the house rule.
+                    if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
+                    else{switchLayer(lyr);}
+                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
+              ))}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+              <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
+                {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
+              </button>
+              {/* Icons, not words. LOOP and FOLLOW were the two widest things
+                  in this row; as glyphs they are square and the row stops being
+                  a negotiation about label width. */}
+              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
+                style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
+              <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
+                style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={19}/></button>
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* 5. PATTERN CHIPS. A pattern is all three parts, so this is one
+                 selector for the whole app rather than the old per-layer
+                 pills. It sits here because switching pattern is a thing you
+                 do mid-edit; it used to mean going to SONG and coming back. */}
+          {!isLandscape&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0}}>
             {patternChipsRow}
           </div>
           )}
@@ -10959,10 +11111,12 @@ export default function LoudLight(){
                   read as one instrument rather than two panels. It GROWS: the
                   square below has already taken its bite (one lane row reserved),
                   so everything still going spare lands here. */}
-              {SONG_STRIP&&(
-                <div style={{width:SZ,flexShrink:0,display:"flex",flexDirection:"column",marginBottom:6}}>{songLane()}</div>
-              )}
-              {!SONG_STRIP&&<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
+              {/* Bar navigation sits directly above the grid in every layout
+                  now. It used to move BELOW in portrait because the song lane
+                  had taken the row above it; the lane is a top-level row now,
+                  so nothing displaces the strip and the two positions collapse
+                  back into one. */}
+              <div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>
               {/* The square IS the grid. The bar strip is a sibling, not a child:
                   inside an aspect-ratio:1 box its height came straight off the
                   cells and they stopped being square. */}
@@ -10991,7 +11145,6 @@ export default function LoudLight(){
                   </div>
                   </div>
                 </div>
-              {SONG_STRIP&&<div style={{width:SZ,marginTop:2,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
               </>);})()}
               </div>
             )}
@@ -11029,16 +11182,11 @@ export default function LoudLight(){
                       {/* The song, above the drum grid too — a part page is a
                           part page, and carrying it on one but not the other is
                           the kind of split that makes a layout feel arbitrary. */}
-                      {SONG_STRIP&&(
-                        <div style={{width:SIZE,flexShrink:0,display:"flex",flexDirection:"column",marginBottom:6}}>{songLane()}</div>
-                      )}
-                      {!SONG_STRIP&&(
-                        // Landscape: the synth page puts no gap between the
-                        // strip and the grid, so neither does this one — the
-                        // two blocks have to be the same height or the centred
-                        // block moves the boundary again.
-                        <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
-                      )}
+                      {/* No gap between the strip and the grid, matching the
+                          synth page exactly — the two blocks have to be the
+                          same height or the centred block moves the boundary
+                          the drums reservation exists to hold still. */}
+                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
                       {/* The reservation, and the real content hanging from the
                           top of it. The bar chips come WITH the grid rather than
                           staying where the synth page leaves them: they are a
@@ -11048,7 +11196,6 @@ export default function LoudLight(){
                           tall as the synth's however short the drum grid is. */}
                       <div style={{position:"relative",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0}}>
                       <div style={{width:SQ,aspectRatio:"1",flexShrink:0,pointerEvents:"none"}}/>
-                      {SONG_STRIP&&<div style={{height:2+_stripRowPx,flexShrink:0,pointerEvents:"none"}}/>}
                       <div style={{position:"absolute",top:0,left:0,right:0,display:"flex",flexDirection:"column",alignItems:"center"}}>
                       <div style={{width:SIZE,display:"flex",position:"relative"}}>
                       {drumRowKeys}
@@ -11124,11 +11271,6 @@ export default function LoudLight(){
                         )})}
                       </div>
                       </div>
-                      {/* Chips below the drum grid too, for the same reason —
-                          the song strip took the top of the page. */}
-                      {SONG_STRIP&&(
-                        <div style={{width:SIZE,flexShrink:0,display:"flex",marginTop:2}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
-                      )}
                       </div>
                       </div>
                     </div>
@@ -11141,76 +11283,9 @@ export default function LoudLight(){
                 near the top of the return — so it is NOT duplicated here.) */}
           </div>
 
-          {/* ── BOTTOM CHROME: chips row + persistent transport (portrait) ── */}
-          {!isLandscape&&(
-          <div style={{flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.98)"}}>
-            {/* Row 1: global chips — TEMPO / SONG / FX / PROJECT.
-                 (There were four; VARY's has gone with VARY and SONG's with the
-                 song lane, which is on this very page.) */}
-            <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
-              {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
-                aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
-                data-tempochip={tempoField} {...tempoChipProps}>
-                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
-              </button>
-              {/* The ▦ SONG chip is GONE. The song lane is two rows above the
-                   grid on this very page: a chip that navigates to a copy of
-                   something already on screen is a door to the room you are
-                   standing in, and it was also the only thing switching the
-                   playback intent, which is derived now. Three chips, each
-                   wider for it. */}
-              {/* FX chip — global reverb/delay design */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.4)"}}>FX</span>
-              </button>
-              {/* PROJECT chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
-              </button>
-            </div>
-            {/* Row 2: the layers AND the transport. They were two rows until
-                 POLY / MONO / DRUMS became glyphs — 114px for the three of
-                 them, which fits beside the five transport controls on a 375px
-                 phone with room to spare. Two groups pushed apart rather than
-                 one run of eight, so "what am I editing" and "what is it
-                 doing" stay tellable apart at a glance. */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
-                <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
-                  onClick={()=>{
-                    // Tapping the layer you are already on opens its sound
-                    // page, and toggles back out — the house rule.
-                    if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
-                    else{switchLayer(lyr);}
-                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
-              ))}
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-              <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
-                {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
-              </button>
-              {/* Icons, not words. LOOP and FOLLOW were the two widest things
-                  in this row; as glyphs they are square and the row stops being
-                  a negotiation about label width. */}
-              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
-                style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
-              <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
-                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={19}/></button>
-              </div>
-            </div>
-          </div>
-          )}
+          {/* The BOTTOM CHROME is gone: its two rows — the global chips and
+              the layers-plus-transport — moved to the TOP of the column, above
+              the grid. See the ordering note at the head of the column. */}
           </div>{/* ══ end CENTER COLUMN ══ */}
 
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
@@ -11243,6 +11318,17 @@ export default function LoudLight(){
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
                   <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.35)"}}>FX</span>
+                </button>
+                <button data-save="1" data-dirty={dirty?"1":"0"}
+                  aria-label={dirty?"Save — unsaved changes":"Save"}
+                  title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
+                  style={{flexShrink:0,height:40,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                    border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,
+                    background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                  onClick={quickSave}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.35)"}}>SAVE</span>
+                  {dirty&&<span style={{position:"absolute",top:4,right:6,width:4,height:4,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
                   <span style={{fontSize:12,lineHeight:1.1,color:"rgba(178,199,219,0.45)"}}>⋯</span>

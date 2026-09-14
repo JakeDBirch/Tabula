@@ -60,6 +60,51 @@ Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go 
 
 The **song lane** is one scrolling line of up to 64 slots, eight of them on screen at a time (`SONG_COLS`), growing by one slot as you fill the last — a slot holds a whole pattern, so there was never a reason to show all 64 at once. It is mounted on every part page (see below); the **song PAGE** that used to be its only home survives in mobile landscape alone, where it is the lane plus a PATTERNS palette above it. Two ways to place: tap an empty slot to drop the selected pattern in, or **drag a palette chip onto a slot** (the gesture the old pattern pills had — a chip tap still just selects, drag is distinguished by a 6px threshold). Dragging also moves between slots, and off-grid clears. A drop lands on a **cell** (replace) or on the **seam** between two cells (insert / reorder, sliding the rest right): `_songHit` picks the nearest cell rect — measured once at drag start, since 64 `getBoundingClientRect`s per pointermove would be felt on a phone — and reads the outer 22% of its width as a seam. Nearest-rect rather than `elementFromPoint` so the gap between cells is a seam rather than "off the grid"; the off-grid slop is deliberately tight (0.35 cell) because off-grid CLEARS a slot and a near miss shouldn't. A slot can also **repeat**: press-and-hold (or right-click) a filled slot for a picker of 1–`SONG_MAX_REP`=4, drawn in the cell as that many pips with the sounding pass lit. Repeats live in a parallel `songRep` array rather than making a slot an object — `song` is a flat id list at four persistence sites, in the packed codec and in the legacy readers — and they expand inside `songSeq`, so the scheduler and `songPosR` still see a plain list and needed no changes; `_songPlayingSlot` walks the counts to map back to a cell. The count belongs to the slot's contents, so it travels on a drag and resets when a slot is cleared. Runs of the same pattern draw a `×N` badge that counts **plays, not cells**, and only when the run spans more than one cell. Above the symbol, mirroring the pips, is a row of **bar dots** — one per bar of the pattern; on the playing cell the current bar's dot swells on every quarter note, so the song page carries the tempo. They flex to fit (true dots to 8 bars, a segmented bar past that, since 32 countable dots don't fit a phone-sized cell). It rides `songPulse`, a `bar*4+quarter` integer the master clock publishes only when it changes — two renders a second at 120bpm, not eight — and the pulse restarts by keying the lit dot on `songPulse` so React remounts it and the CSS animation replays. A **pattern chip row sits on every part page** (`patternChipsRow` for the desktop sidebar and mobile portrait, `patternChipsRail` for the landscape rail), because switching pattern is something you do mid-edit and it used to mean a trip to SONG and back. In portrait it is now the **top** of the page — it used to sit under the layer labels, and those moved down beside the transport when they became icons. Tap switches, `+` adds, the chip the song is currently sounding carries an amber ring when it isn't the one you're editing. **Every chip row is the palette now** (`paletteChipProps` — one gesture set, not two): tap selects, hold or right-click opens the pattern's ops, and a **drag past 6px carries the pattern onto a song slot**. That gesture used to live only on the song page, because that was the only place the lane was; with the lane on the part pages, chips that couldn't drag would have taken arranging away with the page. The old `patChipProps` is gone. The landscape rail deliberately does NOT set `touch-action:none` on its chips — that column scrolls, and there is no lane in landscape to drag onto — which is why the shared handler treats a **`pointercancel` as not-a-tap**: a scroll cancels the pointer, and without that check it read as "you tapped the chip you started the scroll on". **A chip is its NAME and nothing else.** It carried a bar count for a while — `8b`, then `|8|` — and the count is not what you read a chip for: you are picking a pattern. Beside a one-glyph name a bracketed number reads as part of the name, or as a quantity of the wrong thing, and the bar strip under the grid spells the same count out in chips. `patBarsBadge` survives as a stub returning null, in one place, because the argument for leaving it out is worth having written down where the three chip rows call it. Portrait hides the editor row on the song page so the two never show at once (moot now — that page is landscape-only).
 
+**Portrait column order: name, globals, song, transport, patterns, bar nav,
+grid.** Everything that is not the grid is ABOVE it and the grid is last. That
+reverses an earlier decision and the trade is worth stating: the bar chips and
+the transport used to sit UNDER the grid precisely because the bottom of a phone
+is where your thumb is, and the chips are dragged constantly. Putting the grid
+last gives the thumb zone to the grid — the thing you actually touch most — and
+makes the chrome a reach; bar nav stays adjacent to the grid, so the control
+that is dragged most is still the one closest to it. It costs the grid nothing,
+because the grid is **width**-bound in portrait (370px of a 390px phone), so the
+rows above it spend height the grid could never have used — measured unchanged
+at 370px on a 15 and 355px on an SE.
+Three consequences. The song lane is a **top-level row** now rather than living
+inside the measured content area, so `gridSizeCss` no longer subtracts the lane:
+`--ch` has already had it taken out, and subtracting it again cost the grid the
+lane's height twice. The bar strip's two positions **collapse back into one** —
+it is directly above the grid in every layout, because nothing displaces it any
+more (`_barStripRow` keeps its `pad` argument and one mount). And the drums
+reservation no longer reserves a strip row below the grid, only the square.
+`_order.mjs` asserts the order by measured position on a 15 and an SE, on both
+part pages, plus that the column still fits and the grid is still square.
+`_squash`, `_songstrip` and `_icons` all asserted the old arrangement and were
+updated to the new intent — each still guards what it was guarding (the strip
+must not share the grid's aspect-ratio box; the lane sits above the chips; two
+rows of icon chrome, not three).
+
+**ONE-TAP SAVE lives in the tool row, with an unsaved-work cue.** It writes to
+whichever project was last loaded or saved (`selDevId`); with nothing picked it
+makes a new one under the generated name, exactly as the library's SAVE AS does,
+rather than being a dead button. Device library only — the cloud is a network
+round trip and should not fire from a chip you tap without thinking.
+`dirty` is a **reminder, not a guarantee**: it is set by an effect over the
+project's CONTENT state rather than by comparing against the saved bytes, since
+a real comparison would mean packing the whole project on every keystroke. Two
+deliberate exclusions keep it from crying wolf — `playing`, and the
+navigation/transport state (active layer, active pattern, LOOP) which the
+snapshot does carry but which nobody thinks of as work. A false NEGATIVE there
+is much cheaper than a badge that lights when you switch layer: a nudge that is
+always on is not a nudge. The clean-hold window is the other imprecision worth
+naming — a load lands its state over more than one commit (the kit decodes
+asynchronously and `activeKit` is a content dep), so `markClean` holds for a
+moment rather than a single render. The cue is the chip going **amber plus a
+dot**: colour alone is a poor signal at 42px in daylight. `_save.mjs` covers
+both layouts, that a re-save overwrites rather than piling up, and that playback
+and layer switches do not light it.
+
 **The song lane is on the PART PAGES too, above the grid** (`SONG_STRIP`, portrait only) — and in the desktop **sidebar**, where the `▦ SONG` button used to be. The space is free in exactly those two places: the grid is width-bound in portrait (370px of a 390px phone) so vertical room the interface gives back cannot become grid, and the sidebar had a `flex:1` spacer holding PROJECT down. Mobile landscape is the one layout that can't carry it — the grid is height-bound there, so a line above it costs ~23% of the grid, and the ~150px of width going spare beside it would make a horizontal line of eight slots 14px a cell. So landscape keeps the song PAGE, and it is the only place that page still exists. (Worth knowing if that ever needs fixing: a single line is a line whichever way it runs, and eight slots stacked VERTICALLY down the spare width is 344px tall and ~50px wide — it fits beside the grid on every phone in landscape and costs the grid nothing. It would need `_songHit`'s seam test and the track to learn an axis, which is why it wasn't done on spec.) **The bar chips move BELOW the grid wherever the lane displaced them**, and stay above where it didn't (`_barStripRow`, one row and two positions, never two copies). That is not a return of "nothing lives under the grid": that rule is about duplicate READOUTS — the step bar and the length track, which said what the grid already said — and a relocated live control is not one. On a phone the bottom is also where your thumb is, and the chips are dragged constantly.
 
 **It is ONE LINE that scrolls sideways, not a wrapped grid.** Eight slots on screen (`SONG_COLS` means "slots across the visible width" now, not columns of a grid), the rest off the end, and it **grows by one slot as you fill the last** so there is always exactly one empty slot after the song — a linear control for a linear thing. It wrapped into rows and grew to fill whatever height was going for about an hour, and that was the wrong shape twice over: rows implied a structure the song does not have, and its height was a function of the layout while the layout was a function of its height. As one line its height is a CONSTANT — one cell, a 4px gap and a 6px track — which is what makes the rest of the column budgetable (`_laneBlockCss`, subtracted in `gridSizeCss`).
