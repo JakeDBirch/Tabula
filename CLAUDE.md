@@ -250,6 +250,74 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
 - **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **bar chips and nothing else** (`barChips`) — tap or drag the chips to page. (It carried a `♪` row-key toggle for a while; see "Row keys — PARKED".) **The strip is ONE LINE THAT SCROLLS** — eight chips across the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another name), the rest off the end, with a track underneath to pan it. It **wrapped** at eight a row for a while (16 bars two rows, 32 four), and that was wrong for the reason the wrapped song lane was: it made the strip's height a function of the visible part's bar count, so a 16-bar part and an 8-bar part in the same pattern gave the grid — and the song lane above it — two different positions, and switching layer jumped between them. `_barStripPx` is a **constant** now (one chip row + the track), which is what the rest of the column can budget against; `_barStripExtra` is 0 and survives only because the sizing expressions still read it. A chip is never narrower than an eighth of the strip, so **every chip carries its number** (they used to go unnumbered past 8 bars, because there was nowhere to print one). Three things to know: the chips take a fixed flex **basis** so eight fit the scrollport exactly however many bars there are (the same percentage-against-the-scrollport trick the song lane's slots use); the hit test is **1-D again but must read `scrollLeft`** (`_barAt`, and `_scrubTo` defers to it), and scrubbing toward either end **pans** (`_barEdgeScroll`) so you can drag the page to a bar off the end; and the chips keep `touch-action:none` because dragging them scrubs, so — exactly as on the song lane — **the track is the only thing you can drag to scroll**. `barChips` is one JSX value with several mounts on screen at once (the strip, the bar sheet, the step sheet), so the track's thumb is synced by walking `[data-barstrip]` in the DOM rather than through a ref, which would be whichever mount rendered last. A newly *chosen* bar is scrolled into view; a scroll you made by hand is never snapped back. Two things came off it. The **`+`** (tap added a bar, hold opened the bar drawer): `＋ BAR` is in a bar chip's hold menu now, with `⧉ DUP`, `×2` and `DELETE BAR` — the rest of the bar structure it belongs with — so a dedicated button was one op paying rent in the corner of a phone screen next to a menu that already carried its siblings. And the **readout** (pattern name · visible/total): the strip it sat on already *is* both of those, one chip per bar with the current one lit, under a row of pattern chips with the selected one lit; a third copy of what two rows of controls say. On desktop the sidebar's `+BAR` is unchanged. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
 - **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
+- **The transport is three states: PLAY from the top, STOP back to it, PAUSE
+  where you are.** The play button is unchanged — tap to start at the top, tap
+  again to stop and rewind, hold to export — and **PAUSE is a separate button**
+  beside it, because one button cannot express three states with one gesture
+  and a transport is the last place to hide state behind a chain of taps. It is
+  a toggle, drawn the way every engaged toggle here is drawn (amber ring), and
+  it deliberately does NOT become a `▶` while held: the play button beside it is
+  already showing one, and two triangles a thumb apart meaning *carry on* and
+  *start over* is exactly the confusion a transport cannot afford. Inert with
+  the transport stopped.
+  - **Both engines were already shaped for it**, which is why this is small.
+    The JS stop branch resets every cursor by hand and the core's `ll_stop`
+    resets none — `ll_play`, through `seq_start`, is what rewinds. So a pause is
+    the stop path minus the resets and a resume is the start path minus them,
+    plus one correction.
+  - **The correction is the whole of it.** Both clocks keep running while held
+    (the AudioContext's always does; the core's because `ll_render` is
+    sample-driven and keeps rendering so tails ring out), so every stored onset
+    is that far in the past on resume. Left alone the scheduler comes back
+    having "missed" the hold and fires all of it at once — the flam the
+    catch-up guard exists for. `ll_resume` shifts `mNext` and every part cursor
+    by the frames elapsed since `stopFrame`; `resumePlay` does the same against
+    the context clock. Shifting them all by the SAME amount is what keeps each
+    part's phase against the master, so the polymeter survives a pause.
+  - **The JS half is belt and braces, and that was measured rather than
+    assumed.** Remove the rebase and the app still comes back in about the right
+    place, because the catch-up guard already handles a scheduler that finds
+    itself behind. What the rebase buys is that a resume is never the "we fell
+    behind" path at all — under `SCHED_RESYNC` that path DROPS the steps the
+    hold spanned. Don't delete it as redundant; do know that `_pause.mjs` cannot
+    fail on it. `core/test/pause.c` is the test with a real negative control:
+    it asserts every resumed onset to the frame, and goes red the moment the
+    core's shift goes.
+  - **One honest limit:** notes already scheduled inside the ~100ms lookahead
+    when you press pause still sound. Web Audio has been handed them and the JS
+    engine keeps no handle to cancel with. STOP has always had this; it is a
+    tail, not a pile-up.
+  - **A hold is not a readout.** The position kept is the cursors and the song
+    position, not the display: `playing` is false while held, so the playhead
+    column, the bar dots and the chip ring all go dark, which is honest —
+    nothing is sounding. The lit pause button is the state display.
+  - **`paused` is a third state, not a flavour of `playing`.** Everything that
+    keys off `playing` — the autosave block, the wake lock, the diag, the
+    dirty-flag exclusion — means "is audio running", and while held it is not.
+    It is transport state, so it is deliberately **not persisted**; it is
+    cleared by a stop, by NEW PROJECT and by any project load, because a held
+    position belongs to the project you were holding.
+  - **The lock screen's pause is a pause now.** `play` / `pause` / `stop` /
+    `toggle` used to be one call to `startStop`, so the button iOS draws as a
+    pause rewound the song. The page is the only place that knows the
+    difference, so the mapping lives in `__LL_REMOTE` and `_remote.mjs` asserts
+    each command separately.
+  - **It cost an SE 15px of grid, and that is the trade.** Six controls need
+    45px more than the five that fit; a phone has 30px of slack on a 15 and 15
+    on an SE, so it is either a second transport line or every touch target a
+    notch smaller. The line is cheaper: portrait is WIDTH-bound on a tall phone
+    so the row is free there (a 15 measures 370px of grid either way), and on an
+    SE the grid goes 355 → 340 (4%) rather than the whole transport going to
+    ~32px. It is a **wrap**, not a hand-split row, so an iPad — where the width
+    is there — keeps one line and the arithmetic stays the browser's. Desktop
+    wraps to a second line in the sidebar, which costs the grid nothing at all
+    (that panel is a fixed-width column with hundreds of px of slack below).
+    `_icons.mjs` owns the assertion, and says both halves: width-bound on a 15,
+    height-bound but only just on an SE.
+  - `data-playcol` marks the sounding column on the synth grid — a test hook,
+    like `data-drumgrid`: the playhead is a background colour and there was
+    otherwise no way to ask a harness where it is.
+
 - **LOOP is a HEADLAMP: each tap steps the window outward, then off.** Tap once
   and you loop the bar you are on; tap again within `LOOP_CHAIN_MS` (2s) and the
   window grows by a bar, to four; one more, on a pattern longer than four bars,

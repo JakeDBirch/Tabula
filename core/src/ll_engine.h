@@ -86,6 +86,16 @@ typedef struct {
   int32_t song[LL_SONG_MAX]; int songLen;
   /* transport / sequencer */
   int mstep, mFirst, cycles; double mNext;
+  /* PAUSE is ll_stop + ll_resume: stopping already leaves every cursor where
+   * it was (only ll_play, through seq_start, rewinds), so a pause needs no
+   * state of its own — only the frame it happened on. G.frame keeps advancing
+   * while stopped (ll_render is sample-driven and always runs, so tails ring
+   * out), which leaves every stored onset that many frames in the past; resume
+   * shifts them all forward by the same amount, exactly as SCHED_RESYNC does
+   * in the JS scheduler, so the parts keep their phase against the master.
+   * `armed` says a walk has been started at all: resuming before any play is
+   * a play. */
+  double stopFrame; int armed;
   struct { int step; double nextAt; } cur[LL_NLAYERS];
   int songPos, pulse, playPatId;
   /* What the UI has actually been TOLD. The three above are audio truth; these

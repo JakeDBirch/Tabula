@@ -221,8 +221,19 @@ int ll_pattern_load(int slot,int bytes){
 void ll_pattern_clear(int slot){ if(slot>=0&&slot<LL_MAX_PATTERNS)G.pat[slot].used=0; }
 
 /* ── transport ──────────────────────────────────────────────────────────── */
-void ll_play(void){ if(!G.inited)ll_init(48000); seq_start(); G.play=1; }
-void ll_stop(void){ G.play=0; ev_push(LL_EV_STOPPED,0,0,G.frame); }
+void ll_play(void){ if(!G.inited)ll_init(48000); seq_start(); G.play=1; G.armed=1; }
+void ll_stop(void){ G.play=0; G.stopFrame=G.frame; ev_push(LL_EV_STOPPED,0,0,G.frame); }
+/* Carry on from where ll_stop left the cursors. See `stopFrame` in the engine
+ * state for why the shift is the whole of it. */
+void ll_resume(void){
+  if(!G.inited)ll_init(48000);
+  if(!G.armed){ ll_play(); return; }   /* nothing to carry on from */
+  if(G.play)return;                    /* already running: idempotent */
+  double d=G.frame-G.stopFrame; if(d<0)d=0;
+  G.mNext+=d;
+  for(int l=0;l<LL_NLAYERS;l++)G.cur[l].nextAt+=d;
+  G.play=1;
+}
 int ll_playing(void){ return G.play; }
 void ll_audition_note(int layer,float hz,float seconds){
   if(!G.inited)ll_init(48000);

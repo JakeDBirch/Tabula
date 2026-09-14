@@ -3499,6 +3499,11 @@ export default function LoudLight(){
   const [userMask,  setUserMask]  = useState(USER_MASK_DEF);
   const [userRoot,  setUserRoot]  = useState(0);
   const [playing,   setPlaying]   = useState(false);
+  // PAUSED is a third transport state, not a flavour of `playing`: everything
+  // that keys off `playing` — the autosave block, the wake lock, the diag, the
+  // dirty-flag exclusion — wants "is audio running", and while held the answer
+  // is no. So playing=false, paused=true, and the position is kept.
+  const [paused,    setPaused]    = useState(false);
   // The audio session was taken away and would not come back on its own. iOS
   // requires a fresh user gesture to re-acquire it in some interruption cases,
   // so this drives a banner rather than being retried forever in silence.
@@ -4582,7 +4587,11 @@ export default function LoudLight(){
   // discarding any in-memory work, mirroring loadProject's hasWork guard.
   const doNew=()=>{
     // Stop playback if running — discarding work mid-play would otherwise leave
-    // the scheduler ticking against fresh state.
+    // the scheduler ticking against fresh state. A PAUSE is cleared whether or
+    // not anything was playing: its position is this project's, not the new
+    // one's. Cleared FIRST, because this is a long run of setters and a throw
+    // anywhere below it must not leave a resumable pause behind.
+    pausedR.current=false;setPaused(false);
     if(playing){
       clearInterval(tmrR.current);
       if(CORE_ON)coreHost.stop();
@@ -6138,6 +6147,30 @@ export default function LoudLight(){
   // is running out of reach — and the gesture that opens it was turning FOLLOW
   // off on the way (see `_scrubTo`). Same components, same state, same handlers
   // as the transport's: one body, several mounts.
+  // PAUSE — one body, three mounts (desktop sidebar, phone portrait, landscape
+  // rail), like every other control that appears on more than one surface.
+  //
+  // It is a TOGGLE, drawn the way every other engaged toggle in here is drawn:
+  // held, it keeps the pause glyph and lights amber. It deliberately does NOT
+  // become a ▶ while held — the play button beside it is already showing one,
+  // and two triangles that mean different things (carry on / start over) a
+  // thumb apart is exactly the confusion a transport cannot afford.
+  //
+  // Inert with the transport stopped: there is no position to hold, and a
+  // dimmed control says that better than one that silently does nothing.
+  const pauseBtn=(extra,glyph)=>(
+    <button aria-label="Pause" aria-pressed={paused}
+      title={paused?"Held — tap to carry on":"Pause, keeping your place"}
+      disabled={!playing&&!paused}
+      onClick={()=>togglePause()}
+      style={Object.assign({},S.iconBtn,extra,
+        paused?{border:"1px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"}
+              :(playing?{}:{opacity:0.35}))}>
+      <svg width={glyph} height={glyph} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
+        <rect x="1.4" y="1" width="3" height="9" rx="1"/><rect x="6.6" y="1" width="3" height="9" rx="1"/>
+      </svg>
+    </button>
+  );
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
       <button title="Loop — tap again to grow the loop, then off"
@@ -6648,6 +6681,10 @@ export default function LoudLight(){
   const applyShareState=rawState=>{
     if(!rawState)return;
     setBarPage(0);
+    // A held position belongs to the project you were holding. Loading another
+    // one leaves the pause button offering to resume a performance that no
+    // longer exists.
+    pausedR.current=false;setPaused(false);
     const s=unifyLegacyProject(migrateLegacyBass(unpackProject(rawState)));
     setActiveLayer(s.activeLayer||"synth");
     _adoptPatterns(s);
@@ -7705,24 +7742,33 @@ export default function LoudLight(){
       drumEngine.current.play(v.key,at,100,mix,voiceSamplesR.current[v.key],null);
     }catch(e){console.error("drum audition failed",e);}
   };
-  const startStop=async()=>{
-    // Read/write the LIVE ref (not the `playing` state closure) so rapid
-    // programmatic start→stop calls (the MP3 bounce) resolve correctly within
-    // one render. Button clicks are unaffected (state is settled there).
-    if(playingR.current){
-      clearInterval(tmrR.current);
-      if(CORE_ON)coreHost.stop();
-      playingR.current=false;
-      setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
-      setSongBar(-1);songBarR.current=-1;
-      setSongPulse(-1);songPulseR.current=-1;
-      setSongBarLayer({synth:-1,lead:-1,drums:-1});
-      layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
-      if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
-      releaseWakeLock();
-      if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
-      return;
-    }
+  // ── Transport: PLAY from the top, STOP back to it, PAUSE where you are ───
+  // Three states, and the distinction that matters is that only PLAY rewinds.
+  // The engines already agreed on that shape before there was a pause button:
+  // the JS stop branch resets every cursor by hand, and in the core `ll_stop`
+  // leaves them exactly where they were — `ll_play`, through `seq_start`, is
+  // what rewinds. So a pause is the stop path minus the resets, and a resume is
+  // the start path minus them too, plus one correction.
+  //
+  // The correction is the whole of it. Both clocks keep running while held —
+  // the AudioContext's because it always does, the core's because `ll_render`
+  // is sample-driven and keeps rendering so tails ring out — so every stored
+  // onset is that much in the past by the time you resume. Left alone, the
+  // scheduler would come back having "missed" the pause and fire all of it at
+  // once: exactly the flam the catch-up guard exists to prevent. Shifting every
+  // cursor by the same amount is the SCHED_RESYNC move, and it keeps each
+  // part's phase against the master, which is what makes the polymeter survive
+  // a pause.
+  //
+  // One honest limit: notes already scheduled inside the ~100ms lookahead when
+  // you press pause still sound. Web Audio has been handed them and the JS
+  // engine keeps no handle to cancel with. STOP has always had this; it is a
+  // tail, not a pile-up.
+
+  // Everything a play needs that is not about POSITION. Shared by start and
+  // resume so the two cannot drift — a resume that skipped the audio-session
+  // work is silent on a phone that has been locked since you paused.
+  const _engage=async()=>{
     await startEngines();
     bell.current.stepDur=60/bpm/4*speedMult;
     // Silent loop — keeps iOS WebKit audio session alive through screen lock/bg
@@ -7738,11 +7784,46 @@ export default function LoudLight(){
           artwork:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%230e1c2b'/%3E%3Cg stroke='%23ffd28a' stroke-width='7' stroke-linecap='round' stroke-linejoin='round' fill='none'%3E%3Cpath d='M30 30v26h14'/%3E%3Cpath d='M52 30h14v26'/%3E%3C/g%3E%3C/svg%3E",sizes:"96x96",type:"image/svg+xml"}]
         });
         navigator.mediaSession.playbackState="playing";
-        navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)startStop();});
-        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)startStop();});
-        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&playingR.current)startStop();});
+        // The lock screen's pause is a PAUSE now, and its stop a stop — the
+        // three used to be one call, so every one of them rewound the song.
+        navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)(pausedR.current?resumePlay():startStop());});
+        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)pauseTransport();});
+        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&(playingR.current||pausedR.current))stopTransport();});
       }catch(e){}
     }
+  };
+  // Let go of the session housekeeping. Shared by stop and pause: a held
+  // transport is not playing, so it must not hold the screen awake.
+  const _disengage=()=>{
+    clearInterval(tmrR.current);
+    if(CORE_ON)coreHost.stop();
+    playingR.current=false;
+    setPlaying(false);
+    if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
+    releaseWakeLock();
+    if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
+  };
+  const stopTransport=()=>{
+    _disengage();
+    pausedR.current=false;setPaused(false);
+    setStep(-1);setPlayId(null);setDrumStep(-1);
+    setSongBar(-1);songBarR.current=-1;
+    setSongPulse(-1);songPulseR.current=-1;
+    setSongBarLayer({synth:-1,lead:-1,drums:-1});
+    layerLastFreqR.current={synth:null,lead:null};layerLastGlideR.current={synth:false,lead:false};
+  };
+  // Hold. Everything the stop above clears is deliberately LEFT: the playhead,
+  // the song position and the glide memory are the position, and showing you
+  // where you are is half of what a pause is for.
+  const pauseTransport=()=>{
+    if(!playingR.current)return;
+    try{pauseAtR.current=bell.current.ctx.currentTime;}catch(e){pauseAtR.current=0;}
+    _disengage();
+    pausedR.current=true;setPaused(true);
+  };
+  const startPlaying=async()=>{
+    await _engage();
+    pausedR.current=false;setPaused(false);
     stepR.current=0;
     const t0=bell.current.ctx.currentTime+0.05;
     // All three parts start together at the top of the pattern.
@@ -7759,6 +7840,49 @@ export default function LoudLight(){
     playingR.current=true;
     if(CORE_ON){ coreHost.play(); setPlaying(true); return; }
     tmrR.current=setInterval(scheduler,25);setPlaying(true);
+  };
+  const resumePlay=async()=>{
+    if(playingR.current)return;
+    if(!pausedR.current){ await startPlaying(); return; }
+    await _engage();
+    // Shift every cursor by the length of the hold, so the gaps between steps
+    // are what they were and the parts keep their phase against the master.
+    // The core works its own shift out from its own frame clock (ll_resume),
+    // so this only fixes up the JS scheduler's refs.
+    //
+    // Measured, and worth writing down because it is not obvious: WITHOUT this
+    // the app still comes back in roughly the right place, because the catch-up
+    // guard already handles a scheduler that finds itself behind — a hold over
+    // SCHED_RESYNC gets the bodily shift, a shorter one has its missed steps
+    // dropped as late. So this is not what makes resume work; it is what stops
+    // every resume going down the "we fell behind" path, where a short hold
+    // silently costs you the notes it spanned. Belt and braces, deliberately.
+    let d=0;
+    try{ d=(bell.current.ctx.currentTime+0.05)-pauseAtR.current; }catch(e){ d=0; }
+    if(!(d>0)||!isFinite(d))d=0.05;
+    nextNoteR.current+=d;
+    for(const layer of PART_LAYERS){ const lf=freeR.current[layer]; if(lf)lf.nextAt+=d; }
+    pausedR.current=false;setPaused(false);
+    playingR.current=true;
+    if(CORE_ON){ coreHost.resumeTransport(); setPlaying(true); return; }
+    tmrR.current=setInterval(scheduler,25);setPlaying(true);
+  };
+  // The play button. Unchanged in meaning — play from the top, or stop and
+  // rewind — which is why the MP3 bounce and every other caller still work.
+  const startStop=async()=>{
+    // Read/write the LIVE ref (not the `playing` state closure) so rapid
+    // programmatic start→stop calls (the MP3 bounce) resolve correctly within
+    // one render. Button clicks are unaffected (state is settled there).
+    if(playingR.current){ stopTransport(); return; }
+    await startPlaying();
+  };
+  // The pause button: hold, then carry on. Inert with the transport stopped —
+  // there is no position to hold, and a control that does nothing is better
+  // dimmed than mysterious.
+  const togglePause=async()=>{
+    if(exportingR.current)return;
+    if(playingR.current){ pauseTransport(); return; }
+    if(pausedR.current){ await resumePlay(); }
   };
   useEffect(()=>()=>clearInterval(tmrR.current),[]);
 
@@ -7861,13 +7985,20 @@ export default function LoudLight(){
   // callback in here) and the lock-screen buttons would then act on whatever
   // the session looked like at launch.
   const startStopR=useRef(startStop); startStopR.current=startStop;
+  const remoteR=useRef(null);
+  remoteR.current={stop:stopTransport,pause:pauseTransport,resume:resumePlay,start:startStop};
   useEffect(()=>{
     window.__LL_REMOTE=(cmd)=>{
       if(exportingR.current)return;            // a bounce is not interruptible
-      const on=playingR.current;
-      if(cmd==="play"&&on)return;              // idempotent: the lock screen can
-      if((cmd==="pause"||cmd==="stop")&&!on)return; // repeat a command it thinks failed
-      startStopR.current();
+      const on=playingR.current, held=pausedR.current, R=remoteR.current;
+      // Each command means what it says, now that the page has three states to
+      // say it with. They used to be one call to startStop, so the lock
+      // screen's PAUSE rewound the song — the button drawn as a pause was a
+      // stop, which is the kind of thing you only find out mid-take.
+      if(cmd==="play"){ if(!on)(held?R.resume():R.start()); return; }
+      if(cmd==="pause"){ if(on)R.pause(); return; }
+      if(cmd==="stop"){ if(on||held)R.stop(); return; }
+      if(cmd==="toggle"){ on?R.pause():(held?R.resume():R.start()); return; }
     };
     return()=>{delete window.__LL_REMOTE;};
   },[]);
@@ -7946,6 +8077,10 @@ export default function LoudLight(){
   // Keep a ref to playing state for use in event handlers
   const playingR=useRef(false);
   useEffect(()=>{playingR.current=playing;},[playing]);
+  const pausedR=useRef(false);
+  useEffect(()=>{pausedR.current=paused;},[paused]);
+  // The context clock the cursors were written against, sampled at the pause.
+  const pauseAtR=useRef(0);
 
   const requestWakeLock=async()=>{
     if(!("wakeLock" in navigator))return;
@@ -10386,16 +10521,22 @@ export default function LoudLight(){
                     onClick={()=>setPage(pg)}>{lbl}</button>
                 ))}
               </div>
-              {/* ONE transport row, not two. LOOP and FOLLOW were words, and
-                  the words are what stopped five controls fitting across 220px;
-                  as icons they join the row and the panel goes from three rows
-                  to two. ↶ ↷ stay ADJACENT — a pair you click in runs, and the
-                  play button between them would make redo a longer trip every
+              {/* The transport WRAPS rather than being laid out as a fixed
+                  number of rows. Five icons fit across 220px and six do not, so
+                  adding PAUSE puts it onto a second line here — which costs the
+                  grid nothing, because this panel is a fixed-width column and
+                  the SONG block below is flex:1 holding hundreds of pixels of
+                  slack. A wrap rather than a hand-split row so the arithmetic
+                  is the browser's: change a size and it re-flows instead of
+                  overflowing silently.
+                  ↶ ↷ stay ADJACENT — a pair you click in runs, and the play
+                  button between them would make redo a longer trip every
                   time. */}
-              <div style={{display:"flex",gap:5,alignItems:"center",justifyContent:"center"}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",justifyContent:"center"}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
                 <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
+                {pauseBtn({width:38,height:38},11)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                   style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -10465,7 +10606,10 @@ export default function LoudLight(){
                       const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
                       const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;
                       const inactive=colPastEnd(activePat,ac);
-                      return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{
+                      // data-playcol marks the sounding column. A test hook, like
+                      // data-drumgrid: the playhead is a background colour, so
+                      // there was no way to ask a harness where it is.
+                      return(<div key={c} data-row={r} data-col={c} data-playcol={isCol?"1":undefined} style={Object.assign({},S.cell,{
                         background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                         outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px",
                       })}/>);
@@ -11105,7 +11249,17 @@ export default function LoudLight(){
                  phone with room to spare. Two groups pushed apart rather than
                  one run of eight, so "what am I editing" and "what is it
                  doing" stay tellable apart at a glance. */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
+            {/* Two groups — what am I editing, what is it doing — that share one
+                line where there is room for them and take two where there is
+                not. Measured: a phone has 30px of slack on a 15 and 15 on an SE
+                once the five original controls are down, and PAUSE needs 45, so
+                on a phone this is two lines. That is the right way to spend it:
+                portrait is WIDTH-bound (the grid is 370px of a 390px phone), so
+                a row of height here is height the grid could never have used,
+                whereas shrinking six controls to fit would come straight off
+                every touch target. On an iPad, where the width is there, it
+                stays one line — which is why it is a wrap and not a split. */}
+            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
@@ -11118,12 +11272,13 @@ export default function LoudLight(){
                   }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
               ))}
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
               <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
               <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
+              {pauseBtn({width:40,height:40,flexShrink:0},12)}
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
@@ -11208,7 +11363,10 @@ export default function LoudLight(){
                           const ac=barOff+c;
                           const isCol=playing&&playId===activeId&&ac===step,isQ=c%4===0;
                           const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ac]):false;const inactive=colPastEnd(activePat,ac);
-                          return(<div key={c} data-row={r} data-col={c} style={Object.assign({},S.cell,{aspectRatio:"1",
+                          // data-playcol marks the sounding column. A test hook, like
+                      // data-drumgrid: the playhead is a background colour, so
+                      // there was no way to ask a harness where it is.
+                      return(<div key={c} data-row={r} data-col={c} data-playcol={isCol?"1":undefined} style={Object.assign({},S.cell,{aspectRatio:"1",
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
@@ -11367,6 +11525,7 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
+              {pauseBtn({width:"100%",height:32,flexShrink:0},13)}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}

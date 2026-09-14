@@ -95,6 +95,7 @@ class LLProcessor extends AudioWorkletProcessor{
       case "song": { const p=w.ll_scratch(m.ids.length*4+4); this.views(); this.i32.set(m.ids,p>>2); w.ll_song_set(p,m.ids.length); break; }
       case "play": w.ll_play(); break;
       case "stop": w.ll_stop(); break;
+      case "cont": w.ll_resume(); break;
       case "note": w.ll_audition_note(m.l,m.hz,m.sec); break;
       case "hit": w.ll_audition_drum(m.d,m.vel); break;
       case "flush": w.ll_flush(); break;
@@ -309,6 +310,11 @@ self.onmessage=(e)=>{
     setSong(ids){ this.post({t:"song",ids:Int32Array.from(ids)}); }
     play(){ this.post({t:"play"}); }
     stop(){ this.post({t:"stop"}); }
+    // PAUSE is stop(); this is the other half. Named `cont`/`resumeTransport`
+    // because `resume()` on this object is the AudioContext's, and a transport
+    // that silently resumed a suspended context (or the reverse) would be a
+    // very hard afternoon.
+    resumeTransport(){ this.post({t:"cont"}); }
     note(layer,hz,sec){ this.post({t:"note",l:LAYER[layer]??0,hz,sec}); }
     hit(voice,vel){ const d=typeof voice==="number"?voice:VOICES.indexOf(voice); if(d>=0)this.post({t:"hit",d,vel}); }
     flush(){ this.post({t:"flush"}); }

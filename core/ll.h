@@ -158,8 +158,9 @@ float* ll_out(int ch);
 void   ll_render_out(int n);
 
 /* Transport. */
-void  ll_play(void);
-void  ll_stop(void);
+void  ll_play(void);          /* from the top */
+void  ll_stop(void);          /* holds position — ll_play is what rewinds */
+void  ll_resume(void);        /* carry on from the last ll_stop */
 int   ll_playing(void);
 double ll_frame(void);
 int   ll_cycles(void);        /* cycle tops passed since ll_play */

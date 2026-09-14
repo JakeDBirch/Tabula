@@ -163,6 +163,12 @@ extension CoreAudioHost: WKScriptMessageHandler {
             locked { ll_play() }
         case "stop":
             locked { ll_stop() }
+        case "cont":
+            // Resume from where "stop" left the cursors. `start()` as well as
+            // "play" does, because a resume can be the first thing that needs
+            // the engine running after an interruption tore it down.
+            start()
+            locked { ll_resume() }
         case "note":
             start()
             locked { ll_audition_note(i("l"), f("hz"), f("sec")) }

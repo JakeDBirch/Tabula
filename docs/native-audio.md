@@ -163,6 +163,24 @@ cycles (`patCycle(p).abs`, the same walk the core does), where the realtime
 bounce estimated `bars × 16` and was wrong for any trimmed or half-time bar.
 The stop itself is the core's, so the file is exactly the passes asked for.
 
+## Transport: play, stop, resume
+
+Three entry points, and the asymmetry between them is deliberate.
+`ll_play` rewinds (it calls `seq_start`); `ll_stop` only clears `G.play`,
+leaving every cursor where it was; `ll_resume` puts `G.play` back and shifts
+`mNext` and each part's `nextAt` forward by the frames that passed since
+`stopFrame`. That shift is not optional: `ll_render` is sample-driven and keeps
+running while stopped so tails ring out, so without it the sequencer comes back
+holding a fistful of onsets that are already in the past and fires them all at
+once — the same pile-up the JS scheduler's catch-up guard exists to prevent.
+Shifting every cursor by the SAME amount is what preserves each part's phase
+against the master, so a paused polymeter resumes in phase.
+
+The host message is `cont` (`LLCore.resumeTransport`), named away from
+`CoreHost.resume`, which is the AudioContext's. `core/test/pause.c` asserts
+that a pause plus a resume is the same performance delayed by exactly the gap,
+to the frame, and that `ll_play` after a stop still rewinds.
+
 ## The iOS host
 
 `ios/LoudLight/CoreAudioHost.swift` hosts the same C files in AVAudioEngine.
