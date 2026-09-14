@@ -154,6 +154,9 @@ void seq_start(void){
   G.mstep=0; G.mNext=t0; G.mFirst=1; G.cycles=0;
   for(int l=0;l<LL_NLAYERS;l++){ G.cur[l].step=0; G.cur[l].nextAt=t0; }
   G.songPos=0; G.pulse=-1; G.playPatId=-1;
+  /* Receipts reset too, or a restart that lands on the same values as last
+   * time would deliver nothing and leave the UI on the old run's readout. */
+  G.sentSongPos=-2; G.sentPulse=-2; G.sentPatId=-2;
   G.lastFreq[0]=G.lastFreq[1]=0.f; G.lastGlide[0]=G.lastGlide[1]=0;
 }
 static void part_tick(ctx_t*c,int layer){
@@ -176,7 +179,7 @@ static void part_tick(ctx_t*c,int layer){
   int audible=layer==LL_DRUMS?G.p[LL_P_DRUM_AUDIBLE]>0.5f:G.lp[layer][LL_L_AUDIBLE]>0.5f;
   if(audible){ if(layer==LL_DRUMS)play_drum_step(P,s,playAt,stepDur); else play_synth_step(layer,P,s,playAt,stepDur); }
   ev_push(LL_EV_STEP,layer,s,playAt);
-  if(G.playPatId!=P->id){ G.playPatId=P->id; ev_push(LL_EV_PLAYPAT,P->id,0,at); }
+  G.playPatId=P->id;            /* truth; ui_sync below handles delivery */
   G.cur[layer].step=c->barLock?(st+1)%loopLen:(st+1)%len;
   G.cur[layer].nextAt=at+stepDur;
 }
@@ -198,26 +201,40 @@ static void master_tick(ctx_t*c){
     G.cycles++;
     int stopAfter=(int)G.p[LL_P_STOP_AFTER];
     if(stopAfter>0&&G.cycles>=stopAfter){ G.play=0; ev_push(LL_EV_STOPPED,G.cycles,0,t); return; }
-    if(c->inSong&&!c->inLoop&&G.songLen>1){ G.songPos=(G.songPos+1)%G.songLen; ev_push(LL_EV_SONGPOS,G.songPos,0,t); }
+    if(c->inSong&&!c->inLoop&&G.songLen>1){ G.songPos=(G.songPos+1)%G.songLen; }
     for(int l=0;l<LL_NLAYERS;l++){ G.cur[l].step=0; G.cur[l].nextAt=t; }
   }
   G.mFirst=0;
   int mcol=c->mHead?c->mHead->seq[st%c->mHead->seqLen]:st;
   int pb=c->barLock?c->loopBarIdx:mcol/LL_COLS;
   int pq=pb*4+(mcol%LL_COLS)/4;
-  if(pq!=G.pulse){ G.pulse=pq; ev_push(LL_EV_PULSE,pq,0,t); }
+  G.pulse=pq;
   G.mNext=t+master_dur(c,st);
   G.mstep=(st+1)%c->patLen;
 }
+/* Deliver any UI mirror the host has not been told about yet, latching ONLY on
+ * a successful push. A full queue therefore costs a late update, never a lost
+ * one: the next block tries again. This is why the three values above are set
+ * unconditionally where they are computed — they are audio truth, and delivery
+ * is a separate concern with its own receipts.
+ * Runs before the !G.play gate so a retry still happens once the transport has
+ * stopped, and after every tick so the common case is still immediate. */
+void ui_sync(double t){
+  if(G.sentPatId !=G.playPatId && ev_push(LL_EV_PLAYPAT,G.playPatId,0,t)) G.sentPatId =G.playPatId;
+  if(G.sentSongPos!=G.songPos  && ev_push(LL_EV_SONGPOS,G.songPos, 0,t)) G.sentSongPos=G.songPos;
+  if(G.sentPulse  !=G.pulse    && ev_push(LL_EV_PULSE,  G.pulse,   0,t)) G.sentPulse  =G.pulse;
+}
 void seq_run(double bEnd){
+  ui_sync(G.frame);
   if(!G.play)return;
   for(int guard=0;guard<100000;guard++){
-    if(!G.play)return;
+    if(!G.play){ ui_sync(G.frame); return; }
     ctx_t c;
     if(!build_ctx(&c)){ G.mNext=bEnd; for(int l=0;l<LL_NLAYERS;l++)G.cur[l].nextAt=bEnd; return; }
     double te=G.mNext; int which=-1;
     for(int l=0;l<LL_NLAYERS;l++)if(G.cur[l].nextAt<te){ te=G.cur[l].nextAt; which=l; }
     if(te>=bEnd)return;
     if(which<0)master_tick(&c); else part_tick(&c,which);
+    ui_sync(te);
   }
 }

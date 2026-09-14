@@ -88,6 +88,13 @@ typedef struct {
   int mstep, mFirst, cycles; double mNext;
   struct { int step; double nextAt; } cur[LL_NLAYERS];
   int songPos, pulse, playPatId;
+  /* What the UI has actually been TOLD. The three above are audio truth; these
+   * are delivery receipts. ev_push drops silently when the queue is full (the
+   * iOS host drains on a 30Hz timer that is paused while the app is inactive,
+   * so it fills on every lock and app-switch), and latching on the truth meant
+   * a dropped event was never retried — the chip stayed lit on a pattern that
+   * had stopped playing. Report STATE, not transitions. -1 = nothing sent. */
+  int sentSongPos, sentPulse, sentPatId;
   float lastFreq[2]; int lastGlide[2];
   /* voices */
   ll_svoice sv[LL_NSVOICES]; int monoVoice; int svGen;
@@ -119,7 +126,8 @@ static inline float sec2f(float s){ return s*G.sr; }
 static inline ll_phead* part_head(ll_pattern*p,int layer){ return layer==LL_DRUMS?&p->d.h:&p->s[layer].h; }
 static inline float col_mult(const ll_phead*h,int ac){ int bi=ac/LL_COLS; return (bi>=0&&bi<h->bars&&h->barMults[bi]>0.f)?h->barMults[bi]:1.f; }
 static inline float part_abs_len(const ll_phead*h){ float t=0; for(int i=0;i<h->bars;i++)t+=(float)h->barLens[i]*(h->barMults[i]>0.f?h->barMults[i]:1.f); return t; }
-void ev_push(int type,int a,int b,double frame);
+int  ev_push(int type,int a,int b,double frame);
+void ui_sync(double t);
 void att_push(int layer,int row,double frame,double dur,float hz);
 
 /* ll_seq.c */

@@ -35,9 +35,13 @@ static void* arena_alloc(unsigned long bytes){
 }
 
 /* ── queues ─────────────────────────────────────────────────────────────── */
-void ev_push(int type,int a,int b,double frame){
-  if(G.evn+4>LL_EVQ)return;
+/* Returns 1 if the event was queued, 0 if the queue was full. Callers that
+ * mirror a STATE to the UI must latch on the return value, not on the state
+ * changing — see G.sent* in ll_engine.h. */
+int ev_push(int type,int a,int b,double frame){
+  if(G.evn+4>LL_EVQ)return 0;
   G.evq[G.evn++]=type; G.evq[G.evn++]=a; G.evq[G.evn++]=b; G.evq[G.evn++]=(int32_t)frame;
+  return 1;
 }
 void att_push(int layer,int row,double frame,double dur,float hz){
   if(G.attn+5>LL_ATTQ)return;
@@ -82,6 +86,10 @@ void ll_init(float sr){
   sm_init(&G.drumLevel,0.85f,0.02f,G.sr);
   sm_init(&G.masterGain,0.55f,0.02f,G.sr);
   G.monoVoice=-1; G.activeOH=-1; G.pulse=-1; G.playPatId=-1;
+  /* -2 so every receipt starts DIFFERENT from its value (pulse and playPatId
+   * begin at -1), which makes the first state a real send rather than one
+   * suppressed by a receipt that happened to match. */
+  G.sentPulse=-2; G.sentPatId=-2; G.sentSongPos=-2;
   synth_reset(); drums_reset(); fx_reset();
   for(int i=0;i<LL_P_COUNT;i++)fx_param(i,G.p[i]);
   for(int v=0;v<LL_DRUM_ROWS;v++)for(int i=0;i<LL_D_COUNT;i++)drums_set_mix(v,i,G.dm[v][i],-1);
