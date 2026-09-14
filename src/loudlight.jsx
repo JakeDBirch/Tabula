@@ -134,6 +134,13 @@ const IS_MOBILE = (()=>{
   } catch(e) { return false; }
 })();
 
+// Running inside the iOS shell (ios/LoudLight), rather than a browser or a
+// home-screen PWA. The shell sets the flag before any app code runs. Three
+// things read it: the install hint must not fire, downloadBlob goes to the
+// native share sheet, and the audio-route preference below only means anything
+// where there is an AVAudioSession to set.
+const IS_NATIVE = (()=>{ try { return window.__LOUDLIGHT_NATIVE__===true; } catch(e) { return false; } })();
+
 // Gap between grid cells. Declared AFTER IS_MOBILE on purpose: Babel lowers
 // const to var, so reading it above this line yields undefined and silently
 // gives the phone the desktop gap.
@@ -7876,6 +7883,38 @@ export default function LoudLight(){
     if(!h)return;
     try{h.postMessage({playing:!!playing,title:_npTitle});}catch(e){}
   },[playing,_npTitle]);
+  // ── The lock screen or the mix — you cannot have both ───────────────────
+  // A `.mixWithOthers` session is a SECONDARY audio source and iOS gives the
+  // lock screen to the primary one, so the transport registered above simply
+  // does not appear while Loud Light is mixable. That makes "play over a
+  // reference track" and "control it from the lock screen" mutually exclusive
+  // on the device — not a bug to route around, a choice to make.
+  //
+  // It is a preference rather than the build-time constant it started as
+  // because each side is right for a different session, and the only other way
+  // to change a constant is a whole TestFlight round trip.
+  //
+  // A DEVICE preference, deliberately NOT project state: loading someone's
+  // project must not decide what your phone does with its audio route. Read
+  // synchronously so the first push to the shell carries the real value, and
+  // WRITTEN ONLY BY THE TOGGLE — an effect that stamps it on mount would turn
+  // "hasn't decided" into "decided" and strand every install on today's
+  // default (the lesson the row-keys preference cost).
+  const [exclAudio,setExclAudio]=useState(()=>{
+    try{const v=localStorage.getItem("tnori-excl-audio");return v===null?true:v==="1";}catch(e){return true;}
+  });
+  useEffect(()=>{
+    const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.audioSession;
+    if(!h)return;
+    // State, not a transition: the shell re-reads this on every launch and
+    // ignores a value it is already on, so pushing it unconditionally costs
+    // nothing and a dropped message is repaired by the next render.
+    try{h.postMessage({exclusive:!!exclAudio});}catch(e){}
+  },[exclAudio]);
+  const setExclusiveAudio=(v)=>{
+    setExclAudio(!!v);
+    try{localStorage.setItem("tnori-excl-audio",v?"1":"0");}catch(e){}
+  };
   useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
     const onVisible=async()=>{
@@ -9902,6 +9941,31 @@ export default function LoudLight(){
           );
         })()}
       </div>
+
+      {/* ── Audio route (iOS app only) ──────────────────────────────────────
+          Not a setting so much as a fork: iOS hands the lock screen to the
+          PRIMARY audio app, and a mixable app is a secondary one. So this is
+          "lock-screen transport" or "jam over a reference track", and which is
+          right depends on the session rather than on taste. Hidden everywhere
+          else because nothing outside the shell has a session to set. */}
+      {IS_NATIVE&&(
+        <div>
+          <div style={Object.assign({},mSecLbl,{marginBottom:8})}>AUDIO ROUTE</div>
+          <div style={{display:"flex",gap:0,border:"1px solid rgba(168,190,212,0.15)",borderRadius:6,overflow:"hidden",marginBottom:7}}>
+            {[[true,"LOCK SCREEN"],[false,"MIX"]].map(([v,lbl])=>(
+              <button key={lbl} data-audioroute={v?"excl":"mix"} onClick={()=>setExclusiveAudio(v)}
+                style={{flex:1,padding:"7px 8px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:8,letterSpacing:1.5,fontWeight:700,
+                  background:exclAudio===v?"rgba(230,184,114,0.13)":"transparent",
+                  color:exclAudio===v?"#e6b872":"rgba(178,199,219,0.4)"}}>{lbl}</button>
+            ))}
+          </div>
+          <div style={{fontSize:9,lineHeight:1.5,color:"rgba(178,199,219,0.4)"}}>
+            {exclAudio
+              ?"Loud Light owns the route, so the lock screen and Control Centre carry its transport. It interrupts whatever else is playing."
+              :"Loud Light plays over other apps, so you can jam along with a reference track. The lock-screen transport won't appear."}
+          </div>
+        </div>
+      )}
 
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>

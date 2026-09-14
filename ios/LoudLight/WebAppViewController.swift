@@ -19,16 +19,28 @@ final class WebAppViewController: UIViewController {
 
     /// Whether Loud Light takes the audio route for itself.
     ///
-    /// `false` (the default) keeps `.mixWithOthers`, so the app plays OVER
-    /// whatever else is running and you can jam along with a reference track.
-    /// The cost is the lock screen: a mixable app is a secondary audio source
-    /// and iOS does not generally make it the Now Playing app, so the transport
-    /// registered in `NowPlayingController` may never appear.
+    /// `true` (the default) drops `.mixWithOthers`: Loud Light interrupts other
+    /// audio and becomes the system's Now Playing app, which is what makes the
+    /// transport registered in `NowPlayingController` appear on the lock screen
+    /// and in Control Centre.
     ///
-    /// `true` drops the mix option — Loud Light interrupts other audio and owns
-    /// the lock screen. Flip it, run on a device, and keep whichever you prefer;
-    /// there is no configuration that gives both.
-    private static let exclusiveAudio = false
+    /// `false` keeps the mix option, so the app plays OVER whatever else is
+    /// running and you can jam along with a reference track. The cost is the
+    /// lock screen: a mixable app is a SECONDARY audio source and iOS gives the
+    /// Now Playing slot to the primary one, so those controls will not show up.
+    ///
+    /// There is no configuration that gives both, so this is the user's call
+    /// rather than ours — it is set from the page (PROJECT ▸ AUDIO ROUTE) and
+    /// stored here. A constant would have made every change a TestFlight round
+    /// trip. Absent means "not chosen yet", which is the lock screen.
+    private static let exclusiveAudioKey = "LLExclusiveAudio"
+    private static var exclusiveAudio: Bool {
+        get {
+            let d = UserDefaults.standard
+            return d.object(forKey: exclusiveAudioKey) == nil ? true : d.bool(forKey: exclusiveAudioKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: exclusiveAudioKey) }
+    }
 
     /// Shown instead of a white screen when the payload fails to load. A blank
     /// launch on a device you can't attach a debugger to is indistinguishable
@@ -114,6 +126,8 @@ final class WebAppViewController: UIViewController {
         // The page reports transport state here so the lock screen shows what
         // is actually happening — including a play the user started in the app.
         controller.add(self, name: "transport")
+        // …and chooses, here, whether there is a lock screen to show it on.
+        controller.add(self, name: "audioSession")
         // The page detects this handler and routes its audio to the core in
         // AVAudioEngine instead of an AudioContext — see core/host.js.
         coreHost.attach(to: controller)
@@ -187,9 +201,9 @@ final class WebAppViewController: UIViewController {
     @objc private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            // .mixWithOthers so Loud Light plays over whatever is already running
-            // instead of stopping it — you should be able to jam along with a
-            // reference track. Drop the option to make Loud Light exclusive.
+            // Exclusive (no .mixWithOthers) makes Loud Light the primary audio
+            // app, which is what the lock-screen transport needs; mixable lets
+            // it play over a reference track instead. See `exclusiveAudio`.
             let options: AVAudioSession.CategoryOptions = Self.exclusiveAudio ? [] : [.mixWithOthers]
             try session.setCategory(.playback, mode: .default, options: options)
             try session.setActive(true)
@@ -306,6 +320,20 @@ extension WebAppViewController: WKScriptMessageHandler {
             let body = message.body as? [String: Any]
             nowPlaying.update(playing: (body?["playing"] as? Bool) ?? false,
                               title: body?["title"] as? String)
+            return
+        }
+        if message.name == "audioSession" {
+            // The page pushes STATE, not a transition — on mount and on every
+            // change — so a value we are already on has to be a no-op here, or
+            // every launch would tear the session down and put it back up for
+            // nothing. Applied by re-running the same path the return to the
+            // foreground uses, which re-activates the session and restarts the
+            // engine if the category change stopped it.
+            guard let body = message.body as? [String: Any],
+                  let want = body["exclusive"] as? Bool,
+                  want != Self.exclusiveAudio else { return }
+            Self.exclusiveAudio = want
+            configureAudioSession()
             return
         }
         guard message.name == "saveFile",

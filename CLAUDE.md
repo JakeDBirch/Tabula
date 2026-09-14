@@ -902,11 +902,36 @@ Two things gate whether it actually appears, and only one of them is code:
   `.mixWithOthers` session generally is not eligible** — a mixable app is a
   secondary source and iOS gives the lock screen to the primary one. So the
   lock-screen transport and "play over a reference track" are, as far as I can
-  tell, mutually exclusive. `WebAppViewController.exclusiveAudio` is the
-  one-line switch and defaults to **false** (keep mixing, i.e. no behaviour
-  change). Flip it, run on a device, keep whichever you prefer — this is a
-  product decision, not a setting to guess at from here. **Unverified on
-  hardware**, like everything else in the shell.
+  tell, mutually exclusive, and the app now **asks rather than guesses**:
+  PROJECT ▸ **AUDIO ROUTE**, LOCK SCREEN (the default) or MIX.
+  `WebAppViewController.exclusiveAudio` is still the switch, but it is a
+  `UserDefaults`-backed **preference** set from the page over an `audioSession`
+  message handler rather than the constant it started as — a constant made
+  every change of mind a whole TestFlight round trip, for a choice that depends
+  on the session you are in. Three things about it:
+  - **The page pushes STATE, not a transition** — on mount and on every change
+    — and the shell **ignores a value it is already on**, so a launch does not
+    tear the session down and put it back up for nothing, and a dropped message
+    is repaired by the next render. The same shape as the core's `ui_sync`
+    receipts, and for the same reason.
+  - It is a **device preference** (`tnori-excl-audio`), deliberately not
+    project state: loading someone's project must not decide what your phone
+    does with its audio route. Written **only by the toggle**, never by an
+    effect on mount — see the row-keys lesson about persisting a choice rather
+    than a state.
+  - The control renders only under `IS_NATIVE`, since nothing outside the shell
+    has an `AVAudioSession` to set. `_audioroute.mjs` covers both halves.
+  **Unverified on hardware**, like everything else in the shell.
+- **A mixer on the lock screen is not possible**, and it is worth writing down
+  why so it isn't re-litigated. The media controls there are
+  `MPNowPlayingInfoCenter` (title, artist, artwork, rate) plus whichever
+  `MPRemoteCommandCenter` commands you enable — there is no API for a fader,
+  and the slider that IS drawn is the system output volume. The closest real
+  thing is a **Live Activity**: custom lock-screen UI, and since iOS 17 it may
+  carry `Button`/`Toggle` backed by App Intents — so three M/S toggles are
+  reachable, continuous faders are not. That is a widget-extension target, an
+  App Intent per control and a two-way mute bridge, so it is a piece of work
+  rather than a setting.
 
 **Background audio does not work — with Web Audio.** The shell now hosts the
 DSP core in AVAudioEngine (`CoreAudioHost`), which is not Web Audio, and the

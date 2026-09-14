@@ -17,11 +17,11 @@ import WebKit
 ///  • **It needs the app to be the system's Now Playing app**, and an audio
 ///    session with `.mixWithOthers` generally is not eligible — a mixable app
 ///    is a secondary source, and iOS gives the lock screen to the primary one.
-///    `WebAppViewController.exclusiveAudio` is the switch. Keeping the mix
-///    option means you can still jam over a reference track; taking it means
-///    Loud Light owns the lock screen and interrupts whatever else is playing.
-///    That is a product decision, so it is a one-line constant rather than a
-///    choice made here.
+///    `WebAppViewController.exclusiveAudio` is the switch, and it defaults to
+///    exclusive so these controls appear. Keeping the mix option instead means
+///    you can jam over a reference track and this whole class is inert. There
+///    is no setting that gives both, so it is the user's choice, made in the
+///    app (PROJECT ▸ AUDIO ROUTE) rather than decided here.
 ///  • **It needs audio that survives the screen locking**, which is the core in
 ///    AVAudioEngine (`CoreAudioHost`), not Web Audio. Lock-screen controls over
 ///    a WebKit AudioContext would be a dead UI — the context is suspended the
