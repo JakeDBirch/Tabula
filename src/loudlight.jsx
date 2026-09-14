@@ -3592,6 +3592,7 @@ export default function LoudLight(){
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
+  const [loopMenu,  setLoopMenu]  = useState(null); // {x, y, bottom} — LOOP's scope picker
   const [barMenu,   setBarMenu]   = useState(null); // {bar, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
@@ -4775,33 +4776,51 @@ export default function LoudLight(){
   // in both engines.
   const loopHoldR=useRef({tmr:0,held:false});
   const _loopHoldEnd=()=>{if(loopHoldR.current.tmr){clearTimeout(loopHoldR.current.tmr);loopHoldR.current.tmr=0;}};
+  // The scope the TAP turns on. The hold used to set pattern scope directly,
+  // which meant the only way to discover the second scope was to already know
+  // about it; it opens a menu now, and the scope it picks is what a later tap
+  // restores. Session-only on purpose: `loopMode` already persists the scope
+  // whenever LOOP is on, so this is a convenience, not a sixth save site.
+  const loopScopeR=useRef(1);
+  useEffect(()=>{if(loopMode)loopScopeR.current=loopMode;},[loopMode]);
   // Read the live refs, not the render's values: a hold spans 450ms and a
   // state update, so the closure that started the gesture is already stale.
   const setLoopScope=(n)=>{
     if(!n){setLoopMode(0);setLoopBar(-1);setLoopPat(null);return;}
+    loopScopeR.current=n;
     setLoopMode(n);
     setLoopBar(Math.max(0,barPageR.current));
     setLoopPat(activePatternIdR.current);
-    // Only the hold announces itself. On a one-bar pattern the two scopes sound
-    // identical, so without this the deliberate gesture would look like it did
-    // nothing at all — the same reason an all-bars SPEED write flashes.
-    if(n===2)showFlash("LOOP PATTERN");
+    // On a one-bar pattern the two scopes sound identical, so a scope change
+    // would otherwise look like it did nothing at all — the same reason an
+    // all-bars SPEED write flashes.
+    showFlash(n===2?"LOOP PATTERN":"LOOP BAR");
   };
-  const toggleLoop=()=>setLoopScope(loopR.current===1?0:1);
+  // Tap toggles LOOP off, or back on at whichever scope you last chose.
+  const toggleLoop=()=>setLoopScope(loopR.current?0:(loopScopeR.current||1));
+  const loopMenuAtR=useRef(0);
+  const _openLoopMenu=(e)=>{
+    const r=e.currentTarget.getBoundingClientRect();
+    loopMenuAtR.current=Date.now();
+    setLoopMenu({x:r.left+r.width/2,y:r.top,bottom:r.bottom});
+  };
   const loopBtnProps={
     // The NAME is "Loop"; the hint lives in `title`. A whole sentence as the
     // accessible name is read out on every focus, and it is not what the
     // control is called.
     "aria-label":"Loop",
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();loopHoldR.current.held=true;setLoopScope(loopR.current===2?0:2);},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();loopHoldR.current.held=true;_openLoopMenu(e);},
     onPointerDown:(e)=>{
       e.stopPropagation();loopHoldR.current.held=false;_loopHoldEnd();
-      loopHoldR.current.tmr=setTimeout(()=>{loopHoldR.current.tmr=0;loopHoldR.current.held=true;setLoopScope(loopR.current===2?0:2);},450);
+      // currentTarget is null by the time the timer fires, so measure now.
+      const t=e.currentTarget;
+      loopHoldR.current.tmr=setTimeout(()=>{loopHoldR.current.tmr=0;loopHoldR.current.held=true;
+        _openLoopMenu({currentTarget:t});},450);
     },
     onPointerUp:()=>_loopHoldEnd(), onPointerLeave:()=>_loopHoldEnd(),
     onPointerCancel:()=>{_loopHoldEnd();loopHoldR.current.held=false;},
-    // Swallow the hold's trailing click, or every "loop the pattern" is
-    // followed instantly by "…and now just this bar".
+    // Swallow the hold's trailing click, or the menu opens and the same tap
+    // immediately toggles LOOP behind it.
     onClick:(e)=>{e.stopPropagation();if(loopHoldR.current.held){loopHoldR.current.held=false;return;}toggleLoop();},
   };
   // (A layer button's HOLD opened VARY for that layer. VARY is deleted, so the
@@ -4811,6 +4830,70 @@ export default function LoudLight(){
   // screen on the landscape song page and a scope you can't see is a scope you
   // can't trust.
   const loopBtnStyle=loopMode===2?Object.assign({},S.loopOn,{boxShadow:"inset 0 0 0 3px rgba(159,180,199,0.22)"}):(loopMode?S.loopOn:{});
+  // ── LOOP SCOPE MENU — the LOOP button's second function ─────────────────
+  // The two scopes are a CHOICE, so they are shown as one: a radio pair with
+  // the live one marked, rather than a hold that silently toggles a mode you
+  // cannot see. It is one body rendered once at the top level and anchored to
+  // whichever LOOP button opened it — the button has four mounts (the desktop
+  // sidebar, portrait, the landscape rail, and loopFollowPair inside the two
+  // sheets) and a menu per mount would be four to keep in step.
+  //
+  // OFF is on the menu too. The tap toggles, so it is reachable already, but a
+  // menu listing only the two ON states and no way out reads as a trap when
+  // you opened it by accident.
+  const loopMenuBody=(()=>{
+    if(!loopMenu)return null;
+    const close=()=>setLoopMenu(null);
+    const W=150;
+    const px=Math.max(8,Math.min((typeof window!=="undefined"?window.innerWidth:400)-W-8,loopMenu.x-W/2));
+    // Above the button where there is room, below it where there isn't — the
+    // transport sits at the bottom of the screen in portrait and at the top of
+    // a sheet, so neither placement works everywhere.
+    const H=132;
+    const above=loopMenu.y>H+12;
+    const py=above?loopMenu.y-H-8:loopMenu.bottom+8;
+    const row=(label,hint,n)=>{
+      const on=loopMode===n;
+      return(
+        <button key={label}
+          style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"10px 11px",
+            background:on?"rgba(159,180,199,0.14)":"transparent",border:"none",fontFamily:"inherit",
+            textAlign:"left",cursor:"pointer"}}
+          onClick={()=>{setLoopScope(n);close();}}>
+          <span style={{width:9,height:9,borderRadius:"50%",flexShrink:0,
+            border:"1px solid "+(on?C_LOOP:"rgba(168,190,212,0.3)"),
+            background:on?C_LOOP:"transparent",boxShadow:on?"0 0 6px "+C_LOOP:"none"}}/>
+          <span style={{display:"flex",flexDirection:"column",gap:2}}>
+            <span style={{fontSize:10,fontWeight:700,letterSpacing:1.4,
+              color:on?"rgba(224,236,248,0.95)":"rgba(212,226,240,0.8)"}}>{label}</span>
+            <span style={{fontSize:8,letterSpacing:0.6,color:"rgba(178,199,219,0.4)"}}>{hint}</span>
+          </span>
+        </button>
+      );
+    };
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:520}}
+        onPointerDown={()=>{if(Date.now()-loopMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-loopMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"7px 11px 4px",fontSize:8,letterSpacing:2,fontWeight:600,
+            color:"rgba(178,199,219,0.3)"}}>LOOP</div>
+          {row("BAR","the bar you're on",1)}
+          {row("PATTERN","the whole pattern",2)}
+          <button style={{width:"100%",padding:"9px 11px",background:"transparent",border:"none",
+            borderTop:"1px solid rgba(168,190,212,0.1)",fontFamily:"inherit",textAlign:"left",
+            fontSize:10,fontWeight:700,letterSpacing:1.4,
+            color:loopMode?"rgba(212,226,240,0.6)":"rgba(178,199,219,0.25)",
+            cursor:loopMode?"pointer":"default"}}
+            onClick={loopMode?()=>{setLoopScope(0);close();}:undefined}>OFF</button>
+        </div>
+      </div>
+    );
+  })();
   // Switching to a different pattern while LOOP is on moves the loop with you —
   // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
   // which the pin deliberately ignores.
@@ -6028,7 +6111,7 @@ export default function LoudLight(){
   // as the transport's: one body, several mounts.
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
-      <button title="Loop — tap for this bar, hold for the whole pattern"
+      <button title="Loop — tap to toggle, hold to choose bar or pattern"
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={Math.round(sz*0.5)}/></button>
       <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -10015,6 +10098,8 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
+      {/* LOOP's scope picker. The button has four mounts; the menu has one. */}
+      {loopMenuBody}
       {scrubOverlay}
       {exportMenuEl}
 
@@ -10192,7 +10277,7 @@ export default function LoudLight(){
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
                 <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-                <button title="Loop — tap for this bar, hold for the whole pattern" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
+                <button title="Loop — tap to toggle, hold to choose bar or pattern" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                   style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
                   onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={18}/></button>
@@ -11117,7 +11202,7 @@ export default function LoudLight(){
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
-              <button title="Loop — tap for this bar, hold for the whole pattern" aria-label="Loop"
+              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                 style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -11134,7 +11219,7 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button title="Loop — tap for this bar, hold for the whole pattern" aria-label="Loop"
+              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
