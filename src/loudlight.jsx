@@ -10960,7 +10960,7 @@ export default function LoudLight(){
           )}
 
           {/* ── PORTRAIT COLUMN ORDER ──────────────────────────────────────
-               Name, globals, song, transport, patterns, bar nav, grid.
+               Name, globals, song, patterns, transport, bar nav, grid.
                Everything that is not the grid is now ABOVE it, and the grid is
                last. The trade, stated plainly because it reverses an earlier
                one: the bar chips and the transport used to sit UNDER the grid
@@ -11032,7 +11032,17 @@ export default function LoudLight(){
           </div>
           )}
 
-          {/* 4. Transport, with the layer buttons beside it. */}
+          {/* 4. PATTERN CHIPS. A pattern is all three parts, so this is one
+                 selector for the whole app rather than the old per-layer
+                 pills. It sits here because switching pattern is a thing you
+                 do mid-edit; it used to mean going to SONG and coming back. */}
+          {!isLandscape&&(
+          <div style={{padding:"0 12px 6px",flexShrink:0}}>
+            {patternChipsRow}
+          </div>
+          )}
+          {/* 5. Transport, with the layer buttons beside it. Below the pattern
+                 chips: you pick WHAT you are working on, then you drive it. */}
           {!isLandscape&&(
           <div style={{flexShrink:0}}>
             {/* Row 2: the layers AND the transport. They were two rows until
@@ -11073,15 +11083,6 @@ export default function LoudLight(){
           </div>
           )}
 
-          {/* 5. PATTERN CHIPS. A pattern is all three parts, so this is one
-                 selector for the whole app rather than the old per-layer
-                 pills. It sits here because switching pattern is a thing you
-                 do mid-edit; it used to mean going to SONG and coming back. */}
-          {!isLandscape&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0}}>
-            {patternChipsRow}
-          </div>
-          )}
           {/* The portrait VARY PILL ROW was here, and it is gone. It was a
               full-width row above the grid — ~25px, which on an SE is the
               difference between a width-bound grid at 355px and a height-bound
