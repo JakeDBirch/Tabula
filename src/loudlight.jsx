@@ -753,6 +753,27 @@ const partSeq=(part)=>{
   for(let i=0;i<lens.length;i++){const o=i*COLS;for(let c=0;c<lens[i];c++)out.push(o+c);}
   return out.length?out:[0];
 };
+// The columns a LOOP window covers: N bars starting at loopBar, in order.
+// N=1 is the old single-bar pin exactly, which is why this generalises rather
+// than replaces it. Bars wrap into the part's OWN count — the same loop-to-fill
+// rule loopBarOf applies — so a 3-bar window on an 8-bar drum part under a
+// 16-bar synth still lands on bars that exist there.
+const loopSeqOf=(part,loopBar,n)=>{
+  const lens=partBarLens(part), pb=Math.max(1,lens.length), out=[];
+  const N=Math.max(1,n|0);
+  for(let j=0;j<N;j++){
+    const b=(((loopBar+j)%pb)+pb)%pb, o=b*COLS;
+    // A bar with NO length still contributes a full bar to a loop window. That
+    // is not a tidy-up, it is the behaviour being preserved: the single-bar pin
+    // read `partBarLens(pat)[lBar] || COLS`, so a zero-length bar has always
+    // looped as sixteen steps even though the free-running cursor skips it.
+    // Dropping the fallback collapsed the window to one column and replayed
+    // that column every step — a kick on every step, caught by the oracle.
+    const L=lens[b]||COLS;
+    for(let c=0;c<L;c++)out.push(o+c);
+  }
+  return out.length?out:[0];
+};
 const partSeqLen=(part)=>{
   const lens=partBarLens(part);
   let n=0; for(const l of lens)n+=l;
@@ -1607,7 +1628,7 @@ const SESSION_DEFAULTS = Object.freeze({
   dlyIdx:3, dlyFbPct:45, dlyHpVal:8, dlyLpVal:78,
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
-  loopMode:0, loopBar:-1, loopPat:null,
+  loopMode:0, loopBar:-1, loopBars:1, loopPat:null,
 });
 
 
@@ -3487,6 +3508,11 @@ export default function LoudLight(){
   // it. Reading the live page every tick meant the loop crawled around under
   // you, which is what made LOOP feel intertwined with everything else.
   const [loopBar,   setLoopBar]   = useState(-1);
+  // How many bars the loop spans, from loopBar. 1 is the old single-bar pin,
+  // which is why loopMode keeps meaning 0 off / 1 bars / 2 pattern: a saved
+  // loopMode of 2 still reads as "the whole pattern", and a save with no
+  // loopBars reads as the one bar it always was.
+  const [loopBars,  setLoopBars]  = useState(1);
   // ...and WHICH pattern's bar. A bar index alone was applied to whatever the
   // song happened to be playing, so looping bar 4 of pattern B while the song
   // sat in A sounded A's bar 4.
@@ -3620,7 +3646,6 @@ export default function LoudLight(){
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
-  const [loopMenu,  setLoopMenu]  = useState(null); // {x, y, bottom} — LOOP's scope picker
   const [barMenu,   setBarMenu]   = useState(null); // {bar, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
@@ -4077,6 +4102,7 @@ export default function LoudLight(){
   useEffect(()=>{curShapeR.current=curShape;},[curShape]);
   useEffect(()=>{loopR.current=loopMode;},[loopMode]);
   const loopBarR=useRef(-1);
+  const loopBarsR=useRef(1);
   useEffect(()=>{loopBarR.current=loopBar;},[loopBar]);
   const loopPatR=useRef(null);
   useEffect(()=>{loopPatR.current=loopPat;},[loopPat]);
@@ -4111,6 +4137,7 @@ export default function LoudLight(){
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.SONG_MODE,songMode?1:0);},[songMode]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP,loopMode===2?2:loopMode?1:0);},[loopMode]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_BAR,loopBar);},[loopBar]);
+  useEffect(()=>{loopBarsR.current=loopBars;if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_BARS,loopBars);},[loopBars]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.LOOP_PAT,loopPat==null?-1:loopPat);},[loopPat]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.ACTIVE_PAT,activePatternId==null?-1:activePatternId);},[activePatternId]);
   useEffect(()=>{if(CORE_ON)coreHost.set(LLCore.P.P.MOTION,motionEnabled?1:0);},[motionEnabled]);
@@ -4230,7 +4257,7 @@ export default function LoudLight(){
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
-    loopMode,loopBar,loopPat,
+    loopMode,loopBar,loopBars,loopPat,
   });};
   // Installs a unified pattern list from any load path, and bumps the id
   // counter past everything in it so a later-created pattern can't collide.
@@ -4301,6 +4328,7 @@ export default function LoudLight(){
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopBars(s.loopBars!=null?s.loopBars:SESSION_DEFAULTS.loopBars);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
   };
   // Stable function references — read live state via the refs above
@@ -4375,7 +4403,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4470,6 +4498,7 @@ export default function LoudLight(){
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopBars(s.loopBars!=null?s.loopBars:SESSION_DEFAULTS.loopBars);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4559,7 +4588,7 @@ export default function LoudLight(){
     setPatterns([p0]);setActivePatId(p0.id);
     // Seed the lead store with a fresh empty pat so switching to MONO after
     setActiveLayer("synth");
-    setLoopMode(false);setLoopBar(-1);setLoopPat(null);
+    setLoopMode(false);setLoopBar(-1);setLoopBars(1);setLoopPat(null);
     setTrackMute({synth:false,lead:false,drums:false});
     setTrackSolo({synth:false,lead:false,drums:false});
     setSongView(false);
@@ -4822,138 +4851,71 @@ export default function LoudLight(){
   useEffect(()=>{ if(barPage>barCount-1)setBarPage(Math.max(0,barCount-1)); },[barCount,barPage]);
   // LOOP starts on the bar you are ON when you switch it on, and from then on
   // it follows your bar selection (see goToBar). Every LOOP button goes here.
-  // ── LOOP: tap loops the BAR, hold loops the PATTERN ──────────────────────
-  // `loopMode` is a SCOPE now, not a switch: 0 off, 1 one bar, 2 the whole
-  // pattern. A number rather than a second flag because every existing read of
-  // it is a truthy test — `if(loopMode)`, `loopR.current`, `loopMode?S.loopOn`
-  // — so they all keep working unchanged, and an old save carrying `true` reads
-  // as the bar loop it always was. Nothing new to persist, which for once means
-  // the multi-site rule costs nothing.
+  // ── LOOP is a HEADLAMP: each tap steps through, then off ─────────────────
+  // Tap once and you loop the bar you are on. Tap again — within
+  // LOOP_CHAIN_MS — and the window grows by a bar, up to four. One more, on a
+  // pattern longer than four bars, loops the whole pattern. Then it settles:
+  // once the chain has lapsed, wherever you landed is where you are, and the
+  // next tap turns LOOP off. There is no second function on this button any
+  // more; the scope menu is gone.
   //
-  // The scheduler already did nearly all of this: LOOP pinned the pattern AND
-  // held the song's place AND pinned one bar. Pattern loop is the first two
-  // without the third, so it is one flag (`barLock`) split out of `inLoop`,
-  // in both engines.
-  const loopHoldR=useRef({tmr:0,held:false});
-  const _loopHoldEnd=()=>{if(loopHoldR.current.tmr){clearTimeout(loopHoldR.current.tmr);loopHoldR.current.tmr=0;}};
-  // The scope the TAP turns on. The hold used to set pattern scope directly,
-  // which meant the only way to discover the second scope was to already know
-  // about it; it opens a menu now, and the scope it picks is what a later tap
-  // restores. Session-only on purpose: `loopMode` already persists the scope
-  // whenever LOOP is on, so this is a convenience, not a sixth save site.
-  const loopScopeR=useRef(1);
-  useEffect(()=>{if(loopMode)loopScopeR.current=loopMode;},[loopMode]);
-  // Read the live refs, not the render's values: a hold spans 450ms and a
-  // state update, so the closure that started the gesture is already stale.
-  const setLoopScope=(n)=>{
-    if(!n){setLoopMode(0);setLoopBar(-1);setLoopPat(null);return;}
-    loopScopeR.current=n;
+  // Why the chain has to lapse rather than run forever: a control whose next
+  // press depends on every press before it is unreadable once you have stopped
+  // to listen. Settling makes the button honest — mid-chain it extends, at rest
+  // it is an off switch.
+  //
+  // The cycle skips steps it cannot express, so it never stalls on a press that
+  // does nothing. Bars that do not exist are not offered, and WHOLE PATTERN is
+  // offered only past four bars, because at four or fewer it is the same loop
+  // as the bars already are. A one-bar pattern is therefore just on, then off.
+  //
+  // `loopMode` keeps its meaning — 0 off / 1 bars / 2 pattern — so a saved 2
+  // still reads as the whole pattern, and `loopBars` (1..4) is the new half. An
+  // old save with no loopBars reads as the single bar it always was.
+  const LOOP_CHAIN_MS=2000;
+  const LOOP_MAX_BARS=4;
+  const loopChainR=useRef(0);
+  // The states this pattern can actually offer, in order.
+  const _loopSteps=()=>{
+    const n=Math.max(1,patBarCount);
+    const out=[];
+    for(let i=1;i<=Math.min(LOOP_MAX_BARS,n);i++)out.push({mode:1,bars:i});
+    if(n>LOOP_MAX_BARS)out.push({mode:2,bars:1});
+    return out;
+  };
+  const setLoopScope=(n,bars)=>{
+    if(!n){setLoopMode(0);setLoopBar(-1);setLoopBars(1);setLoopPat(null);return;}
     setLoopMode(n);
+    setLoopBars(Math.max(1,bars||1));
     setLoopBar(Math.max(0,barPageR.current));
     setLoopPat(activePatternIdR.current);
-    // On a one-bar pattern the two scopes sound identical, so a scope change
-    // would otherwise look like it did nothing at all — the same reason an
-    // all-bars SPEED write flashes.
-    showFlash(n===2?"LOOP PATTERN":"LOOP BAR");
+    showFlash(n===2?"LOOP PATTERN":(bars>1?"LOOP "+bars+" BARS":"LOOP BAR"));
   };
-  // Tap toggles LOOP off, or back on at whichever scope you last chose.
-  const toggleLoop=()=>setLoopScope(loopR.current?0:(loopScopeR.current||1));
-  const loopMenuAtR=useRef(0);
-  const _openLoopMenu=(e)=>{
-    const r=e.currentTarget.getBoundingClientRect();
-    loopMenuAtR.current=Date.now();
-    setLoopMenu({x:r.left+r.width/2,y:r.top,bottom:r.bottom});
+  const tapLoop=()=>{
+    const now=Date.now();
+    const chained=now-loopChainR.current<LOOP_CHAIN_MS;
+    loopChainR.current=now;
+    // Settled, or already off → the tap is the plain switch.
+    if(!loopR.current){setLoopScope(1,1);return;}
+    if(!chained){setLoopScope(0);return;}
+    const steps=_loopSteps();
+    const cur=loopR.current===2?steps.length-1
+      :steps.findIndex(x=>x.mode===1&&x.bars===loopBarsR.current);
+    const next=cur+1;
+    if(next>=steps.length){setLoopScope(0);return;}   // nothing left to grow into
+    setLoopScope(steps[next].mode,steps[next].bars);
   };
+  const toggleLoop=tapLoop;
   const loopBtnProps={
     // The NAME is "Loop"; the hint lives in `title`. A whole sentence as the
     // accessible name is read out on every focus, and it is not what the
     // control is called.
     "aria-label":"Loop",
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();loopHoldR.current.held=true;_openLoopMenu(e);},
-    onPointerDown:(e)=>{
-      e.stopPropagation();loopHoldR.current.held=false;_loopHoldEnd();
-      // currentTarget is null by the time the timer fires, so measure now.
-      const t=e.currentTarget;
-      loopHoldR.current.tmr=setTimeout(()=>{loopHoldR.current.tmr=0;loopHoldR.current.held=true;
-        _openLoopMenu({currentTarget:t});},450);
-    },
-    onPointerUp:()=>_loopHoldEnd(), onPointerLeave:()=>_loopHoldEnd(),
-    onPointerCancel:()=>{_loopHoldEnd();loopHoldR.current.held=false;},
-    // Swallow the hold's trailing click, or the menu opens and the same tap
-    // immediately toggles LOOP behind it.
-    onClick:(e)=>{e.stopPropagation();if(loopHoldR.current.held){loopHoldR.current.held=false;return;}toggleLoop();},
+    onClick:(e)=>{e.stopPropagation();tapLoop();},
   };
-  // (A layer button's HOLD opened VARY for that layer. VARY is deleted, so the
-  // hold is too — the buttons are a plain tap again.)
-  // Pattern scope gets a second, inset outline: the bar strip is the real
-  // readout (every chip underlined rather than one), but the strip isn't on
-  // screen on the landscape song page and a scope you can't see is a scope you
-  // can't trust.
   const loopBtnStyle=loopMode===2?Object.assign({},S.loopOn,{boxShadow:"inset 0 0 0 3px rgba(159,180,199,0.22)"}):(loopMode?S.loopOn:{});
-  // ── LOOP SCOPE MENU — the LOOP button's second function ─────────────────
-  // The two scopes are a CHOICE, so they are shown as one: a radio pair with
-  // the live one marked, rather than a hold that silently toggles a mode you
-  // cannot see. It is one body rendered once at the top level and anchored to
-  // whichever LOOP button opened it — the button has four mounts (the desktop
-  // sidebar, portrait, the landscape rail, and loopFollowPair inside the two
-  // sheets) and a menu per mount would be four to keep in step.
-  //
-  // OFF is on the menu too. The tap toggles, so it is reachable already, but a
-  // menu listing only the two ON states and no way out reads as a trap when
-  // you opened it by accident.
-  const loopMenuBody=(()=>{
-    if(!loopMenu)return null;
-    const close=()=>setLoopMenu(null);
-    const W=150;
-    const px=Math.max(8,Math.min((typeof window!=="undefined"?window.innerWidth:400)-W-8,loopMenu.x-W/2));
-    // Above the button where there is room, below it where there isn't — the
-    // transport sits at the bottom of the screen in portrait and at the top of
-    // a sheet, so neither placement works everywhere.
-    const H=132;
-    const above=loopMenu.y>H+12;
-    const py=above?loopMenu.y-H-8:loopMenu.bottom+8;
-    const row=(label,hint,n)=>{
-      const on=loopMode===n;
-      return(
-        <button key={label}
-          style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"10px 11px",
-            background:on?"rgba(159,180,199,0.14)":"transparent",border:"none",fontFamily:"inherit",
-            textAlign:"left",cursor:"pointer"}}
-          onClick={()=>{setLoopScope(n);close();}}>
-          <span style={{width:9,height:9,borderRadius:"50%",flexShrink:0,
-            border:"1px solid "+(on?C_LOOP:"rgba(168,190,212,0.3)"),
-            background:on?C_LOOP:"transparent",boxShadow:on?"0 0 6px "+C_LOOP:"none"}}/>
-          <span style={{display:"flex",flexDirection:"column",gap:2}}>
-            <span style={{fontSize:10,fontWeight:700,letterSpacing:1.4,
-              color:on?"rgba(224,236,248,0.95)":"rgba(212,226,240,0.8)"}}>{label}</span>
-            <span style={{fontSize:8,letterSpacing:0.6,color:"rgba(178,199,219,0.4)"}}>{hint}</span>
-          </span>
-        </button>
-      );
-    };
-    return(
-      <div style={{position:"fixed",inset:0,zIndex:520}}
-        onPointerDown={()=>{if(Date.now()-loopMenuAtR.current>400)close();}}
-        onClick={()=>{if(Date.now()-loopMenuAtR.current>400)close();}}>
-        <div style={{position:"absolute",left:px,top:py,width:W,
-          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
-          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-          <div style={{padding:"7px 11px 4px",fontSize:8,letterSpacing:2,fontWeight:600,
-            color:"rgba(178,199,219,0.3)"}}>LOOP</div>
-          {row("BAR","the bar you're on",1)}
-          {row("PATTERN","the whole pattern",2)}
-          <button style={{width:"100%",padding:"9px 11px",background:"transparent",border:"none",
-            borderTop:"1px solid rgba(168,190,212,0.1)",fontFamily:"inherit",textAlign:"left",
-            fontSize:10,fontWeight:700,letterSpacing:1.4,
-            color:loopMode?"rgba(212,226,240,0.6)":"rgba(178,199,219,0.25)",
-            cursor:loopMode?"pointer":"default"}}
-            onClick={loopMode?()=>{setLoopScope(0);close();}:undefined}>OFF</button>
-        </div>
-      </div>
-    );
-  })();
+  // (The LOOP scope MENU is gone. The button has no second function now: each
+  //  tap steps the loop outward and then off — see tapLoop above.)
   // Switching to a different pattern while LOOP is on moves the loop with you —
   // that's an explicit "I'm working on this one now", unlike paging or FOLLOW,
   // which the pin deliberately ignores.
@@ -6171,7 +6133,7 @@ export default function LoudLight(){
   // as the transport's: one body, several mounts.
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
-      <button title="Loop — tap to toggle, hold to choose bar or pattern"
+      <button title="Loop — tap again to grow the loop, then off"
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={Math.round(sz*0.5)}/></button>
       <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -6246,7 +6208,15 @@ export default function LoudLight(){
           // used to cause went unexplained.
           // Pattern scope underlines EVERY bar — the strip is what says how wide
           // the loop is, and "all of them" is exactly what it should read as.
-          const isLoop=loopMode===2?true:!!loopMode&&bi===((loopBar%barCount)+barCount)%barCount;
+          // A loop of N bars underlines N chips, so the strip says how WIDE the
+          // loop is as well as where — which is the whole readout for a control
+          // that has no label for its state. Each bar of the window wraps into
+          // this part's own count, exactly as the audio does.
+          const isLoop=loopMode===2?true:!!loopMode&&(()=>{
+            for(let j=0;j<Math.max(1,loopBars);j++)
+              if(bi===((((loopBar+j)%barCount)+barCount)%barCount))return true;
+            return false;
+          })();
           const has=_barHasNotes(bi);
           // Bars past this part's loop end hold no content of their own — the
           // part repeats its own length through them (loop to fill), which is
@@ -6663,7 +6633,7 @@ export default function LoudLight(){
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
-    loopMode,loopBar,loopPat,
+    loopMode,loopBar,loopBars,loopPat,
     patterns,activePatId:activePatternId,
     song,songRep,activeLayer
   });
@@ -6706,6 +6676,7 @@ export default function LoudLight(){
     }
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
+    setLoopBars(s.loopBars!=null?s.loopBars:SESSION_DEFAULTS.loopBars);
     setLoopPat(s.loopPat!=null?s.loopPat:null);
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -7530,11 +7501,15 @@ export default function LoudLight(){
     // The master wraps too: it is a part like any other, and it can be the
     // SHORT one (an 8-bar master under a 16-bar drum part).
     const mLoopBar=(barLock&&mPart)?loopBarOf(mPart):0;
-    const loopMasterLen=(barLock&&mPart)?Math.max(1,partBarLens(mPart)[mLoopBar]||COLS):COLS;
+    // The master's own window. With more than one bar in it the rate is no
+    // longer constant — each bar prices its own ticks — so the duration has to
+    // read the column the step actually lands on, exactly as the free-running
+    // branch does.
+    const mLoopSeq=(barLock&&mPart)?loopSeqOf(mPart,mLoopBar,loopBarsR.current):null;
+    const loopMasterLen=mLoopSeq?Math.max(1,mLoopSeq.length):COLS;
     const masterDur=(i)=>{
       if(!mPart)return absStepDur;
-      // In LOOP every tick is the pinned bar's, so its rate is constant.
-      const col=barLock?mLoopBar*COLS:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
+      const col=barLock?mLoopSeq[i%mLoopSeq.length]:((mSeq&&mSeq.length)?mSeq[i%mSeq.length]:0);
       return absStepDur*colMult(mPart,col);
     };
     const patLen=Math.max(1,barLock?loopMasterLen:cyc.steps);
@@ -7567,8 +7542,9 @@ export default function LoudLight(){
         // In LOOP the cursor runs across the pinned bar's own columns — its own
         // length, so looping a 14-step bar loops 14 steps, not 16.
         const lBar=barLock?loopBarOf(pat):0;
-        const loopLen=barLock?Math.max(1,partBarLens(pat)[lBar]||COLS):0;
-        const s=barLock?lBar*COLS+(lf.step%loopLen):seq[lf.step%len];
+        const lSeq=barLock?loopSeqOf(pat,lBar,loopBarsR.current):null;
+        const loopLen=barLock?lSeq.length:0;
+        const s=barLock?lSeq[lf.step%loopLen]:seq[lf.step%len];
         // Priced from the bar THIS step is in, so it has to come after `s`.
         // It is both how long the note sounds and how far the cursor moves.
         const layerStepDur=absStepDur*colMult(pat,s);
@@ -10179,8 +10155,6 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
-      {/* LOOP's scope picker. The button has four mounts; the menu has one. */}
-      {loopMenuBody}
       {scrubOverlay}
       {exportMenuEl}
 
@@ -10358,7 +10332,7 @@ export default function LoudLight(){
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
                 <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-                <button title="Loop — tap to toggle, hold to choose bar or pattern" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
+                <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                   style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
                   onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={18}/></button>
@@ -11089,7 +11063,7 @@ export default function LoudLight(){
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
-              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
+              <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                 style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -11329,7 +11303,7 @@ export default function LoudLight(){
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
                 {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
               </button>
-              <button title="Loop — tap to toggle, hold to choose bar or pattern" aria-label="Loop"
+              <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}

@@ -52,6 +52,7 @@ enum ll_param {
   LL_P_SONG_MODE,    /* 0/1 */
   LL_P_LOOP,         /* 0 off, 1 loop one bar, 2 loop the whole pattern */
   LL_P_LOOP_BAR,     /* bar index */
+  LL_P_LOOP_BARS,    /* how many bars the loop spans, from LOOP_BAR (1..4) */
   LL_P_LOOP_PAT,     /* pattern id, -1 none */
   LL_P_ACTIVE_PAT,   /* pattern id being edited */
   LL_P_MASTER,       /* master gain, 0.55 default */

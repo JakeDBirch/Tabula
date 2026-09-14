@@ -59,7 +59,7 @@ static void defaults(void){
   p[LL_P_DLY_TIME]=0.375f; p[LL_P_DLY_FB]=0.45f; p[LL_P_DLY_HP]=8; p[LL_P_DLY_LP]=78;
   p[LL_P_RV_SIZE]=50; p[LL_P_RV_DAMP]=40; p[LL_P_RV_LFDAMP]=0; p[LL_P_RV_PREDELAY]=0; p[LL_P_RV_MOD]=0; p[LL_P_DLY_TO_REV]=0;
   p[LL_P_DRUM_LEVEL]=85; p[LL_P_DRUM_FXTRIM]=100; p[LL_P_DRUM_AUDIBLE]=1;
-  p[LL_P_SONG_MODE]=0; p[LL_P_LOOP]=0; p[LL_P_LOOP_BAR]=0; p[LL_P_LOOP_PAT]=-1; p[LL_P_ACTIVE_PAT]=-1;
+  p[LL_P_SONG_MODE]=0; p[LL_P_LOOP]=0; p[LL_P_LOOP_BAR]=0; p[LL_P_LOOP_BARS]=1; p[LL_P_LOOP_PAT]=-1; p[LL_P_ACTIVE_PAT]=-1;
   p[LL_P_MASTER]=0.55f; p[LL_P_MOTION]=0; p[LL_P_STOP_AFTER]=0;
   for(int l=0;l<2;l++){
     float*q=G.lp[l];

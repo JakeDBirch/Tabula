@@ -250,26 +250,49 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
 - **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **bar chips and nothing else** (`barChips`) — tap or drag the chips to page. (It carried a `♪` row-key toggle for a while; see "Row keys — PARKED".) **The strip is ONE LINE THAT SCROLLS** — eight chips across the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another name), the rest off the end, with a track underneath to pan it. It **wrapped** at eight a row for a while (16 bars two rows, 32 four), and that was wrong for the reason the wrapped song lane was: it made the strip's height a function of the visible part's bar count, so a 16-bar part and an 8-bar part in the same pattern gave the grid — and the song lane above it — two different positions, and switching layer jumped between them. `_barStripPx` is a **constant** now (one chip row + the track), which is what the rest of the column can budget against; `_barStripExtra` is 0 and survives only because the sizing expressions still read it. A chip is never narrower than an eighth of the strip, so **every chip carries its number** (they used to go unnumbered past 8 bars, because there was nowhere to print one). Three things to know: the chips take a fixed flex **basis** so eight fit the scrollport exactly however many bars there are (the same percentage-against-the-scrollport trick the song lane's slots use); the hit test is **1-D again but must read `scrollLeft`** (`_barAt`, and `_scrubTo` defers to it), and scrubbing toward either end **pans** (`_barEdgeScroll`) so you can drag the page to a bar off the end; and the chips keep `touch-action:none` because dragging them scrubs, so — exactly as on the song lane — **the track is the only thing you can drag to scroll**. `barChips` is one JSX value with several mounts on screen at once (the strip, the bar sheet, the step sheet), so the track's thumb is synced by walking `[data-barstrip]` in the DOM rather than through a ref, which would be whichever mount rendered last. A newly *chosen* bar is scrolled into view; a scroll you made by hand is never snapped back. Two things came off it. The **`+`** (tap added a bar, hold opened the bar drawer): `＋ BAR` is in a bar chip's hold menu now, with `⧉ DUP`, `×2` and `DELETE BAR` — the rest of the bar structure it belongs with — so a dedicated button was one op paying rent in the corner of a phone screen next to a menu that already carried its siblings. And the **readout** (pattern name · visible/total): the strip it sat on already *is* both of those, one chip per bar with the current one lit, under a row of pattern chips with the selected one lit; a third copy of what two rows of controls say. On desktop the sidebar's `+BAR` is unchanged. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
 - **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
-- **LOOP is a SCOPE, and the scope is a MENU. Tap toggles LOOP on and off; hold
-  (or right-click) opens BAR / PATTERN / OFF with the live one marked.** The
-  hold used to set pattern scope outright, which meant the only way to discover
-  the second scope was to already know it was there, and the only readout was a
-  bar strip you might not be looking at. A radio pair states the choice. Three
-  things follow. The tap is now **on/off at the scope you last chose**
-  (`loopScopeR`) rather than always dropping to the bar — a scope you picked
-  deliberately should survive a stop and start. That ref is **session-only on
-  purpose**: `loopMode` already persists the scope whenever LOOP is on, so this
-  is a convenience and not a sixth save site. **OFF is on the menu** even though
-  the tap already reaches it, because a menu offering only the two ON states
-  reads as a trap when you opened it by accident. And the menu is **one body
-  mounted once** at the top level, anchored to whichever button opened it: LOOP
-  has four mounts (desktop sidebar, portrait, the landscape rail, and
-  `loopFollowPair` inside both sheets) and a menu per mount would be four to
-  keep in step. Both house traps apply and are tested: the menu opens with the
-  finger still down, so its backdrop ignores dismissals for 400ms
-  (`loopMenuAtR`), and the hold swallows its trailing click or LOOP toggles
-  behind the menu it just opened. `_loopmenu.mjs` covers the menu;
-  `_patloop.mjs` still covers what pattern scope DOES, via the new route.
+- **LOOP is a HEADLAMP: each tap steps the window outward, then off.** Tap once
+  and you loop the bar you are on; tap again within `LOOP_CHAIN_MS` (2s) and the
+  window grows by a bar, to four; one more, on a pattern longer than four bars,
+  loops the whole pattern. Then it settles — once the chain has lapsed, wherever
+  you landed is where you are and the next tap turns LOOP **off**. There is no
+  second function on the button any more; the scope menu that briefly lived on
+  its hold is deleted, and so is `_loopmenu.mjs`.
+  - **Why the chain must lapse.** A control whose next press depends on every
+    press before it is unreadable the moment you stop to listen. Settling makes
+    it honest: mid-chain it extends, at rest it is an off switch. The cost is
+    that you cannot extend a loop you have been listening to for a few seconds —
+    you turn it off and tap up again. That is the deliberate half of the trade.
+  - **The cycle skips what it cannot express**, so no press is ever a no-op.
+    Bars that do not exist are not offered, and WHOLE PATTERN is offered only
+    past four bars, because at four or fewer it is the same loop the bars
+    already are. A one-bar pattern is therefore on, then off.
+  - **A loop is N BARS now, not one bar or all of them.** `loopMode` keeps its
+    meaning — 0 off / 1 bars / 2 pattern — so a saved `2` still reads as the
+    whole pattern and a save with no `loopBars` reads as the single bar it
+    always was; `loopBars` (1..4) is the new half and goes to every persistence
+    site plus a core param (`LL_P_LOOP_BARS`) and its mirror effect.
+  - **Both engines walk a WINDOW**, generalising the single-bar pin rather than
+    replacing it: `loopSeqOf` in JS, `loop_win_len` / `loop_win_col` in C — the
+    C pair walks rather than materialises, because the render thread allocates
+    nothing. Every bar of the window wraps into the part's own count, the same
+    loop-to-fill rule that stopped a short part falling silent under a long one.
+    With more than one bar in the window the master's tick rate is no longer
+    constant, so `masterDur` has to price from the column the step actually
+    lands on rather than the bar's first column.
+  - **One trap, paid for, and the oracle caught it.** The single-bar pin read
+    `partBarLens(pat)[lBar] || COLS`, so a bar with NO length has always looped
+    as sixteen steps even though the free-running cursor skips it. The first
+    `loopSeqOf` dropped that fallback, the window collapsed to one column, and
+    every step replayed it — a kick on every step. The C helper happened to keep
+    `l>0?l:LL_COLS`, which is exactly why the core stayed right and only the JS
+    went wrong, and why the oracle went red in one run. **When you generalise a
+    guarded expression, carry the guard.**
+  - **The bar strip is still the readout, and it now says how WIDE.** N bars
+    looping underlines N chips, each wrapped into the visible part's own count.
+    That is the whole state display for a control with no label.
+  - `_loopcycle.mjs` covers the gesture across a 1-, 2- and 8-bar pattern —
+    every step of the cycle, the "nothing left to grow into" end, and the settle
+    rule. `_patloop.mjs` still covers what a wide loop DOES.
 - **The underlying model is unchanged:** `loopMode` is `0` off / `1` bar / `2` pattern — a number rather than a second flag, because every existing read of it is a truthy test (`if(loopMode)`, `loopR.current`, `loopMode?S.loopOn`), so they all kept working and an old save carrying `true` reads as the bar loop it always was. **Nothing new to persist**, which is the one time the multi-site rule has cost nothing. In the core it is the same param, `LL_P_LOOP`, taking the value 2.
   - The scheduler already did nearly all of it. LOOP meant three things at once: pin the pattern, hold the song's place, and pin one bar. Pattern scope is the first two without the third, so it is one flag split out — **`inLoop`** (either scope) and **`barLock`** (scope 1 only), in both engines. With `barLock` off every part runs its own full length and the master its full cycle, exactly as with LOOP off; the only thing LOOP is still doing is not advancing the song.
   - Verified by stating the behaviour rather than the agreement: *looping the whole pattern is attack-for-attack identical to free-running that pattern* (`core/test/oracle.mjs`), because that is what it is. The oracle alone would not catch `barLock` leaking back in — a bug written into both engines passes it, which is how the loop-wrap silence survived.

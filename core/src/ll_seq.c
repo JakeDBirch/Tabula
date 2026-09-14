@@ -17,7 +17,7 @@ typedef struct {
    * a whole-pattern loop is inLoop without barLock: everything runs its own
    * full length, the song just doesn't advance. */
   ll_pattern*pat; int inSong, inLoop, barLock, loopBarIdx, loopOff;
-  int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen, mLoopBar;
+  int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen, mLoopBar, loopBars;
 } ctx_t;
 
 static ll_pattern* find_pat(int id){ if(id<0)return 0; for(int i=0;i<LL_MAX_PATTERNS;i++)if(G.pat[i].used&&G.pat[i].id==id)return &G.pat[i]; return 0; }
@@ -41,6 +41,34 @@ static int pat_cycle_steps(ll_pattern*p,int mLayer){
   int st=mh->seqLen*reps; return st<1?1:st;
 }
 
+/* The LOOP window's columns: N bars from `loopBar`, each wrapped into this
+ * part's OWN bar count (the loop-to-fill rule the free-running cursor obeys).
+ * N=1 is the old single-bar pin exactly, which is why this generalises it
+ * rather than replacing it. Walked rather than materialised: a window is at
+ * most four bars, so finding the i'th column is a couple of compares and the
+ * render thread allocates nothing. */
+static int loop_win_len(ll_phead*h,int loopBar,int n){
+  int pb=h->bars<1?1:h->bars, total=0;
+  if(n<1)n=1;
+  for(int j=0;j<n;j++){
+    int b=((loopBar+j)%pb+pb)%pb;
+    int l=h->barLens[b];
+    total+=l>0?l:LL_COLS;
+  }
+  return total>0?total:LL_COLS;
+}
+static int loop_win_col(ll_phead*h,int loopBar,int n,int i){
+  int pb=h->bars<1?1:h->bars;
+  if(n<1)n=1;
+  if(i<0)i=0;
+  for(int j=0;j<n;j++){
+    int b=((loopBar+j)%pb+pb)%pb;
+    int l=h->barLens[b]; if(l<=0)l=LL_COLS;
+    if(i<l)return b*LL_COLS+i;
+    i-=l;
+  }
+  return ((loopBar%pb)+pb)%pb*LL_COLS;   /* unreachable while i < window length */
+}
 static int build_ctx(ctx_t*c){
   c->inSong=G.p[LL_P_SONG_MODE]>0.5f;
   c->inLoop=G.p[LL_P_LOOP]>0.5f;
@@ -65,11 +93,11 @@ static int build_ctx(ctx_t*c){
   /* The master is a part like any other and can be the SHORT one, so it wraps
    * the pinned bar into its own length exactly as the others do. */
   c->mLoopBar=0; c->loopMasterLen=LL_COLS;
+  c->loopBars=(int)G.p[LL_P_LOOP_BARS]; if(c->loopBars<1)c->loopBars=1;
   if(c->barLock&&c->mHead){
     int pb=c->mHead->bars<1?1:c->mHead->bars;
-    c->mLoopBar=c->loopBarIdx%pb;
-    int l=c->mHead->barLens[c->mLoopBar];
-    c->loopMasterLen=l>0?l:LL_COLS;
+    c->mLoopBar=((c->loopBarIdx%pb)+pb)%pb;
+    c->loopMasterLen=loop_win_len(c->mHead,c->mLoopBar,c->loopBars);
   }
   c->patLen=c->barLock?c->loopMasterLen:pat_cycle_steps(cur,c->mLayer);
   if(c->patLen<1)c->patLen=1;
@@ -77,7 +105,9 @@ static int build_ctx(ctx_t*c){
 }
 static double master_dur(ctx_t*c,int i){
   if(!c->mHead)return c->absStep;
-  int col=c->barLock?c->mLoopBar*LL_COLS:c->mHead->seq[i%c->mHead->seqLen];
+  int col=c->barLock
+    ?loop_win_col(c->mHead,c->mLoopBar,c->loopBars,i%c->loopMasterLen)
+    :c->mHead->seq[i%c->mHead->seqLen];
   return c->absStep*col_mult(c->mHead,col);
 }
 
@@ -168,10 +198,10 @@ static void part_tick(ctx_t*c,int layer){
    * free-running cursor obeys. Without it an 8-bar part under a 16-bar one was
    * read past the end of its grid and fell silent for every loop bar past 8. */
   int lBar=0, loopLen=0;
-  if(c->barLock){ int pb=h->bars<1?1:h->bars; lBar=c->loopBarIdx%pb;
-                 int l=h->barLens[lBar]; loopLen=l>0?l:LL_COLS; }
+  if(c->barLock){ int pb=h->bars<1?1:h->bars; lBar=((c->loopBarIdx%pb)+pb)%pb;
+                 loopLen=loop_win_len(h,lBar,c->loopBars); }
   int st=G.cur[layer].step;
-  int s=c->barLock?lBar*LL_COLS+(st%loopLen):h->seq[st%len];
+  int s=c->barLock?loop_win_col(h,lBar,c->loopBars,st%loopLen):h->seq[st%len];
   double stepDur=c->absStep*col_mult(h,s);
   double at=G.cur[layer].nextAt;
   float sw=G.p[LL_P_SWING];
