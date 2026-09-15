@@ -73,7 +73,11 @@ const openWith=async(core,scenario)=>{
   await p.goto(URL0+'?core='+core); await p.waitForTimeout(1500);
   return {p,errs};
 };
-const clickPlay=(p)=>p.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.title==='Hold to export');b.click();});
+const clickPlay=(p)=>p.evaluate(()=>{const b=document.querySelector('[data-playbtn]');b.click();});
+// The play button is a play/PAUSE toggle now, so the second click has to be the
+// stop button beside it — a pause would leave the transport held rather than
+// rewound, which is not what "end the capture" means.
+const clickStop=(p)=>p.evaluate(()=>{const b=document.querySelector('button[aria-label="Stop"]');if(b)b.click();});
 
 // ── JS engine capture ──
 const captureJS=async(scenario,seconds)=>{
@@ -97,7 +101,7 @@ const captureJS=async(scenario,seconds)=>{
   const sr=await p.evaluate(()=>window.__bellSR=document.querySelector('body')&&(window.__att.length,undefined)||null);
   const out=await p.evaluate(()=>window.__att);
   const rate=await p.evaluate(()=>{const c=[...document.querySelectorAll('*')];return 0;});
-  await clickPlay(p); await p.waitForTimeout(100);
+  await clickStop(p); await p.waitForTimeout(100);
   await p.context().close();
   return {att:out,errs};
 };
@@ -112,7 +116,7 @@ const captureCore=async(scenario,seconds)=>{
   });
   await clickPlay(p); await p.waitForTimeout(400);
   const sr=await p.evaluate(()=>window.__LL_CORE_HOST.sr);
-  await clickPlay(p); await p.waitForTimeout(100);
+  await clickStop(p); await p.waitForTimeout(100);
   const log=await p.evaluate(()=>window.__log.map(m=>m.t==='sample'?{...m,data:Array.from(m.data)}:m));
   await p.context().close();
   return {log,sr,errs};

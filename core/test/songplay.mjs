@@ -39,11 +39,12 @@ for(const core of [0,1]){
   const filled=await p.evaluate(()=>[...document.querySelectorAll('[data-song-cell="1"]')].filter(c=>c.textContent.trim()).length);
   ck(filled===2,`two patterns placed in the song (${filled})`);
 
-  await p.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.title==='Hold to export');b.click();});
+  await p.evaluate(()=>{const b=document.querySelector('[data-playbtn]');b.click();});
   // One bar is 2s at 120bpm, so ~6s covers several entries either way.
   const seen=new Set();
   for(let i=0;i<28;i++){ await p.waitForTimeout(220); const c=await cursor(); if(c>=0)seen.add(c); }
-  await p.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.title==='Hold to export');b.click();});
+  // Stop, not a second click on play — that button pauses now.
+  await p.evaluate(()=>{const b=document.querySelector('button[aria-label="Stop"]');if(b)b.click();});
   await p.waitForTimeout(200);
   ck(seen.size>=2,`the playhead moved through the song (slots seen: ${JSON.stringify([...seen])})`);
   ck(seen.has(0)&&seen.has(1),'  and visited both entries');

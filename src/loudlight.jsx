@@ -4395,10 +4395,18 @@ export default function LoudLight(){
         if(e.key==="Escape"){e.preventDefault();setMenuOpen(false);setConfirmAction(null);}
         return;
       }
-      // Spacebar toggles play/stop globally (skip when typing in a text field).
+      // Spacebar is the PLAY/PAUSE button's keyboard twin — the same three-state
+      // toggle, not the old play/stop one, so the key and the button under it
+      // cannot mean different things. ESC is stop-and-rewind, the keyboard
+      // reading of the persistent stop beside it.
       if(!isEditable&&(e.key===" "||e.code==="Space")){
         e.preventDefault();
-        startStop();
+        togglePlayPause();
+        return;
+      }
+      if(!isEditable&&e.key==="Escape"&&(playingR.current||pausedR.current)){
+        e.preventDefault();
+        stopTransport();
         return;
       }
       const isUndo=(e.metaKey||e.ctrlKey)&&!e.shiftKey&&(e.key==="z"||e.key==="Z");
@@ -6147,29 +6155,39 @@ export default function LoudLight(){
   // is running out of reach — and the gesture that opens it was turning FOLLOW
   // off on the way (see `_scrubTo`). Same components, same state, same handlers
   // as the transport's: one body, several mounts.
-  // PAUSE — one body, three mounts (desktop sidebar, phone portrait, landscape
+  // STOP — one body, three mounts (desktop sidebar, phone portrait, landscape
   // rail), like every other control that appears on more than one surface.
   //
-  // It is a TOGGLE, drawn the way every other engaged toggle in here is drawn:
-  // held, it keeps the pause glyph and lights amber. It deliberately does NOT
-  // become a ▶ while held — the play button beside it is already showing one,
-  // and two triangles that mean different things (carry on / start over) a
-  // thumb apart is exactly the confusion a transport cannot afford.
+  // It is PERSISTENT: a square that is always in the row, in the same place,
+  // whatever the transport is doing. Stop used to be the play button's second
+  // tap, which is fine while there are two states and impossible once there
+  // are three — a button cannot draw "pause" and "stop" at once, and the one
+  // thing you reach for without looking is the one that puts it back.
   //
-  // Inert with the transport stopped: there is no position to hold, and a
-  // dimmed control says that better than one that silently does nothing.
-  const pauseBtn=(extra,glyph)=>(
-    <button aria-label="Pause" aria-pressed={paused}
-      title={paused?"Held — tap to carry on":"Pause, keeping your place"}
+  // Dimmed, not hidden, with the transport already stopped: it is a no-op
+  // there, and a control that stays put and greys out says that better than
+  // one that appears and disappears under your thumb.
+  const stopBtn=(extra,glyph)=>(
+    <button aria-label="Stop" title="Stop and rewind to the top"
       disabled={!playing&&!paused}
-      onClick={()=>togglePause()}
-      style={Object.assign({},S.iconBtn,extra,
-        paused?{border:"1px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"}
-              :(playing?{}:{opacity:0.35}))}>
+      onClick={()=>{ if(playing||paused)stopTransport(); }}
+      style={Object.assign({},S.iconBtn,extra,(playing||paused)?{}:{opacity:0.35})}>
       <svg width={glyph} height={glyph} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
-        <rect x="1.4" y="1" width="3" height="9" rx="1"/><rect x="6.6" y="1" width="3" height="9" rx="1"/>
+        <rect x="1" y="1" width="9" height="9" rx="1.5"/>
       </svg>
     </button>
+  );
+  // The combined PLAY/PAUSE glyph, so the three mounts cannot drift: it shows
+  // what the next press DOES — ▮▮ while running, ▶ when stopped OR held. A
+  // held transport therefore offers a ▶ that carries on from where you are;
+  // rewinding is the button next door, which is the whole point of splitting
+  // them.
+  const playGlyph=(sz)=>(
+    <svg width={sz} height={sz} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
+      {playing
+        ?<Fragment><rect x="1.4" y="1" width="3" height="9" rx="1"/><rect x="6.6" y="1" width="3" height="9" rx="1"/></Fragment>
+        :<polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/>}
+    </svg>
   );
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
@@ -7835,9 +7853,22 @@ export default function LoudLight(){
     releaseWakeLock();
     if("mediaSession" in navigator)navigator.mediaSession.playbackState="paused";
   };
+  // STOP REWINDS. That was always true of the PLAY button's second tap, and it
+  // has to stay true now that stop is its own control and a hold is a third
+  // state: pressing stop while held must put the cursor back to the top, not
+  // leave the held position sitting there to be resumed from by the next play.
+  //
+  // `startPlaying` re-seeds every one of these itself, so the resets below are
+  // belt and braces for the JS engine — but they are NOT redundant, because a
+  // stop is also what clears a PAUSE, and `resumePlay` (the other way out of a
+  // hold) reads exactly these refs. Zero them here and a stop cannot be
+  // resumed from by anything, whatever order the next calls come in.
   const stopTransport=()=>{
     _disengage(true);
     pausedR.current=false;setPaused(false);
+    pauseAtR.current=null;
+    stepR.current=0;nextNoteR.current=0;songPosR.current=0;
+    for(const layer of PART_LAYERS){ freeR.current[layer]={step:0,nextAt:0,bar:0}; }
     setStep(-1);setPlayId(null);setDrumStep(-1);
     setSongBar(-1);songBarR.current=-1;
     setSongPulse(-1);songPulseR.current=-1;
@@ -7919,13 +7950,24 @@ export default function LoudLight(){
     if(playingR.current){ stopTransport(); return; }
     await startPlaying();
   };
-  // The pause button: hold, then carry on. Inert with the transport stopped —
-  // there is no position to hold, and a control that does nothing is better
-  // dimmed than mysterious.
-  const togglePause=async()=>{
+  // ── The transport button: PLAY and PAUSE are one control, STOP is its own ──
+  // Two buttons for three states, split the way a transport has always been
+  // split: one button is "is it running", the other is "put it back".
+  //
+  // The combined button shows what the NEXT PRESS DOES — ▶ when stopped or
+  // held, ▮▮ while running — which is the only reading that survives a glance
+  // mid-take. It replaced a play button whose second tap was a stop, so
+  // carrying on from a hold meant pressing a ▶ that rewound you: the one thing
+  // a resume must not do.
+  //
+  // Note it does NOT go through `startStop`. That function still means
+  // play-from-the-top / stop, because the MP3 bounce and the lock-screen
+  // `start` command both mean exactly that, and neither wants a pause.
+  const togglePlayPause=async()=>{
     if(exportingR.current||engagingR.current)return;
     if(playingR.current){ pauseTransport(); return; }
-    if(pausedR.current){ await resumePlay(); }
+    if(pausedR.current){ await resumePlay(); return; }
+    await startPlaying();
   };
   useEffect(()=>()=>clearInterval(tmrR.current),[]);
 
@@ -9673,6 +9715,11 @@ export default function LoudLight(){
   const playHoldR=useRef({tmr:0,held:false});
   const _playHoldEnd=()=>{const t=playHoldR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
   const playBtnProps={
+    // A stable hook for the harnesses. They used to find this button by its
+    // title, which was the constant "Hold to export"; the title now says what
+    // the next press does, so it changes with the transport and is no longer
+    // an id. (Same argument as data-playcol and data-drumgrid.)
+    "data-playbtn":"1",
     onPointerDown:(e)=>{
       if(e.button===2)return;
       const t=playHoldR.current;t.held=false;_playHoldEnd();
@@ -9694,7 +9741,7 @@ export default function LoudLight(){
       setExportMenu({x:r.left+r.width/2,y:r.bottom});},
     // The hold swallows its own trailing click, or opening the menu would also
     // start playback behind it.
-    onClick:()=>{const t=playHoldR.current;if(t.held){t.held=false;return;}startStop();},
+    onClick:()=>{const t=playHoldR.current;if(t.held){t.held=false;return;}togglePlayPause();},
   };
 
   // ── The TEMPO chip: tap opens the drawer, HOLD edits it in place ─────────
@@ -10578,8 +10625,8 @@ export default function LoudLight(){
               <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",justifyContent:"center"}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>{playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}</button>
-                {pauseBtn({width:38,height:38},11)}
+                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>{playGlyph(11)}</button>
+                {stopBtn({width:38,height:38},11)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                   style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -11318,10 +11365,10 @@ export default function LoudLight(){
               <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
               <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
               <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
-                {playing?<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
+              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
+                {playGlyph(11)}
               </button>
-              {pauseBtn({width:40,height:40,flexShrink:0},12)}
+              {stopBtn({width:40,height:40,flexShrink:0},12)}
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
@@ -11565,10 +11612,10 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
             <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:{})} title="Hold to export" {...playBtnProps}>
-                {playing?<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>:<svg width="13" height="13" viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}><polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/></svg>}
+              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
+                {playGlyph(13)}
               </button>
-              {pauseBtn({width:"100%",height:32,flexShrink:0},13)}
+              {stopBtn({width:"100%",height:32,flexShrink:0},13)}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
@@ -12103,6 +12150,12 @@ const S={
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
+  // HELD. The play/pause button shows a ▶ when stopped and when held, so the
+  // ring is what tells the two apart — amber, the way every engaged toggle in
+  // here is drawn, and the same amber the old separate pause button lit with.
+  // (The other half of the readout is the STOP button beside it, which is
+  // dimmed only when there is genuinely nothing to rewind.)
+  playHeld:  {border:"2px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"},
   // A square button whose content is a glyph rather than a word. Same height as
   // the transport's round play button so the row reads as one row.
   iconBtn:   {width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",padding:0,
