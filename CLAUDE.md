@@ -1005,9 +1005,25 @@ iOS has not handed back) lives on the web side — so a command becomes a call t
 message handler. One direction each way, no second copy of "is it playing" to
 drift. Every other command (skip, seek, scrub) is explicitly **disabled**: a
 lock screen that draws a skip button doing nothing is worse than one that
-doesn't draw it. `isLiveStream` is set, because a looping sequencer has no
-duration to scrub. Verified headlessly (`_remote.mjs`) by shimming
+doesn't draw it. Verified headlessly (`_remote.mjs`) by shimming
 `window.webkit`, exactly as the MIDI download bridge was.
+
+**`MPNowPlayingInfoPropertyIsLiveStream` is NOT set, and that is deliberate —
+setting it is what denied the lock screen a pause button.** It was set at
+first, for a reason that reads well: a sequencer loops, so it has no duration
+and nothing to scrub, and the live-stream flag is how you say that — no
+progress bar instead of one pinned at zero. The cost is not documented
+anywhere obvious: iOS treats a live stream as something that **cannot be
+paused**, so the Now Playing UI substitutes a **stop** button for the
+play/pause one. `pauseCommand` stayed registered and stayed unreachable; there
+was no pause on the lock screen to press, which is how it was reported, twice,
+and the second time after the app had grown a perfectly good pause of its own.
+The trade is taken the other way round now. Duration and elapsed time are
+still not published (without them there is no meaningful bar to draw) and
+`changePlaybackPositionCommand` is disabled, so nothing there is draggable.
+**This one is reasoned from documented iOS behaviour, not seen on a device** —
+if a progress bar shows up looking silly, that is the half of the trade that
+was bought.
 
 Two things gate whether it actually appears, and only one of them is code:
 

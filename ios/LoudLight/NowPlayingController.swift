@@ -98,14 +98,29 @@ final class NowPlayingController {
         publish()
     }
 
-    /// A sequencer loops — it has no duration, no elapsed time and nothing to
-    /// scrub. `isLiveStream` is how you say that: the lock screen then shows a
-    /// transport and no progress bar, instead of a bar pinned at zero.
+    /// **Do not set `MPNowPlayingInfoPropertyIsLiveStream` here.** It was set,
+    /// for a good reason that stopped being good: a sequencer loops, so it has
+    /// no duration and nothing to scrub, and the live-stream flag is how you
+    /// say that — the lock screen then draws no progress bar instead of one
+    /// pinned at zero.
+    ///
+    /// The cost was not obvious and is the whole point of this comment: iOS
+    /// treats a live stream as something that CANNOT BE PAUSED, so the Now
+    /// Playing UI substitutes a **stop** button for the play/pause one. The
+    /// `pauseCommand` registered above stayed registered and stayed unreachable
+    /// — there was simply no pause on the lock screen to press, which is
+    /// exactly how it was reported, twice.
+    ///
+    /// So the flag is gone and the trade is taken the other way round: a
+    /// transport you can actually pause is worth more than a tidy absence of
+    /// progress furniture. Duration and elapsed time are still deliberately
+    /// NOT published — without them there is no meaningful bar to draw — and
+    /// `changePlaybackPositionCommand` is disabled, so nothing here is
+    /// draggable either way.
     private func publish() {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: "Loud Light",
-            MPNowPlayingInfoPropertyIsLiveStream: true,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
         ]
         if let art = Self.artwork { info[MPMediaItemPropertyArtwork] = art }
