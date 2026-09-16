@@ -6,23 +6,48 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Loud Light">
+  <meta name="apple-mobile-web-app-title" content="LL LAB">
   <meta name="theme-color" content="#0e1c2b">
-  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="manifest" href="manifest-lab.webmanifest">
   <link rel="icon" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
-  <title>Loud Light</title>
+  <title>Loud Light LAB</title>
   <style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#0e1c2b;overflow:hidden;}</style>
 </head>
 <body>
   <div id="root"></div>
   <script>
-    // Register the offline service worker so the installed PWA runs with no network.
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js').catch(function () {});
-      });
-    }
+    window.__LL_NS = "tnori-lab-";
+    (function () {
+      try {
+        var NS = window.__LL_NS;
+        if (localStorage.getItem(NS + "_seeded")) return;
+        var keys = [];
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (!k || k.indexOf(NS) === 0) continue;
+          if (k.indexOf("tnori-") === 0 || k === "tabula-nohint") keys.push(k);
+        }
+        for (var j = 0; j < keys.length; j++) {
+          var src = keys[j];
+          var bare = src.indexOf("tnori-") === 0 ? src.slice(6) : src;
+          localStorage.setItem(NS + bare, localStorage.getItem(src));
+        }
+        localStorage.setItem(NS + "_seeded", String(keys.length));
+      } catch (e) {}
+    })();
+    // A mark you cannot miss and cannot press. It lives in the SCAFFOLD, not in
+    // src/lab.jsx, so the fork can stay a byte-for-byte copy of the shipping
+    // source until you actually change something — which is what makes
+    // `npm run lab:diff` read as the experiment and nothing else.
+    window.addEventListener("load", function () {
+      try {
+        var b = document.createElement("div");
+        b.textContent = "LAB";
+        b.setAttribute("style", "position:fixed;top:calc(env(safe-area-inset-top) + 2px);right:calc(env(safe-area-inset-right) + 4px);z-index:99999;pointer-events:none;font:700 9px/1 ui-monospace,monospace;letter-spacing:1.5px;padding:3px 5px;border-radius:3px;color:#0e1c2b;background:rgba(255,196,106,.75);");
+        document.body.appendChild(b);
+      } catch (e) {}
+    });
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -1197,7 +1222,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-16 03:48Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-16 03:49Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.

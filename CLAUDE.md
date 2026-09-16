@@ -24,6 +24,9 @@ npm run audit     # standalone CJS return_react2 audit
 npm run test:core # rebuilds core/ll_core.wasm from core/src and runs the core's tests
 npm run test:oracle # JS scheduler vs the core, attack for attack — run after ANY scheduler change
 npm run test:play   # behavioural: the song's playhead actually advances, on BOTH engines
+npm run build:lab   # the EXPERIMENTAL fork: src/lab.jsx → lab.html (see "The LAB build")
+npm run lab:reset   # re-seed src/lab.jsx from the shipping source, then rebuild
+npm run lab:diff    # what the experiment has actually changed
 ```
 
 - **`src/loudlight.jsx` is THE source.** `index.html` is a generated artifact — never edit it by hand.
@@ -33,6 +36,72 @@ npm run test:play   # behavioural: the song's playhead actually advances, on BOT
 - Preview locally: `.claude/launch.json` defines a `loudlight` static server on :8137 rooted at the repo (works the same in a cloud sandbox). Serving the built `index.html` is the only way to see changes.
 
 **Verifying changes:** the build validates syntax. For grid/paging/codec work, a headless Playwright pass over the built `index.html` is worth the setup (`npm i --no-save playwright react@18.2.0 react-dom@18.2.0`, serve a copy with the CDN `<script src>`s pointed at the local UMD builds, then drive the DOM and read back `localStorage["tnori-autosave"]` to assert on real pattern data). That's how the duplicate-bar overwrite bug was caught. **Rewrite EVERY CDN reference in that copy, not just React's** — the sandbox has no network, so `lamejs` has to point at `vendor/lame.min.js` as well, or the MP3 bounce silently produces a null blob and `_core_bounce` / `_core_native` fail in a way that looks exactly like an engine regression. The sync step should assert its own substitutions landed, the same way the iOS build does. Filter resource 404s out of the console check — a bare static server has no samples or manifest. Logic (scheduler math, the pattern randomizer, range-slider frequency mapping) is best checked by extracting the pure function into a tiny Node harness and running Monte-Carlo/round-trip asserts — do NOT rely on headless AudioContext (gesture-gated, non-deterministic) and **do not auto-start playback** (Jake often has other audio running). UI/layout changes: verify in the browser preview (read the DOM / console, not just screenshots — screenshots have been flaky).
+
+---
+
+## The LAB build — where big changes get tried
+
+`lab.html` is a **parallel build of the whole app** for design and layout
+experiments that aren't worth committing to yet. `npm run build:lab` compiles
+`src/lab.jsx` — a **copy** of `src/loudlight.jsx` — through the same pipeline and
+the same audits, and emits `lab.html` beside `index.html`. Pages serves it, so
+it is a URL (`…/Tabula/lab.html`) you can put on a home screen and judge by hand
+on the phone, which is the only way this app's layout has ever actually been
+judged.
+
+**A fork, not a flag, and that was the deliberate choice.** The alternative was
+a `?lab=1` flag in the one source, like `?core=1` — no drift, trivial to
+promote. It was rejected because it puts every half-finished layout branch
+*inside the file Pages serves*, which is the exact shape of the VARY disaster:
+a flag that gates the obvious reads and not the rest. A fork cannot half-apply,
+because the shipping build never loads a line of it.
+
+**Three things make a broken lab cost nothing**, and all three are properties of
+the *scaffold*, not of the fork — so an experiment cannot switch them off by
+accident:
+
+- **Its own storage island.** The scaffold sets `window.__LL_NS="tnori-lab-"`
+  before the bundle runs, and the source reads its prefix from that one constant
+  (`LS_NS`, with `KEY_NS` for the host-provided `window.storage`). Unset — every
+  shipping build — it is the same `tnori-` fossil it always was, so this is a
+  rename of a string literal and nothing else. **Every** direct `localStorage`
+  key goes through it, view preferences and `tabula-nohint` included: a lab that
+  namespaced its projects but shared its preferences would still be writing into
+  the live island.
+- **It seeds itself ONCE, one way.** On first launch it copies the live island
+  across, so you audition a layout against your own songs rather than a default
+  project. After that it diverges and never reads `tnori-` again. The
+  "seeded" marker is its own key rather than "is the island empty", so an
+  experiment that clears its own library doesn't silently get the real one
+  copied back over it mid-test.
+- **It registers no service worker.** `sw.js` is cache-first over a *shared
+  origin*, and that is the one route by which a bad lab build could poison the
+  live app. It also has its own manifest, so installing it doesn't collide with
+  the installed PWA, and the scaffold paints a small amber `LAB` chip
+  (`pointer-events:none`) so the two are never confused on a phone.
+
+**The cost, stated plainly:** `src/lab.jsx` is a copy of a 12k-line file. It
+goes stale against `main` as you keep shipping, and a winning experiment comes
+back as a hand-ported diff. `npm run lab:diff` is the experiment and nothing
+else (the fork starts byte-identical — the LAB mark lives in the scaffold
+precisely to keep that true), and `npm run lab:reset` re-seeds the fork from
+current `main` when it has drifted too far to be worth porting.
+
+`lab.html` is committed, because Pages only serves what is on `main` and the
+whole point is a URL the phone can reach. It is ~836KB, so **push it when you
+want to look at it on the phone, not on every local iteration** — otherwise the
+repo grows by most of a megabyte per experiment. (`index.html` has always had
+this cost; the lab just gets rebuilt far more often.)
+
+`--lab` and `--ios` are **mutually exclusive**: the iOS payload is the shipping
+app, and there is no signed offline build of the experiment.
+
+`_lab.mjs` is the harness. It asserts the isolation on the real built files over
+one origin — the seed lands, the lab's writes move no live key, a second launch
+doesn't re-seed, the live library survives — and it has a **negative control**
+(force the island back to `tnori-` and the same steps clobber the real library),
+plus a check that the lab's autosave actually ran, because "cannot move a live
+key" passes vacuously against a lab that wrote nothing.
 
 ---
 

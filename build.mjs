@@ -12,6 +12,7 @@
 // Usage:
 //   node build.mjs              full build (index.html, CDN scaffold)
 //   node build.mjs --ios        also emit ios/www/ — offline, self-contained
+//   node build.mjs --lab        build src/lab.jsx → lab.html instead (see below)
 //   node build.mjs --audit-only just run the CJS audit, no output
 
 import { execFileSync } from "node:child_process";
@@ -19,8 +20,29 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, cpSync, ex
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const SRC = "src/loudlight.jsx";
-const OUT = "index.html";
+// --lab builds the EXPERIMENTAL fork, src/lab.jsx → lab.html, through this same
+// pipeline and the same audits. It ships to Pages beside index.html, so it is a
+// URL you can put on a home screen and judge by hand — which is the only way
+// this app's layout ever gets judged. Three things keep a broken lab from
+// costing anything:
+//
+//   · It writes to its own storage island (window.__LL_NS = "tnori-lab-"), so
+//     no experiment can reach the real project library or autosave. On first
+//     launch it COPIES the live island across, so you audition a layout against
+//     your own songs rather than a default project, and then diverges.
+//   · It registers NO service worker. sw.js is cache-first over a shared
+//     origin, and that is the one way a bad lab build could poison the live app.
+//   · Its own manifest, so installing it doesn't collide with the installed PWA.
+//
+// The cost, stated plainly: src/lab.jsx is a COPY of a 12k-line file, so it goes
+// stale against main and a winning experiment comes back as a hand-ported diff
+// (`npm run lab:diff`). That is the price of the isolation — the alternative, a
+// ?lab=1 flag in the shipping source, has no drift but puts every half-finished
+// layout inside the file Pages serves, which is the flag trap CLAUDE.md already
+// paid for once. `npm run lab:reset` re-seeds the fork from current main.
+const lab = process.argv.includes("--lab");
+const SRC = lab ? "src/lab.jsx" : "src/loudlight.jsx";
+const OUT = lab ? "lab.html" : "index.html";
 const auditOnly = process.argv.includes("--audit-only");
 // --ios additionally emits ios/www/ — the same app, but self-contained: every
 // CDN dependency vendored from vendor/, no service worker (WKWebView serves
@@ -29,17 +51,24 @@ const auditOnly = process.argv.includes("--audit-only");
 // on a plane is not a shippable music tool, so nothing may reach the network
 // at launch. See docs/ios-testflight.md.
 const ios = process.argv.includes("--ios");
+if (lab && ios) {
+  // The iOS payload is the shipping app. There is no signed, offline, native
+  // build of the experiment, and pretending otherwise would put a fork on
+  // TestFlight under the real app's bundle id.
+  console.error("!! --lab and --ios are mutually exclusive: the iOS payload is built from the shipping source only.");
+  process.exit(1);
+}
 
 const tmp = mkdtempSync(join(tmpdir(), "loudlight-build-"));
-const srcStripped = join(tmp, "loudlight.jsx");
-const compiled = join(tmp, "loudlight.js");
+const srcStripped = join(tmp, (lab ? "lab" : "loudlight") + ".jsx");
+const compiled = join(tmp, (lab ? "lab" : "loudlight") + ".js");
 
 // 1. Prepare source — drop the React import line and the `export default`.
 const raw = readFileSync(SRC, "utf8");
 // Stamp the build. BUILD_ID is rendered in the PROJECT menu, so when something
 // misbehaves on a device we can't inspect, the first question — "are you even
 // running the build I just pushed?" — has an answer on screen.
-const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z" + (lab ? " LAB" : "");
 const prepped = raw
   .replace(/^import React.*$\n?/m, "")
   .replace(/^export default function LoudLight/m, "function LoudLight")
@@ -148,6 +177,51 @@ const VIEWPORT = `<meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">`;
 const RESET = `<style>html,body,#root{margin:0;padding:0;height:100%;width:100%;background:#0e1c2b;overflow:hidden;}</style>`;
 
+// The lab's boot script. It runs before the bundle, and does two things the
+// shipping page must never do: it moves the storage island sideways, and it
+// copies the live island into it ONCE. The copy is what makes the lab worth
+// opening — a layout judged against a default project is not judged at all —
+// and the one-way direction is what makes it safe: the lab reads tnori- here
+// and never again, and writes only tnori-lab-.
+//
+// The seeded marker is deliberately its own key rather than "is the island
+// empty": an experiment that clears its own projects must not silently re-copy
+// the real ones back over whatever it was mid-way through testing.
+const LAB_NS = "tnori-lab-";
+const LAB_BOOT = `<script>
+    window.__LL_NS = ${JSON.stringify(LAB_NS)};
+    (function () {
+      try {
+        var NS = window.__LL_NS;
+        if (localStorage.getItem(NS + "_seeded")) return;
+        var keys = [];
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (!k || k.indexOf(NS) === 0) continue;
+          if (k.indexOf("tnori-") === 0 || k === "tabula-nohint") keys.push(k);
+        }
+        for (var j = 0; j < keys.length; j++) {
+          var src = keys[j];
+          var bare = src.indexOf("tnori-") === 0 ? src.slice(6) : src;
+          localStorage.setItem(NS + bare, localStorage.getItem(src));
+        }
+        localStorage.setItem(NS + "_seeded", String(keys.length));
+      } catch (e) {}
+    })();
+    // A mark you cannot miss and cannot press. It lives in the SCAFFOLD, not in
+    // src/lab.jsx, so the fork can stay a byte-for-byte copy of the shipping
+    // source until you actually change something — which is what makes
+    // \`npm run lab:diff\` read as the experiment and nothing else.
+    window.addEventListener("load", function () {
+      try {
+        var b = document.createElement("div");
+        b.textContent = "LAB";
+        b.setAttribute("style", "position:fixed;top:calc(env(safe-area-inset-top) + 2px);right:calc(env(safe-area-inset-right) + 4px);z-index:99999;pointer-events:none;font:700 9px/1 ui-monospace,monospace;letter-spacing:1.5px;padding:3px 5px;border-radius:3px;color:#0e1c2b;background:rgba(255,196,106,.75);");
+        document.body.appendChild(b);
+      } catch (e) {}
+    });
+  </script>`;
+
 const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -155,24 +229,24 @@ const html = `<!DOCTYPE html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Loud Light">
+  <meta name="apple-mobile-web-app-title" content="${lab ? "LL LAB" : "Loud Light"}">
   <meta name="theme-color" content="#0e1c2b">
-  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="manifest" href="${lab ? "manifest-lab.webmanifest" : "manifest.webmanifest"}">
   <link rel="icon" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
-  <title>Loud Light</title>
+  <title>${lab ? "Loud Light LAB" : "Loud Light"}</title>
   ${RESET}
 </head>
 <body>
   <div id="root"></div>
-  <script>
+  ${lab ? LAB_BOOT : `<script>
     // Register the offline service worker so the installed PWA runs with no network.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('sw.js').catch(function () {});
       });
     }
-  </script>
+  </script>`}
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   ${CORE_SCRIPT}

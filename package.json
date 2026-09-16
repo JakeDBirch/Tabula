@@ -10,7 +10,10 @@
     "build:core": "node core/build.mjs",
     "test:core": "node core/build.mjs",
     "test:oracle": "node core/test/oracle.mjs",
-    "test:play": "node core/test/songplay.mjs"
+    "test:play": "node core/test/songplay.mjs",
+    "build:lab": "node build.mjs --lab",
+    "lab:reset": "node -e \"require('fs').copyFileSync('src/loudlight.jsx','src/lab.jsx');console.log('src/lab.jsx re-seeded from src/loudlight.jsx')\" && node build.mjs --lab",
+    "lab:diff": "git diff --no-index --stat -- src/loudlight.jsx src/lab.jsx || true"
   },
   "devDependencies": {
     "@babel/cli": "^7.24.0",
