@@ -4710,7 +4710,12 @@ export default function LoudLight(){
   // the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another
   // name), the rest off the end, with a track underneath to pan it.
   const BAR_COLS=8;
-  const BAR_ROW_H=22, BAR_ROW_GAP=2;
+  // 34, not 22. The row used to hold up to thirty-two chips, so its height was
+  // whatever still let a 9px number fit; it holds THREE now and is the control
+  // you page the part with, so it is sized as a target. Free in portrait, which
+  // is width-bound — and ~12px off the grid in the height-bound layouts, which
+  // is the honest cost of the trade.
+  const BAR_ROW_H=34, BAR_ROW_GAP=2;
   const BAR_TRACK=5, BAR_TRACK_GAP=3;
   const _barRows=1;
   const _barPerRow=Math.max(1,Math.min(BAR_COLS,barCount));
@@ -4723,7 +4728,26 @@ export default function LoudLight(){
   // squashed by precisely the height of the chips. Two chip rows made it
   // obvious, one row had been quietly costing the same thing for months.
   // One chip row plus its track — the same on a 1-bar part and a 32-bar one.
-  const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK;
+  // ── The step parameters are BUTTONS, and the grid is where they land ─────
+  // STEP used to be a place you went: a sheet on mobile, a page on desktop,
+  // eight lanes 22px tall stacked in whatever height was left. Eight readouts
+  // of sixteen steps each, none of them big enough to hit, on a surface that
+  // covered the transport to show you them.
+  //
+  // It is a row of buttons now. Tap VEL and the velocity lane SPILLS onto the
+  // grid — the grid's own columns become the faders, full height, with the
+  // notes dimmed behind so you can see what you are shaping. Tap it again and
+  // you are back to writing notes. Same sixteen columns, same pattern, at
+  // sixteen times the size, on the surface you were already looking at.
+  //
+  // The row costs one line, and portrait is WIDTH-bound, so on a phone that
+  // line is free. The drums page has no per-column params (drum velocity is per
+  // CELL — thirteen values in a column, not one), so it shows no row and
+  // RESERVES the height instead, exactly as it already reserves the strip row:
+  // the grid's top edge must not move when you switch layer.
+  const PARAM_ROW_H=30, PARAM_ROW_GAP=4;
+  const _paramRowPx=PARAM_ROW_H+PARAM_ROW_GAP;
+  const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK+_paramRowPx;
   // The strip ROW's outer height — the chips plus `barStrip`'s own
   // `marginBottom`. The drums page has to reserve exactly this much for the
   // strip it hangs under its (shorter) grid, or the two blocks come out
@@ -4910,6 +4934,17 @@ export default function LoudLight(){
   // `loopMode` keeps its meaning — 0 off / 1 bars / 2 pattern — so a saved 2
   // still reads as the whole pattern, and `loopBars` (1..4) is the new half. An
   // old save with no loopBars reads as the single bar it always was.
+  // Which step lane is spilled onto the grid, or null for notes. A view state
+  // and deliberately NOT persisted: it decides what your next drag on the grid
+  // edits, and coming back to a project with the grid silently in VEL mode is
+  // the kind of thing a save should never be able to do to you.
+  const [spillParam,setSpillParam]=useState(null);
+  // Which drum channel the mixer is focused on, or null for the level-only
+  // overview. A view state, not persisted — it is where you are looking.
+  const [drumFocus,setDrumFocus]=useState(null);
+  const spillLane=spillParam?LANES.find(l=>l.key===spillParam)||null:null;
+  // Drums have no per-column params, so a spill cannot survive the trip there.
+  useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
   const LOOP_CHAIN_MS=2000;
   const LOOP_MAX_BARS=4;
   const loopChainR=useRef(0);
@@ -4921,12 +4956,32 @@ export default function LoudLight(){
     if(n>LOOP_MAX_BARS)out.push({mode:2,bars:1});
     return out;
   };
+  // ── The strip EXPANDS while the loop is being set up ─────────────────────
+  // The spinner shows three bars, which cannot draw a four-bar loop window —
+  // and the strip has been the WHOLE readout for LOOP since the button lost its
+  // label. So the strip becomes that readout again for exactly as long as the
+  // gesture lasts: any change of loop scope expands it to the full scrolling
+  // chip row, and it collapses back to the spinner once the chain has lapsed.
+  // Its lifetime is the chain's plus a grace, so the last tap of a chain is
+  // still legible after the chain itself has settled — which is what makes the
+  // expansion read as part of the gesture rather than as a mode you are in.
+  // Turning LOOP OFF does not expand it: there would be nothing to look at, and
+  // 2.8s of strip after an off tap is noise.
+  const [loopExpand,setLoopExpand]=useState(false);
+  const loopExpandTmrR=useRef(0);
+  const _flashLoopStrip=()=>{
+    setLoopExpand(true);
+    clearTimeout(loopExpandTmrR.current);
+    loopExpandTmrR.current=setTimeout(()=>setLoopExpand(false),LOOP_CHAIN_MS+800);
+  };
+  useEffect(()=>()=>clearTimeout(loopExpandTmrR.current),[]);
   const setLoopScope=(n,bars)=>{
     if(!n){setLoopMode(0);setLoopBar(-1);setLoopBars(1);setLoopPat(null);return;}
     setLoopMode(n);
     setLoopBars(Math.max(1,bars||1));
     setLoopBar(Math.max(0,barPageR.current));
     setLoopPat(activePatternIdR.current);
+    _flashLoopStrip();
     showFlash(n===2?"LOOP PATTERN":(bars>1?"LOOP "+bars+" BARS":"LOOP BAR"));
   };
   const tapLoop=()=>{
@@ -6212,14 +6267,125 @@ export default function LoudLight(){
         onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={Math.round(sz*0.5)}/></button>
     </div>
   );
-  const _openStepFor=(bar,x,y)=>{
-    if(IS_MOBILE){ const k=activeLayer==="drums"?"bars":"pattern";
-      setActiveSheet(sh=>sh===k?null:k); return; }
-    if(activeLayer==="drums"){ _openBarOps(bar,x,y); return; }
-    setPage(pg=>pg==="step"?"edit":"step");
-  };
-  const barChips=(
-    <div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+  // `_openStepFor` is GONE. It was the tap-again on a bar chip, and the only
+  // thing it opened was the step sheet / step page — which is not where step
+  // parameters live any more. The sheet and the page are still in the source,
+  // unreachable from here, so the two can be compared while this is being
+  // judged; delete them once the spill has been heard and felt on the phone.
+  // Drums used that gesture to reach the "bars" sheet: the bar menu on the
+  // spinner's HOLD carries everything that sheet did (＋BAR, ⧉DUP, ×2, DELETE,
+  // SPEED and the content ops), so nothing is stranded.
+  // ── The bar SPINNER ──────────────────────────────────────────────────────
+  // Three bars, not all of them: the one before, the one you are on, and the
+  // one after, plus a count. You spin through to the bar you want rather than
+  // reading a map of the whole part.
+  //
+  // What that buys, which is the point of it: the strip used to spend the full
+  // width of the screen drawing thirty-two chips 2px apart — a readout nobody
+  // reads chip by chip, at a size nothing can be tapped at. Three cells at the
+  // same width are THUMB-SIZED, and the width it gives back is where the step
+  // parameter buttons now live (see `paramRow`).
+  //
+  // The neighbours WRAP. A part is a loop, so the bar before bar 1 is the last
+  // bar, and showing a blank there would spend a third of the control saying
+  // "nothing here" on exactly the bar you most often start from.
+  //
+  // Three gestures, the house set: tap a neighbour to step onto it, DRAG across
+  // to spin (one cell of travel = one bar, so it reads as a wheel rather than a
+  // scrollbar), and hold for that bar's own ops. Tapping the CENTRE does
+  // nothing — it used to open STEP, and STEP is not a place any more: its lanes
+  // spill onto the grid from `paramRow`.
+  const _spinR=useRef({x:0,start:0,moved:false,held:false,tmr:0,cw:48});
+  const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}};
+  const _wrapBar=(b)=>{const n=Math.max(1,barCount);return ((b%n)+n)%n;};
+  const _barSpinner=(
+    <div data-barspin="1"
+      style={{display:"flex",alignItems:"stretch",gap:BAR_ROW_GAP,height:BAR_ROW_H,
+        touchAction:"none",cursor:"ew-resize",userSelect:"none"}}
+      onPointerDown={e=>{
+        e.stopPropagation();e.preventDefault();
+        try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+        const cell=e.currentTarget.querySelector('[data-spincell="0"]');
+        // WHICH cell was hit is recorded HERE, on the way down, not read off the
+        // pointerup. The container captures the pointer so it can be dragged off
+        // the control — and a captured pointer's later events are retargeted to
+        // the CAPTURING element, so `e.target.closest("[data-spincell]")` on the
+        // up is the container and finds nothing. The tap silently did nothing.
+        const hitEl=e.target&&e.target.closest?e.target.closest("[data-spincell]"):null;
+        _spinR.current={x:e.clientX,start:curBar,moved:false,held:false,tmr:0,
+          hit:hitEl?parseInt(hitEl.getAttribute("data-spincell"),10)||0:0,
+          cw:Math.max(24,(cell?cell.getBoundingClientRect().width:48))};
+        const x=e.clientX,y=e.clientY,bar=curBar;
+        _spinEnd();
+        _spinR.current.tmr=setTimeout(()=>{
+          _spinR.current.tmr=0;_spinR.current.held=true;_openBarOps(bar,x,y);
+        },450);
+      }}
+      onPointerMove={e=>{
+        if(!e.buttons)return;e.stopPropagation();
+        const g=_spinR.current;
+        const d=Math.round((e.clientX-g.x)/g.cw);
+        // A wobble under half a cell is not a spin, and must not cancel the hold.
+        if(!d&&!g.moved)return;
+        g.moved=true;_spinEnd();
+        // Drag RIGHT walks forward, the way a horizontal strip reads.
+        const want=_wrapBar(g.start+d);
+        if(want!==curBar)goToBar(want);
+      }}
+      onPointerUp={e=>{
+        _spinEnd();
+        const g=_spinR.current;
+        if(e.button===2){g.held=false;return;}
+        // A tap on a NEIGHBOUR steps onto it. The centre is where you already
+        // are, so it has nothing to do.
+        if(!g.held&&!g.moved&&g.hit)goToBar(_wrapBar(curBar+g.hit));
+        g.held=false;g.moved=false;
+      }}
+      onPointerCancel={()=>{_spinEnd();_spinR.current.held=false;_spinR.current.moved=false;}}
+      onContextMenu={e=>{e.preventDefault();e.stopPropagation();_spinEnd();
+        _spinR.current.held=true;_openBarOps(curBar,e.clientX,e.clientY);}}>
+      {[-1,0,1].map(off=>{
+        const bi=_wrapBar(curBar+off);
+        const isCur=off===0;
+        // The same three states the chips carried, on the cells that can show
+        // them. A loop wider than the window is what the EXPANSION is for.
+        const isPlaying=bi===playingBar;
+        const isLoop=loopMode===2?true:!!loopMode&&(()=>{
+          for(let j=0;j<Math.max(1,loopBars);j++)
+            if(bi===((((loopBar+j)%barCount)+barCount)%barCount))return true;
+          return false;
+        })();
+        const has=_barHasNotes(bi);
+        const past=(_barLens[bi]||0)===0;
+        // Only the centre is a real target; the neighbours are the step controls
+        // either side of it, so the centre takes the width.
+        return(
+          <div key={off} data-spincell={off} style={{position:"relative",borderRadius:4,
+            flex:isCur?"1 1 0":"0 0 26%",display:"flex",alignItems:"center",justifyContent:"center",
+            background:isCur?"rgba(255,206,130,0.62)":isLoop?"rgba(159,180,199,0.16)":past?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.14)":"rgba(186,208,230,0.06)",
+            boxShadow:isPlaying?"inset 0 0 0 1.5px "+C_VARY:"none",
+            color:isCur?"rgba(10,20,32,0.85)":isLoop?C_LOOP:"rgba(178,199,219,0.4)",
+            fontSize:isCur?13:10,fontWeight:700,lineHeight:1,
+            transition:"background .08s"}}>
+            {bi+1}
+            {isLoop?<div style={{position:"absolute",left:2,right:2,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
+          </div>
+        );
+      })}
+      {/* The total. The strip no longer draws every bar, so the count is the
+          only thing left that says how long the part is — it is a readout the
+          spinner cannot do without, not the third copy the old one was. */}
+      <div style={{flex:"0 0 auto",display:"flex",alignItems:"center",justifyContent:"center",
+        padding:"0 7px",borderRadius:4,background:"rgba(186,208,230,0.05)",
+        fontSize:9,fontWeight:700,letterSpacing:0.5,color:"rgba(178,199,219,0.45)",pointerEvents:"none"}}>
+        {(curBar+1)+"/"+barCount}
+      </div>
+    </div>
+  );
+  // The full scrolling strip, kept intact: it is what the spinner EXPANDS into
+  // while a loop is being set up, and the only view that can draw a four-bar
+  // window. Every gesture on it is unchanged.
+  const _barStripScroll=(
       <div data-barstrip="1" className="barscroll"
            onScroll={e=>_syncBarTrack(e.currentTarget)}
            style={{position:"relative",display:"flex",gap:BAR_ROW_GAP,height:BAR_ROW_H,
@@ -6228,9 +6394,9 @@ export default function LoudLight(){
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
              const bar=_barAt(e.clientX,e.clientY,e.currentTarget),x=e.clientX,y=e.clientY;
-             // Tapping the bar you are ALREADY on opens STEP (see
-             // _openStepFor). Recorded before _scrubTo, which is what makes
-             // the bar current.
+             // `wasCur` recorded before _scrubTo (which is what makes the bar
+             // current). It no longer opens anything — see above — but the flag
+             // still guards the hold from firing on a scrub release.
              barHoldR.current.wasCur=(bar===curBar);
              barHoldR.current.moved=false;
              _scrubTo(e.clientX,e.clientY,e.currentTarget);
@@ -6255,8 +6421,10 @@ export default function LoudLight(){
              // Not after a hold (it already opened it) and not after a scrub,
              // where the release lands on a bar you were dragging to rather
              // than one you deliberately tapped twice.
-             if(!barHoldR.current.held&&!barHoldR.current.moved&&barHoldR.current.wasCur)
-               _openStepFor(_barAt(e.clientX,e.clientY,e.currentTarget),e.clientX,e.clientY);
+             // The tap-again used to open STEP here. STEP is not a place any
+             // more — the lanes spill onto the grid from `paramRow` — so the
+             // gesture has nothing to open and is gone rather than rebound.
+
              barHoldR.current.wasCur=false;
            }}
            onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;barHoldR.current.wasCur=false;}}
@@ -6317,13 +6485,23 @@ export default function LoudLight(){
           );
         })}
       </div>
+  );
+  const barChips=(
+    <div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+      {loopExpand?_barStripScroll:_barSpinner}
       {/* The track: drag it to pan, and read where you are in a 32-bar part.
           Its height is part of the constant `_barStripPx`. */}
       <div data-bartrack="1" onPointerDown={_barPanStart} aria-hidden="true"
         style={{height:BAR_TRACK,borderRadius:BAR_TRACK/2,position:"relative",flexShrink:0,
           background:"rgba(186,208,230,0.07)",cursor:"pointer",touchAction:"none"}}>
-        <div data-barthumb="1" style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
-          borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
+        {/* Expanded, the thumb is a SCROLL position and is written imperatively
+            by `_syncBarTrack`. Collapsed there is no scrollport to read, so it
+            is a plain position readout — one bar wide, where you are — which is
+            the only thing left saying where in a 32-bar part the spinner sits. */}
+        <div data-barthumb="1" style={loopExpand
+          ?{position:"absolute",top:0,bottom:0,left:0,width:"100%",borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)"}
+          :{position:"absolute",top:0,bottom:0,borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)",
+            width:(100/Math.max(1,barCount))+"%",left:(100*curBar/Math.max(1,barCount))+"%",transition:"left .08s"}}/>
       </div>
     </div>
   );
@@ -6334,8 +6512,32 @@ export default function LoudLight(){
   // one op that the menu beside it also carries is a control paying rent in the
   // corner of a phone screen. (The "bars" SHEET keeps its opener on drums,
   // which have no step lanes: tapping the bar you are already on.)
+  // The eight step lanes as eight buttons. Tap one and it spills onto the grid;
+  // tap it again, or the one that is lit, and you are back to notes. Eight
+  // across a 370px phone is ~44px a button — the width the bar chips gave back.
+  // A lit button carries its lane's own colour, which is also the colour the
+  // faders come up in, so the row says what you are about to see.
+  const paramRow=(
+    <div data-paramrow="1" style={{display:"flex",gap:3,height:PARAM_ROW_H,width:"100%",flexShrink:0,touchAction:"none"}}>
+      {LANES.map(lane=>{
+        const on=spillParam===lane.key;
+        return(
+          <button key={lane.key} data-param={lane.key} aria-pressed={on}
+            onClick={e=>{e.stopPropagation();setSpillParam(on?null:lane.key);}}
+            style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+              border:"1px solid "+(on?lane.color:lane.color+"33"),
+              background:on?lane.color+"2e":"rgba(186,208,230,0.04)",
+              color:on?lane.color:lane.color+"99",
+              fontSize:9,fontWeight:700,letterSpacing:0.5,padding:0,
+              boxShadow:on?"0 0 8px "+lane.color+"44":"none",
+              transition:"background .08s, box-shadow .08s"}}>{lane.label}</button>
+        );
+      })}
+    </div>
+  );
   const barStrip=(
-    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",flexDirection:"column",gap:PARAM_ROW_GAP,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,width:"100%"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -6345,6 +6547,16 @@ export default function LoudLight(){
       {/* The ♪ row-key toggle was here. It is gone while ROWKEYS_ON is false —
           the column is worth having, the corner of the bar strip is not where
           you reach for it. The strip is bar chips and nothing else again. */}
+    </div>
+    {/* Drums have no per-column params, so they get no row — and the drums
+        block RESERVES this height instead (see `_stripRowPx`), because the
+        grid's top edge must not move when you switch layer. */}
+    {/* On drums it is rendered and HIDDEN rather than dropped: both pages put
+        `barStrip` above their grid, so the two blocks are only the same height
+        while the row is there. Dropping it would move the drum grid up by
+        exactly its height — which is the boundary the drums spacer below exists
+        to hold still. */}
+    {activeLayer!=="drums"?paramRow:<div aria-hidden="true" style={{height:PARAM_ROW_H,flexShrink:0,visibility:"hidden"}}/>}
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -9518,6 +9730,356 @@ export default function LoudLight(){
     }));
   };
 
+  // ── The spilled lane, drawn OVER the grid ────────────────────────────────
+  // A sibling of the grid container, absolutely positioned over it from the
+  // shared `position:relative` parent — the same construction the row keys use,
+  // and for the same two reasons. The grid's pointer handlers live on its
+  // container and hit-test a column from that container's own width, so
+  // anything inside it is read as part of the grid; and as a SIBLING a drag on
+  // a fader cannot reach the grid's gesture machine at all, so there is no
+  // `stopPropagation` to forget.
+  //
+  // Its columns are `flex:1` with the grid's own `CELL_GAP` between them, so
+  // fader and cell line up BY CONSTRUCTION rather than by a magic offset — if
+  // the grid's gap changes, both move together.
+  //
+  // Declared here, below `setStepParam` and `resetStepCol`, and called at the
+  // mounts rather than being a JSX value: Babel lowers `const` to `var`, so a
+  // value built above those would capture `undefined` and the faders would
+  // silently do nothing.
+  const _spillR=useRef({active:false});
+  const spillOverlay=()=>{
+    const lane=spillLane;
+    if(!lane||activeLayer==="drums"||!activePat)return null;
+    const pat=activePat;
+    const allParams=pat.params||defaultStepParams(patW(pat));
+    // FLT / OCT / GLIDE are the only lanes that animate mid-note, so they stay
+    // live across a tied note's extension cells; everything else is locked at
+    // note-start and is dead on a column with no attack. Same rule the lanes
+    // always had — it is about when the engine reads the value, not about which
+    // surface is drawing it.
+    const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
+    const colHasNote=Array.from({length:COLS},(_,vc)=>{
+      const c=barOff+vc;
+      if(!isMidNote){
+        for(let r=0;r<ROWS;r++) if(pat.grid[r]&&pat.grid[r][c])return true;
+        return false;
+      }
+      for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
+        if(pat.grid[r]&&pat.grid[r][c2]){
+          const span=Math.max(1,(pat.durs&&pat.durs[r]&&pat.durs[r][c2])||1);
+          if(c<c2+span)return true;
+        }
+      }
+      return false;
+    });
+    const valAt=(vc)=>{const sp=allParams[barOff+vc];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;};
+    const colAt=(clientX,el)=>{
+      const rect=el.getBoundingClientRect();
+      return Math.max(0,Math.min(COLS-1,Math.floor((clientX-rect.left)/rect.width*COLS)));
+    };
+    const valFromY=(clientY,el)=>{
+      const rect=el.getBoundingClientRect();
+      const pct=1-Math.max(0,Math.min(1,(clientY-rect.top)/rect.height));
+      return Math.round(lane.min+pct*(lane.max-lane.min));
+    };
+    const write=(vc,v)=>{
+      if(!colHasNote[vc])return;
+      setStepParam(barOff+vc,lane.key,Math.max(lane.min,Math.min(lane.max,Math.round(v))));
+    };
+    const playCol=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1;
+    return(
+      <div data-spill={lane.key}
+        style={{position:"absolute",inset:0,zIndex:3,display:"flex",gap:CELL_GAP,
+          touchAction:"none",cursor:"ns-resize"}}
+        onPointerDown={e=>{
+          e.stopPropagation();e.preventDefault();
+          try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+          const el=e.currentTarget, vc=colAt(e.clientX,el);
+          // A bool lane is a toggle, not a fader: no height to read.
+          if(lane.bool){
+            if(!colHasNote[vc]){_spillR.current={active:false};return;}
+            pushHistory();write(vc,valAt(vc)?0:1);_spillR.current={active:false};return;
+          }
+          // Double-tap a step resets EVERY lane on it, exactly as it did in the
+          // lanes. Keyed by column so taps on adjacent steps don't pair.
+          if(colHasNote[vc]&&isDoubleTap(e,vc)){_spillR.current={active:false};resetStepCol(barOff+vc);return;}
+          _spillR.current={active:true,mode:null,col:vc,el,
+            startLocked:!colHasNote[vc],cur:valAt(vc),
+            ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false,
+            hgt:el.getBoundingClientRect().height};
+        }}
+        onPointerMove={e=>{
+          const d=_spillR.current; if(!d||!d.active)return; e.stopPropagation();
+          // The same gesture split the lanes had: a horizontal-dominant drag
+          // DRAWS a curve across steps, a vertical one is a fine ballistic
+          // adjust of the step you started on. The grid is bigger, so the curve
+          // is the gesture that got better — you draw it with your whole hand.
+          if(d.mode===null){
+            const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
+            if(d.startLocked){ if(Math.abs(dx)>6||Math.abs(dy)>6)d.mode="draw"; else return; }
+            else if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6)d.mode="draw";
+            else if(Math.abs(dy)>4)d.mode="fine";
+            else return;
+            if(!d.didStart){pushHistory();d.didStart=true;}
+          }
+          if(d.mode==="draw")write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+          else{
+            const pd=d.ly-e.clientY; d.ly=e.clientY;
+            d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,d.hgt,lane.max-lane.min)));
+            write(d.col,d.cur);
+          }
+        }}
+        onPointerUp={e=>{
+          const d=_spillR.current;
+          if(d&&d.active&&d.mode===null&&!d.startLocked&&e.type==="pointerup"){
+            pushHistory();write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+          }
+          _spillR.current={active:false};
+        }}
+        onPointerCancel={()=>{_spillR.current={active:false};}}>
+        {Array.from({length:COLS},(_,vc)=>{
+          const v=valAt(vc), locked=!colHasNote[vc], isAct=vc===playCol, isQ=vc%4===0;
+          const isRhy=lane.key==="rhy";
+          const pct=lane.bool?(v?1:0)
+            :isRhy?Math.max(0.12,(Math.round(v)-1)/3)
+            :(v-lane.min)/(lane.max-lane.min);
+          const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
+          return(
+            <div key={vc} style={{flex:1,minWidth:0,position:"relative",borderRadius:2,
+              background:isQ?"rgba(10,20,32,0.30)":"rgba(10,20,32,0.22)",
+              opacity:locked?0.25:1,overflow:"hidden"}}>
+              {lane.center!=null&&<div style={{position:"absolute",left:0,right:0,bottom:(cp*100)+"%",height:1,background:lane.color+"33"}}/>}
+              <div style={{position:"absolute",left:0,right:0,bottom:0,height:(pct*100)+"%",
+                background:isAct?lane.color:lane.color+"66",
+                boxShadow:isAct?"0 0 8px "+lane.color:"none",transition:"height .04s"}}/>
+              {/* The value, on steps that carry one. The lanes could only afford
+                  7px here; a full-height column can say it properly. */}
+              {!locked&&(isAct||v!==lane.def)&&(
+                <span style={{position:"absolute",top:2,left:0,right:0,textAlign:"center",
+                  fontSize:9,fontWeight:700,lineHeight:1.2,color:"rgba(245,240,232,0.95)",
+                  textShadow:"0 0 3px #000,0 1px 2px #000",pointerEvents:"none"}}>{fmtStepVal(lane,v)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── The drum mixer: ONE body, two mounts ─────────────────────────────
+  // Desktop's SOUND page and the mobile SOUND sheet both show it. It was two
+  // near-copies before — the mobile one written as 'mirrors the desktop
+  // layout' — which is exactly how two surfaces drift apart. Extracted rather
+  // than edited twice.
+  //
+  // Declared below setDrumMix / onMixDrag / onMixUp / effDispMix and CALLED at
+  // the mounts: built as a JSX value above them it would close over undefined
+  // and every fader would be dead, silently.
+  const drumMixerBody=()=>{
+    const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+    const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
+    // ── The mixer is TWO views, not one wall ─────────────────────
+    // It used to be thirteen channel strips 62px wide, each carrying
+    // eight controls, in a horizontally SCROLLING row — so you could
+    // see about five voices at a time, none of the controls were
+    // bigger than 8px tall, and finding a voice meant scrolling a
+    // panel to look for it. Crowded and sprawling at the same time,
+    // which is the worst of both: too much on screen to read, and not
+    // enough of it to be sure you had seen everything.
+    //
+    // The top level is now LEVEL AND NOTHING ELSE, and every voice is
+    // on it — thirteen faders across the width, no scroll. That is the
+    // view you actually mix in, and "can I see all of it at once" is
+    // the whole requirement for it. Everything else about a voice —
+    // pitch, filter, envelope, saturation, pan, the two sends, the
+    // sampler — lives in a FOCUSED view you step into for one channel
+    // at a time, where each control can be the size of a control.
+    //
+    // `drumFocus` is a view state and deliberately not persisted: it
+    // is where you happen to be looking, not anything about the song.
+    const focus=drumFocus!=null&&drumFocus>=0&&drumFocus<DRUM_ROWS?drumFocus:null;
+    // One slider body for both views. The overview does not use it;
+    // the focused view mounts it at a size the strips could never
+    // afford. Base edit, or motion override/record, exactly as before.
+    const bigSlider=(r,key,val,minVal,maxVal,bipolar,dc)=>(
+      <div style={{flex:1,height:18,background:"rgba(186,208,230,0.07)",borderRadius:4,position:"relative",cursor:"pointer",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          const rect=e.currentTarget.getBoundingClientRect();
+          if(isDoubleTap(e,key)){setDrumMix(r,key,_drumDefMix()[key]);return;}
+          const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
+          const update=ev=>{
+            const pd=ev.clientX-lx; lx=ev.clientX;
+            cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
+            onMixDrag(r,key,Math.round(cur));
+          };
+          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+        }}>
+        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
+        {bipolar
+          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:4}}/>
+          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:4}}/>}
+        <div style={{position:"absolute",top:-3,bottom:-3,width:10,
+          left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 5px)`,
+          background:"rgba(255,255,255,0.9)",borderRadius:3,boxShadow:"0 0 4px "+dc+"88"}}/>
+      </div>
+    );
+    // The level fader, one body, two sizes: a column in the overview
+    // and the tall one in the focused view.
+    const levelFader=(r,lvl,dc)=>(
+      <div style={{flex:1,minHeight:40,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,cursor:"ns-resize",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          const rect=e.currentTarget.getBoundingClientRect();
+          if(isDoubleTap(e,"lvl"+r)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}
+          const dim=rect.height; let cur=lvl!=null?lvl:100, ly=e.clientY;
+          const update=ev=>{
+            const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
+            cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            onMixDrag(r,"level",Math.round(cur));
+          };
+          const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+        }}>
+        <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${lvl}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
+        <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-lvl}% - 2.5px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
+        <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
+      </div>
+    );
+    const hdrBtn=(on,label,onClick,col)=>(
+      <button onClick={onClick}
+        style={{padding:"4px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+          border:"1px solid "+(on?col:"rgba(168,190,212,0.2)"),background:on?col+"28":"transparent",
+          color:on?col:"rgba(178,199,219,0.45)"}}>{label}</button>
+    );
+    return(
+    <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+      {/* Kit selector — switch between curated sample packs or the synth engine */}
+      <div style={{flexShrink:0,marginBottom:8}}>
+        <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+          {DRUM_KITS.map(kit=>{
+            const on=activeKit===kit.id;
+            return(
+              <button key={kit.id} disabled={kitLoading}
+                onClick={()=>loadKit(kit.id)}
+                style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                {kitLoading&&on?"…":kit.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+        {focus!=null
+          ?<button onClick={()=>setDrumFocus(null)}
+             style={{padding:"4px 10px",borderRadius:4,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+               border:"1px solid rgba(168,190,212,0.3)",background:"rgba(186,208,230,0.06)",color:"rgba(178,199,219,0.75)"}}>‹ MIX</button>
+          :<div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIXER</div>}
+        {focus!=null&&<div style={{fontSize:11,letterSpacing:1.5,fontWeight:700,color:drumColor(focus,linkHat,linkTom)}}>{DRUM_VOICES[focus].full||DRUM_VOICES[focus].label}</div>}
+        {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
+        {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
+          <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
+            style={{padding:"4px 8px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
+        ))}
+        <div style={{flex:1}}/>
+        {hdrBtn(motionEnabled,"MOTION",()=>setMotionEnabled(v=>!v),"#c4727a")}
+        {motionEnabled&&hdrBtn(motionRec,motionRec?"● REC":"REC",()=>setMotionRec(v=>!v),"#e07060")}
+        {motionEnabled&&hdrBtn(false,"CLR",clearMotion,"#000")}
+      </div>
+
+      {focus==null?(
+        // ── OVERVIEW: level only, every voice, no scroll ─────────
+        <div style={{flex:1,minHeight:0,display:"flex",gap:2,alignItems:"stretch"}}>
+          {DRUM_DISPLAY.map((r)=>{
+            const voice=DRUM_VOICES[r];
+            const m=mix[r], md=effDispMix(dPat,r,m);
+            const dc=drumColor(r,linkHat,linkTom);
+            return(
+              <div key={voice.key} style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:3,position:"relative",
+                padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",overflow:"hidden"}}>
+                {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                  <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
+                );})()}
+                {/* The name is the way IN. A fader is a drag, so a tap
+                    on one does nothing — which leaves the tap free for
+                    the only other thing a channel strip can want. */}
+                <button onClick={()=>setDrumFocus(r)} title={"Open "+(voice.full||voice.label)}
+                  style={{padding:"3px 0",borderRadius:3,border:"1px solid "+dc+"33",background:dc+"14",
+                    color:dc,fontSize:8,fontWeight:700,letterSpacing:0.5,cursor:"pointer",fontFamily:"inherit",
+                    whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{voice.label}</button>
+                {levelFader(r,md.level,dc)}
+                <div style={{fontSize:8,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+              </div>
+            );
+          })}
+        </div>
+      ):(
+        // ── FOCUSED CHANNEL ──────────────────────────────────────
+        (()=>{
+          const r=focus, voice=DRUM_VOICES[r];
+          const m=mix[r], md=effDispMix(dPat,r,m);
+          const dc=drumColor(r,linkHat,linkTom);
+          const isRec=recordingVoice===voice.key;
+          const hasSample=!!voiceSamples[voice.key];
+          const filtMode=m.filt||"off";
+          const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
+          const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
+          const row=(label,node,readout)=>(
+            <div style={{display:"flex",alignItems:"center",gap:8,minHeight:24}}>
+              <div style={{width:44,flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.5)",fontWeight:600}}>{label}</div>
+              {node}
+              <div style={{width:42,flexShrink:0,textAlign:"right",fontSize:9,color:"rgba(178,199,219,0.7)",fontWeight:600}}>{readout}</div>
+            </div>
+          );
+          return(
+            <div style={{flex:1,minHeight:0,display:"flex",gap:10,overflow:"hidden"}}>
+              <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:7,overflowY:"auto"}}>
+                {row("PITCH",bigSlider(r,"pitch",md.pitch||0,-12,12,true,dc),(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0))}
+                <div style={{display:"flex",alignItems:"center",gap:8,minHeight:24}}>
+                  <button onClick={e=>{e.stopPropagation();cycleFilt();}}
+                    style={{width:44,flexShrink:0,height:18,padding:0,fontSize:7,letterSpacing:0.5,fontWeight:700,borderRadius:3,cursor:"pointer",fontFamily:"inherit",
+                      border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
+                      background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
+                      color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
+                  <div style={{flex:1,display:"flex",opacity:filtMode==="off"?0.4:1}}>{bigSlider(r,"filtCut",md.filtCut!=null?md.filtCut:100,0,100,false,dc)}</div>
+                  <div style={{width:42,flexShrink:0,textAlign:"right",fontSize:9,color:"rgba(178,199,219,0.7)",fontWeight:600}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
+                </div>
+                {row("ENV",bigSlider(r,"env",md.env!=null?md.env:100,0,100,false,dc),md.env!=null?md.env:100)}
+                {row("SAT",bigSlider(r,"sat",md.sat||0,0,100,false,dc),md.sat||0)}
+                {row("PAN",bigSlider(r,"pan",md.pan,-100,100,true,dc),md.pan>0?"+"+md.pan:md.pan)}
+                {row("REV",bigSlider(r,"rvSend",md.rvSend,0,100,false,dc),md.rvSend)}
+                {row("DLY",bigSlider(r,"dlySend",md.dlySend,0,100,false,dc),md.dlySend)}
+                {activeKit==="user"&&(
+                  <div style={{display:"flex",gap:5,marginTop:2}}>
+                    <button style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:9,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                      onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
+                      {isRec?"STOP":hasSample?"● SAMPLE":"REC"}
+                    </button>
+                    {hasSample&&!isRec&&<button style={{padding:"6px 10px",borderRadius:4,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                  </div>
+                )}
+              </div>
+              {/* The level fader stays on screen in here too: you are
+                  still mixing, and stepping into a channel to change
+                  its filter should not mean stepping back out to hear
+                  it against its own level. */}
+              <div style={{width:56,flexShrink:0,display:"flex",flexDirection:"column",gap:4,position:"relative",
+                padding:"6px 6px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box"}}>
+                <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.45)",textAlign:"center",fontWeight:600}}>LEVEL</div>
+                {levelFader(r,md.level,dc)}
+                <div style={{fontSize:9,color:"rgba(178,199,219,0.7)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+              </div>
+            </div>
+          );
+        })()
+      )}
+    </div>
+    );
+  };
+
   // BPM drag scrubber
   const [bpmDragging, setBpmDragging] = useState(false);
   const bpmDragRef  = useRef(null);
@@ -10688,7 +11250,8 @@ export default function LoudLight(){
                   own width, so a key column inside it would be read as column 0. */}
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",position:"relative",flexShrink:0}}>
               {rowKeys}
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
+              {spillOverlay()}
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {lenEdgeSynth}
@@ -10889,194 +11452,7 @@ export default function LoudLight(){
                 <span style={{fontSize:11,color:"rgba(178,199,219,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
               </div>
             )}
-            {activeLayer==="drums"&&page==="sound"&&(()=>{
-              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
-              return(
-              <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
-                {/* Kit selector — switch between curated sample packs or the synth engine */}
-                <div style={{flexShrink:0,marginBottom:8}}>
-                  <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {DRUM_KITS.map(kit=>{
-                      const on=activeKit===kit.id;
-                      return(
-                        <button key={kit.id} disabled={kitLoading}
-                          onClick={()=>loadKit(kit.id)}
-                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
-                          {kitLoading&&on?"…":kit.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIXER</div>
-                  {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
-                  {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
-                    <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
-                      style={{padding:"3px 7px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
-                  ))}
-                  <div style={{flex:1}}/>
-                  {/* MOTION mode + record arm. In MOTION mode dragging a slider
-                      is a live override; with REC armed during playback the hold
-                      writes per-step automation. */}
-                  <button onClick={()=>setMotionEnabled(v=>!v)}
-                    style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
-                  {motionEnabled&&(
-                    <button onClick={()=>setMotionRec(v=>!v)}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
-                  )}
-                  {motionEnabled&&(
-                    <button onClick={clearMotion}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
-                  )}
-                </div>
-                {/* Channel strips — horizontal row of conventional vertical strips.
-                    CH + OH are separate strips (each holds its own sample) but their
-                    params are linked via setDrumMix. Toms link on level only. Layout
-                    per strip: name → PITCH → FILT → SAT → ENV → PAN → REV → DLY →
-                    fader → REC/CLR. */}
-                <div style={{flex:1,display:"flex",gap:4,overflowX:"auto",overflowY:"hidden",alignItems:"stretch",paddingBottom:4}}>
-                  {DRUM_VOICES.map((voice,r)=>{
-                    const stripLabel=voice.full||voice.label;
-                    const m=mix[r];
-                    const md=effDispMix(dPat,r,m); // motion-aware display values
-                    const stripBg="rgba(30,28,24,0.55)";
-                    const dc=drumColor(r,linkHat,linkTom);
-                    const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
-                    // Horizontal mini-slider builder. Drag routes through onMixDrag
-                    // (base edit, or motion override/record), onMixUp on release.
-                    const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                      <div style={{width:"100%",height:8,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}
-                          const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
-                          const update=ev=>{
-                            const pd=ev.clientX-lx; lx=ev.clientX;
-                            cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
-                            onMixDrag(r,key,Math.round(cur));
-                          };
-                          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                        }}
-                        onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
-                        {bipolar
-                          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
-                          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:8,
-                          left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,
-                          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+dc+"88"}}/>
-                      </div>
-                    );
-                    const isRec=recordingVoice===voice.key;
-                    const hasSample=!!voiceSamples[voice.key];
-                    const filtMode=m.filt||"off";
-                    const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                    const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                    return(
-                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                        {/* Hit flash — a uniform full-strip glow that pulses on
-                            each hit, peak opacity scaling with velocity, then
-                            fades. (Intensity, not height — a bottom-anchored
-                            gradient read like the level fader moving.) */}
-                        {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                          <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
-                        );})()}
-                        {/* Voice name */}
-                        <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
-                        {/* PITCH (semitones, bipolar) */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                          {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
-                        </div>
-                        {/* FILTER — type chip on its own row above, then a
-                            full-width cutoff slider + numeric readout (matches the
-                            PITCH/ENV cells; the chip no longer steals slider width). */}
-                        <div style={cell}>
-                          <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                            style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                              border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
-                              background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                              color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
-                          <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
-                        </div>
-                        {/* ENV — sample playback length (full right = whole sample) */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                          {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
-                        </div>
-                        {/* SAT — per-voice saturation/drive */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                          {miniSlider("sat",md.sat||0,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
-                        </div>
-                        {/* PAN */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                          {miniSlider("pan",md.pan,-100,100,true)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
-                        </div>
-                        {/* REV send */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
-                          {miniSlider("rvSend",md.rvSend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
-                        </div>
-                        {/* DLY send */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                          {miniSlider("dlySend",md.dlySend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
-                        </div>
-                        {/* Vertical level fader */}
-                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0",touchAction:"none"}}
-                          onPointerDown={e=>{
-                            e.stopPropagation();
-                            const rect=e.currentTarget.getBoundingClientRect();
-                            if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}
-                            const dim=rect.height; let cur=md.level!=null?md.level:100, ly=e.clientY;
-                            const update=ev=>{
-                              const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
-                              cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
-                              onMixDrag(r,"level",Math.round(cur));
-                            };
-                            const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                            document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                          }}>
-                          {/* Fill from bottom up */}
-                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
-                          {/* Thumb */}
-                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
-                          {/* Center notch */}
-                          <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
-                        </div>
-                        <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
-                        {/* REC / sample — only on the USER kit (curated presets
-                            don't expose the sampler). */}
-                        {activeKit==="user"&&(
-                        <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                            onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                            {isRec?"STOP":hasSample?"●":"REC"}
-                          </button>
-                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
-                        </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              );
-            })()}
+            {activeLayer==="drums"&&page==="sound"&&drumMixerBody()}
 
             {activeLayer!=="drums"&&page==="step"&&(
               <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
@@ -11464,7 +11840,8 @@ export default function LoudLight(){
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
-                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
+                  {spillOverlay()}
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
                     {lenEdgeSynth}
@@ -11923,135 +12300,7 @@ export default function LoudLight(){
                         </div>
                       </div>
                     )}
-                    {activeLayer==="drums"&&(()=>{
-                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
-                      // Mobile mixer: horizontally-scrolling row of compact channel strips.
-                      // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
-                      // vertical level fader → REC) but at a narrower width.
-                      return(<div>
-                      {/* KIT selector (mobile) */}
-                      <div style={{marginBottom:6}}>
-                        <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:3}}>KIT</div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          {DRUM_KITS.map(kit=>{const on=activeKit===kit.id;return(
-                            <button key={kit.id} disabled={kitLoading} onClick={()=>loadKit(kit.id)}
-                              style={{padding:"5px 12px",borderRadius:5,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:10,letterSpacing:1,fontWeight:on?700:500,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
-                              {kitLoading&&on?"…":kit.label}
-                            </button>);})}
-                        </div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-                        {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
-                          <button key={lbl} onClick={()=>set(v=>!v)}
-                            style={{padding:"4px 8px",borderRadius:5,fontSize:8,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
-                        ))}
-                        <button onClick={()=>setMotionEnabled(v=>!v)}
-                          style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
-                        {motionEnabled&&(
-                          <button onClick={()=>setMotionRec(v=>!v)}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
-                        )}
-                        {motionEnabled&&(
-                          <button onClick={clearMotion}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
-                        )}
-                      </div>
-                      {/* Drag-scrollbar — reliable horizontal scroll for the strips
-                          (their sliders capture touch, blocking native swipe). */}
-                      <div style={{height:16,marginBottom:5,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:8,touchAction:"none",cursor:"ew-resize",overflow:"hidden"}}
-                        onPointerDown={e=>{try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}const track=e.currentTarget;mixScrollTo(e.clientX,track);const mv=ev=>mixScrollTo(ev.clientX,track);const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                        <div style={{position:"absolute",top:2,bottom:2,width:"32%",left:`calc(${mixScrollPct}*(100% - 32%))`,background:"rgba(178,199,219,0.4)",borderRadius:7,pointerEvents:"none"}}/>
-                        <span style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",fontSize:7,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:600,pointerEvents:"none",whiteSpace:"nowrap"}}>◂ DRAG TO SCROLL ▸</span>
-                      </div>
-                      <div ref={mixScrollRef} onScroll={mixScrollSync} style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
-                        {DRUM_VOICES.map((voice,r)=>{
-                          const stripLabel=voice.full||voice.label;
-                          const m=mix[r];
-                          const md=effDispMix(dPat,r,m); // motion-aware display values
-                          const isRec=recordingVoice===voice.key;
-                          const hasSample=!!voiceSamples[voice.key];
-                          const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
-                          const dc=drumColor(r,linkHat,linkTom);
-                          const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                            <div style={{width:"100%",height:10,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
-                              onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                              {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
-                              {bipolar
-                                ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
-                                :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
-                              <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                            </div>
-                          );
-                          const filtMode=m.filt||"off";
-                          const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                          const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                            {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                              <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
-                            );})()}
-                            <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                              {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
-                            </div>
-                            <div style={cell}>
-                              <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                                style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                                  border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
-                                  background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                                  color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
-                              <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                              {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                              {miniSlider("sat",md.sat||0,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                              {miniSlider("pan",md.pan,-100,100,true)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
-                              {miniSlider("rvSend",md.rvSend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                              {miniSlider("dlySend",md.dlySend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
-                            </div>
-                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
-                              <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
-                              <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
-                            </div>
-                            <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
-                            {activeKit==="user"&&(
-                            <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                                onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                                {isRec?"STOP":hasSample?"●":"REC"}
-                              </button>
-                              {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
-                            </div>
-                            )}
-                          </div>);
-                        })}
-                      </div>
-                      </div>);
-                    })()}
+                    {activeLayer==="drums"&&drumMixerBody()}
                   </div>
                 )}
                 {/* FX sheet — global reverb / delay design */}
