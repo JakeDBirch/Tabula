@@ -48,10 +48,10 @@ final class NowPlayingController {
         registered = true
 
         let c = MPRemoteCommandCenter.shared()
-        // Only the three the app actually has. Everything else is disabled so
-        // the lock screen does not draw a skip button that does nothing —
-        // a dead control is worse than an absent one.
-        for unused in [c.nextTrackCommand, c.previousTrackCommand,
+        // Only what the app actually has. Everything else is disabled so the
+        // lock screen does not draw a control that does nothing — a dead
+        // button is worse than an absent one.
+        for unused in [c.nextTrackCommand,
                        c.seekForwardCommand, c.seekBackwardCommand,
                        c.skipForwardCommand, c.skipBackwardCommand,
                        c.changePlaybackPositionCommand] {
@@ -72,6 +72,33 @@ final class NowPlayingController {
         }
         c.stopCommand.isEnabled = true
         c.stopCommand.addTarget { [weak self] _ in
+            self?.send("stop"); return .success
+        }
+
+        // ⏮ IS THE STOP BUTTON, and that is a deliberate trade.
+        //
+        // The Now Playing transport has three fixed slots — ⏮ · ▶/❙❙ · ⏭ — and
+        // **stop is never one of them**: iOS draws ■ only as a SUBSTITUTE for
+        // the play/pause button, and the one way to ask for that substitution
+        // is the live-stream flag, which is exactly what used to deny the lock
+        // screen a pause (see `publish()` below). So pause and stop cannot both
+        // have the centre slot, there is no API for a fourth button, and the
+        // only place a third control can go is one of the flanking slots.
+        //
+        // `stopCommand` above stays registered and draws nothing; it is how
+        // Siri and hardware stop controls reach the transport. This is what
+        // puts a stop on the SCREEN, and the glyph says skip-back rather than
+        // stop. It is the honest reading here: this app has no tracks to skip
+        // to, and "back to the start" is what stop does — it rewinds. The cost,
+        // stated plainly, is that a headphone double-press or a Siri "previous
+        // track" now rewinds the song rather than doing nothing. One line to
+        // undo if it reads wrong on the phone.
+        //
+        // `nextTrackCommand` stays disabled: there is nothing forward of the
+        // song's top to go to, so the right slot would be the dead button this
+        // block exists to avoid.
+        c.previousTrackCommand.isEnabled = true
+        c.previousTrackCommand.addTarget { [weak self] _ in
             self?.send("stop"); return .success
         }
     }

@@ -1036,10 +1036,42 @@ transport** — everything that can refuse a play (an export in flight, a sessio
 iOS has not handed back) lives on the web side — so a command becomes a call to
 `window.__LL_REMOTE`, and the page posts its state back over a `transport`
 message handler. One direction each way, no second copy of "is it playing" to
-drift. Every other command (skip, seek, scrub) is explicitly **disabled**: a
-lock screen that draws a skip button doing nothing is worse than one that
-doesn't draw it. Verified headlessly (`_remote.mjs`) by shimming
-`window.webkit`, exactly as the MIDI download bridge was.
+drift. Seek, scrub and NEXT track are explicitly **disabled**: a lock screen
+that draws a control doing nothing is worse than one that doesn't draw it.
+
+**⏮ IS THE STOP BUTTON, because the lock screen has no slot for one.** The Now
+Playing transport is three fixed slots — `⏮ · ▶/❙❙ · ⏭` — and **stop is never
+one of them**: iOS draws ■ only as a SUBSTITUTE for the play/pause button, and
+the only way to ask for that substitution is the live-stream flag, which is
+exactly what used to deny the lock screen a pause (below). Pause and stop
+therefore cannot both hold the centre slot, there is no API for a fourth button,
+and a flanking slot is the only place a third control can go. Reported as "I now
+have play and pause but no stop", which is the trade landing as designed — so
+`previousTrackCommand` sends `stop`.
+- **`stopCommand` stays registered and draws nothing.** It is how Siri and
+  hardware stop controls reach the transport; it was never dead code, just an
+  undrawn command. The ⏮ is what puts a stop on the SCREEN.
+- **The glyph says skip-back, and that is the cost.** It is the honest reading
+  here — there are no tracks to skip to and "back to the start" is what stop
+  does, since it rewinds — but a headphone double-press or a Siri "previous
+  track" now rewinds the song rather than doing nothing. One line to undo if it
+  reads wrong on the phone. `nextTrackCommand` stays disabled: there is nothing
+  forward of the song's top to go to, so the right slot would be the dead button
+  the rule above exists to avoid.
+- **The real "all three, drawn properly" answer is a Live Activity** (iOS 17+
+  `Button`s backed by App Intents) — a widget-extension target, an App Intent per
+  control and a two-way state bridge. Same conclusion, and the same shape of
+  work, as the lock-screen mixer question below.
+
+Verified headlessly (`_remote.mjs`) by shimming `window.webkit`, exactly as the
+MIDI download bridge was: each command separately, from each transport state,
+including **stop from a HOLD** — which is what ⏮ sends when you press it on a
+paused transport. Two traps in that harness, both paid for. It must NOT set
+`__LOUDLIGHT_NATIVE__`: that puts the page on the core, whose sequencer lives in
+the shell, so with the `core` handler stubbed nothing sounds and every playhead
+assertion reads -1 — green on the state checks and blind on the ones that matter.
+And the Swift half is **not compiled here** (no toolchain in a cloud sandbox);
+CI's `compile` job is what type-checks it, on any push touching `ios/`.
 
 **`MPNowPlayingInfoPropertyIsLiveStream` is NOT set, and that is deliberate —
 setting it is what denied the lock screen a pause button.** It was set at
