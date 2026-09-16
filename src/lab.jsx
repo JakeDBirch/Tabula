@@ -10849,7 +10849,15 @@ export default function LoudLight(){
                                 if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                 else if(mode==="paint"){
                                   const cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
-                                  const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
+                                  // The row under the finger is a DISPLAY row, and
+                                  // every write below this point is by DATA row —
+                                  // the grid is drawn in DRUM_DISPLAY order, so the
+                                  // two are a permutation apart. Map it. The tap was
+                                  // always right because it uses the `r` the row was
+                                  // rendered with; only this hit test, which derives
+                                  // a row from geometry, could get it wrong, and it
+                                  // wrote to the mirrored voice.
+                                  const rr=DRUM_DISPLAY[Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)))];
                                   paint(rr,cc);
                                 }
                               };
@@ -11585,7 +11593,15 @@ export default function LoudLight(){
                                   if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                   else if(mode==="paint"){
                                     const cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));
-                                    const rr=Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)));
+                                    // The row under the finger is a DISPLAY row, and
+                                  // every write below this point is by DATA row —
+                                  // the grid is drawn in DRUM_DISPLAY order, so the
+                                  // two are a permutation apart. Map it. The tap was
+                                  // always right because it uses the `r` the row was
+                                  // rendered with; only this hit test, which derives
+                                  // a row from geometry, could get it wrong, and it
+                                  // wrote to the mirrored voice.
+                                  const rr=DRUM_DISPLAY[Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)))];
                                     paint(rr,cc);
                                   }
                                 };
