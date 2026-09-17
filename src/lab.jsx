@@ -4710,12 +4710,18 @@ export default function LoudLight(){
   // the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another
   // name), the rest off the end, with a track underneath to pan it.
   const BAR_COLS=8;
-  // 34, not 22. The row used to hold up to thirty-two chips, so its height was
-  // whatever still let a 9px number fit; it holds THREE now and is the control
-  // you page the part with, so it is sized as a target. Free in portrait, which
-  // is width-bound — and ~12px off the grid in the height-bound layouts, which
-  // is the honest cost of the trade.
-  const BAR_ROW_H=34, BAR_ROW_GAP=2;
+  // 30, not 22. The row used to hold up to thirty-two chips, so its height was
+  // whatever still let a 9px number fit; it holds three bars and eight buttons
+  // now, both of which are things you hit, so it is sized as a target. The 8px
+  // it costs is paid for several times over by the transport row below.
+  // 30 in phone PORTRAIT, 22 everywhere else — and that asymmetry is the rule
+  // "the grid can't shrink" made concrete. Portrait pays for the extra 8px many
+  // times over out of the transport row it just collapsed, so the row can be
+  // sized as a target there. Landscape and desktop have no such row to collect
+  // from: the transport is already in a rail or a sidebar, so every pixel this
+  // row grows comes straight off a height-bound grid. They keep the old height
+  // and spend WIDTH on the buttons instead, which is what they have going spare.
+  const BAR_ROW_H=(IS_MOBILE&&!isLandscape)?30:22, BAR_ROW_GAP=2;
   const BAR_TRACK=5, BAR_TRACK_GAP=3;
   const _barRows=1;
   const _barPerRow=Math.max(1,Math.min(BAR_COLS,barCount));
@@ -4745,9 +4751,15 @@ export default function LoudLight(){
   // CELL — thirteen values in a column, not one), so it shows no row and
   // RESERVES the height instead, exactly as it already reserves the strip row:
   // the grid's top edge must not move when you switch layer.
-  const PARAM_ROW_H=30, PARAM_ROW_GAP=4;
-  const _paramRowPx=PARAM_ROW_H+PARAM_ROW_GAP;
-  const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK+_paramRowPx;
+  // They share the SPINNER'S ROW. The whole point of showing three bars instead
+  // of eight was the width it gives back, and spending that saving on a new row
+  // of height was the opposite of the trade — it cost 46px of grid on every
+  // height-bound layout and gave the width to nothing. So the row is split: the
+  // spinner takes three eighths of it, roughly the three tiles it draws, and the
+  // buttons take the rest.
+  const PARAM_ROW_H=0, PARAM_ROW_GAP=0;
+  const _paramRowPx=0;
+  const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK;
   // The strip ROW's outer height — the chips plus `barStrip`'s own
   // `marginBottom`. The drums page has to reserve exactly this much for the
   // strip it hangs under its (shorter) grid, or the two blocks come out
@@ -6367,19 +6379,16 @@ export default function LoudLight(){
             color:isCur?"rgba(10,20,32,0.85)":isLoop?C_LOOP:"rgba(178,199,219,0.4)",
             fontSize:isCur?13:10,fontWeight:700,lineHeight:1,
             transition:"background .08s"}}>
-            {bi+1}
+            {isCur?<><span>{bi+1}</span><span style={{fontSize:9,fontWeight:600,opacity:0.55,marginLeft:1}}>{"/"+barCount}</span></>:(bi+1)}
             {isLoop?<div style={{position:"absolute",left:2,right:2,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
           </div>
         );
       })}
-      {/* The total. The strip no longer draws every bar, so the count is the
-          only thing left that says how long the part is — it is a readout the
-          spinner cannot do without, not the third copy the old one was. */}
-      <div style={{flex:"0 0 auto",display:"flex",alignItems:"center",justifyContent:"center",
-        padding:"0 7px",borderRadius:4,background:"rgba(186,208,230,0.05)",
-        fontSize:9,fontWeight:700,letterSpacing:0.5,color:"rgba(178,199,219,0.45)",pointerEvents:"none"}}>
-        {(curBar+1)+"/"+barCount}
-      </div>
+      {/* The total rides ON the centre cell as "4/8" rather than in a chip of
+          its own. The strip no longer draws every bar so the count has to be
+          somewhere — but as a separate tile it spent a quarter of the spinner's
+          width on a number, which came off all three cells and gave nothing to
+          the buttons beside them. */}
     </div>
   );
   // The full scrolling strip, kept intact: it is what the spinner EXPANDS into
@@ -6487,7 +6496,7 @@ export default function LoudLight(){
       </div>
   );
   const barChips=(
-    <div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+    <div data-barwrap="1" style={{flex:loopExpand?"1 1 0":"3 1 0",minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
       {loopExpand?_barStripScroll:_barSpinner}
       {/* The track: drag it to pan, and read where you are in a 32-bar part.
           Its height is part of the constant `_barStripPx`. */}
@@ -6518,7 +6527,7 @@ export default function LoudLight(){
   // A lit button carries its lane's own colour, which is also the colour the
   // faders come up in, so the row says what you are about to see.
   const paramRow=(
-    <div data-paramrow="1" style={{display:"flex",gap:3,height:PARAM_ROW_H,width:"100%",flexShrink:0,touchAction:"none"}}>
+    <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:BAR_ROW_H,touchAction:"none"}}>
       {LANES.map(lane=>{
         const on=spillParam===lane.key;
         return(
@@ -6528,16 +6537,15 @@ export default function LoudLight(){
               border:"1px solid "+(on?lane.color:lane.color+"33"),
               background:on?lane.color+"2e":"rgba(186,208,230,0.04)",
               color:on?lane.color:lane.color+"99",
-              fontSize:9,fontWeight:700,letterSpacing:0.5,padding:0,
+              fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
               boxShadow:on?"0 0 8px "+lane.color+"44":"none",
-              transition:"background .08s, box-shadow .08s"}}>{lane.label}</button>
+              transition:"background .08s, box-shadow .08s"}}>{lane.key==="glide"?"GLD":lane.label}</button>
         );
       })}
     </div>
   );
   const barStrip=(
-    <div style={{display:"flex",flexDirection:"column",gap:PARAM_ROW_GAP,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
-    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,width:"100%"}}>
+    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -6546,17 +6554,15 @@ export default function LoudLight(){
           the corner where the grid wants the width. */}
       {/* The ♪ row-key toggle was here. It is gone while ROWKEYS_ON is false —
           the column is worth having, the corner of the bar strip is not where
-          you reach for it. The strip is bar chips and nothing else again. */}
-    </div>
-    {/* Drums have no per-column params, so they get no row — and the drums
-        block RESERVES this height instead (see `_stripRowPx`), because the
-        grid's top edge must not move when you switch layer. */}
-    {/* On drums it is rendered and HIDDEN rather than dropped: both pages put
-        `barStrip` above their grid, so the two blocks are only the same height
-        while the row is there. Dropping it would move the drum grid up by
-        exactly its height — which is the boundary the drums spacer below exists
-        to hold still. */}
-    {activeLayer!=="drums"?paramRow:<div aria-hidden="true" style={{height:PARAM_ROW_H,flexShrink:0,visibility:"hidden"}}/>}
+          you reach for it. */}
+      {/* The step-parameter buttons, in the width the spinner gave back. Drums
+          have no per-column params (drum velocity is per CELL — thirteen values
+          in a column, not one), so the buttons are simply absent there; the
+          spacer keeps the spinner the same size on both pages, so the control
+          you page the part with does not move when you switch layer. While the
+          strip is EXPANDED for a loop the buttons stand down — the strip needs
+          the whole width to draw the window, and it is back within seconds. */}
+      {loopExpand?null:(activeLayer!=="drums"?paramRow:<div style={{flex:"5 1 0",minWidth:0}}/>)}
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -11724,6 +11730,18 @@ export default function LoudLight(){
                 <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
               </button>
+              {/* ↶ ↷ live UP HERE now, not in the transport row. They are not
+                  transport — they are what you press when you have just done
+                  something you did not mean, which is the same kind of thing as
+                  SAVE, and they were the two controls stopping the transport and
+                  the layers from sharing one line. Moving them cost this row
+                  nothing (the four chips flex, and they had width to give) and
+                  bought a whole row below. They stay ADJACENT, because they are
+                  a pair you press in runs. */}
+              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+              </div>
             </div>
           </div>
           )}
@@ -11737,16 +11755,16 @@ export default function LoudLight(){
                  phone with room to spare. Two groups pushed apart rather than
                  one run of eight, so "what am I editing" and "what is it
                  doing" stay tellable apart at a glance. */}
-            {/* Two groups — what am I editing, what is it doing — that share one
-                line where there is room for them and take two where there is
-                not. Measured: a phone has 30px of slack on a 15 and 15 on an SE
-                once the five original controls are down, and PAUSE needs 45, so
-                on a phone this is two lines. That is the right way to spend it:
-                portrait is WIDTH-bound (the grid is 370px of a 390px phone), so
-                a row of height here is height the grid could never have used,
-                whereas shrinking six controls to fit would come straight off
-                every touch target. On an iPad, where the width is there, it
-                stays one line — which is why it is a wrap and not a split. */}
+            {/* Two groups — what am I editing, what is it doing — on ONE line.
+                It took two for a while: six controls plus three layer glyphs do
+                not fit a 375px phone, and the reasoning was that portrait is
+                width-bound so the extra row is free. That is true of the GRID
+                and false of everything else: the row was 97px on an SE, which
+                is 97px of screen spent on wrapping rather than on anything you
+                look at. ↶ ↷ moved up to the globals row (they are not transport)
+                and the rest fits with room to spare — 308px of 355 on an SE.
+                Still a wrap rather than a hand-split row, so an iPad's extra
+                width stays the browser's problem and not ours. */}
             <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
@@ -11761,8 +11779,6 @@ export default function LoudLight(){
               ))}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
-              <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-              <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
               <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
                 {playGlyph(11)}
               </button>
