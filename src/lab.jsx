@@ -4828,6 +4828,18 @@ export default function LoudLight(){
   // duplicate READOUTS — the step bar and the length track, which said what the
   // grid already said — and a live control you tap constantly is not one.
   const stripBelow=IS_MOBILE&&!isLandscape;
+  // What sits under the grid in portrait: the step buttons across the full
+  // width, and — for the couple of seconds a loop is being set up — the full
+  // chip strip instead. Both are exactly `_barStripPx` tall, which is what lets
+  // them swap without the grid moving; the strip needs a row this wide to draw
+  // a four-bar window, and this is the only row that is.
+  const _belowGridRow=(w)=>(
+    <div style={{width:w,height:_barStripPx,marginTop:5,flexShrink:0,display:"flex",alignItems:"stretch"}}>
+      {loopExpand
+        ?<div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>{_barStripScroll}{_barTrackEl}</div>
+        :(activeLayer!=="drums"?paramRow:null)}
+    </div>
+  );
   const _barStripRow=(pad)=>(
     <div style={{display:"flex",width:"100%",flexShrink:0}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
   );
@@ -6347,7 +6359,7 @@ export default function LoudLight(){
   const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}};
   const _wrapBar=(b)=>{const n=Math.max(1,barCount);return ((b%n)+n)%n;};
   const BAR_PX_PER_BAR=26;   // a thumb-length swipe is about four bars
-  const _barSpinner=(()=>{
+  const barTile=(extra)=>{
     const isPlaying=curBar===playingBar;
     const isLoop=loopMode===2?true:!!loopMode&&(()=>{
       for(let j=0;j<Math.max(1,loopBars);j++)
@@ -6356,12 +6368,12 @@ export default function LoudLight(){
     })();
     return(
     <div data-barspin="1" title="Drag up and down to change bar — tap for this bar's ops"
-      style={{flex:"0 0 auto",width:64,height:BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK,
+      style={Object.assign({flex:"0 0 auto",width:64,height:"100%",
         position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",
         touchAction:"none",cursor:"ns-resize",userSelect:"none",
         background:"rgba(255,206,130,0.62)",color:"rgba(10,20,32,0.85)",
         boxShadow:isPlaying?"inset 0 0 0 2px "+C_VARY:"none",
-        fontSize:15,fontWeight:700,lineHeight:1}}
+        fontSize:15,fontWeight:700,lineHeight:1},extra||{})}
       onPointerDown={e=>{
         e.stopPropagation();e.preventDefault();
         try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
@@ -6394,7 +6406,7 @@ export default function LoudLight(){
       {isLoop?<div style={{position:"absolute",left:3,right:3,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
     </div>
     );
-  })();
+  };
   // The full scrolling strip, kept intact: it is what the spinner EXPANDS into
   // while a loop is being set up, and the only view that can draw a four-bar
   // window. Every gesture on it is unchanged.
@@ -6499,9 +6511,8 @@ export default function LoudLight(){
         })}
       </div>
   );
-  const barChips=(loopExpand?(
-    <div data-barwrap="1" style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
-      {_barStripScroll}
+  const _barTrackEl=(
+    <>
       {/* The track: drag it to pan, and read where you are in a 32-bar part.
           Its height is part of the constant `_barStripPx`. */}
       <div data-bartrack="1" onPointerDown={_barPanStart} aria-hidden="true"
@@ -6515,8 +6526,14 @@ export default function LoudLight(){
         <div data-barthumb="1" style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
           borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
       </div>
+    </>
+  );
+  const barChips=(loopExpand?(
+    <div data-barwrap="1" style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+      {_barStripScroll}
+      {_barTrackEl}
     </div>
-  ):_barSpinner);
+  ):barTile({width:64}));
   // The + that used to sit at the end of this strip is GONE. It added a bar on
   // a tap and opened the pattern/bar sheet on a hold — and both of those live
   // on the bar chips now: ＋ BAR is in a chip's hold menu with the rest of the
@@ -6530,7 +6547,7 @@ export default function LoudLight(){
   // A lit button carries its lane's own colour, which is also the colour the
   // faders come up in, so the row says what you are about to see.
   const paramRow=(
-    <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:BAR_ROW_H,touchAction:"none"}}>
+    <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:"100%",minHeight:BAR_ROW_H,touchAction:"none"}}>
       {LANES.map(lane=>{
         const on=spillParam===lane.key;
         return(
@@ -6548,9 +6565,8 @@ export default function LoudLight(){
     </div>
   );
   const barStrip=(
-    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,
-      marginBottom:stripBelow?0:(IS_MOBILE?4:5),marginTop:stripBelow?5:0,
-      width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",alignItems:"stretch",gap:IS_MOBILE?5:6,height:_barStripPx,
+      marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -6602,7 +6618,7 @@ export default function LoudLight(){
   // data-drumgrid mark the two grids — there was otherwise no way to measure
   // where this row sits in the column.
   const patternChipsRow=(
-    <div data-patrow="1" style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
+    <div data-patrow="1" style={{display:"flex",flexWrap:"wrap",alignItems:"stretch",gap:IS_MOBILE?5:3,width:"100%"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
         <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
           {...paletteChipProps(p,col)}
@@ -6627,6 +6643,13 @@ export default function LoudLight(){
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
             color:"rgba(178,199,219,0.45)"})}>+</div>
       )}
+      {/* The bar tile lives HERE in portrait, at the right-hand end. It is
+          navigation — which pattern, which bar — so it belongs with the other
+          navigation rather than in a row of its own, and this row had spare
+          width going begging. What that buys is the whole width below the grid
+          for the step buttons: 36px → 44px each, which is the first time they
+          have been a proper target. */}
+      {stripBelow?<div style={{marginLeft:"auto",display:"flex"}}>{barTile({width:58})}</div>:null}
     </div>
   );
   // Vertical variant for the landscape rail (74px wide), which stacks its
@@ -11906,7 +11929,7 @@ export default function LoudLight(){
                   </div>
                   </div>
                 </div>
-              {stripBelow?<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>:null}
+              {stripBelow?_belowGridRow(SZ):null}
               </>);})()}
               </div>
             )}
@@ -12046,7 +12069,7 @@ export default function LoudLight(){
                       </div>
                       </div>
                       </div>
-                      {stripBelow?<div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>:null}
+                      {stripBelow?_belowGridRow(SIZE):null}
                     </div>
                   );
                 })()}
