@@ -4814,6 +4814,20 @@ export default function LoudLight(){
   // In landscape and on desktop nothing displaced them, the transport is in the
   // rail rather than under your thumb, and leaving them put is the smaller
   // change. One row, two positions — never two copies.
+  // BELOW the grid in phone portrait. The bar tile and the step buttons are the
+  // two things you operate WHILE looking at the grid, and the bottom of a phone
+  // is where your thumb already is — the same argument that put the grid last
+  // in this column, applied to the row that drives it. Above it they were a
+  // reach across the whole instrument.
+  //
+  // It costs the grid nothing: the row is the same height wherever it sits, and
+  // `gridSizeCss` subtracts `_barStripPx` either way. Landscape keeps it above,
+  // because there the rail is the thumb zone and the bottom edge is not.
+  //
+  // This is not a return of anything under the grid: that rule is about
+  // duplicate READOUTS — the step bar and the length track, which said what the
+  // grid already said — and a live control you tap constantly is not one.
+  const stripBelow=IS_MOBILE&&!isLandscape;
   const _barStripRow=(pad)=>(
     <div style={{display:"flex",width:"100%",flexShrink:0}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
   );
@@ -6534,7 +6548,9 @@ export default function LoudLight(){
     </div>
   );
   const barStrip=(
-    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,
+      marginBottom:stripBelow?0:(IS_MOBILE?4:5),marginTop:stripBelow?5:0,
+      width:"100%",touchAction:"none"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -11854,12 +11870,10 @@ export default function LoudLight(){
                   read as one instrument rather than two panels. It GROWS: the
                   square below has already taken its bite (one lane row reserved),
                   so everything still going spare lands here. */}
-              {/* Bar navigation sits directly above the grid in every layout
-                  now. It used to move BELOW in portrait because the song lane
-                  had taken the row above it; the lane is a top-level row now,
-                  so nothing displaces the strip and the two positions collapse
-                  back into one. */}
-              <div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>
+              {/* Bar navigation is BELOW the grid in portrait and above it in
+                  landscape — one row, two positions, never two copies. See
+                  `stripBelow`. */}
+              {stripBelow?null:<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
               {/* The square IS the grid. The bar strip is a sibling, not a child:
                   inside an aspect-ratio:1 box its height came straight off the
                   cells and they stopped being square. */}
@@ -11892,6 +11906,7 @@ export default function LoudLight(){
                   </div>
                   </div>
                 </div>
+              {stripBelow?<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>:null}
               </>);})()}
               </div>
             )}
@@ -11932,8 +11947,11 @@ export default function LoudLight(){
                       {/* No gap between the strip and the grid, matching the
                           synth page exactly — the two blocks have to be the
                           same height or the centred block moves the boundary
-                          the drums reservation exists to hold still. */}
-                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                          the drums reservation exists to hold still. Which is
+                          also why the strip moves below HERE too when it moves
+                          below there: the two pages have to agree, or switching
+                          layer shifts the grid by a row. */}
+                      {stripBelow?null:<div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>}
                       {/* The reservation, and the real content hanging from the
                           top of it. The bar chips come WITH the grid rather than
                           staying where the synth page leaves them: they are a
@@ -12028,6 +12046,7 @@ export default function LoudLight(){
                       </div>
                       </div>
                       </div>
+                      {stripBelow?<div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>:null}
                     </div>
                   );
                 })()}
