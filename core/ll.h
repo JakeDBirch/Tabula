@@ -18,6 +18,10 @@
 
 #define LL_VERSION       1
 #define LL_COLS          16      /* steps per bar — the editor's page width */
+/* Bytes per column in a pattern's step-param block on the wire. Bump it here,
+ * in core/host.js's packer and in the tests' wire.h together — the core reads
+ * a flat array and a mismatch is silent corruption, not an error. */
+#define LL_STEPP_BYTES 9
 #define LL_MAX_BARS      32
 #define LL_MAX_COLS      (LL_MAX_BARS*LL_COLS)
 #define LL_ROWS          16      /* synth rows */

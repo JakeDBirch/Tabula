@@ -11,7 +11,7 @@ static void wb_bytes(wbuf*w,const void*p,int n){ while(w->n+n>w->cap){w->cap=w->
 /* A simple in-test pattern model. */
 typedef struct {
   int bars; int lens[LL_MAX_BARS]; float mults[LL_MAX_BARS];
-  uint8_t grid[16][LL_MAX_COLS], durs[16][LL_MAX_COLS], params[LL_MAX_COLS][8];
+  uint8_t grid[16][LL_MAX_COLS], durs[16][LL_MAX_COLS], params[LL_MAX_COLS][LL_STEPP_BYTES];
 } tsyn;
 typedef struct {
   int bars; int lens[LL_MAX_BARS]; float mults[LL_MAX_BARS];
@@ -22,7 +22,7 @@ typedef struct { int id, master; tsyn s[2]; tdrm d; } tpat;
 static void tpat_init(tpat*p,int id,int bars){
   memset(p,0,sizeof *p); p->id=id;
   for(int l=0;l<2;l++){ p->s[l].bars=bars; for(int i=0;i<bars;i++){p->s[l].lens[i]=16;p->s[l].mults[i]=1;} 
-    for(int c=0;c<bars*16;c++){ uint8_t*q=p->s[l].params[c]; q[0]=100;q[1]=50;q[2]=0;q[3]=0;q[4]=1;q[5]=0;q[6]=2;q[7]=0; }
+    for(int c=0;c<bars*16;c++){ uint8_t*q=p->s[l].params[c]; q[0]=100;q[1]=50;q[2]=0;q[3]=0;q[4]=1;q[5]=0;q[6]=2;q[7]=0;q[8]=0; }
     for(int r=0;r<16;r++)for(int c=0;c<bars*16;c++)p->s[l].durs[r][c]=1; }
   p->d.bars=bars; for(int i=0;i<bars;i++){p->d.lens[i]=16;p->d.mults[i]=1;}
   for(int r=0;r<13;r++)for(int c=0;c<bars*16;c++){p->d.vel[r][c]=100;p->d.rat[r][c]=1;}
@@ -33,7 +33,7 @@ static void tpat_pack(const tpat*p,wbuf*w){
   for(int l=0;l<2;l++){ const tsyn*s=&p->s[l]; int W=s->bars*16;
     wb_i32(w,s->bars); for(int i=0;i<s->bars;i++)wb_i32(w,s->lens[i]); for(int i=0;i<s->bars;i++)wb_f32(w,s->mults[i]);
     for(int r=0;r<16;r++)wb_bytes(w,s->grid[r],W); for(int r=0;r<16;r++)wb_bytes(w,s->durs[r],W);
-    for(int c=0;c<W;c++)wb_bytes(w,s->params[c],8); }
+    for(int c=0;c<W;c++)wb_bytes(w,s->params[c],LL_STEPP_BYTES); }
   { const tdrm*d=&p->d; int W=d->bars*16;
     wb_i32(w,d->bars); for(int i=0;i<d->bars;i++)wb_i32(w,d->lens[i]); for(int i=0;i<d->bars;i++)wb_f32(w,d->mults[i]);
     for(int r=0;r<13;r++)wb_bytes(w,d->grid[r],W); for(int r=0;r<13;r++)wb_bytes(w,d->vel[r],W); for(int r=0;r<13;r++)wb_bytes(w,d->rat[r],W);

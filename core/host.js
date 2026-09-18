@@ -32,7 +32,7 @@ const LLCore=(()=>{
     const parts=[pat.parts.synth,pat.parts.lead,pat.parts.drums];
     const hs=parts.map(norm);
     let size=16;
-    for(let l=0;l<2;l++){const W=hs[l].bars*16;size+=4+hs[l].bars*8+16*W*2+W*8;}
+    for(let l=0;l<2;l++){const W=hs[l].bars*16;size+=4+hs[l].bars*8+16*W*2+W*9;}
     const dm=parts[2].motion&&typeof parts[2].motion==="object"?parts[2].motion:null;
     {const W=hs[2].bars*16;size+=4+hs[2].bars*8+13*W*3+4+(dm?7*13*W*2:0);}
     const buf=new ArrayBuffer(size),dv=new DataView(buf),u8=new Uint8Array(buf);let o=0;
@@ -47,7 +47,7 @@ const LLCore=(()=>{
       for(let c=0;c<W;c++){
         const sp=(p.params&&p.params[c])||null;
         u8[o++]=u8c(sp?sp.vel:100,0,127);u8[o++]=u8c(sp?(sp.flt??50):50,0,100);u8[o++]=u8c(sp?sp.dly:0,0,100);u8[o++]=u8c(sp?(sp.rev??0):0,0,100);
-        u8[o++]=u8c(sp?(sp.rhy??1):1,1,4);u8[o++]=u8c(sp?sp.dur:0,-100,100)&255;u8[o++]=u8c(sp?sp.oct:2,0,4);u8[o++]=sp&&sp.glide?1:0;
+        u8[o++]=u8c(sp?(sp.rhy??1):1,1,4);u8[o++]=u8c(sp?sp.dur:0,-100,100)&255;u8[o++]=u8c(sp?sp.oct:2,0,4);u8[o++]=sp&&sp.glide?1:0;u8[o++]=u8c(sp&&sp.glideT!=null?sp.glideT:0,0,100);
       }
     }
     {

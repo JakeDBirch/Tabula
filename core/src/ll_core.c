@@ -193,10 +193,10 @@ int ll_pattern_load(int slot,int bytes){
     ll_spart*s=&tmp.s[l];
     if(rd_head(&r,&s->h))return -2;
     int W=s->h.bars*LL_COLS;
-    const uint8_t*g=rd_bytes(&r,LL_ROWS*W), *d=rd_bytes(&r,LL_ROWS*W), *pp=rd_bytes(&r,W*8);
+    const uint8_t*g=rd_bytes(&r,LL_ROWS*W), *d=rd_bytes(&r,LL_ROWS*W), *pp=rd_bytes(&r,W*LL_STEPP_BYTES);
     if(r.err)return -3;
     for(int row=0;row<LL_ROWS;row++)for(int c=0;c<W;c++){ s->grid[row][c]=g[row*W+c]; s->durs[row][c]=d[row*W+c]; if(g[row*W+c])s->h.hasNotes=1; }
-    for(int c=0;c<W;c++){ const uint8_t*q=pp+c*8; s->params[c].vel=q[0];s->params[c].flt=q[1];s->params[c].dly=q[2];s->params[c].rev=q[3];s->params[c].rhy=q[4];s->params[c].dur=(int8_t)q[5];s->params[c].oct=q[6];s->params[c].glide=q[7]; }
+    for(int c=0;c<W;c++){ const uint8_t*q=pp+c*LL_STEPP_BYTES; s->params[c].vel=q[0];s->params[c].flt=q[1];s->params[c].dly=q[2];s->params[c].rev=q[3];s->params[c].rhy=q[4];s->params[c].dur=(int8_t)q[5];s->params[c].oct=q[6];s->params[c].glide=q[7];s->params[c].glideT=q[8]; }
     head_finish(&s->h);
   }
   {

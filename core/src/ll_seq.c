@@ -129,9 +129,14 @@ static void play_synth_step(int layer,ll_pattern*P,int s,double at,double stepDu
     float f=G.freqs[r]*ratio;
     float stepOct=sp?(float)((int)sp->oct-2):0.f, layerOct=lp[LL_L_OCTAVE];
     float actualF=f*ll_exp2(stepOct+layerOct);
-    int hasGlide=sp&&sp->glide;
+    /* How far INTO the next step the slide runs, as a fraction of a step. It
+     * was a fixed 1/32 note, which is exactly half a step at 1x — so 50 here
+     * reproduces the old sound and everything either side of it is new range.
+     * Measured in steps, so it tracks tempo AND this bar's own rate. */
+    int glidePct=glide_pct(sp);
+    int hasGlide=glidePct>0;
     float layerGlide01=ll_clamp(lp[LL_L_GLIDE],0,100)/100.f;
-    float stepGlideTime=(60.f/bpm/8.f)*(part->h.barMults[0]>0.f?part->h.barMults[0]:1.f);
+    float stepGlideTime=(float)(glidePct/100.0*stepDur);
     float layerGlideTime=layerGlide01*(60.f/bpm);
     int usePrev=G.lastGlide[layer]||layerGlide01>0.f;
     float prevF=(usePrev&&G.lastFreq[layer]>0.f)?G.lastFreq[layer]:0.f;

@@ -22,7 +22,19 @@ void* memset(void*,int,unsigned long);
 #define LL_MAX_SLOTS    8        /* sample slots per voice (rr / vel layers) */
 #define LL_STRIP_W      LL_BLOCK
 
-typedef struct { uint8_t vel,flt,dly,rev,rhy; int8_t dur; uint8_t oct,glide; } ll_stepp;
+/* glideT is GLIDE AS A TIME: 0..100, a percentage of the step. `glide` is the
+ * old on/off flag and is still read, because a save that predates glideT
+ * carries it and the two are different intentions — an old glide:1 and a new
+ * glideT:1 do not mean the same thing. Absent glideT means "read the flag as
+ * it always meant", and the old fixed 1/32 note is exactly half a step at 1x,
+ * which is LL_GLIDE_LEGACY_PCT. Same rule, same constant, as the JS side. */
+#define LL_GLIDE_LEGACY_PCT 50
+typedef struct { uint8_t vel,flt,dly,rev,rhy; int8_t dur; uint8_t oct,glide,glideT; } ll_stepp;
+static inline int glide_pct(const ll_stepp*sp){
+  if(!sp)return 0;
+  if(sp->glideT>0)return sp->glideT>100?100:sp->glideT;
+  return sp->glide?LL_GLIDE_LEGACY_PCT:0;
+}
 
 /* The parts. Lengths and rates are per bar (barLens / barMults), and `seq` is
  * partSeq: the ordered absolute columns the part plays. hasNotes is cached at

@@ -130,7 +130,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   if(monoSingle)G.monoVoice=(int)(v-G.sv);
   /* Mid-note OCT/GLIDE pitch automation for tied notes. */
   if(hasMods){
-    float prevModFreq=playFreq; int prevModGlide=sp?sp->glide:0;
+    float prevModFreq=playFreq; int prevModGlide=glide_pct(sp)>0;
     for(int i=0;i<nmods;i++){
       double mAt=modAt[i]; const ll_stepp*m=&modSp[i];
       if(mAt<=t||mAt>=t+sec2f(dur))continue;
@@ -138,7 +138,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
       if(ll_fabs(mPlayFreq-prevModFreq)>0.5f){
         if(prevModGlide)auto_exp(&v->frq,mAt,ll_max(1.f,mPlayFreq)); else auto_set(&v->frq,mAt,ll_max(1.f,mPlayFreq));
       }
-      prevModFreq=mPlayFreq; prevModGlide=m->glide;
+      prevModFreq=mPlayFreq; prevModGlide=glide_pct(m)>0;
     }
   }
   /* ── sends ── */

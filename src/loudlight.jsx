@@ -219,6 +219,9 @@ const C_VARY="#e6b872";
 // fallback, and it is still what an inactive note and the brand furniture use.
 const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
+// 0..1 → the two hex digits an 8-digit colour string wants. The palette is
+// written as "#rrggbb"+"aa" all over this file, so this is the missing half.
+const _a=(v)=>Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,"0");
 // VARY IS DELETED. It re-rolled the grid at every bar boundary at PLAYBACK
 // time — a fresh drop/shift/ghost each pass, never written back — and it is
 // gone: a part plays what is written in it. The one piece kept is `MUT8_PARAMS`,
@@ -404,7 +407,27 @@ const randPolyGrid=(span=SCALE_SPAN)=>{
 // extending one note's duration doesn't affect notes in other rows. Within a row,
 // only one note plays at any moment (per-row monophony).
 const mkDurs=(w=COLS)=>Array.from({length:ROWS},()=>new Array(w).fill(1));
-const defaultStepParams=(w=COLS)=>Array.from({length:w},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0}));
+// `glideT` is GLIDE AS A TIME, 0..100, read as a percentage of the step: 0 is
+// off, 100 slides for the whole step. It replaces the `glide` FLAG, which could
+// only say whether to slide and never how fast, so every portamento in the app
+// was the same fixed 1/32 note.
+//
+// `glide` stays in the defaults and is still read, because a save that predates
+// this carries it and a flag is not convertible on sight: an old `glide:1` and
+// a new `glideT:1` are different intentions. So the rule is the house one —
+// absent `glideT` means "read the old field as it always meant", and the old
+// fixed 1/32 note IS half a step at 1×, which is `GLIDE_LEGACY_PCT`. An old
+// project therefore glides exactly as it did, and the moment you touch the lane
+// it starts carrying a time instead.
+const GLIDE_LEGACY_PCT=50;
+const defaultStepParams=(w=COLS)=>Array.from({length:w},()=>({vel:100,flt:50,dly:0,rev:0,rhy:1,dur:0,oct:2,glide:0,glideT:0}));
+// The one place that resolves the two fields. Everything that wants to know how
+// long a step glides for asks this, never `sp.glide`.
+const glidePctOf=(sp)=>{
+  if(!sp)return 0;
+  if(sp.glideT!=null&&sp.glideT>0)return Math.max(0,Math.min(100,sp.glideT));
+  return sp.glide?GLIDE_LEGACY_PCT:0;
+};
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,bars:1,speedMult:1});
 // Cull a pattern down to monophonic — at most one active note per column.
 // Used when copying a POLY (multi-row-per-col) pattern onto the MONO layer:
@@ -2257,7 +2280,7 @@ const LANES=[
   {key:"rhy",  label:"RTCH", color:"#e6b872",min:1,   max:4,   def:1,   center:null, bool:false},
   {key:"dur",  label:"DUR",  color:"#9fb4c7",min:-100,max:100, def:0,   center:0,    bool:false},
   {key:"oct",  label:"OCT",  color:"#79b8f2",min:0,   max:4,   def:2,   center:2,    bool:false},
-  {key:"glide",label:"GLIDE",color:"#00bcd4",min:0,   max:1,   def:0,   center:null, bool:true},
+  {key:"glideT",label:"GLIDE",color:"#00bcd4",min:0,   max:100, def:0,   center:null, bool:false},
 ];
 // rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
 // dur: -100 to +100 — percentage modifier on note gate length (0=default)
@@ -2284,6 +2307,7 @@ const VDEF={DROP:13,SHIFT:17,RANGE:1,PITCH:0,GHOST:0};
 // octave, dur → signed %, else the raw number).
 const fmtStepVal=(lane,v)=>{
   if(lane.key==="rhy")return "×"+Math.max(1,v);
+  if(lane.key==="glideT")return v+"%";
   if(lane.key==="oct"){const o=v-2;return (o>0?"+":"")+o;}
   if(lane.key==="dur")return (v>0?"+":"")+v;
   return ""+v;
@@ -2884,7 +2908,7 @@ class Bell{
     // transition INTO the first mod.
     if(hasMods){
       let prevModFreq=playFreq;
-      let prevModGlide=!!(sp&&sp.glide);
+      let prevModGlide=glidePctOf(sp)>0;
       for(const m of mods){
         if(m.at<=t||m.at>=t+dur)continue;
         const mStepOct=m.sp?(m.sp.oct-2):0;
@@ -2901,7 +2925,7 @@ class Bell{
           }
         }
         prevModFreq=mPlayFreq;
-        prevModGlide=!!(m.sp&&m.sp.glide);
+        prevModGlide=glidePctOf(m.sp)>0;
       }
     }
     vcf.connect(vca);
@@ -3563,6 +3587,15 @@ export default function LoudLight(){
   // dismiss the sheet the instant it appeared; the backdrop ignores clicks for
   // a beat after this stamp.
   const sheetGuardR = useRef(0);
+  // ESC closes whichever sheet is open. The backdrop is the primary way out and
+  // stays so; this is the belt to its braces, and it costs nothing on a phone
+  // where there is no ESC to press — the ✕ in the sound header is that.
+  useEffect(()=>{
+    if(!activeSheet)return;
+    const k=(e)=>{if(e.key==="Escape")setActiveSheet(null);};
+    window.addEventListener("keydown",k);
+    return ()=>window.removeEventListener("keydown",k);
+  },[activeSheet]);
   const seqTrackRef=useRef(null);
   // Save / load / share / cloud all live behind one PROJECT menu — none of it
   // is needed while you're playing. Desktop opens it as a modal; on mobile it's
@@ -4710,7 +4743,18 @@ export default function LoudLight(){
   // the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another
   // name), the rest off the end, with a track underneath to pan it.
   const BAR_COLS=8;
-  const BAR_ROW_H=22, BAR_ROW_GAP=2;
+  // 30, not 22. The row used to hold up to thirty-two chips, so its height was
+  // whatever still let a 9px number fit; it holds three bars and eight buttons
+  // now, both of which are things you hit, so it is sized as a target. The 8px
+  // it costs is paid for several times over by the transport row below.
+  // 30 in phone PORTRAIT, 22 everywhere else — and that asymmetry is the rule
+  // "the grid can't shrink" made concrete. Portrait pays for the extra 8px many
+  // times over out of the transport row it just collapsed, so the row can be
+  // sized as a target there. Landscape and desktop have no such row to collect
+  // from: the transport is already in a rail or a sidebar, so every pixel this
+  // row grows comes straight off a height-bound grid. They keep the old height
+  // and spend WIDTH on the buttons instead, which is what they have going spare.
+  const BAR_ROW_H=(IS_MOBILE&&!isLandscape)?30:22, BAR_ROW_GAP=2;
   const BAR_TRACK=5, BAR_TRACK_GAP=3;
   const _barRows=1;
   const _barPerRow=Math.max(1,Math.min(BAR_COLS,barCount));
@@ -4723,6 +4767,31 @@ export default function LoudLight(){
   // squashed by precisely the height of the chips. Two chip rows made it
   // obvious, one row had been quietly costing the same thing for months.
   // One chip row plus its track — the same on a 1-bar part and a 32-bar one.
+  // ── The step parameters are BUTTONS, and the grid is where they land ─────
+  // STEP used to be a place you went: a sheet on mobile, a page on desktop,
+  // eight lanes 22px tall stacked in whatever height was left. Eight readouts
+  // of sixteen steps each, none of them big enough to hit, on a surface that
+  // covered the transport to show you them.
+  //
+  // It is a row of buttons now. Tap VEL and the velocity lane SPILLS onto the
+  // grid — the grid's own columns become the faders, full height, with the
+  // notes dimmed behind so you can see what you are shaping. Tap it again and
+  // you are back to writing notes. Same sixteen columns, same pattern, at
+  // sixteen times the size, on the surface you were already looking at.
+  //
+  // The row costs one line, and portrait is WIDTH-bound, so on a phone that
+  // line is free. The drums page has no per-column params (drum velocity is per
+  // CELL — thirteen values in a column, not one), so it shows no row and
+  // RESERVES the height instead, exactly as it already reserves the strip row:
+  // the grid's top edge must not move when you switch layer.
+  // They share the SPINNER'S ROW. The whole point of showing three bars instead
+  // of eight was the width it gives back, and spending that saving on a new row
+  // of height was the opposite of the trade — it cost 46px of grid on every
+  // height-bound layout and gave the width to nothing. So the row is split: the
+  // spinner takes three eighths of it, roughly the three tiles it draws, and the
+  // buttons take the rest.
+  const PARAM_ROW_H=0, PARAM_ROW_GAP=0;
+  const _paramRowPx=0;
   const _barStripPx=BAR_ROW_H+BAR_TRACK_GAP+BAR_TRACK;
   // The strip ROW's outer height — the chips plus `barStrip`'s own
   // `marginBottom`. The drums page has to reserve exactly this much for the
@@ -4757,6 +4826,32 @@ export default function LoudLight(){
   // In landscape and on desktop nothing displaced them, the transport is in the
   // rail rather than under your thumb, and leaving them put is the smaller
   // change. One row, two positions — never two copies.
+  // BELOW the grid in phone portrait. The bar tile and the step buttons are the
+  // two things you operate WHILE looking at the grid, and the bottom of a phone
+  // is where your thumb already is — the same argument that put the grid last
+  // in this column, applied to the row that drives it. Above it they were a
+  // reach across the whole instrument.
+  //
+  // It costs the grid nothing: the row is the same height wherever it sits, and
+  // `gridSizeCss` subtracts `_barStripPx` either way. Landscape keeps it above,
+  // because there the rail is the thumb zone and the bottom edge is not.
+  //
+  // This is not a return of anything under the grid: that rule is about
+  // duplicate READOUTS — the step bar and the length track, which said what the
+  // grid already said — and a live control you tap constantly is not one.
+  const stripBelow=IS_MOBILE&&!isLandscape;
+  // What sits under the grid in portrait: the step buttons across the full
+  // width, and — for the couple of seconds a loop is being set up — the full
+  // chip strip instead. Both are exactly `_barStripPx` tall, which is what lets
+  // them swap without the grid moving; the strip needs a row this wide to draw
+  // a four-bar window, and this is the only row that is.
+  const _belowGridRow=(w)=>(
+    <div style={{width:w,height:_barStripPx,marginTop:5,flexShrink:0,display:"flex",alignItems:"stretch"}}>
+      {loopExpand
+        ?<div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>{_barStripScroll}{_barTrackEl}</div>
+        :(activeLayer!=="drums"?paramRow:null)}
+    </div>
+  );
   const _barStripRow=(pad)=>(
     <div style={{display:"flex",width:"100%",flexShrink:0}}><div style={{width:pad,flexShrink:0}}/>{barStrip}</div>
   );
@@ -4910,6 +5005,144 @@ export default function LoudLight(){
   // `loopMode` keeps its meaning — 0 off / 1 bars / 2 pattern — so a saved 2
   // still reads as the whole pattern, and `loopBars` (1..4) is the new half. An
   // old save with no loopBars reads as the single bar it always was.
+  // Which step lane is spilled onto the grid, or null for notes. A view state
+  // and deliberately NOT persisted: it decides what your next drag on the grid
+  // edits, and coming back to a project with the grid silently in VEL mode is
+  // the kind of thing a save should never be able to do to you.
+  const [spillParam,setSpillParam]=useState(null);
+  // Which drum channel the mixer is focused on, or null for the level-only
+  // overview. A view state, not persisted — it is where you are looking.
+  const [drumFocus,setDrumFocus]=useState(null);
+  // The SOUND screen shows one of four things: a layer's voice, or the global
+  // FX. "layer" means "whatever `activeLayer` is", so the selector inside it is
+  // the same state the grid uses and the two cannot disagree. A view state,
+  // not persisted.
+  const [soundTab,setSoundTab]=useState("layer");
+  // Which step lane's ops are open. When STEP stopped being a page, each lane's
+  // RST and RAND went with it — the functions survived, the way to reach them
+  // did not, and nothing replaced them. The buttons are where they belong: the
+  // lane's own control, under the house split (tap spills it, hold operates on
+  // it).
+  const [paramMenu,setParamMenu]=useState(null);
+  const paramMenuAtR=useRef(0);
+  const paramHoldR=useRef({tmr:0,held:false,sx:0,sy:0});
+  const randStepLaneR=useRef(null), resetStepLaneR=useRef(null);
+  const _paramHoldEnd=()=>{if(paramHoldR.current.tmr){clearTimeout(paramHoldR.current.tmr);paramHoldR.current.tmr=0;}};
+  const _openParamOps=(key,x,y)=>{paramMenuAtR.current=Date.now();setParamMenu({key,x,y});};
+  const paramBtnProps=(key,onTap)=>({
+    onPointerDown:(e)=>{
+      const x=e.clientX,y=e.clientY;
+      paramHoldR.current.held=false;paramHoldR.current.sx=x;paramHoldR.current.sy=y;
+      _paramHoldEnd();
+      paramHoldR.current.tmr=setTimeout(()=>{
+        paramHoldR.current.tmr=0;paramHoldR.current.held=true;_openParamOps(key,x,y);
+      },450);
+    },
+    // An 8px THRESHOLD, not any movement — the mistake that made the layer
+    // hold impossible on a phone while passing a motionless headless mouse.
+    onPointerMove:(e)=>{
+      if(!e.buttons)return;
+      const h=paramHoldR.current;
+      if(Math.abs(e.clientX-h.sx)>8||Math.abs(e.clientY-h.sy)>8)_paramHoldEnd();
+    },
+    onPointerUp:()=>{_paramHoldEnd();},
+    onPointerCancel:()=>{_paramHoldEnd();paramHoldR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_paramHoldEnd();
+      paramHoldR.current.held=true;_openParamOps(key,e.clientX,e.clientY);},
+    onClick:(e)=>{
+      e.stopPropagation();
+      // The hold already opened the menu; its trailing click must not also
+      // spill the lane underneath it.
+      if(paramHoldR.current.held){paramHoldR.current.held=false;return;}
+      onTap();
+    },
+  });
+  // Which layer's hold menu is open, and where. RAND and CLEAR for a part,
+  // without having to go to that part first.
+  const [layerMenu,setLayerMenu]=useState(null);
+  const layerMenuAtR=useRef(0);
+  const layerHoldR=useRef({tmr:0,held:false});
+  const _layerHoldEnd=()=>{if(layerHoldR.current.tmr){clearTimeout(layerHoldR.current.tmr);layerHoldR.current.tmr=0;}};
+  const _openLayerOps=(lyr,x,y)=>{
+    if(activeLayerR.current!==lyr)switchLayer(lyr);
+    layerMenuAtR.current=Date.now();setLayerMenu({layer:lyr,x,y});
+  };
+  // TAP SWITCHES, HOLD OPENS THE OPS. The tap used to have a second function —
+  // tapping the layer you were already on opened its SOUND page — and that is
+  // gone: SOUND is its own screen now, reached from its own chip, so the second
+  // function had nowhere useful to point. It also cost more than it looked:
+  // a mis-tap on the layer you were already editing threw a full-screen sheet
+  // over the instrument, which is a thing you do by accident constantly on a
+  // row of three buttons your thumb lives on.
+  const layerBtnProps=(lyr)=>({
+    // `touchAction:none` and the no-select pair are LOAD-BEARING, not tidiness:
+    // without them a long press on a <button> hands the gesture to the browser
+    // — text selection, the iOS callout — which fires `pointercancel` and kills
+    // the hold before it can land.
+    onPointerDown:(e)=>{
+      const x=e.clientX,y=e.clientY;
+      layerHoldR.current.held=false;layerHoldR.current.sx=x;layerHoldR.current.sy=y;
+      _layerHoldEnd();
+      layerHoldR.current.tmr=setTimeout(()=>{
+        layerHoldR.current.tmr=0;layerHoldR.current.held=true;_openLayerOps(lyr,x,y);
+      },450);
+    },
+    // A THRESHOLD, not any movement. This is why the hold "wasn't working":
+    // it cancelled on the first pointermove, and a finger resting on a button
+    // for 450ms always moves a pixel or two — so on a phone the hold could
+    // essentially never complete, while a headless mouse (down, wait, up, no
+    // movement at all) passed it every time. The test was the wrong shape, not
+    // just the code.
+    onPointerMove:(e)=>{
+      if(!e.buttons)return;
+      const h=layerHoldR.current;
+      if(Math.abs(e.clientX-h.sx)>8||Math.abs(e.clientY-h.sy)>8)_layerHoldEnd();
+    },
+    onPointerUp:()=>{_layerHoldEnd();},
+    onPointerCancel:()=>{_layerHoldEnd();layerHoldR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_layerHoldEnd();
+      layerHoldR.current.held=true;_openLayerOps(lyr,e.clientX,e.clientY);},
+    onClick:(e)=>{
+      e.stopPropagation();
+      // The hold already opened something; its trailing click must not also
+      // switch layer underneath the menu.
+      if(layerHoldR.current.held){layerHoldR.current.held=false;return;}
+      if(activeLayerR.current!==lyr)switchLayer(lyr);
+    },
+  });
+  const spillLane=spillParam?LANES.find(l=>l.key===spillParam)||null:null;
+  // The grid's ground carries the part's colour at the very bottom of its
+  // range. A lit note has taken its layer's colour since the icons landed, but
+  // the surface under it did not, so an empty POLY grid and an empty MONO grid
+  // were the same picture — and on a phone you switch layer far more often than
+  // you have notes down to tell them apart by. 0.045 alpha is deliberately
+  // under the quarter-beat column shading, so it reads as a TINT and never as
+  // content: the thing it must not do is look like a lit cell.
+  // `noteRgb` only knows the two SYNTH layers — drums colour per voice, so it
+  // has no single note colour and falls through to the brand amber. Which made
+  // the drums page the one layer whose tint was not its own: it read as "lit",
+  // not as "drums". Its accent is the rose the DRUMS button already wears.
+  const layerTint="rgba("+(activeLayer==="drums"?"196,114,122":noteRgb(activeLayer))+",0.045)";
+  // Drums have no per-column params, so a spill cannot survive the trip there.
+  useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
+  // Tapping anywhere that is not the spilled lane or the row of buttons puts it
+  // away. A spill is a MODE the grid is in, and a mode you can only leave by
+  // finding the one button that opened it is a trap — every other overlay in
+  // here closes on a tap outside, and this is the same promise.
+  //
+  // A capture-phase window listener rather than a backdrop element: a backdrop
+  // over the whole screen would eat the taps meant for the transport, the
+  // pattern chips and the bar tile, all of which stay live while a lane is up.
+  useEffect(()=>{
+    if(!spillParam)return;
+    const away=(e)=>{
+      const t=e.target;
+      if(t&&t.closest&&(t.closest("[data-spill]")||t.closest("[data-paramrow]")))return;
+      setSpillParam(null);
+    };
+    window.addEventListener("pointerdown",away,true);
+    return ()=>window.removeEventListener("pointerdown",away,true);
+  },[spillParam]);
   const LOOP_CHAIN_MS=2000;
   const LOOP_MAX_BARS=4;
   const loopChainR=useRef(0);
@@ -4921,12 +5154,32 @@ export default function LoudLight(){
     if(n>LOOP_MAX_BARS)out.push({mode:2,bars:1});
     return out;
   };
+  // ── The strip EXPANDS while the loop is being set up ─────────────────────
+  // The spinner shows three bars, which cannot draw a four-bar loop window —
+  // and the strip has been the WHOLE readout for LOOP since the button lost its
+  // label. So the strip becomes that readout again for exactly as long as the
+  // gesture lasts: any change of loop scope expands it to the full scrolling
+  // chip row, and it collapses back to the spinner once the chain has lapsed.
+  // Its lifetime is the chain's plus a grace, so the last tap of a chain is
+  // still legible after the chain itself has settled — which is what makes the
+  // expansion read as part of the gesture rather than as a mode you are in.
+  // Turning LOOP OFF does not expand it: there would be nothing to look at, and
+  // 2.8s of strip after an off tap is noise.
+  const [loopExpand,setLoopExpand]=useState(false);
+  const loopExpandTmrR=useRef(0);
+  const _flashLoopStrip=()=>{
+    setLoopExpand(true);
+    clearTimeout(loopExpandTmrR.current);
+    loopExpandTmrR.current=setTimeout(()=>setLoopExpand(false),LOOP_CHAIN_MS+800);
+  };
+  useEffect(()=>()=>clearTimeout(loopExpandTmrR.current),[]);
   const setLoopScope=(n,bars)=>{
     if(!n){setLoopMode(0);setLoopBar(-1);setLoopBars(1);setLoopPat(null);return;}
     setLoopMode(n);
     setLoopBars(Math.max(1,bars||1));
     setLoopBar(Math.max(0,barPageR.current));
     setLoopPat(activePatternIdR.current);
+    _flashLoopStrip();
     showFlash(n===2?"LOOP PATTERN":(bars>1?"LOOP "+bars+" BARS":"LOOP BAR"));
   };
   const tapLoop=()=>{
@@ -5407,11 +5660,140 @@ export default function LoudLight(){
     if(el.scrollLeft!==was)_syncBarTrack(el);
   };
   const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
-  const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
+  // The dismissal guard is sized to the GESTURE THAT OPENED IT, not fixed at
+  // 400ms. That window exists for a HOLD: the menu opens with the finger still
+  // down, so the opening press's own trailing click has to be ignored or the
+  // menu closes the instant it appears. A TAP has already finished — the menu
+  // opens on the pointerup — so all it can emit is one trailing click a few ms
+  // later, and 400ms of deafness after that just makes a quick dismissal feel
+  // like it did not register. Which is exactly how the sweep found it: tap to
+  // open, tap to dismiss, and the second tap did nothing.
+  const _openBarOps=(bar,x,y,guardMs)=>{
+    barMenuAtR.current=Date.now()-(400-(guardMs==null?400:guardMs));
+    setBarMenu({bar,x,y});
+  };
+  const _barHasNotes=(bi)=>{
+    if(!editPat||!editPat.grid)return false;
+    const a=bi*COLS,b=a+COLS;
+    for(let r=0;r<editPat.grid.length;r++){
+      const row=editPat.grid[r]; if(!row)continue;
+      for(let c=a;c<b;c++)if(row[c])return true;
+    }
+    return false;
+  };
+  // RAND and CLEAR for a layer, on its button's HOLD. They act on the visible
+  // bar, exactly as the bar menu's do — the difference is that you do not have
+  // to go to that part first, which is the whole point of hanging them off the
+  // part's own button. It switches to that layer as it opens, so you can see
+  // what you are about to change and every existing bar-scoped implementation
+  // needed no changes.
+  const paramOpsMenu=!paramMenu?null:(()=>{
+    const lane=LANES.find(l=>l.key===paramMenu.key);
+    if(!lane)return null;
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=124;
+    const px=Math.max(8,Math.min(vw-W-8,paramMenu.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,paramMenu.y-H-10));   // above the row, which sits low
+    const close=()=>setParamMenu(null);
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-paramMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-paramMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:12,fontWeight:700,color:lane.color}}>{lane.label}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>BAR {curBar+1}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {[["RAND",()=>randStepLaneR.current&&randStepLaneR.current(lane.key)],
+              ["RESET",()=>resetStepLaneR.current&&resetStepLaneR.current(lane.key)]].map(([t,fn])=>(
+              <button key={t}
+                style={{padding:"11px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+                  color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
+                onClick={()=>{fn();close();}}>{t}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+  const layerOpsMenu=!layerMenu?null:(()=>{
+    const lm=layerMenu, isDrum=lm.layer==="drums";
+    const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
+    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#79b8f2":"#c4727a";
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
+    const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
+    const close=()=>setLayerMenu(null);
+    const act=(fn)=>{fn();close();};
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-layerMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-layerMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:12,fontWeight:700,color:col}}>{lbl}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>BAR {curBar+1}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {[["RAND",()=>isDrum?randDrumVel():randPatId(activePatternIdR.current)],
+              ["CLEAR",()=>isDrum?clearDrums():clearPatId(activePatternIdR.current)]].map(([t,fn])=>(
+              <button key={t}
+                style={{padding:"11px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+                  color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
+                onClick={()=>act(fn)}>{t}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+  // The SOUND screen's own selector: three layers and the global FX, which is
+  // what makes it ONE screen rather than a sheet with a second sheet behind it.
+  // Picking a layer here sets `activeLayer` — the same state the grid uses, so
+  // "whose sound am I editing" and "whose notes am I editing" can never drift
+  // apart, and coming out of SOUND leaves you on the part you were just
+  // shaping.
+  const soundTabs=(compact)=>(
+    <div data-soundtabs="1" style={{display:"flex",gap:4,flexShrink:0,marginBottom:compact?6:10}}>
+      {compact&&(
+        <button data-soundclose="1" aria-label="Close sound" title="Close"
+          onClick={()=>setActiveSheet(null)}
+          style={{flex:"0 0 auto",width:28,height:28,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+            border:"1px solid rgba(168,190,212,0.2)",background:"transparent",
+            color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1}}>✕</button>
+      )}
+      {[["synth","POLY","#a8c5a0"],["lead","MONO","#79b8f2"],["drums","DRUMS","#c4727a"],["fx","FX",C_SAT]].map(([k,lbl,col])=>{
+        const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
+        return(
+          <button key={k} data-soundtab={k} aria-pressed={on}
+            onClick={()=>{ if(k==="fx"){setSoundTab("fx");} else {setSoundTab("layer");if(activeLayer!==k)switchLayer(k);} }}
+            style={{flex:1,minWidth:0,height:compact?28:32,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+              fontSize:9,fontWeight:700,letterSpacing:1,
+              border:"1px solid "+(on?col:col+"33"),
+              background:on?col+"22":"transparent",
+              color:on?col:col+"99"}}>{lbl}</button>
+        );
+      })}
+    </div>
+  );
   const barOpsMenu=!barMenu?null:(()=>{
     const bm=barMenu;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(230,vw-16),H=260;
+    const W=Math.min(260,vw-16);
+    // Cap at three quarters of the screen, never the whole of it: a menu with
+    // no reachable backdrop is a menu you cannot dismiss. Past the cap it
+    // scrolls inside itself.
+    const H=Math.min(Math.round(vh*0.75),260+(barCount>1?Math.ceil(barCount/8)*24+14:0));
     const px=Math.max(8,Math.min(vw-W-8,bm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,bm.y+14));
     const close=()=>setBarMenu(null);
@@ -5429,10 +5811,10 @@ export default function LoudLight(){
       <div style={{position:"fixed",inset:0,zIndex:500}}
         onPointerDown={()=>{if(Date.now()-barMenuAtR.current>400)close();}}
         onClick={()=>{if(Date.now()-barMenuAtR.current>400)close();}}>
-        <div style={{position:"absolute",left:px,top:py,width:W,
+        <div style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
           background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
           borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"auto",pointerEvents:"all"}}
           onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
           <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
             borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
@@ -5446,12 +5828,44 @@ export default function LoudLight(){
                   +(m!==1&&lbl?" · "+lbl:"");
               })()}</span>
           </div>
+          {/* EVERY BAR, as a grid you can point at. The content ops below all
+              act on the bar you are LOOKING at, so copying bar 2 into bar 7
+              used to mean: open the menu, CPY, close it, scrub to 7, open it
+              again, PST. Two of those five moves were the menu. Tapping a bar
+              here selects it — the same `goToBar` a scrub does, so nothing
+              below needed changing — and the menu STAYS OPEN, which is the
+              whole point: CPY, tap 7, PST, without leaving.
+              Four columns and a cap of eight rows: 32 bars is the ceiling and
+              this is a menu, not a page. */}
+          {barCount>1&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:2,padding:"7px 8px",
+              background:"rgba(10,18,28,0.92)",borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+              {Array.from({length:barCount},(_,bi)=>{
+                const isSel=bi===bm.bar, isPlay=bi===playingBar, has=_barHasNotes(bi);
+                const dead=(partBarLens(editPat)[bi]||0)===0;
+                return(
+                  <button key={bi} data-barcell={bi}
+                    onClick={()=>{goToBar(bi);setBarMenu(m=>m?Object.assign({},m,{bar:bi}):m);}}
+                    style={{height:22,padding:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",
+                      fontSize:9,fontWeight:700,lineHeight:1,
+                      border:"1px solid "+(isSel?"rgba(255,206,130,0.85)":"rgba(168,190,212,0.14)"),
+                      background:isSel?"rgba(255,206,130,0.62)":dead?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.15)":"rgba(186,208,230,0.06)",
+                      boxShadow:isPlay?"inset 0 0 0 1.5px "+C_VARY:"none",
+                      color:isSel?"rgba(10,20,32,0.85)":"rgba(178,199,219,0.55)"}}>{bi+1}</button>
+                );
+              })}
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("RAND",()=>act(()=>isDrum?randDrumVel():randPatId(activePatternId)))}
             {cell("CLR", ()=>act(()=>isDrum?clearDrums():clearPatId(activePatternId)))}
             {cell("MUT8",()=>act(()=>isDrum?mutateDrumPat1():mutatePat1()))}
-            {cell("CPY", ()=>act(()=>copyPatId(activePatternId)),isDrum)}
-            {cell("PST", ()=>act(()=>pastePatId(activePatternId)),isDrum||!clipboard)}
+            {/* These two stay OPEN. Everything else here is a one-shot, but
+                copy and paste are a PAIR performed across two bars, and closing
+                between them is the move the bar grid above was added to
+                remove. */}
+            {cell("CPY", ()=>copyPatId(activePatternId),isDrum)}
+            {cell("PST", ()=>pastePatId(activePatternId),isDrum||!clipboard)}
             {cell("⧉ DUP",()=>act(()=>duplicateBar()),barCount>=MAX_BARS)}
           </div>
           {/* The three ways to gain a bar, together — ⧉ DUP above is the
@@ -5679,10 +6093,21 @@ export default function LoudLight(){
                   // _songMeasure caches for drops.
                   border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
                   boxSizing:"border-box",minWidth:0,
-                  outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
+                  // NO HALO ON THE SOUNDING SLOT. A ring around the cell says
+                  // "this cell", which you can already see — and the lane is a
+                  // row of identical squares, so a ring on one of them reads as
+                  // selection rather than as sound. The CHARACTER glows instead:
+                  // the symbol is what names the pattern, so lighting the symbol
+                  // is lighting the thing you are actually reading. Same
+                  // language as the pattern chips, where the glyph lights and
+                  // the halo means "editing".
+                  // The hover outline stays: that is a drop target, which is a
+                  // different question and only exists mid-drag.
+                  outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",
                   outlineOffset:"-1px",
-                  boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
-                  color:pat?"#0e1c2b":"transparent",fontSize:17,fontWeight:700,
+                  color:pat?(isCursor?"#fff":"#0e1c2b"):"transparent",
+                  textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",
+                  fontSize:17,fontWeight:700,
                   touchAction:"none",cursor:"pointer",userSelect:"none",
                   transition:"background .08s, outline .08s"}}
                 onPointerDown={(e)=>{
@@ -6125,15 +6550,6 @@ export default function LoudLight(){
   //
   // Reads as a minimap: each segment is a bar, filled if it contains notes, so
   // you can see the shape of a long pattern and where you are in it at a glance.
-  const _barHasNotes=(bi)=>{
-    if(!editPat||!editPat.grid)return false;
-    const a=bi*COLS,b=a+COLS;
-    for(let r=0;r<editPat.grid.length;r++){
-      const row=editPat.grid[r]; if(!row)continue;
-      for(let c=a;c<b;c++)if(row[c])return true;
-    }
-    return false;
-  };
   // Chips only. Every control that used to sit alongside them (add / remove /
   // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
   // ops, where the buttons can be a real touch size — a row of 18px glyphs above
@@ -6212,14 +6628,130 @@ export default function LoudLight(){
         onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={Math.round(sz*0.5)}/></button>
     </div>
   );
-  const _openStepFor=(bar,x,y)=>{
-    if(IS_MOBILE){ const k=activeLayer==="drums"?"bars":"pattern";
-      setActiveSheet(sh=>sh===k?null:k); return; }
-    if(activeLayer==="drums"){ _openBarOps(bar,x,y); return; }
-    setPage(pg=>pg==="step"?"edit":"step");
+  // `_openStepFor` is GONE. It was the tap-again on a bar chip, and the only
+  // thing it opened was the step sheet / step page — which is not where step
+  // parameters live any more. The sheet and the page are still in the source,
+  // unreachable from here, so the two can be compared while this is being
+  // judged; delete them once the spill has been heard and felt on the phone.
+  // Drums used that gesture to reach the "bars" sheet: the bar menu on the
+  // spinner's HOLD carries everything that sheet did (＋BAR, ⧉DUP, ×2, DELETE,
+  // SPEED and the content ops), so nothing is stranded.
+  // ── The bar TILE ─────────────────────────────────────────────────────────
+  // One tile reading "3/8", scrubbed VERTICALLY. It was three tiles — previous,
+  // current, next — and that was wrong twice over. Horizontally there is
+  // nowhere to go on the left: the control sits at the start of a row, so the
+  // gesture runs out of screen in one direction and not the other. And the
+  // neighbours were not telling you anything — without motion carrying them
+  // past, "the bar before" and "the bar after" are just two numbers you can
+  // already work out from the one in the middle.
+  //
+  // So: one tile, and the gesture is a vertical scrub, which has the full
+  // height of a thumb's travel in both directions and no edge to run into. It
+  // wraps, so there is no end to hit either.
+  //
+  // TAP OPENS THE BAR'S OPS. That used to be the long press, with the tap
+  // opening STEP — and STEP is not a place any more, so the tap was doing
+  // nothing at all. The remaining function gets the primary gesture rather than
+  // staying behind a hold nobody would guess at.
+  //
+  // It absorbs the track row when collapsed, so the tile is the full height of
+  // the strip block rather than a chip with a scrollbar under it. Same total
+  // height in both states — the thing the rest of the column budgets against.
+  const _spinR=useRef({y:0,start:0,moved:false,tmr:0,top:0,bot:0});
+  const _spinEdgeR=useRef(0);
+  const _spinEdgeStop=()=>{if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}};
+  const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}_spinEdgeStop();};
+  useEffect(()=>()=>_spinEdgeStop(),[]);
+  // Both the drag and the edge timer go through here, so "where am I" lives in
+  // one place and the two can't disagree about which bar is current.
+  // IT CLAMPS. It used to wrap, and wrapping is wrong for this control however
+  // neatly a part loops: a scrub with no ends has no position you can feel,
+  // only a number that keeps changing, and overshooting recycles you past the
+  // bar you were aiming for instead of parking you at the end. Bar 1 is the
+  // bottom of the travel and bar N is the top, the way a fader has ends.
+  const _spinStep=(n)=>{
+    if(!n)return;
+    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,barPageR.current+n));
+    if(want!==barPageR.current)goToBar(want);
   };
-  const barChips=(
-    <div data-barwrap="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+  // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
+  // was never broken; the TRAVEL was. The tile sits high on the screen, so an
+  // upward swipe runs out of phone long before it runs out of bars, and on an
+  // 8-bar part a full swipe lands you on the last one every time — which is
+  // exactly "swiping up impossibly high just takes me to the last bar".
+  // Re-anchoring makes the gesture incremental rather than absolute, so a
+  // second swipe carries on from where the first ended, and the edge
+  // acceleration below means one swipe held at the top keeps going. Between
+  // them the control has no reachable end, which is what wrapping was for.
+  const BAR_PX_PER_BAR=18;
+  const BAR_EDGE_MS=110;     // one bar per tick while the finger is past the edge
+  const barTile=(extra)=>{
+    const isPlaying=curBar===playingBar;
+    const isLoop=loopMode===2?true:!!loopMode&&(()=>{
+      for(let j=0;j<Math.max(1,loopBars);j++)
+        if(curBar===((((loopBar+j)%barCount)+barCount)%barCount))return true;
+      return false;
+    })();
+    return(
+    <div data-barspin="1" title="Drag up and down to change bar — tap for this bar's ops"
+      style={Object.assign({flex:"0 0 auto",width:64,height:"100%",
+        position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",
+        touchAction:"none",cursor:"ns-resize",userSelect:"none",
+        background:"rgba(255,206,130,0.62)",color:"rgba(10,20,32,0.85)",
+        boxShadow:isPlaying?"inset 0 0 0 2px "+C_VARY:"none",
+        fontSize:15,fontWeight:700,lineHeight:1},extra||{})}
+      onPointerDown={e=>{
+        e.stopPropagation();e.preventDefault();
+        try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+        const r=e.currentTarget.getBoundingClientRect();
+        _spinR.current={y:e.clientY,start:curBar,moved:false,tmr:0,edge:0,top:r.top,bot:r.bottom};
+      }}
+      onPointerMove={e=>{
+        if(!e.buttons)return;e.stopPropagation();
+        const g=_spinR.current;
+        // Up is forward, the way every other vertical control in here reads.
+        // Whole bars are CONSUMED out of the delta and the anchor moves with
+        // them, so the gesture never accumulates an absolute distance it cannot
+        // travel — see BAR_PX_PER_BAR.
+        const d=Math.trunc((g.y-e.clientY)/BAR_PX_PER_BAR);
+        if(d){g.moved=true;g.y-=d*BAR_PX_PER_BAR;_spinStep(d);}
+        // Past either edge of the tile, keep going for as long as you hold it
+        // there. The same answer the song lane and the bar strip already use
+        // when a drag needs somewhere off-screen.
+        const dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;
+        if(dir!==g.edge){
+          g.edge=dir;_spinEdgeStop();
+          // The timer stops itself at the end of the travel — without that it
+          // would sit there ticking against a clamp for as long as you held it.
+          if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>{
+            const at=barPageR.current;
+            _spinStep(dir);
+            if(barPageR.current===at)_spinEdgeStop();
+          },BAR_EDGE_MS);}
+        }
+      }}
+      onPointerUp={e=>{
+        _spinEnd();
+        const g=_spinR.current;
+        if(e.button===2)return;
+        // A tap — not the release of a scrub — opens this bar's ops.
+        if(!g.moved)_openBarOps(curBar,e.clientX,e.clientY,120);
+        g.moved=false;
+      }}
+      onPointerCancel={()=>{_spinEnd();_spinR.current.moved=false;}}
+      onContextMenu={e=>{e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY,120);}}>
+      <span>{curBar+1}</span>
+      <span style={{fontSize:10,fontWeight:600,opacity:0.55,marginLeft:1}}>{"/"+barCount}</span>
+      {/* LOOP's steel underline, the one state the tile can still show on its
+          own. How WIDE the loop is is what the expansion is for. */}
+      {isLoop?<div style={{position:"absolute",left:3,right:3,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
+    </div>
+    );
+  };
+  // The full scrolling strip, kept intact: it is what the spinner EXPANDS into
+  // while a loop is being set up, and the only view that can draw a four-bar
+  // window. Every gesture on it is unchanged.
+  const _barStripScroll=(
       <div data-barstrip="1" className="barscroll"
            onScroll={e=>_syncBarTrack(e.currentTarget)}
            style={{position:"relative",display:"flex",gap:BAR_ROW_GAP,height:BAR_ROW_H,
@@ -6228,9 +6760,9 @@ export default function LoudLight(){
              e.stopPropagation();e.preventDefault();
              e.currentTarget.setPointerCapture(e.pointerId);
              const bar=_barAt(e.clientX,e.clientY,e.currentTarget),x=e.clientX,y=e.clientY;
-             // Tapping the bar you are ALREADY on opens STEP (see
-             // _openStepFor). Recorded before _scrubTo, which is what makes
-             // the bar current.
+             // `wasCur` recorded before _scrubTo (which is what makes the bar
+             // current). It no longer opens anything — see above — but the flag
+             // still guards the hold from firing on a scrub release.
              barHoldR.current.wasCur=(bar===curBar);
              barHoldR.current.moved=false;
              _scrubTo(e.clientX,e.clientY,e.currentTarget);
@@ -6255,8 +6787,10 @@ export default function LoudLight(){
              // Not after a hold (it already opened it) and not after a scrub,
              // where the release lands on a bar you were dragging to rather
              // than one you deliberately tapped twice.
-             if(!barHoldR.current.held&&!barHoldR.current.moved&&barHoldR.current.wasCur)
-               _openStepFor(_barAt(e.clientX,e.clientY,e.currentTarget),e.clientX,e.clientY);
+             // The tap-again used to open STEP here. STEP is not a place any
+             // more — the lanes spill onto the grid from `paramRow` — so the
+             // gesture has nothing to open and is gone rather than rebound.
+
              barHoldR.current.wasCur=false;
            }}
            onPointerCancel={()=>{_barHoldEnd();barHoldR.current.held=false;barHoldR.current.wasCur=false;}}
@@ -6317,16 +6851,30 @@ export default function LoudLight(){
           );
         })}
       </div>
+  );
+  const _barTrackEl=(
+    <>
       {/* The track: drag it to pan, and read where you are in a 32-bar part.
           Its height is part of the constant `_barStripPx`. */}
       <div data-bartrack="1" onPointerDown={_barPanStart} aria-hidden="true"
         style={{height:BAR_TRACK,borderRadius:BAR_TRACK/2,position:"relative",flexShrink:0,
           background:"rgba(186,208,230,0.07)",cursor:"pointer",touchAction:"none"}}>
+        {/* The thumb is a SCROLL position, written imperatively by
+            `_syncBarTrack`. It only exists in the expanded state now: collapsed,
+            the tile IS the readout ("3/8") and a proportional bar beside a
+            number saying the same thing is the duplicate readout this app keeps
+            deleting. */}
         <div data-barthumb="1" style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
           borderRadius:BAR_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
       </div>
-    </div>
+    </>
   );
+  const barChips=(loopExpand?(
+    <div data-barwrap="1" style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",gap:BAR_TRACK_GAP}}>
+      {_barStripScroll}
+      {_barTrackEl}
+    </div>
+  ):barTile({width:64}));
   // The + that used to sit at the end of this strip is GONE. It added a bar on
   // a tap and opened the pattern/bar sheet on a hold — and both of those live
   // on the bar chips now: ＋ BAR is in a chip's hold menu with the rest of the
@@ -6334,8 +6882,68 @@ export default function LoudLight(){
   // one op that the menu beside it also carries is a control paying rent in the
   // corner of a phone screen. (The "bars" SHEET keeps its opener on drums,
   // which have no step lanes: tapping the bar you are already on.)
+  // The eight step lanes as eight buttons. Tap one and it spills onto the grid;
+  // tap it again, or the one that is lit, and you are back to notes. Eight
+  // across a 370px phone is ~44px a button — the width the bar chips gave back.
+  // A lit button carries its lane's own colour, which is also the colour the
+  // faders come up in, so the row says what you are about to see.
+  // Which lanes the step that is SOUNDING right now has an edit on. The buttons
+  // are the only thing on screen that can say a step carries a parameter at all
+  // once the lanes stopped being a page — so a note with a velocity dip or a
+  // ratchet lights its lane as it passes, and you can see where the edits are
+  // without opening any of them.
+  // VEL, OCT, RTCH and DUR are deliberately NOT in this scheme. The grid says
+  // all four on the note itself — velocity as its opacity, octave as the bars
+  // above or below it, ratchet as the subdivisions inside it, and DUR as the
+  // note's drawn LENGTH, which is the most direct of the lot: a note held half
+  // as long is drawn half as long. A second readout of something already on
+  // screen is the duplicate this app keeps deleting. What is left is what the
+  // grid cannot show: the filter, the two sends and the glide.
+  //
+  // And it is a brightness, not a flag: the value is normalised against how far
+  // it can travel from its default, so a small filter move glows faintly and a
+  // full one glows hard. "This step has something on it" was worth knowing;
+  // "this step has a LOT of it" is what you actually listen for.
+  const HOT_LANES=LANES.filter(l=>["flt","dly","rev","glideT"].indexOf(l.key)>=0);
+  const _hotLanes=(()=>{
+    const out={};
+    if(!playing||playId!==activeId||step<0||!activePat)return out;
+    const sp=(activePat.params||null)&&activePat.params[step];
+    if(!sp)return out;
+    for(const l of HOT_LANES){
+      const v=sp[l.key]!=null?sp[l.key]:l.def;
+      if(v===l.def)continue;
+      const span=Math.max(Math.abs(l.max-l.def),Math.abs(l.def-l.min))||1;
+      out[l.key]=Math.max(0.18,Math.min(1,Math.abs(v-l.def)/span));
+    }
+    return out;
+  })();
+  const paramRow=(
+    <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:"100%",minHeight:BAR_ROW_H,touchAction:"none"}}>
+      {LANES.map(lane=>{
+        const on=spillParam===lane.key;
+        // 0 when cold, 0.18..1 when lit — how far this step's value has moved.
+        const heat=on?0:(_hotLanes[lane.key]||0);
+        const hot=heat>0;
+        return(
+          <button key={lane.key} data-param={lane.key} data-hot={hot?"1":undefined} aria-pressed={on}
+            title={lane.label+" — tap to spill it onto the grid, hold for RAND / RESET"}
+            {...paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key))}
+            style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"33"),
+              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.04)",
+              color:on||hot?lane.color:lane.color+"99",
+              fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
+              touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",
+              boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
+              transition:"background .08s, box-shadow .08s"}}>{lane.key==="glideT"?"GLD":lane.label}</button>
+        );
+      })}
+    </div>
+  );
   const barStrip=(
-    <div style={{display:"flex",alignItems:"flex-start",gap:IS_MOBILE?5:6,marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
+    <div style={{display:"flex",alignItems:"stretch",gap:IS_MOBILE?5:6,height:_barStripPx,
+      marginBottom:IS_MOBILE?4:5,width:"100%",touchAction:"none"}}>
       {barChips}
       {/* No readout here. It named the pattern and counted the bars — "♫ 2/4" —
           and the strip it sat on is ALREADY both of those: one chip per bar
@@ -6344,7 +6952,15 @@ export default function LoudLight(){
           the corner where the grid wants the width. */}
       {/* The ♪ row-key toggle was here. It is gone while ROWKEYS_ON is false —
           the column is worth having, the corner of the bar strip is not where
-          you reach for it. The strip is bar chips and nothing else again. */}
+          you reach for it. */}
+      {/* The step-parameter buttons, in the width the spinner gave back. Drums
+          have no per-column params (drum velocity is per CELL — thirteen values
+          in a column, not one), so the buttons are simply absent there; the
+          spacer keeps the spinner the same size on both pages, so the control
+          you page the part with does not move when you switch layer. While the
+          strip is EXPANDED for a loop the buttons stand down — the strip needs
+          the whole width to draw the window, and it is back within seconds. */}
+      {loopExpand?null:(activeLayer!=="drums"?paramRow:<div style={{flex:"5 1 0",minWidth:0}}/>)}
     </div>
   );
   // Desktop sidebar version of the bar controls. The mobile drawer carries a
@@ -6361,9 +6977,12 @@ export default function LoudLight(){
   // would silently install onClick={undefined}.
   const patChipData=patterns.map((p,i)=>({
     p,col:patCol(i),sel:p.id===activePatternId,
-    // Ring the pattern the song is currently sounding when it isn't the one
-    // you're looking at — that's the cue for "jump to what I can hear".
-    lit:playing&&songMode&&p.id===playId&&p.id!==activePatternId,
+    // The pattern the song is SOUNDING. It used to be suppressed on the chip
+    // you were editing, because the cue was a ring and the ring was also how
+    // "selected" read — so the two collided and one had to give way. They are
+    // different channels now (see the row below), so it is simply true whenever
+    // it is true, including on the chip you are looking at.
+    lit:playing&&songMode&&p.id===playId,
     empty:PART_LAYERS.every(l=>{
       const g=p.parts[l]&&p.parts[l].grid;
       return !g||!g.some(row=>row&&row.some(Boolean));
@@ -6372,6 +6991,22 @@ export default function LoudLight(){
   const _patChipBase={display:"flex",alignItems:"center",justifyContent:"center",gap:4,
     borderRadius:6,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",
     flexShrink:0,fontWeight:700,lineHeight:1,fontFamily:"inherit",boxSizing:"border-box"};
+  // THE CHIP'S STATE STYLING, IN ONE PLACE. The row and the landscape rail were
+  // two copies of it, and the copies drifted the moment the states changed: the
+  // rail was still painting "selected" into the border and suppressing the
+  // playing cue long after the row had stopped. Three mounts, one body — the
+  // house rule this file keeps having to relearn.
+  //
+  // Halo = the pattern you are EDITING. Symbol lit = the pattern SOUNDING.
+  // Colour = the pattern's identity, carried always, because that is what you
+  // recognise it by in the song lane.
+  const patChipState=(col,sel,lit,empty)=>({
+    border:"1px solid "+col+(sel?"":"44"),
+    background:sel?col+"22":col+"0d",
+    boxShadow:sel?"0 0 0 2px "+col+"55, 0 0 10px "+col+"33":"none",
+    color:lit?"#fff":(empty?col+"66":col),
+    textShadow:lit?"0 0 8px "+col+",0 0 14px "+col+"88":"none",
+  });
   // Horizontal row — desktop sidebar and mobile portrait. Wraps rather than
   // scrolls: 16 chips is the ceiling and a hidden chip is a chip you can't
   // reach, which is the whole complaint this row exists to fix.
@@ -6379,7 +7014,7 @@ export default function LoudLight(){
   // data-drumgrid mark the two grids — there was otherwise no way to measure
   // where this row sits in the column.
   const patternChipsRow=(
-    <div data-patrow="1" style={{display:"flex",flexWrap:"wrap",gap:IS_MOBILE?5:3,width:"100%"}}>
+    <div data-patrow="1" style={{display:"flex",flexWrap:"wrap",alignItems:"stretch",gap:IS_MOBILE?5:3,width:"100%"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
         <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
           {...paletteChipProps(p,col)}
@@ -6388,10 +7023,8 @@ export default function LoudLight(){
             // A chip is a drag source now, so it must own the gesture. (The
             // landscape rail deliberately does NOT set this: that column
             // scrolls, and there is no lane in landscape to drag onto.)
-            fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab",
-            border:"1px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.16)"),
-            background:sel?col+"22":"transparent",
-            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+            fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab"},
+            patChipState(col,sel,lit,empty))}>
           {p.name}
           {patBarsBadge(p)}
         </div>
@@ -6404,20 +7037,28 @@ export default function LoudLight(){
             border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
             color:"rgba(178,199,219,0.45)"})}>+</div>
       )}
+      {/* The bar tile lives HERE in portrait, at the right-hand end. It is
+          navigation — which pattern, which bar — so it belongs with the other
+          navigation rather than in a row of its own, and this row had spare
+          width going begging. What that buys is the whole width below the grid
+          for the step buttons: 36px → 44px each, which is the first time they
+          have been a proper target. */}
+      {stripBelow?<div style={{marginLeft:"auto",display:"flex"}}>{barTile({width:58})}</div>:null}
     </div>
   );
   // Vertical variant for the landscape rail (74px wide), which stacks its
   // controls. Scrolls, because the rail's height is the screen's short side.
   const patternChipsRail=(
-    <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
+    // Marked `data-patrow` like the row it is the landscape twin of — it is the
+    // same control, and a harness that can only measure two of the three mounts
+    // is how the two drifted apart in the first place.
+    <div data-patrow="1" style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
         <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
           {...paletteChipProps(p,col)}
           style={Object.assign({},_patChipBase,{
-            padding:"9px 4px",borderRadius:14,fontSize:13,
-            border:"1.5px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.18)"),
-            background:sel?col+"22":"transparent",
-            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+            padding:"9px 4px",borderRadius:14,fontSize:13},
+            patChipState(col,sel,lit,empty))}>
           {p.name}
           {patBarsBadge(p)}
         </div>
@@ -7323,12 +7964,18 @@ export default function LoudLight(){
       const stepOct=sp?(sp.oct-2):0;
       const layerOct=layerLP.octave||0;
       const actualF=f*Math.pow(2,stepOct+layerOct);
-      const hasGlide=!!(sp&&sp.glide);
+      // How far INTO the next step the slide runs, as a fraction of a step.
+      // It was a fixed 1/32 note (`60/bpm/8 * speedMult`), which is exactly half
+      // a step — so 50% reproduces the old sound and everything either side of
+      // it is new range. Measured in steps rather than seconds so it tracks
+      // tempo AND the bar's own speed, the way the rest of the app does.
+      const glidePct=glidePctOf(sp);
+      const hasGlide=glidePct>0;
       // Per-layer glide knob (0..100). When >0, every note glides into the
       // next regardless of step-level glide flags. Step glide stacks on top —
       // a step-glide note uses whichever glide time is longer.
       const layerGlide01=Math.max(0,Math.min(100,layerLP.glide||0))/100;
-      const stepGlideTime=(60/bpmR.current/8)*(pat?.speedMult??1); // ~1/32 note
+      const stepGlideTime=(glidePct/100)*stepDur; // 50% == the old fixed 1/32 note
       const layerGlideTime=layerGlide01*(60/bpmR.current); // up to ~1 beat
       const usePrev=layerLastGlideR.current[layer]||layerGlide01>0;
       const prevF=usePrev?(layerLastFreqR.current[layer]??null):null;
@@ -9490,6 +10137,7 @@ export default function LoudLight(){
       return Object.assign({},p,{params});
     }));
   };
+  randStepLaneR.current=randStepLane;
   const randStepAll=()=>LANES.forEach(l=>randStepLane(l.key));
   const resetStepLane=(key)=>{pushHistory();setFollowSeq(false);
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
@@ -9500,6 +10148,7 @@ export default function LoudLight(){
       return Object.assign({},p,{params});
     }));
   };
+  resetStepLaneR.current=resetStepLane;
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
@@ -9516,6 +10165,365 @@ export default function LoudLight(){
       const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>i===col?Object.assign({},dflt):sp);
       return Object.assign({},p,{params});
     }));
+  };
+
+  // ── The spilled lane, drawn OVER the grid ────────────────────────────────
+  // A sibling of the grid container, absolutely positioned over it from the
+  // shared `position:relative` parent — the same construction the row keys use,
+  // and for the same two reasons. The grid's pointer handlers live on its
+  // container and hit-test a column from that container's own width, so
+  // anything inside it is read as part of the grid; and as a SIBLING a drag on
+  // a fader cannot reach the grid's gesture machine at all, so there is no
+  // `stopPropagation` to forget.
+  //
+  // Its columns are `flex:1` with the grid's own `CELL_GAP` between them, so
+  // fader and cell line up BY CONSTRUCTION rather than by a magic offset — if
+  // the grid's gap changes, both move together.
+  //
+  // Declared here, below `setStepParam` and `resetStepCol`, and called at the
+  // mounts rather than being a JSX value: Babel lowers `const` to `var`, so a
+  // value built above those would capture `undefined` and the faders would
+  // silently do nothing.
+  const _spillR=useRef({active:false});
+  const spillOverlay=()=>{
+    const lane=spillLane;
+    if(!lane||activeLayer==="drums"||!activePat)return null;
+    const pat=activePat;
+    const allParams=pat.params||defaultStepParams(patW(pat));
+    // FLT / OCT / GLIDE are the only lanes that animate mid-note, so they stay
+    // live across a tied note's extension cells; everything else is locked at
+    // note-start and is dead on a column with no attack. Same rule the lanes
+    // always had — it is about when the engine reads the value, not about which
+    // surface is drawing it.
+    const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
+    const colHasNote=Array.from({length:COLS},(_,vc)=>{
+      const c=barOff+vc;
+      if(!isMidNote){
+        for(let r=0;r<ROWS;r++) if(pat.grid[r]&&pat.grid[r][c])return true;
+        return false;
+      }
+      for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
+        if(pat.grid[r]&&pat.grid[r][c2]){
+          const span=Math.max(1,(pat.durs&&pat.durs[r]&&pat.durs[r][c2])||1);
+          if(c<c2+span)return true;
+        }
+      }
+      return false;
+    });
+    const valAt=(vc)=>{const sp=allParams[barOff+vc];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;};
+    const colAt=(clientX,el)=>{
+      const rect=el.getBoundingClientRect();
+      return Math.max(0,Math.min(COLS-1,Math.floor((clientX-rect.left)/rect.width*COLS)));
+    };
+    const valFromY=(clientY,el)=>{
+      const rect=el.getBoundingClientRect();
+      const pct=1-Math.max(0,Math.min(1,(clientY-rect.top)/rect.height));
+      return Math.round(lane.min+pct*(lane.max-lane.min));
+    };
+    const write=(vc,v)=>{
+      if(!colHasNote[vc])return;
+      setStepParam(barOff+vc,lane.key,Math.max(lane.min,Math.min(lane.max,Math.round(v))));
+    };
+    const playCol=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1;
+    return(
+      <div data-spill={lane.key}
+        style={{position:"absolute",inset:0,zIndex:3,display:"flex",gap:CELL_GAP,
+          touchAction:"none",cursor:"ns-resize"}}
+        onPointerDown={e=>{
+          e.stopPropagation();e.preventDefault();
+          try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+          const el=e.currentTarget, vc=colAt(e.clientX,el);
+          // A bool lane is a toggle, not a fader: no height to read.
+          if(lane.bool){
+            if(!colHasNote[vc]){_spillR.current={active:false};return;}
+            pushHistory();write(vc,valAt(vc)?0:1);_spillR.current={active:false};return;
+          }
+          // Double-tap a step resets EVERY lane on it, exactly as it did in the
+          // lanes. Keyed by column so taps on adjacent steps don't pair.
+          if(colHasNote[vc]&&isDoubleTap(e,vc)){_spillR.current={active:false};resetStepCol(barOff+vc);return;}
+          _spillR.current={active:true,mode:null,col:vc,el,
+            startLocked:!colHasNote[vc],cur:valAt(vc),
+            ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false,
+            hgt:el.getBoundingClientRect().height};
+        }}
+        onPointerMove={e=>{
+          const d=_spillR.current; if(!d||!d.active)return; e.stopPropagation();
+          // The same gesture split the lanes had: a horizontal-dominant drag
+          // DRAWS a curve across steps, a vertical one is a fine ballistic
+          // adjust of the step you started on. The grid is bigger, so the curve
+          // is the gesture that got better — you draw it with your whole hand.
+          if(d.mode===null){
+            const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
+            if(d.startLocked){ if(Math.abs(dx)>6||Math.abs(dy)>6)d.mode="draw"; else return; }
+            else if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6)d.mode="draw";
+            else if(Math.abs(dy)>4)d.mode="fine";
+            else return;
+            if(!d.didStart){pushHistory();d.didStart=true;}
+          }
+          if(d.mode==="draw")write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+          else{
+            const pd=d.ly-e.clientY; d.ly=e.clientY;
+            d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,d.hgt,lane.max-lane.min)));
+            write(d.col,d.cur);
+          }
+        }}
+        onPointerUp={e=>{
+          const d=_spillR.current;
+          if(d&&d.active&&d.mode===null&&!d.startLocked&&e.type==="pointerup"){
+            pushHistory();write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+          }
+          _spillR.current={active:false};
+        }}
+        onPointerCancel={()=>{_spillR.current={active:false};}}>
+        {Array.from({length:COLS},(_,vc)=>{
+          const v=valAt(vc), locked=!colHasNote[vc], isAct=vc===playCol, isQ=vc%4===0;
+          const isRhy=lane.key==="rhy";
+          const pct=lane.bool?(v?1:0)
+            :isRhy?Math.max(0.12,(Math.round(v)-1)/3)
+            :(v-lane.min)/(lane.max-lane.min);
+          const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
+          return(
+            <div key={vc} style={{flex:1,minWidth:0,position:"relative",borderRadius:2,
+              background:isQ?"rgba(10,20,32,0.30)":"rgba(10,20,32,0.22)",
+              opacity:locked?0.25:1,overflow:"hidden"}}>
+              {lane.center!=null&&<div style={{position:"absolute",left:0,right:0,bottom:(cp*100)+"%",height:1,background:lane.color+"33"}}/>}
+              <div style={{position:"absolute",left:0,right:0,bottom:0,height:(pct*100)+"%",
+                background:isAct?lane.color:lane.color+"66",
+                boxShadow:isAct?"0 0 8px "+lane.color:"none",transition:"height .04s"}}/>
+              {/* The value, on steps that carry one. The lanes could only afford
+                  7px here; a full-height column can say it properly. */}
+              {!locked&&(isAct||v!==lane.def)&&(
+                <span style={{position:"absolute",top:2,left:0,right:0,textAlign:"center",
+                  fontSize:9,fontWeight:700,lineHeight:1.2,color:"rgba(245,240,232,0.95)",
+                  textShadow:"0 0 3px #000,0 1px 2px #000",pointerEvents:"none"}}>{fmtStepVal(lane,v)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── The drum mixer: ONE body, two mounts ─────────────────────────────
+  // Desktop's SOUND page and the mobile SOUND sheet both show it. It was two
+  // near-copies before — the mobile one written as 'mirrors the desktop
+  // layout' — which is exactly how two surfaces drift apart. Extracted rather
+  // than edited twice.
+  //
+  // Declared below setDrumMix / onMixDrag / onMixUp / effDispMix and CALLED at
+  // the mounts: built as a JSX value above them it would close over undefined
+  // and every fader would be dead, silently.
+  const drumMixerBody=()=>{
+    const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
+    const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
+    // ── The mixer is TWO views, not one wall ─────────────────────
+    // It used to be thirteen channel strips 62px wide, each carrying
+    // eight controls, in a horizontally SCROLLING row — so you could
+    // see about five voices at a time, none of the controls were
+    // bigger than 8px tall, and finding a voice meant scrolling a
+    // panel to look for it. Crowded and sprawling at the same time,
+    // which is the worst of both: too much on screen to read, and not
+    // enough of it to be sure you had seen everything.
+    //
+    // The top level is now LEVEL AND NOTHING ELSE, and every voice is
+    // on it — thirteen faders across the width, no scroll. That is the
+    // view you actually mix in, and "can I see all of it at once" is
+    // the whole requirement for it. Everything else about a voice —
+    // pitch, filter, envelope, saturation, pan, the two sends, the
+    // sampler — lives in a FOCUSED view you step into for one channel
+    // at a time, where each control can be the size of a control.
+    //
+    // `drumFocus` is a view state and deliberately not persisted: it
+    // is where you happen to be looking, not anything about the song.
+    const focus=drumFocus!=null&&drumFocus>=0&&drumFocus<DRUM_ROWS?drumFocus:null;
+    // One slider body for both views. The overview does not use it;
+    // the focused view mounts it at a size the strips could never
+    // afford. Base edit, or motion override/record, exactly as before.
+    const bigSlider=(r,key,val,minVal,maxVal,bipolar,dc)=>(
+      <div style={{flex:1,height:"min(30px,100%)",minHeight:16,background:"rgba(186,208,230,0.07)",borderRadius:4,position:"relative",cursor:"pointer",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          const rect=e.currentTarget.getBoundingClientRect();
+          if(isDoubleTap(e,key)){setDrumMix(r,key,_drumDefMix()[key]);return;}
+          const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
+          const update=ev=>{
+            const pd=ev.clientX-lx; lx=ev.clientX;
+            cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
+            onMixDrag(r,key,Math.round(cur));
+          };
+          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+        }}>
+        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
+        {bipolar
+          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:4}}/>
+          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:4}}/>}
+        <div style={{position:"absolute",top:-3,bottom:-3,width:10,
+          left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 5px)`,
+          background:"rgba(255,255,255,0.9)",borderRadius:3,boxShadow:"0 0 4px "+dc+"88"}}/>
+      </div>
+    );
+    // The level fader, one body, two sizes: a column in the overview
+    // and the tall one in the focused view.
+    const levelFader=(r,lvl,dc)=>(
+      <div style={{flex:1,minHeight:40,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,cursor:"ns-resize",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          const rect=e.currentTarget.getBoundingClientRect();
+          if(isDoubleTap(e,"lvl"+r)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}
+          const dim=rect.height; let cur=lvl!=null?lvl:100, ly=e.clientY;
+          const update=ev=>{
+            const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
+            cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            onMixDrag(r,"level",Math.round(cur));
+          };
+          const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
+          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
+        }}>
+        <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${lvl}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
+        <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-lvl}% - 2.5px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
+        <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
+      </div>
+    );
+    const hdrBtn=(on,label,onClick,col)=>(
+      <button onClick={onClick}
+        style={{padding:"4px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+          border:"1px solid "+(on?col:"rgba(168,190,212,0.2)"),background:on?col+"28":"transparent",
+          color:on?col:"rgba(178,199,219,0.45)"}}>{label}</button>
+    );
+    return(
+    <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
+      {/* Kit selector — switch between curated sample packs or the synth engine */}
+      <div style={{flexShrink:0,marginBottom:8}}>
+        <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+          {DRUM_KITS.map(kit=>{
+            const on=activeKit===kit.id;
+            return(
+              <button key={kit.id} disabled={kitLoading}
+                onClick={()=>loadKit(kit.id)}
+                style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
+                {kitLoading&&on?"…":kit.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+        {focus!=null
+          ?<button onClick={()=>setDrumFocus(null)}
+             style={{padding:"4px 10px",borderRadius:4,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+               border:"1px solid rgba(168,190,212,0.3)",background:"rgba(186,208,230,0.06)",color:"rgba(178,199,219,0.75)"}}>‹ MIX</button>
+          :<div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIXER</div>}
+        {focus!=null&&<div style={{fontSize:11,letterSpacing:1.5,fontWeight:700,color:drumColor(focus,linkHat,linkTom)}}>{DRUM_VOICES[focus].full||DRUM_VOICES[focus].label}</div>}
+        {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
+        {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
+          <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
+            style={{padding:"4px 8px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
+        ))}
+        <div style={{flex:1}}/>
+        {hdrBtn(motionEnabled,"MOTION",()=>setMotionEnabled(v=>!v),"#c4727a")}
+        {motionEnabled&&hdrBtn(motionRec,motionRec?"● REC":"REC",()=>setMotionRec(v=>!v),"#e07060")}
+        {motionEnabled&&hdrBtn(false,"CLR",clearMotion,"#000")}
+      </div>
+
+      {focus==null?(
+        // ── OVERVIEW: level only, every voice, no scroll ─────────
+        // Thirteen channels in ONE row is thirteen slivers on a phone (24px
+        // each) and a perfectly good mixer on a desktop (73px). So it WRAPS:
+        // each tile asks for 46px and grows — one row of thirteen wherever the
+        // width is there, two rows of seven and six on a phone.
+        // `alignContent:stretch` is what makes those rows SHARE the height
+        // rather than sitting at the top of it: the same trap as the sheet
+        // above, one level down.
+        <div style={{flex:1,minHeight:0,display:"flex",flexWrap:"wrap",alignContent:"stretch",gap:4}}>
+          {DRUM_DISPLAY.map((r)=>{
+            const voice=DRUM_VOICES[r];
+            const m=mix[r], md=effDispMix(dPat,r,m);
+            const dc=drumColor(r,linkHat,linkTom);
+            return(
+              <div key={voice.key} style={{flex:"1 1 46px",minWidth:46,display:"flex",flexDirection:"column",gap:3,position:"relative",
+                padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",overflow:"hidden"}}>
+                {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
+                  <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
+                );})()}
+                {/* The name is the way IN. A fader is a drag, so a tap
+                    on one does nothing — which leaves the tap free for
+                    the only other thing a channel strip can want. */}
+                <button onClick={()=>setDrumFocus(r)} title={"Open "+(voice.full||voice.label)}
+                  style={{padding:"3px 0",borderRadius:3,border:"1px solid "+dc+"33",background:dc+"14",
+                    color:dc,fontSize:8,fontWeight:700,letterSpacing:0.5,cursor:"pointer",fontFamily:"inherit",
+                    whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{voice.label}</button>
+                {levelFader(r,md.level,dc)}
+                <div style={{fontSize:8,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+              </div>
+            );
+          })}
+        </div>
+      ):(
+        // ── FOCUSED CHANNEL ──────────────────────────────────────
+        (()=>{
+          const r=focus, voice=DRUM_VOICES[r];
+          const m=mix[r], md=effDispMix(dPat,r,m);
+          const dc=drumColor(r,linkHat,linkTom);
+          const isRec=recordingVoice===voice.key;
+          const hasSample=!!voiceSamples[voice.key];
+          const filtMode=m.filt||"off";
+          const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
+          const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
+          const row=(label,node,readout)=>(
+            <div style={{flex:"1 1 0",display:"flex",alignItems:"center",gap:8,minHeight:26}}>
+              <div style={{width:44,flexShrink:0,fontSize:9,letterSpacing:1,color:"rgba(178,199,219,0.5)",fontWeight:600}}>{label}</div>
+              {node}
+              <div style={{width:42,flexShrink:0,textAlign:"right",fontSize:10,color:"rgba(178,199,219,0.7)",fontWeight:600}}>{readout}</div>
+            </div>
+          );
+          return(
+            // One channel's controls in a column with 700px in it should be
+            // seven BIG controls, not seven small ones and a void.
+            <div style={{flex:1,minHeight:0,display:"flex",gap:10,overflow:"hidden"}}>
+              <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:7,minHeight:0}}>
+                {row("PITCH",bigSlider(r,"pitch",md.pitch||0,-12,12,true,dc),(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0))}
+                <div style={{flex:"1 1 0",display:"flex",alignItems:"center",gap:8,minHeight:26}}>
+                  <button onClick={e=>{e.stopPropagation();cycleFilt();}}
+                    style={{width:44,flexShrink:0,height:18,padding:0,fontSize:7,letterSpacing:0.5,fontWeight:700,borderRadius:3,cursor:"pointer",fontFamily:"inherit",
+                      border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
+                      background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
+                      color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{filtMode.toUpperCase()}</button>
+                  <div style={{flex:1,display:"flex",opacity:filtMode==="off"?0.4:1}}>{bigSlider(r,"filtCut",md.filtCut!=null?md.filtCut:100,0,100,false,dc)}</div>
+                  <div style={{width:42,flexShrink:0,textAlign:"right",fontSize:9,color:"rgba(178,199,219,0.7)",fontWeight:600}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
+                </div>
+                {row("ENV",bigSlider(r,"env",md.env!=null?md.env:100,0,100,false,dc),md.env!=null?md.env:100)}
+                {row("SAT",bigSlider(r,"sat",md.sat||0,0,100,false,dc),md.sat||0)}
+                {row("PAN",bigSlider(r,"pan",md.pan,-100,100,true,dc),md.pan>0?"+"+md.pan:md.pan)}
+                {row("REV",bigSlider(r,"rvSend",md.rvSend,0,100,false,dc),md.rvSend)}
+                {row("DLY",bigSlider(r,"dlySend",md.dlySend,0,100,false,dc),md.dlySend)}
+                {activeKit==="user"&&(
+                  <div style={{display:"flex",gap:5,marginTop:2}}>
+                    <button style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:9,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+                      onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
+                      {isRec?"STOP":hasSample?"● SAMPLE":"REC"}
+                    </button>
+                    {hasSample&&!isRec&&<button style={{padding:"6px 10px",borderRadius:4,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                  </div>
+                )}
+              </div>
+              {/* The level fader stays on screen in here too: you are
+                  still mixing, and stepping into a channel to change
+                  its filter should not mean stepping back out to hear
+                  it against its own level. */}
+              <div style={{width:"24%",minWidth:56,maxWidth:120,flexShrink:0,display:"flex",flexDirection:"column",gap:4,position:"relative",
+                padding:"6px 6px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box"}}>
+                <div style={{fontSize:7,letterSpacing:1,color:"rgba(178,199,219,0.45)",textAlign:"center",fontWeight:600}}>LEVEL</div>
+                {levelFader(r,md.level,dc)}
+                <div style={{fontSize:9,color:"rgba(178,199,219,0.7)",textAlign:"center",fontWeight:600}}>{md.level}</div>
+              </div>
+            </div>
+          );
+        })()
+      )}
+    </div>
+    );
   };
 
   // BPM drag scrubber
@@ -10458,6 +11466,8 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
+      {layerOpsMenu}
+      {paramOpsMenu}
       {scrubOverlay}
       {exportMenuEl}
 
@@ -10528,16 +11538,9 @@ export default function LoudLight(){
                       border:"1px solid "+(over?`rgba(${rgb},0.85)`:isActive?`rgba(${rgb},0.55)`:"rgba(168,190,212,0.1)"),
                       borderRadius:8,cursor:"pointer",
                       background:over?`rgba(${rgb},0.18)`:isActive?`rgba(${rgb},0.06)`:"transparent",
-                      color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s"}}
-                    onClick={()=>{
-                      // Clicking the layer you are ALREADY on opens its sound
-                      // page, and toggles back — the house rule, and with no
-                      // SOUND tab a one-way door would need the tab row to
-                      // escape. DRUMS behaves identically; it used to do
-                      // nothing at all, which was a dead control.
-                      if(isActive){setPage(pg=>pg==="sound"?"edit":"sound");}
-                      else{switchLayer(layer);}
-                    }}>
+                      color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s",
+                      touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}
+                    {...layerBtnProps(layer)}>
                     <LLIcon name={layer==="synth"?"poly":layer==="lead"?"mono":"drums"} size={18}/>
                   </div>
                 );
@@ -10620,7 +11623,7 @@ export default function LoudLight(){
                   that — the same rule, and the layer boxes already behaved that
                   way, so the tab was a second door to one room. */}
               <div style={{display:"flex",gap:4}}>
-                {[["edit","EDIT"],["fx","FX"]].map(([pg,lbl])=>(
+                {[["edit","EDIT"],["sound","SOUND"]].map(([pg,lbl])=>(
                   <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{})}
                     onClick={()=>setPage(pg)}>{lbl}</button>
                 ))}
@@ -10688,7 +11691,8 @@ export default function LoudLight(){
                   own width, so a key column inside it would be read as column 0. */}
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",position:"relative",flexShrink:0}}>
               {rowKeys}
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
+              {spillOverlay()}
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative",background:layerTint},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {lenEdgeSynth}
@@ -10740,8 +11744,15 @@ export default function LoudLight(){
                           const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;
                           const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
+                          // The note is drawn at the length it is PLAYED: the
+                          // engine does rawDur*(1+dur/100), so −50 draws half as
+                          // long and +100 draws twice. Ratcheted notes keep
+                          // their span — that box is divided into sub-hits, and
+                          // stretching it would say something untrue about them.
+                          const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;
+                          const vwD=Math.max(0.16,vw*(1+durMod));
                           const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;
-                          const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
+                          const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:bright,
@@ -10795,7 +11806,7 @@ export default function LoudLight(){
                 <div style={{width:dw||"80%",height:dw||"80%",flexShrink:0,pointerEvents:"none"}}/>
                 <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:dw||"80%",height:dh||"auto",display:"flex"}}>
                 {drumRowKeys}
-                <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
+                <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative",background:layerTint})}>
                   {lenEdgeDrums}
                   {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
@@ -10889,194 +11900,7 @@ export default function LoudLight(){
                 <span style={{fontSize:11,color:"rgba(178,199,219,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
               </div>
             )}
-            {activeLayer==="drums"&&page==="sound"&&(()=>{
-              const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-              const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
-              return(
-              <div style={{width:"100%",height:"100%",overflow:"hidden",padding:"12px 12px 8px",boxSizing:"border-box",display:"flex",flexDirection:"column"}}>
-                {/* Kit selector — switch between curated sample packs or the synth engine */}
-                <div style={{flexShrink:0,marginBottom:8}}>
-                  <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:4}}>KIT</div>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {DRUM_KITS.map(kit=>{
-                      const on=activeKit===kit.id;
-                      return(
-                        <button key={kit.id} disabled={kitLoading}
-                          onClick={()=>loadKit(kit.id)}
-                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:8,letterSpacing:1,fontWeight:on?700:400,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
-                          {kitLoading&&on?"…":kit.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div style={{flexShrink:0,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500}}>MIXER</div>
-                  {/* Group-link toggles (defeatable). HH = all params; TOM = all but pan. */}
-                  {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
-                    <button key={lbl} onClick={()=>set(v=>!v)} title={"Link "+lbl+" channels"}
-                      style={{padding:"3px 7px",borderRadius:4,fontSize:7,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
-                  ))}
-                  <div style={{flex:1}}/>
-                  {/* MOTION mode + record arm. In MOTION mode dragging a slider
-                      is a live override; with REC armed during playback the hold
-                      writes per-step automation. */}
-                  <button onClick={()=>setMotionEnabled(v=>!v)}
-                    style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
-                  {motionEnabled&&(
-                    <button onClick={()=>setMotionRec(v=>!v)}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
-                  )}
-                  {motionEnabled&&(
-                    <button onClick={clearMotion}
-                      style={{padding:"3px 9px",borderRadius:4,fontSize:8,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
-                  )}
-                </div>
-                {/* Channel strips — horizontal row of conventional vertical strips.
-                    CH + OH are separate strips (each holds its own sample) but their
-                    params are linked via setDrumMix. Toms link on level only. Layout
-                    per strip: name → PITCH → FILT → SAT → ENV → PAN → REV → DLY →
-                    fader → REC/CLR. */}
-                <div style={{flex:1,display:"flex",gap:4,overflowX:"auto",overflowY:"hidden",alignItems:"stretch",paddingBottom:4}}>
-                  {DRUM_VOICES.map((voice,r)=>{
-                    const stripLabel=voice.full||voice.label;
-                    const m=mix[r];
-                    const md=effDispMix(dPat,r,m); // motion-aware display values
-                    const stripBg="rgba(30,28,24,0.55)";
-                    const dc=drumColor(r,linkHat,linkTom);
-                    const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:2};
-                    // Horizontal mini-slider builder. Drag routes through onMixDrag
-                    // (base edit, or motion override/record), onMixUp on release.
-                    const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                      <div style={{width:"100%",height:8,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",cursor:"pointer",touchAction:"none"}}
-                        onPointerDown={e=>{
-                          e.stopPropagation();
-                          const rect=e.currentTarget.getBoundingClientRect();
-                          if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}
-                          const dim=rect.width, range=maxVal-minVal; let cur=val, lx=e.clientX;
-                          const update=ev=>{
-                            const pd=ev.clientX-lx; lx=ev.clientX;
-                            cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));
-                            onMixDrag(r,key,Math.round(cur));
-                          };
-                          const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                          document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                        }}
-                        onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                        {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
-                        {bipolar
-                          ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${50+(val-minVal)/(maxVal-minVal)*100-50}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
-                          :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
-                        <div style={{position:"absolute",top:-3,bottom:-3,width:8,
-                          left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,
-                          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 3px "+dc+"88"}}/>
-                      </div>
-                    );
-                    const isRec=recordingVoice===voice.key;
-                    const hasSample=!!voiceSamples[voice.key];
-                    const filtMode=m.filt||"off";
-                    const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                    const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                    return(
-                      <div key={voice.key} style={{flexShrink:0,width:62,minWidth:62,display:"flex",flexDirection:"column",gap:5,padding:"6px 4px",background:stripBg,border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                        {/* Hit flash — a uniform full-strip glow that pulses on
-                            each hit, peak opacity scaling with velocity, then
-                            fades. (Intensity, not height — a bottom-anchored
-                            gradient read like the level fader moving.) */}
-                        {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                          <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
-                        );})()}
-                        {/* Voice name */}
-                        <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.15,minHeight:12}}>{stripLabel}</div>
-                        {/* PITCH (semitones, bipolar) */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                          {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
-                        </div>
-                        {/* FILTER — type chip on its own row above, then a
-                            full-width cutoff slider + numeric readout (matches the
-                            PITCH/ENV cells; the chip no longer steals slider width). */}
-                        <div style={cell}>
-                          <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                            style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                              border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
-                              background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                              color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
-                          <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
-                        </div>
-                        {/* ENV — sample playback length (full right = whole sample) */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                          {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
-                        </div>
-                        {/* SAT — per-voice saturation/drive */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                          {miniSlider("sat",md.sat||0,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
-                        </div>
-                        {/* PAN */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                          {miniSlider("pan",md.pan,-100,100,true)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
-                        </div>
-                        {/* REV send */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
-                          {miniSlider("rvSend",md.rvSend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
-                        </div>
-                        {/* DLY send */}
-                        <div style={cell}>
-                          <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                          {miniSlider("dlySend",md.dlySend,0,100,false)}
-                          <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
-                        </div>
-                        {/* Vertical level fader */}
-                        <div style={{flex:1,minHeight:60,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,cursor:"ns-resize",margin:"4px 12px 0",touchAction:"none"}}
-                          onPointerDown={e=>{
-                            e.stopPropagation();
-                            const rect=e.currentTarget.getBoundingClientRect();
-                            if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}
-                            const dim=rect.height; let cur=md.level!=null?md.level:100, ly=e.clientY;
-                            const update=ev=>{
-                              const pd=ly-ev.clientY; ly=ev.clientY; // drag up = louder
-                              cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
-                              onMixDrag(r,"level",Math.round(cur));
-                            };
-                            const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
-                            document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-                          }}>
-                          {/* Fill from bottom up */}
-                          <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
-                          {/* Thumb */}
-                          <div style={{position:"absolute",left:-4,right:-4,height:6,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2,boxShadow:"0 0 4px "+dc+"88"}}/>
-                          {/* Center notch */}
-                          <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
-                        </div>
-                        <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
-                        {/* REC / sample — only on the USER kit (curated presets
-                            don't expose the sampler). */}
-                        {activeKit==="user"&&(
-                        <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                          <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                            onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                            {isRec?"STOP":hasSample?"●":"REC"}
-                          </button>
-                          {hasSample&&!isRec&&<button style={{padding:"3px 5px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
-                        </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              );
-            })()}
+            {soundTab==="layer"&&activeLayer==="drums"&&page==="sound"&&drumMixerBody()}
 
             {activeLayer!=="drums"&&page==="step"&&(
               <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
@@ -11130,7 +11954,10 @@ export default function LoudLight(){
                 </div>
               )}
             {/* (The two VARY pages were here; VARY is deleted.) */}
-            {activeLayer!=="drums"&&page==="sound"&&(
+            {page==="sound"&&(
+              <div style={{position:"absolute",top:8,left:12,right:12,zIndex:6}}>{soundTabs(false)}</div>
+            )}
+            {soundTab==="layer"&&activeLayer!=="drums"&&page==="sound"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
@@ -11218,7 +12045,7 @@ export default function LoudLight(){
             )}
             {/* Global FX page — reverb / delay design. Same
                 for every layer (these buses are shared), drums included. */}
-            {page==="fx"&&(
+            {page==="sound"&&soundTab==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{marginBottom:14}}>{mixerBody}</div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
@@ -11258,7 +12085,7 @@ export default function LoudLight(){
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
                   style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"})}
-                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
+                  {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {/* PATTERN CHIPS — the same selector as portrait and desktop,
@@ -11321,10 +12148,16 @@ export default function LoudLight(){
                    playback intent, which is derived now. Three chips, each
                    wider for it. */}
               {/* FX chip — global reverb/delay design */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.4)"}}>FX</span>
+              {/* SOUND, not FX. It is the one screen where you shape what the
+                  instrument sounds like: each layer's voice AND the global FX,
+                  chosen by a selector inside it. FX was only ever half of that,
+                  and the other half was hidden behind tapping a layer button
+                  you were already on — a door nobody would find, on a control
+                  whose real job is switching layers. */}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.4)"}}>SOUND</span>
               </button>
               {/* SAVE — one tap onto the project you last loaded or saved. The
                    cue for unsaved work is the CHIP going amber, the same "lit"
@@ -11348,6 +12181,18 @@ export default function LoudLight(){
                 <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
                 <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
               </button>
+              {/* ↶ ↷ live UP HERE now, not in the transport row. They are not
+                  transport — they are what you press when you have just done
+                  something you did not mean, which is the same kind of thing as
+                  SAVE, and they were the two controls stopping the transport and
+                  the layers from sharing one line. Moving them cost this row
+                  nothing (the four chips flex, and they had width to give) and
+                  bought a whole row below. They stay ADJACENT, because they are
+                  a pair you press in runs. */}
+              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+              </div>
             </div>
           </div>
           )}
@@ -11361,44 +12206,44 @@ export default function LoudLight(){
                  phone with room to spare. Two groups pushed apart rather than
                  one run of eight, so "what am I editing" and "what is it
                  doing" stay tellable apart at a glance. */}
-            {/* Two groups — what am I editing, what is it doing — that share one
-                line where there is room for them and take two where there is
-                not. Measured: a phone has 30px of slack on a 15 and 15 on an SE
-                once the five original controls are down, and PAUSE needs 45, so
-                on a phone this is two lines. That is the right way to spend it:
-                portrait is WIDTH-bound (the grid is 370px of a 390px phone), so
-                a row of height here is height the grid could never have used,
-                whereas shrinking six controls to fit would come straight off
-                every touch target. On an iPad, where the width is there, it
-                stays one line — which is why it is a wrap and not a split. */}
+            {/* Two groups — what am I editing, what is it doing — on ONE line.
+                It took two for a while: six controls plus three layer glyphs do
+                not fit a 375px phone, and the reasoning was that portrait is
+                width-bound so the extra row is free. That is true of the GRID
+                and false of everything else: the row was 97px on an SE, which
+                is 97px of screen spent on wrapping rather than on anything you
+                look at. ↶ ↷ moved up to the globals row (they are not transport)
+                and the rest fits with room to spare — 308px of 355 on an SE.
+                Still a wrap rather than a hand-split row, so an iPad's extra
+                width stays the browser's problem and not ours. */}
+            {/* Every control in here GROWS to fill the row. Once ↶ ↷ moved up
+                the seven that are left fitted with 47px to spare, and spare
+                width on a row of thumb targets is just smaller thumb targets:
+                each button takes an equal share and caps at 56px so an iPad
+                gets a sensible row rather than seven dinner plates. The two
+                groups split it 3:4, which is exactly the button count, so the
+                gap between them lands where it always did. */}
             <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{flex:"3 1 0",display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
-                  onClick={()=>{
-                    // Tapping the layer you are already on opens its sound
-                    // page, and toggles back out — the house rule.
-                    if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
-                    else{switchLayer(lyr);}
-                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={19}/></button>
+                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
-              <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-              <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:36,height:36,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-              <button style={Object.assign({},S.playBtn,{width:44,height:44,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
+              <div style={{flex:"4 1 0",display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
+              <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
                 {playGlyph(11)}
               </button>
-              {stopBtn({width:40,height:40,flexShrink:0},12)}
+              {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},13)}
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
-                style={Object.assign({},S.iconBtn,{width:40,height:40},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={19}/></button>
+                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={22}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{width:40,height:40},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
-                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={19}/></button>
+                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={22}/></button>
               </div>
             </div>
           </div>
@@ -11451,12 +12296,10 @@ export default function LoudLight(){
                   read as one instrument rather than two panels. It GROWS: the
                   square below has already taken its bite (one lane row reserved),
                   so everything still going spare lands here. */}
-              {/* Bar navigation sits directly above the grid in every layout
-                  now. It used to move BELOW in portrait because the song lane
-                  had taken the row above it; the lane is a top-level row now,
-                  so nothing displaces the strip and the two positions collapse
-                  back into one. */}
-              <div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>
+              {/* Bar navigation is BELOW the grid in portrait and above it in
+                  landscape — one row, two positions, never two copies. See
+                  `stripBelow`. */}
+              {stripBelow?null:<div style={{width:SZ,flexShrink:0}}>{_barStripRow(rowKeyPad)}</div>}
               {/* The square IS the grid. The bar strip is a sibling, not a child:
                   inside an aspect-ratio:1 box its height came straight off the
                   cells and they stopped being square. */}
@@ -11464,7 +12307,8 @@ export default function LoudLight(){
                   {/* Keys outside the grid container — see the desktop mount. */}
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
-                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"})}
+                  {spillOverlay()}
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative",background:layerTint},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
                     {lenEdgeSynth}
@@ -11482,12 +12326,13 @@ export default function LoudLight(){
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;const vwD=Math.max(0.16,vw*(1+durMod));const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
                   </div>
                 </div>
+              {stripBelow?_belowGridRow(SZ):null}
               </>);})()}
               </div>
             )}
@@ -11528,8 +12373,11 @@ export default function LoudLight(){
                       {/* No gap between the strip and the grid, matching the
                           synth page exactly — the two blocks have to be the
                           same height or the centred block moves the boundary
-                          the drums reservation exists to hold still. */}
-                      <div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>
+                          the drums reservation exists to hold still. Which is
+                          also why the strip moves below HERE too when it moves
+                          below there: the two pages have to agree, or switching
+                          layer shifts the grid by a row. */}
+                      {stripBelow?null:<div style={{width:SIZE,flexShrink:0,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{barStrip}</div>}
                       {/* The reservation, and the real content hanging from the
                           top of it. The bar chips come WITH the grid rather than
                           staying where the synth page leaves them: they are a
@@ -11542,7 +12390,7 @@ export default function LoudLight(){
                       <div style={{position:"absolute",top:0,left:0,right:0,display:"flex",flexDirection:"column",alignItems:"center"}}>
                       <div style={{width:SIZE,display:"flex",position:"relative"}}>
                       {drumRowKeys}
-                      <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
+                      <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative",background:layerTint}}>
                         {lenEdgeDrums}
                         {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
@@ -11624,6 +12472,7 @@ export default function LoudLight(){
                       </div>
                       </div>
                       </div>
+                      {stripBelow?_belowGridRow(SIZE):null}
                     </div>
                   );
                 })()}
@@ -11667,9 +12516,9 @@ export default function LoudLight(){
                   <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.35)"}}>FX</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
                 <button data-save="1" data-dirty={dirty?"1":"0"}
                   aria-label={dirty?"Save — unsaved changes":"Save"}
@@ -11695,7 +12544,29 @@ export default function LoudLight(){
             <>
               {/* Backdrop — full screen so ANY tap outside the sheet closes it. */}
               <div style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.4)"}} onClick={()=>{if(Date.now()-sheetGuardR.current<400)return;setActiveSheet(null);}}/>
-              <div style={{position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"}}>
+              {/* The drum mixer gets a DEFINITE height; everything else stays
+                  shrink-to-fit. That is the whole of why the mixer was a foul
+                  ball on a phone: `maxHeight` only CAPS, so a sheet full of
+                  `flex:1` had nothing to stretch against and collapsed to its
+                  content — 189px on an 844px phone, which made every fader
+                  16×40px. Desktop never showed it, because the SOUND page there
+                  is a real column with 765px in it. A mixer is the one thing in
+                  here whose job is to use the height it is given. */}
+              <div style={Object.assign({position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"},
+                // ONE BOX FOR ALL FOUR FACES. The drums mixer needed a definite
+                // height to be usable, and giving it one only for drums made the
+                // four faces of a single screen four different sizes — switching
+                // tab moved the ground under you. They share it now.
+                //
+                // And it clears the status bar. The old height put the sheet's
+                // top edge 12px from the top of the screen, which on a phone is
+                // under the notch: the first row of the mixer could not be
+                // reached at all. The gap is the safe-area inset plus a margin,
+                // so the top item is always a thumb's width below the hardware.
+                (activeSheet==="sound")
+                  ?{height:isLandscape?"82vh":"calc(100dvh - 60px - 52px - env(safe-area-inset-top))",
+                    maxHeight:"none",overflowY:"hidden",display:"flex",flexDirection:"column",padding:"12px 10px 14px"}
+                  :{})}>
 
                 {/* TEMPO sheet */}
                 {activeSheet==="tempo"&&(
@@ -11839,10 +12710,18 @@ export default function LoudLight(){
                   </div>
                 )}
                 {activeSheet==="sound"&&(
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>SOUND</div>
-                    {activeLayer!=="drums"&&(
-                      <div style={{overflowY:"auto"}}>
+                  /* On drums this wrapper has to carry the height through: the
+                     sheet is a flex column with a definite height now, and a
+                     plain <div> in the middle shrinks to its content and strands
+                     the mixer's `flex:1` against nothing. That is the same
+                     mistake as the sheet's own `maxHeight`, one level down — a
+                     chain of flex is only as good as its weakest link. */
+                  <div style={soundTab==="fx"
+                    ?{flexShrink:0,display:"flex",flexDirection:"column"}
+                    :{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+                    {soundTabs(true)}
+                    {soundTab==="layer"&&activeLayer!=="drums"&&(
+                      <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                         {/* Portrait is too narrow for two columns (knobs shrink and
                             labels like DETUNE clip) — stack full-width there; keep
                             two columns in the roomier landscape sheet. */}
@@ -11923,140 +12802,14 @@ export default function LoudLight(){
                         </div>
                       </div>
                     )}
-                    {activeLayer==="drums"&&(()=>{
-                      const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
-                      const mix=fillDrumMix(drumMix); // GLOBAL static mix (not per-pattern)
-                      // Mobile mixer: horizontally-scrolling row of compact channel strips.
-                      // Each strip mirrors the desktop layout (name → PAN → REV → DLY →
-                      // vertical level fader → REC) but at a narrower width.
-                      return(<div>
-                      {/* KIT selector (mobile) */}
-                      <div style={{marginBottom:6}}>
-                        <div style={{fontSize:7,letterSpacing:2,color:"rgba(178,199,219,0.3)",fontWeight:500,marginBottom:3}}>KIT</div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          {DRUM_KITS.map(kit=>{const on=activeKit===kit.id;return(
-                            <button key={kit.id} disabled={kitLoading} onClick={()=>loadKit(kit.id)}
-                              style={{padding:"5px 12px",borderRadius:5,border:"1px solid "+(on?"rgba(178,199,219,0.6)":"rgba(178,199,219,0.15)"),background:on?"rgba(178,199,219,0.1)":"transparent",color:on?"rgba(178,199,219,0.9)":"rgba(178,199,219,0.4)",fontSize:10,letterSpacing:1,fontWeight:on?700:500,cursor:kitLoading?"wait":"pointer",fontFamily:"inherit"}}>
-                              {kitLoading&&on?"…":kit.label}
-                            </button>);})}
-                        </div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-                        {[["HH",linkHat,setLinkHat],["TOM",linkTom,setLinkTom]].map(([lbl,on,set])=>(
-                          <button key={lbl} onClick={()=>set(v=>!v)}
-                            style={{padding:"4px 8px",borderRadius:5,fontSize:8,letterSpacing:0.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?"#7aaa96":"rgba(168,190,212,0.2)"),background:on?"rgba(122,170,150,0.14)":"transparent",color:on?"#9fcfb5":"rgba(178,199,219,0.4)"}}>{"⛓ "+lbl}</button>
-                        ))}
-                        <button onClick={()=>setMotionEnabled(v=>!v)}
-                          style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionEnabled?"#c4727a":"rgba(168,190,212,0.2)"),background:motionEnabled?"rgba(196,114,122,0.16)":"transparent",color:motionEnabled?"#e0909a":"rgba(178,199,219,0.45)"}}>MOTION</button>
-                        {motionEnabled&&(
-                          <button onClick={()=>setMotionRec(v=>!v)}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(motionRec?"#e07060":"rgba(168,190,212,0.2)"),background:motionRec?"rgba(224,112,96,0.2)":"transparent",color:motionRec?"#ff8a78":"rgba(178,199,219,0.45)"}}>{motionRec?"● REC":"REC"}</button>
-                        )}
-                        {motionEnabled&&(
-                          <button onClick={clearMotion}
-                            style={{padding:"4px 10px",borderRadius:5,fontSize:9,letterSpacing:1,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.45)"}}>CLR</button>
-                        )}
-                      </div>
-                      {/* Drag-scrollbar — reliable horizontal scroll for the strips
-                          (their sliders capture touch, blocking native swipe). */}
-                      <div style={{height:16,marginBottom:5,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:8,touchAction:"none",cursor:"ew-resize",overflow:"hidden"}}
-                        onPointerDown={e=>{try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}const track=e.currentTarget;mixScrollTo(e.clientX,track);const mv=ev=>mixScrollTo(ev.clientX,track);const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                        <div style={{position:"absolute",top:2,bottom:2,width:"32%",left:`calc(${mixScrollPct}*(100% - 32%))`,background:"rgba(178,199,219,0.4)",borderRadius:7,pointerEvents:"none"}}/>
-                        <span style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",fontSize:7,letterSpacing:1.5,color:"rgba(178,199,219,0.5)",fontWeight:600,pointerEvents:"none",whiteSpace:"nowrap"}}>◂ DRAG TO SCROLL ▸</span>
-                      </div>
-                      <div ref={mixScrollRef} onScroll={mixScrollSync} style={{display:"flex",gap:3,overflowX:"auto",overflowY:"hidden",height:340,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
-                        {DRUM_VOICES.map((voice,r)=>{
-                          const stripLabel=voice.full||voice.label;
-                          const m=mix[r];
-                          const md=effDispMix(dPat,r,m); // motion-aware display values
-                          const isRec=recordingVoice===voice.key;
-                          const hasSample=!!voiceSamples[voice.key];
-                          const cell={display:"flex",flexDirection:"column",alignItems:"center",gap:1};
-                          const dc=drumColor(r,linkHat,linkTom);
-                          const miniSlider=(key,val,minVal,maxVal,bipolar)=>(
-                            <div style={{width:"100%",height:10,background:"rgba(186,208,230,0.07)",borderRadius:3,position:"relative",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,key,_drumDefMix()[key]);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.width,range=maxVal-minVal;let cur=val,lx=e.clientX;const u=ev=>{const pd=ev.clientX-lx;lx=ev.clientX;cur=Math.max(minVal,Math.min(maxVal,cur+ballisticDelta(pd,dim,range)));onMixDrag(r,key,Math.round(cur));};const up=()=>{onMixUp(r,key);document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}
-                              onDoubleClick={()=>setDrumMix(r,key,_drumDefMix()[key])}>
-                              {bipolar&&<div style={{position:"absolute",left:"50%",top:-1,bottom:-1,width:1,background:"rgba(186,208,230,0.25)"}}/>}
-                              {bipolar
-                                ?<div style={{position:"absolute",top:0,bottom:0,left:val<=0?`${((val-minVal)/(maxVal-minVal))*100}%`:"50%",width:`${Math.abs(val)/(maxVal-minVal)*100}%`,background:dc+"99",borderRadius:3}}/>
-                                :<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${((val-minVal)/(maxVal-minVal))*100}%`,background:dc+"99",borderRadius:3}}/>}
-                              <div style={{position:"absolute",top:-3,bottom:-3,width:8,left:`calc(${((val-minVal)/(maxVal-minVal))*100}% - 4px)`,background:"rgba(255,255,255,0.85)",borderRadius:2}}/>
-                            </div>
-                          );
-                          const filtMode=m.filt||"off";
-                          const cycleFilt=()=>{const i=FILT_MODES.indexOf(filtMode);const nx=FILT_MODES[(i+1)%FILT_MODES.length];setDrumMix(r,"filt",nx);};
-                          const filtColors={off:"rgba(168,190,212,0.3)",lp:"#7aaa96",hp:"#c4a070",bp:"#a890c0"};
-                          return(<div key={voice.key} style={{flexShrink:0,width:56,display:"flex",flexDirection:"column",gap:4,padding:"5px 3px",background:"rgba(30,28,24,0.55)",border:"1px solid "+dc+"22",borderRadius:4,boxSizing:"border-box",position:"relative",overflow:"hidden"}}>
-                            {drumFlash[r]&&(()=>{const fv=drumFlash[r];const a=Math.round((0.08+0.30*Math.max(0,Math.min(127,fv.vel))/127)*255).toString(16).padStart(2,"0");return(
-                              <div key={fv.n} style={{position:"absolute",inset:0,background:dc+a,boxShadow:"inset 0 0 8px "+dc+a,pointerEvents:"none",borderRadius:4,animation:"dflash 240ms ease-out forwards"}}/>
-                            );})()}
-                            <div style={{fontSize:8,fontWeight:700,letterSpacing:1,color:dc,textAlign:"center",lineHeight:1.1,minHeight:10}}>{stripLabel}</div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PITCH</div>
-                              {miniSlider("pitch",md.pitch||0,-12,12,true)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{(md.pitch||0)>0?"+"+md.pitch:(md.pitch||0)}</div>
-                            </div>
-                            <div style={cell}>
-                              <button onClick={e=>{e.stopPropagation();cycleFilt();}}
-                                style={{alignSelf:"flex-start",height:11,padding:"0 5px",fontSize:6,letterSpacing:0.5,fontWeight:700,borderRadius:2,cursor:"pointer",fontFamily:"inherit",
-                                  border:"1px solid "+(filtMode==="off"?"rgba(168,190,212,0.2)":filtColors[filtMode]),
-                                  background:filtMode==="off"?"transparent":filtColors[filtMode]+"22",
-                                  color:filtMode==="off"?"rgba(178,199,219,0.4)":filtColors[filtMode]}}>{"FILT "+filtMode.toUpperCase()}</button>
-                              <div style={{width:"100%",opacity:filtMode==="off"?0.4:1}}>{miniSlider("filtCut",md.filtCut!=null?md.filtCut:100,0,100,false)}</div>
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{vcfLbl(md.filtCut!=null?md.filtCut:100)}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>ENV</div>
-                              {miniSlider("env",md.env!=null?md.env:100,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.env!=null?md.env:100}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>SAT</div>
-                              {miniSlider("sat",md.sat||0,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.sat||0}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>PAN</div>
-                              {miniSlider("pan",md.pan,-100,100,true)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.pan>0?"+"+md.pan:md.pan}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>REV</div>
-                              {miniSlider("rvSend",md.rvSend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.rvSend}</div>
-                            </div>
-                            <div style={cell}>
-                              <div style={{fontSize:6,letterSpacing:1,color:"rgba(178,199,219,0.4)",alignSelf:"flex-start"}}>DLY</div>
-                              {miniSlider("dlySend",md.dlySend,0,100,false)}
-                              <div style={{fontSize:6,color:"rgba(178,199,219,0.55)"}}>{md.dlySend}</div>
-                            </div>
-                            <div style={{flex:1,minHeight:50,position:"relative",background:"rgba(186,208,230,0.06)",borderRadius:3,margin:"3px 10px 0",touchAction:"none"}}
-                              onPointerDown={e=>{e.stopPropagation();if(isDoubleTap(e)){setDrumMix(r,"level",DRUM_DEFAULT_LEVEL);return;}const rect=e.currentTarget.getBoundingClientRect();const dim=rect.height;let cur=md.level!=null?md.level:100,ly=e.clientY;const u=ev=>{const pd=ly-ev.clientY;ly=ev.clientY;cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));onMixDrag(r,"level",Math.round(cur));};const up=()=>{onMixUp(r,"level");document.removeEventListener("pointermove",u);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};document.addEventListener("pointermove",u);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);}}>
-                              <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${md.level}%`,background:"linear-gradient(to top,"+dc+"cc,"+dc+"66)",borderRadius:3}}/>
-                              <div style={{position:"absolute",left:-3,right:-3,height:5,top:`calc(${100-md.level}% - 3px)`,background:"rgba(255,255,255,0.92)",borderRadius:2}}/>
-                              <div style={{position:"absolute",left:0,right:0,top:"50%",height:1,background:"rgba(186,208,230,0.18)"}}/>
-                            </div>
-                            <div style={{fontSize:7,color:"rgba(178,199,219,0.6)",textAlign:"center",fontWeight:600}}>{md.level}</div>
-                            {activeKit==="user"&&(
-                            <div style={{display:"flex",gap:2,justifyContent:"center"}}>
-                              <button style={{flex:1,padding:"3px 0",borderRadius:3,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                                onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                                {isRec?"STOP":hasSample?"●":"REC"}
-                              </button>
-                              {hasSample&&!isRec&&<button style={{padding:"3px 4px",borderRadius:3,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:7,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
-                            </div>
-                            )}
-                          </div>);
-                        })}
-                      </div>
-                      </div>);
-                    })()}
+                    {soundTab==="layer"&&activeLayer==="drums"&&(
+                      <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>{drumMixerBody()}</div>
+                    )}
                   </div>
                 )}
                 {/* FX sheet — global reverb / delay design */}
-                {activeSheet==="fx"&&(
-                  <div>
+                {activeSheet==="sound"&&soundTab==="fx"&&(
+                  <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                     <div style={{marginBottom:16}}>{mixerBody}</div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>

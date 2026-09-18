@@ -26,6 +26,13 @@ const buildFixture=(scenario)=>({
     s.grid[9][16]=true; s.grid[11][20]=true; s.params[20]={...s.params[20],glide:1,flt:80}; s.grid[7][29]=true; s.params[29]={...s.params[29],dur:-50};
     // lead: one bar, loops to fill
     const l=A.parts.lead; l.grid[14][0]=true; l.grid[13][2]=true; l.grid[12][4]=true; l.grid[12][6]=true; l.params[2]={...l.params[2],glide:1};
+    // GLIDE AS A TIME, on the lead, alongside the legacy flag above. 25% and 90%
+    // of a step either side of the old fixed 1/32 note (which is 50%), so the
+    // scenario covers a shorter and a longer glide than anything the flag could
+    // express — and the flag's own step is still in here, so a change that broke
+    // the legacy fallback would show up in the same run.
+    l.grid[11][8]=true; l.params[8]={...l.params[8],glideT:25};
+    l.grid[10][10]=true; l.params[10]={...l.params[10],glideT:90};
     // drums: two bars
     const d=A.parts.drums; const V={BD:0,SD:1,RM:2,CP:3,HT:4,MT:5,LT:6,CH:7,OH:8,CY:9,CL:10,SH:11,CB:12};
     for(const c of [0,8,16,24])d.grid[V.BD][c]=true; for(const c of [4,12,20,28])d.grid[V.SD][c]=true;

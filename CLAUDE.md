@@ -41,6 +41,13 @@ npm run lab:diff    # what the experiment has actually changed
 
 ## The LAB build — where big changes get tried
 
+**The first fork was PROMOTED on 2026-09-18**: the interface described
+throughout this document — the bar tile, the step spill, the SOUND screen, the
+two-view drum mixer — was built and judged in the lab, then `src/lab.jsx` became
+`src/loudlight.jsx`. That is the cycle working: nine design notes and six bugs
+over several days, none of it touching the shipping page until it was wanted.
+Run `npm run lab:reset` after a promotion so the fork starts from the new main.
+
 `lab.html` is a **parallel build of the whole app** for design and layout
 experiments that aren't worth committing to yet. `npm run build:lab` compiles
 `src/lab.jsx` — a **copy** of `src/loudlight.jsx` — through the same pipeline and
@@ -127,10 +134,34 @@ Whole-pattern lifecycle ops (`addPattern` / `dupPatternId` / `delPatternId`) go 
 
 `unifyLegacyProject` migrates pre-unification saves: each populated song column becomes a pattern, then the libraries are paired by index so nothing in them is lost, and the column order becomes the `song`. Two data-loss bugs were caught here by testing, both worth remembering: a project with patterns but no arrangement migrated to only the active combination; and the old per-lane "filter ids against this layer's library" load step ran *after* unification had deleted those libraries, so it blanked every lane and wiped the arrangement. Legacy fixtures need an actual song in them or neither shows up. Lossy in one way by design: a drum pattern shared across columns becomes independent copies.
 
-The **song lane** is one scrolling line of up to 64 slots, eight of them on screen at a time (`SONG_COLS`), growing by one slot as you fill the last — a slot holds a whole pattern, so there was never a reason to show all 64 at once. It is mounted on every part page (see below); the **song PAGE** that used to be its only home survives in mobile landscape alone, where it is the lane plus a PATTERNS palette above it. Two ways to place: tap an empty slot to drop the selected pattern in, or **drag a palette chip onto a slot** (the gesture the old pattern pills had — a chip tap still just selects, drag is distinguished by a 6px threshold). Dragging also moves between slots, and off-grid clears. A drop lands on a **cell** (replace) or on the **seam** between two cells (insert / reorder, sliding the rest right): `_songHit` picks the nearest cell rect — measured once at drag start, since 64 `getBoundingClientRect`s per pointermove would be felt on a phone — and reads the outer 22% of its width as a seam. Nearest-rect rather than `elementFromPoint` so the gap between cells is a seam rather than "off the grid"; the off-grid slop is deliberately tight (0.35 cell) because off-grid CLEARS a slot and a near miss shouldn't. A slot can also **repeat**: press-and-hold (or right-click) a filled slot for a picker of 1–`SONG_MAX_REP`=4, drawn in the cell as that many pips with the sounding pass lit. Repeats live in a parallel `songRep` array rather than making a slot an object — `song` is a flat id list at four persistence sites, in the packed codec and in the legacy readers — and they expand inside `songSeq`, so the scheduler and `songPosR` still see a plain list and needed no changes; `_songPlayingSlot` walks the counts to map back to a cell. The count belongs to the slot's contents, so it travels on a drag and resets when a slot is cleared. Runs of the same pattern draw a `×N` badge that counts **plays, not cells**, and only when the run spans more than one cell. Above the symbol, mirroring the pips, is a row of **bar dots** — one per bar of the pattern; on the playing cell the current bar's dot swells on every quarter note, so the song page carries the tempo. They flex to fit (true dots to 8 bars, a segmented bar past that, since 32 countable dots don't fit a phone-sized cell). It rides `songPulse`, a `bar*4+quarter` integer the master clock publishes only when it changes — two renders a second at 120bpm, not eight — and the pulse restarts by keying the lit dot on `songPulse` so React remounts it and the CSS animation replays. A **pattern chip row sits on every part page** (`patternChipsRow` for the desktop sidebar and mobile portrait, `patternChipsRail` for the landscape rail), because switching pattern is something you do mid-edit and it used to mean a trip to SONG and back. In portrait it is now the **top** of the page — it used to sit under the layer labels, and those moved down beside the transport when they became icons. Tap switches, `+` adds, the chip the song is currently sounding carries an amber ring when it isn't the one you're editing. **Every chip row is the palette now** (`paletteChipProps` — one gesture set, not two): tap selects, hold or right-click opens the pattern's ops, and a **drag past 6px carries the pattern onto a song slot**. That gesture used to live only on the song page, because that was the only place the lane was; with the lane on the part pages, chips that couldn't drag would have taken arranging away with the page. The old `patChipProps` is gone. The landscape rail deliberately does NOT set `touch-action:none` on its chips — that column scrolls, and there is no lane in landscape to drag onto — which is why the shared handler treats a **`pointercancel` as not-a-tap**: a scroll cancels the pointer, and without that check it read as "you tapped the chip you started the scroll on". **A chip is its NAME and nothing else.** It carried a bar count for a while — `8b`, then `|8|` — and the count is not what you read a chip for: you are picking a pattern. Beside a one-glyph name a bracketed number reads as part of the name, or as a quantity of the wrong thing, and the bar strip under the grid spells the same count out in chips. `patBarsBadge` survives as a stub returning null, in one place, because the argument for leaving it out is worth having written down where the three chip rows call it. Portrait hides the editor row on the song page so the two never show at once (moot now — that page is landscape-only).
+The **song lane** is one scrolling line of up to 64 slots, eight of them on screen at a time (`SONG_COLS`), growing by one slot as you fill the last — a slot holds a whole pattern, so there was never a reason to show all 64 at once. It is mounted on every part page (see below); the **song PAGE** that used to be its only home survives in mobile landscape alone, where it is the lane plus a PATTERNS palette above it. Two ways to place: tap an empty slot to drop the selected pattern in, or **drag a palette chip onto a slot** (the gesture the old pattern pills had — a chip tap still just selects, drag is distinguished by a 6px threshold). Dragging also moves between slots, and off-grid clears. A drop lands on a **cell** (replace) or on the **seam** between two cells (insert / reorder, sliding the rest right): `_songHit` picks the nearest cell rect — measured once at drag start, since 64 `getBoundingClientRect`s per pointermove would be felt on a phone — and reads the outer 22% of its width as a seam. Nearest-rect rather than `elementFromPoint` so the gap between cells is a seam rather than "off the grid"; the off-grid slop is deliberately tight (0.35 cell) because off-grid CLEARS a slot and a near miss shouldn't. A slot can also **repeat**: press-and-hold (or right-click) a filled slot for a picker of 1–`SONG_MAX_REP`=4, drawn in the cell as that many pips with the sounding pass lit. Repeats live in a parallel `songRep` array rather than making a slot an object — `song` is a flat id list at four persistence sites, in the packed codec and in the legacy readers — and they expand inside `songSeq`, so the scheduler and `songPosR` still see a plain list and needed no changes; `_songPlayingSlot` walks the counts to map back to a cell. The count belongs to the slot's contents, so it travels on a drag and resets when a slot is cleared. Runs of the same pattern draw a `×N` badge that counts **plays, not cells**, and only when the run spans more than one cell. Above the symbol, mirroring the pips, is a row of **bar dots** — one per bar of the pattern; on the playing cell the current bar's dot swells on every quarter note, so the song page carries the tempo. They flex to fit (true dots to 8 bars, a segmented bar past that, since 32 countable dots don't fit a phone-sized cell). It rides `songPulse`, a `bar*4+quarter` integer the master clock publishes only when it changes — two renders a second at 120bpm, not eight — and the pulse restarts by keying the lit dot on `songPulse` so React remounts it and the CSS animation replays. A **pattern chip row sits on every part page** (`patternChipsRow` for the desktop sidebar and mobile portrait, `patternChipsRail` for the landscape rail), because switching pattern is something you do mid-edit and it used to mean a trip to SONG and back. In portrait it is now the **top** of the page — it used to sit under the layer labels, and those moved down beside the transport when they became icons. **TWO STATES, TWO CHANNELS: the halo is what you are EDITING, the symbol
+lighting up is what is SOUNDING.** They used to share the border, so a chip could
+not be both at once and the playing cue had to be suppressed on the selected
+chip to hide the collision. And every chip carries its OWN COLOUR all the time,
+not only when selected: the colour is the pattern's identity — what you
+recognise it by in the song lane — so spending it as a selection cue made twelve
+of thirteen chips anonymous. `patChipState` is the one body; the row and the
+landscape rail were two copies of it once and drifted apart within a day, which
+is why the rail now also carries `data-patrow` so a harness can see it.
+**In the SONG LANE the sounding slot has NO halo — its character glows.** A ring
+around a cell says "this cell", which you can already see, and in a row of
+identical squares it reads as selection rather than as sound. The hover outline
+stays: that is a drop target, a different question, and only exists mid-drag. **Every chip row is the palette now** (`paletteChipProps` — one gesture set, not two): tap selects, hold or right-click opens the pattern's ops, and a **drag past 6px carries the pattern onto a song slot**. That gesture used to live only on the song page, because that was the only place the lane was; with the lane on the part pages, chips that couldn't drag would have taken arranging away with the page. The old `patChipProps` is gone. The landscape rail deliberately does NOT set `touch-action:none` on its chips — that column scrolls, and there is no lane in landscape to drag onto — which is why the shared handler treats a **`pointercancel` as not-a-tap**: a scroll cancels the pointer, and without that check it read as "you tapped the chip you started the scroll on". **A chip is its NAME and nothing else.** It carried a bar count for a while — `8b`, then `|8|` — and the count is not what you read a chip for: you are picking a pattern. Beside a one-glyph name a bracketed number reads as part of the name, or as a quantity of the wrong thing, and the bar strip under the grid spells the same count out in chips. `patBarsBadge` survives as a stub returning null, in one place, because the argument for leaving it out is worth having written down where the three chip rows call it. Portrait hides the editor row on the song page so the two never show at once (moot now — that page is landscape-only).
 
-**Portrait column order: name, globals, transport, song, patterns, bar nav,
-grid.** Everything that is not the grid is ABOVE it and the grid is last. That
+**Portrait column order: name, globals (+ ↶ ↷), transport + layers, song,
+patterns (+ the bar tile), grid, STEP BUTTONS.** The step buttons are the one
+thing BELOW the grid, and that is deliberate: they decide what a drag on the grid
+edits, and the bottom of a phone is where your thumb already is. It is the same
+argument that put the grid last, applied to the row that drives it. (Not a return
+of "things under the grid" — that rule is about duplicate READOUTS, the step bar
+and the length track, which said what the grid already said.)
+Two economies paid for the rest. **↶ ↷ moved up to the globals row** — they are
+not transport, they are what you press after doing something you did not mean,
+which is the same kind of thing as SAVE — and that let **the transport and the
+layers share ONE line** instead of wrapping to 97px on an SE. Every control in
+that row grows to fill the width and caps at 56px, so an iPad gets a row rather
+than seven dinner plates.
+Everything that is not the grid or the step buttons is ABOVE the grid. That
 reverses an earlier decision and the trade is worth stating: the bar chips and
 the transport used to sit UNDER the grid precisely because the bottom of a phone
 is where your thumb is, and the chips are dragged constantly. Putting the grid
@@ -143,9 +174,10 @@ at 370px on a 15 and 355px on an SE.
 Three consequences. The song lane is a **top-level row** now rather than living
 inside the measured content area, so `gridSizeCss` no longer subtracts the lane:
 `--ch` has already had it taken out, and subtracting it again cost the grid the
-lane's height twice. The bar strip's two positions **collapse back into one** —
-it is directly above the grid in every layout, because nothing displaces it any
-more (`_barStripRow` keeps its `pad` argument and one mount). And the drums
+lane's height twice. The bar strip has two positions again, and `stripBelow` is the switch: the step
+buttons sit BELOW the grid in phone portrait and the tile+buttons row sits ABOVE
+it in landscape and on desktop, where the rail and the sidebar are the thumb
+zone. One row, two positions, never two copies. And the drums
 reservation no longer reserves a strip row below the grid, only the square.
 `_order.mjs` asserts the order by measured position on a 15 and an SE, on both
 part pages, plus that the column still fits and the grid is still square.
@@ -317,7 +349,40 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 - **×2** (`doublePattern`, in `barOpsRow` and the SEQUENCE drawer) doubles the ACTIVE part and copies its data into the new half — the fast way to get a second nearly-identical pass to vary. A 1-bar drum loop under a doubled melody doesn't want doubling; it wants to keep looping to fill.
 - **Patterns are multi-bar** (`bars`, 1–`MAX_BARS`=32). Every per-column lane (`grid`, `durs`, `params`, drum `vel`/`rat`/`motion`) is `patW(p) = bars*COLS` wide. `gridLen` is the part's total sounding length in steps, kept as the **sum of `barLens`** — it is no longer a column bound and no longer the source of truth (`barLens` is); see "Length is PER BAR" above. `resizePatBars(p,n)` grows/shrinks every lane together (do NOT resize one by hand — a half-resized pattern reads `undefined` at playback and Babel won't catch it). `normalizePatBars` repairs anything loaded from disk.
 - **`COLS` (=16) means STEPS PER BAR, and also the width of the visible editor page.** It is NOT the pattern width — use `patW(p)` / `gridW(rows)` for that. Keeping COLS as the view width is what lets all the layout math (`ci/COLS`, `rect.width/COLS`, the step bar) stay untouched: the grid draws a 16-column **window** into a wider pattern.
-- **Bar paging.** `barPage` (shared across layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar; `barOff = curBar*COLS`. The strip above the grid is **bar chips and nothing else** (`barChips`) — tap or drag the chips to page. (It carried a `♪` row-key toggle for a while; see "Row keys — PARKED".) **The strip is ONE LINE THAT SCROLLS** — eight chips across the visible width (`BAR_COLS`, the song lane's `SONG_COLS` by another name), the rest off the end, with a track underneath to pan it. It **wrapped** at eight a row for a while (16 bars two rows, 32 four), and that was wrong for the reason the wrapped song lane was: it made the strip's height a function of the visible part's bar count, so a 16-bar part and an 8-bar part in the same pattern gave the grid — and the song lane above it — two different positions, and switching layer jumped between them. `_barStripPx` is a **constant** now (one chip row + the track), which is what the rest of the column can budget against; `_barStripExtra` is 0 and survives only because the sizing expressions still read it. A chip is never narrower than an eighth of the strip, so **every chip carries its number** (they used to go unnumbered past 8 bars, because there was nowhere to print one). Three things to know: the chips take a fixed flex **basis** so eight fit the scrollport exactly however many bars there are (the same percentage-against-the-scrollport trick the song lane's slots use); the hit test is **1-D again but must read `scrollLeft`** (`_barAt`, and `_scrubTo` defers to it), and scrubbing toward either end **pans** (`_barEdgeScroll`) so you can drag the page to a bar off the end; and the chips keep `touch-action:none` because dragging them scrubs, so — exactly as on the song lane — **the track is the only thing you can drag to scroll**. `barChips` is one JSX value with several mounts on screen at once (the strip, the bar sheet, the step sheet), so the track's thumb is synced by walking `[data-barstrip]` in the DOM rather than through a ref, which would be whichever mount rendered last. A newly *chosen* bar is scrolled into view; a scroll you made by hand is never snapped back. Two things came off it. The **`+`** (tap added a bar, hold opened the bar drawer): `＋ BAR` is in a bar chip's hold menu now, with `⧉ DUP`, `×2` and `DELETE BAR` — the rest of the bar structure it belongs with — so a dedicated button was one op paying rent in the corner of a phone screen next to a menu that already carried its siblings. And the **readout** (pattern name · visible/total): the strip it sat on already *is* both of those, one chip per bar with the current one lit, under a row of pattern chips with the selected one lit; a third copy of what two rows of controls say. On desktop the sidebar's `+BAR` is unchanged. Add / duplicate / delete bar and FOLLOW live with the other pattern ops: the mobile SEQUENCE drawer (`activeSheet==="pattern"`, thumb-sized) and the desktop sidebar (`barOpsRow`, compact). The drawer is mobile-only, so anything added there needs a desktop-sidebar counterpart or desktop loses the feature. Both sheets repeat `barChips`, because a sheet covers the strip: the bar sheet needs it (ADD/DUP/DEL BAR act on the **visible** bar) and so does the step sheet (the lanes show one bar at a time). Rule of thumb: anything paged by `barOff` needs chips wherever it's shown.
+- **Bar paging is ONE TILE, scrubbed vertically.** `barPage` (shared across
+  layers, clamped per-pattern via `barIdxIn`/`barOffIn`) picks the visible bar;
+  `barOff = curBar*COLS`. The control is a single 58px tile reading `3/8`, and it
+  rides the **pattern chip row** — it is navigation, like the chips, and that row
+  had spare width at its right-hand end.
+  - **It was eight chips, then three, then one**, and both reductions were the
+    same argument. Thirty-two chips 2px apart is a readout nobody reads chip by
+    chip at a size nothing can be tapped at. Three — previous, current, next —
+    was no better: horizontally there is nowhere to go on the LEFT, so the
+    gesture runs out of screen in one direction and not the other, and without
+    motion carrying them past, the neighbours are two numbers you can work out
+    from the one in the middle.
+  - **The gesture is a VERTICAL scrub, and it CLAMPS.** Bar 1 is the bottom of
+    the travel and bar N the top, the way a fader has ends. It wrapped for a
+    day and that was wrong: a scrub with no ends has no position you can feel,
+    and overshooting recycles you past the bar you were aiming for instead of
+    parking you at it. Whole bars are consumed out of the delta and the anchor
+    moves with them (18px a bar), so a second swipe carries on from the first;
+    holding past either edge of the tile keeps stepping at one bar per 110ms and
+    stops itself at the end. Between them the control has travel a thumb can
+    actually use — the original complaint was never the wrap, it was that an
+    upward swipe runs out of phone.
+  - **TAP OPENS THE BAR'S OPS**, promoted from the long press when STEP stopped
+    being a place for the tap to point at.
+  - **LOOP expands it.** Three bars cannot draw a four-bar window, and the strip
+    has been the whole readout for LOOP since the button lost its label — so any
+    change of loop scope expands the full scrolling chip strip *below the grid*,
+    in the row the step buttons use, and it collapses back once the chain lapses
+    (`LOOP_CHAIN_MS` plus a grace). The tile stays put while it is up: the tile
+    is the control, the strip is the window readout, two different jobs. Both are
+    exactly `_barStripPx` tall so they swap without the grid moving.
+  - `barChips` (the scrolling strip) survives intact for that expansion and for
+    landscape/desktop, where tile and step buttons still share one row ABOVE the
+    grid — there the rail and the sidebar are the thumb zone, not the bottom edge.
 - **Adding a bar lands you on it.** The bar strip's `+`, ADD BAR, DUP BAR and ×2 all page to the bar they made — all four go through `goToBar`, so FOLLOW clears (otherwise the playhead drags the page straight back off it) and LOOP travels with you.
 - **The transport is three states, split across two buttons: PLAY/PAUSE is one
   control, STOP is its own and PERSISTENT.** The combined button draws **what
@@ -551,6 +616,25 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
 
 - `params[c]` keys: `vel, flt, dly, rev, rhy, dur, oct, glide` (see `defaultStepParams`). `rev`/`dur` were added after the first arch doc.
 - `rhy` is **ratchet only** (1–4 retriggers). rhy=0-as-tie is a dead semantic — durations live on `durs`.
+- **`glideT` is GLIDE AS A TIME**: 0..100, read as a percentage of the STEP — 0
+  off, 100 slides the whole way — so it tracks tempo and the bar's own rate like
+  everything else here. It replaced a FLAG (`glide`, on/off) which could only say
+  whether to slide and never how fast, so every portamento in the app was the
+  same fixed 1/32 note.
+  - **The old flag is still read**, and that is deliberate: a flag is not
+    convertible on sight, because an old `glide:1` and a new `glideT:1` are
+    different intentions. Absent `glideT` means "read the old field as it always
+    meant", and the old fixed 1/32 note is EXACTLY half a step at 1×, so
+    `GLIDE_LEGACY_PCT` is 50 and an old project glides precisely as it did.
+    `glidePctOf` is the one place that resolves the two; nothing reads
+    `sp.glide` directly any more.
+  - **The CORE carries it too**, which is the half that is easy to forget. The
+    step-param wire format went from 8 bytes a column to 9 (`LL_STEPP_BYTES` in
+    `core/ll.h`), and `glide_pct` in `ll_engine.h` is the C twin of
+    `glidePctOf`. Bump that constant in `core/ll.h`, `core/host.js`'s packer and
+    `core/test/wire.h` TOGETHER — the core reads a flat array, so a mismatch is
+    silent corruption rather than an error. The oracle covers both the legacy
+    flag and `glideT` at 25% and 90%.
 - **`speedMult`** = per-pattern step-duration multiplier. `stepDur = 60/bpm/4 * speedMult`. The button LABEL is the speed factor, the value is its inverse: `2×` (twice as fast) = `mult 0.5`; `½×` = `mult 2`. `SPEED_OPTS` order is value-ascending (2×,1×,⅔×,½×,⅓×,¼×). Duplicating a pattern must carry `speedMult` (it's part of the pattern).
 - Rows are scale degrees (pitch is already scale-quantized): `fromBot = ROWS-1-row`, tonic at `fromBot % span == 0`, triad tones (1/3/5) at `fromBot % span ∈ {0,2,4}`. **`span` is the scale's own notes-per-octave, not a constant 7** — see "Scales and the user key".
 
@@ -605,6 +689,75 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 - **Parts** each run their own cursor (`freeR.current[layer] = {step, nextAt}`). `lf.step` indexes `partSeq(part)` — the ordered list of columns that part plays — and each tick lasts `absStepDur * colMult(part, s)`, priced from the bar the step is in. They drift apart inside the pattern; that's the polymeter.
 - **The master clock is one pattern long**, but counted in the MASTER PART'S OWN STEPS (`patCycle(pat).steps`) and priced per tick from that step's bar — not `bars * COLS` absolute steps, and not a uniform multiplier. See "Speed is PER BAR" and "One part is the pattern's MASTER" above for why both of those stopped being single multiplications. When it wraps, the song advances to its next entry and every part cursor resets to step 0. That single rule replaced sync/free/random and the old `cycleLen = min over populated layers` fudge, which existed only to invent a shared bar for three independent lanes.
+
+### STEP PARAMETERS SPILL ONTO THE GRID
+
+**STEP is not a place any more.** It was a sheet on mobile and a page on
+desktop: eight lanes 22px tall, sixteen steps each, on a surface that covered
+the transport to show them. It is a row of eight buttons under the grid now
+(`paramRow`, full width, ~45×38px each). Tap VEL and the velocity lane SPILLS
+onto the grid — the grid's own columns become the faders, full height, notes
+dimmed to 34% behind. Tap again for the notes. Same data, same gesture split as
+the lanes had (horizontal drag draws a curve, vertical is a fine ballistic
+adjust, double-tap resets the step), at sixteen times the size.
+
+- **The overlay is a SIBLING of the grid container**, positioned over it from
+  the shared `position:relative` parent — the row-keys construction, for the
+  row-keys reasons: the grid hit-tests a column from its own width, and a
+  sibling cannot reach its gesture machine at all.
+- **The grid goes read-only while a lane is up** (`pointerEvents:none`, 0.34
+  opacity). The columns ARE the faders; leaving notes tappable underneath would
+  put two gestures on one surface, which is the shape the drum paint bug came in.
+- **A tap anywhere else puts it away** — a capture-phase window listener, not a
+  backdrop, because a backdrop would eat the taps meant for the transport, the
+  chips and the bar tile, all of which stay live while a lane is up.
+- **HOLD a step button for that lane's RAND / RESET.** Those came off the STEP
+  page with it and were stranded for a while — `randStepLane` / `resetStepLane`
+  survived with nothing able to reach them. The menu is built from refs, because
+  it is an IIFE evaluated at its own declaration and the ops are declared
+  thousands of lines below it.
+- **A button LIGHTS when the sounding step carries an edit, and the light is a
+  BRIGHTNESS** scaled to how far the value has moved from its default. Only
+  FLT / DLY / REV / GLIDE are in the scheme: VEL, OCT, RTCH and DUR are all
+  things the GRID draws on the note itself — opacity, octave bars, ratchet
+  subdivisions, and the note's drawn LENGTH — and a second readout of something
+  already on screen is the duplicate this app keeps deleting.
+- **The note is drawn at the length it is PLAYED.** The engine does
+  `rawDur*(1+dur/100)`, so the rect is scaled by exactly that: −50 draws half as
+  long, +100 twice. Ratcheted notes keep their span — that box is divided into
+  sub-hits and stretching it would say something untrue about them.
+
+The old step sheet and step page are still in the source, unreachable, so the
+two can be compared. Delete them once this has been lived with.
+
+### THE SOUND SCREEN
+
+**One screen for everything that shapes the sound**, reached from its own chip
+(what used to be `≋ FX`). Inside it a selector picks **POLY / MONO / DRUMS /
+FX** — three voices and the global bus. It was split before: the FX chip carried
+the global buses, and each layer's voice was behind a door you could only find
+by tapping a layer button you were ALREADY on.
+
+- The selector sets `activeLayer`, deliberately — the same state the grid uses,
+  so "whose sound am I editing" and "whose notes am I editing" cannot drift, and
+  coming out leaves you on the part you were shaping.
+- **All four faces share one box**, and it clears the status bar. Giving only the
+  drums mixer a definite height made the four faces four different sizes, so
+  switching tab moved the ground under you — and that height put the sheet's top
+  edge 12px from the top of the screen, under the notch, where the first row of
+  the mixer could not be reached at all.
+- **It has a ✕**, and ESC closes any sheet. A nearly full-screen sheet leaves no
+  reachable backdrop, so the biggest sheet was the one you could not tap outside
+  of. Same lesson as the landscape bar menu.
+- Desktop's tab row is `EDIT | SOUND` for the same reason.
+
+**THE MAIN-SCREEN LAYER BUTTONS ONLY SWITCH LAYERS.** The tap-again is gone. It
+cost more than it looked: a mis-tap on the layer you were already editing threw a
+full-screen sheet over the instrument, which is something you do constantly on
+three buttons your thumb lives on. **Their HOLD carries that part's RAND and
+CLEAR** — bar-scoped, like the bar menu's, and it switches to that layer as it
+opens so you can see what you are about to change. `layerBtnProps` is one
+contract for all three mounts.
 
 ### Controls & interaction conventions
 
@@ -666,13 +819,14 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
   release lands on a bar you dragged to rather than one you deliberately tapped
   twice. `barHoldR` therefore carries `wasCur` and `moved` alongside the hold
   timer, and `wasCur` is recorded *before* `_scrubTo` makes the bar current.
-  - On a **layer button** it opens that layer's SOUND page. This is the
-    oldest of them and **the SOUND button is gone because of it** — the pill on
-    mobile (portrait and the landscape rail) and the tab on desktop. On desktop
-    it **toggles** sound↔edit, since with no tab you would otherwise need the
-    tab row to get back, and **DRUMS got the gesture it never had**: clicking
-    an already-active DRUMS used to do nothing at all, and it is now the only
-    way to the kit and the drum mixer.
+  - **NOT on a layer button any more.** It opened that layer's SOUND page for a
+    long time, and it cost more than it looked: a mis-tap on the layer you were
+    already editing threw a full-screen sheet over the instrument, which is
+    something you do constantly on three buttons your thumb lives on. It also
+    made two rounds of sweep findings unreadable — every blocked click downstream
+    of a sheet nobody meant to open. SOUND is its own screen with its own chip
+    now, so the second function had nowhere useful to point; the layer button's
+    HOLD carries that part's RAND / CLEAR instead.
   - On a **pattern chip** it opens that pattern's ops — the same menu the hold
     gives.
   - On a **bar chip** it opens **STEP**, and the hold keeps the bar's own ops.
@@ -922,11 +1076,38 @@ The scheduler is a lookahead loop (~25 ms tick, ~100 ms ahead) over ONE pattern:
 
 ### The mixer
 
-**Vertical faders, at the top of the FX sheet (mobile) and the FX page (desktop).** POLY / MONO / DRUMS, each a track you drag (up is louder, ballistic like every other control, double-tap back to unity) with its **M and S stacked beside the fader**, bottom-aligned — that's dead space either way, and putting them there gives the travel back the height it was spending on a button row. It has moved twice for the same reason: it used to exist in the desktop sidebar AND inside the PROJECT menu (two copies to keep in step, neither of them where you're listening), then on the song page, which is gone from every layout but landscape. FX is the right inheritor rather than a consolation prize, because the **per-channel trim beside each fader is an FX send scaler** — "how much of this channel" and "what the FX are" belong on one screen. `mixerBody`, one body, two mounts: don't fork it. Values still land where they always did: POLY/MONO in `layerParams[layer].mix`, DRUMS in the global `drumLevel`.
+**The DRUM mixer is two views.** The top level is LEVEL ONLY and every voice is
+on it — thirteen faders, wrapping to share the height, no scroll — because "can
+I see all of it at once" is the whole requirement for the view you actually mix
+in. Pitch, filter, envelope, saturation, pan, both sends and the sampler live in
+a FOCUSED channel you step into by tapping a voice's name, where each control is
+the size of a control. The level fader stays on screen in there too: changing a
+filter should not mean stepping out to hear it against its own level.
 
-Beside each fader is an **FX send trim** — a second, narrower vertical track scaling that channel's delay AND reverb sends together, **defaulting to 100 (full)**. It sits in the same tall band as the fader and M/S rather than under them: all three want vertical travel or none at all, and the height is the only real estate a phone-width strip has, so anything stacked below the fader is spending travel on a control that doesn't need it. Order across the band is fader, then M/S, then the trim — the button column is the gap that keeps the two tracks from being a thumb-width apart (36px of separation on a phone). Level and trim share one readout line (`85 · FX 100`), which is also what tells the two tracks apart. It exists to be pulled back, not pushed up: set the layer and per-step sends where you want them, then trim the whole channel's wet signal from one place. POLY/MONO live in `layerParams[layer].fxTrim` and are read per note inside `Bell.play` (multiplying `revMul` and `dlyMul`), so no engine method and no play-start re-apply are needed. DRUMS is `drumFxTrim`, a bus-wide scaler on `DrumEngine.setFxTrim` — the per-voice sends are persistent AudioParams, so each strip keeps its untrimmed `rvBase`/`dlyBase` and the trim rescales from those; otherwise a trim drag would need React to re-push the whole base mix, and the per-step MOTION writes (which go through `setVoiceMix`) would fight it. A missing `fxTrim` / `drumFxTrim` on an old save reads as 100, i.e. exactly what the app did before it existed.
+It was thirteen 62px strips carrying eight controls each in a horizontally
+scrolling row — five voices visible at a time, nothing bigger than 8px tall.
+Crowded and sprawling at once.
 
-The lane it used to share the song page with is a fixed-height single line now (see the song section), so it can't overflow its own box the way it once did — a full 64-slot song under a `flex-basis:auto` lane painted straight over the mixer, and it was invisible in testing until measured against a *filled* song rather than an empty one. The per-drum-voice MIXER on the drums SOUND page is a different control and stays put.
+**The bug that made it unusable was HEIGHT, not layout, and it measured.** On a
+phone each fader came out 16×40px. The bottom sheet uses `maxHeight`, which only
+CAPS — so a sheet full of `flex:1` had nothing to stretch against and collapsed
+to its content, 189px of an 844px phone. Desktop never showed it because the
+SOUND page there is a real column with 765px in it. The sheet takes a definite
+height now and every wrapper between it and the mixer carries that height
+through: a chain of flex is only as good as its weakest link, and a plain `<div>`
+in the middle was the weak one. Fader went 16×40 → 38×277.
+
+`drumMixerBody` is ONE body with two mounts (desktop SOUND page, mobile SOUND
+sheet). They were two near-copies, the mobile one written as "mirrors the desktop
+layout", which is exactly how two surfaces drift.
+
+**The LAYER mixer** — POLY / MONO / DRUMS faders with M/S and an FX send trim —
+lives on the SOUND screen's FX face. Values land where they always did: POLY/MONO
+in `layerParams[layer].mix`, DRUMS in the global `drumLevel`; the trims in
+`layerParams[layer].fxTrim` and `drumFxTrim`, read per note inside `Bell.play`
+and as a bus scaler on `DrumEngine.setFxTrim`. A missing trim on an old save
+reads as 100, i.e. exactly what the app did before it existed. `mixerBody`, one
+body, two mounts: don't fork it.
 
 ### The PROJECT menu
 
@@ -1304,6 +1485,15 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 
 The palette is the app icon: a **deep navy ground** (`#0e1c2b`) with **cool blue-grey** furniture, and **warm amber** (`rgba(255,214,150,…)`) for anything lit — a note, the current bar chip, the brand wordmark. That's the icon's lightbulb: dark glass, glowing filament. A note isn't a filled rectangle any more, it's an emissive one — every lit note carries a soft glow, brighter under the playhead, with velocity driving the ramp between.
 
+**The grid's GROUND takes the part's colour too**, faintly (`layerTint`, 0.045
+alpha): POLY green, MONO blue, DRUMS the rose its own button wears — `noteRgb`
+only knows the two synth layers, so drums has to be named explicitly or it falls
+through to the brand amber and reads as "lit" rather than as itself. The alpha is
+deliberately under the quarter-beat column shading: it must read as a tint and
+never as a lit cell. Before it, an empty POLY grid and an empty MONO grid were
+the same picture, on a phone where you switch layer far more often than you have
+notes down to tell them apart by.
+
 **A lit note takes its PART's colour, not the one amber** (`LAYER_NOTE_RGB` /
 `noteRgb`): POLY green `176,224,152`, MONO blue `132,200,255`, and amber as the
 fallback for anything else and for the brand furniture. Both synth layers used
@@ -1437,6 +1627,15 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   `_*.mjs` harnesses it is COMMITTED, because the bug it guards broke playback
   on the live site. Run both after
   anything that touches a scheduler.
+- **GESTURES ARE THE THING HEADLESS TESTS ARE WORST AT.** Two "this isn't
+  working" reports in one session were both gestures that passed a harness and
+  failed in the hand. The layer HOLD cancelled on ANY pointermove — and a finger
+  resting on a button for 450ms always moves a pixel or two, while a headless
+  mouse goes down and up without moving at all, so the test passed a gesture no
+  hand can make. (Fix: an 8px threshold, plus `touch-action:none` and the
+  no-callout pair, without which iOS hands a long press to the browser and
+  returns `pointercancel`.) The other was a feature that did not exist. **Hold
+  tests must WOBBLE**, and a report that something feels dead deserves a low bar.
 - **Native audio (the real one)**: **started 2026-09-10 — see "The native
   audio core" above and `docs/native-audio.md`.** The core is complete for
   everything the JS engine does (VARY excepted), hosted in an AudioWorklet
