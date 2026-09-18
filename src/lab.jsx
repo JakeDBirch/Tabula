@@ -5009,7 +5009,11 @@ export default function LoudLight(){
   // you have notes down to tell them apart by. 0.045 alpha is deliberately
   // under the quarter-beat column shading, so it reads as a TINT and never as
   // content: the thing it must not do is look like a lit cell.
-  const layerTint="rgba("+noteRgb(activeLayer)+",0.045)";
+  // `noteRgb` only knows the two SYNTH layers — drums colour per voice, so it
+  // has no single note colour and falls through to the brand amber. Which made
+  // the drums page the one layer whose tint was not its own: it read as "lit",
+  // not as "drums". Its accent is the rose the DRUMS button already wears.
+  const layerTint="rgba("+(activeLayer==="drums"?"196,114,122":noteRgb(activeLayer))+",0.045)";
   // Drums have no per-column params, so a spill cannot survive the trip there.
   useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
   // Tapping anywhere that is not the spilled lane or the row of buttons puts it
@@ -5560,7 +5564,11 @@ export default function LoudLight(){
   const barOpsMenu=!barMenu?null:(()=>{
     const bm=barMenu;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(260,vw-16),H=Math.min(vh-24,260+(barCount>1?Math.ceil(barCount/8)*24+14:0));
+    const W=Math.min(260,vw-16);
+    // Cap at three quarters of the screen, never the whole of it: a menu with
+    // no reachable backdrop is a menu you cannot dismiss. Past the cap it
+    // scrolls inside itself.
+    const H=Math.min(Math.round(vh*0.75),260+(barCount>1?Math.ceil(barCount/8)*24+14:0));
     const px=Math.max(8,Math.min(vw-W-8,bm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,bm.y+14));
     const close=()=>setBarMenu(null);
@@ -5578,10 +5586,10 @@ export default function LoudLight(){
       <div style={{position:"fixed",inset:0,zIndex:500}}
         onPointerDown={()=>{if(Date.now()-barMenuAtR.current>400)close();}}
         onClick={()=>{if(Date.now()-barMenuAtR.current>400)close();}}>
-        <div style={{position:"absolute",left:px,top:py,width:W,
+        <div style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
           background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
           borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"auto",pointerEvents:"all"}}
           onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
           <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
             borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
@@ -6425,7 +6433,6 @@ export default function LoudLight(){
     const want=((((barPageR.current+n)%Math.max(1,barCount))+barCount)%Math.max(1,barCount));
     if(want!==barPageR.current)goToBar(want);
   };
-  const _wrapBar=(b)=>{const n=Math.max(1,barCount);return ((b%n)+n)%n;};
   // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
   // was never broken; the TRAVEL was. The tile sits high on the screen, so an
   // upward swipe runs out of phone long before it runs out of bars, and on an
@@ -6718,6 +6725,22 @@ export default function LoudLight(){
   const _patChipBase={display:"flex",alignItems:"center",justifyContent:"center",gap:4,
     borderRadius:6,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",
     flexShrink:0,fontWeight:700,lineHeight:1,fontFamily:"inherit",boxSizing:"border-box"};
+  // THE CHIP'S STATE STYLING, IN ONE PLACE. The row and the landscape rail were
+  // two copies of it, and the copies drifted the moment the states changed: the
+  // rail was still painting "selected" into the border and suppressing the
+  // playing cue long after the row had stopped. Three mounts, one body — the
+  // house rule this file keeps having to relearn.
+  //
+  // Halo = the pattern you are EDITING. Symbol lit = the pattern SOUNDING.
+  // Colour = the pattern's identity, carried always, because that is what you
+  // recognise it by in the song lane.
+  const patChipState=(col,sel,lit,empty)=>({
+    border:"1px solid "+col+(sel?"":"44"),
+    background:sel?col+"22":col+"0d",
+    boxShadow:sel?"0 0 0 2px "+col+"55, 0 0 10px "+col+"33":"none",
+    color:lit?"#fff":(empty?col+"66":col),
+    textShadow:lit?"0 0 8px "+col+",0 0 14px "+col+"88":"none",
+  });
   // Horizontal row — desktop sidebar and mobile portrait. Wraps rather than
   // scrolls: 16 chips is the ceiling and a hidden chip is a chip you can't
   // reach, which is the whole complaint this row exists to fix.
@@ -6734,21 +6757,8 @@ export default function LoudLight(){
             // A chip is a drag source now, so it must own the gesture. (The
             // landscape rail deliberately does NOT set this: that column
             // scrolls, and there is no lane in landscape to drag onto.)
-            fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab",
-            // TWO STATES, TWO CHANNELS. The halo is what you are EDITING; the
-            // symbol lighting up is what is SOUNDING. They used to share the
-            // border, so a pattern could not be both at once and the playing
-            // cue was suppressed on the selected chip to hide the collision.
-            //
-            // And every chip carries its own colour all the time, not only when
-            // selected: the colour is the pattern's identity — it is what you
-            // recognise it by in the song lane — so spending it as a selection
-            // cue made twelve of thirteen chips anonymous.
-            border:"1px solid "+col+(sel?"":"44"),
-            background:sel?col+"22":col+"0d",
-            boxShadow:sel?"0 0 0 2px "+col+"55, 0 0 10px "+col+"33":"none",
-            color:lit?"#fff":(empty?col+"66":col),
-            textShadow:lit?"0 0 8px "+col+",0 0 14px "+col+"88":"none"})}>
+            fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab"},
+            patChipState(col,sel,lit,empty))}>
           {p.name}
           {patBarsBadge(p)}
         </div>
@@ -6773,15 +6783,16 @@ export default function LoudLight(){
   // Vertical variant for the landscape rail (74px wide), which stacks its
   // controls. Scrolls, because the rail's height is the screen's short side.
   const patternChipsRail=(
-    <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
+    // Marked `data-patrow` like the row it is the landscape twin of — it is the
+    // same control, and a harness that can only measure two of the three mounts
+    // is how the two drifted apart in the first place.
+    <div data-patrow="1" style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden",touchAction:"pan-y"}}>
       {patChipData.map(({p,col,sel,lit,empty})=>(
         <div key={p.id} role="button" aria-label={"Pattern "+p.name+" (hold for pattern controls, drag onto a song slot to place it)"} aria-pressed={sel}
           {...paletteChipProps(p,col)}
           style={Object.assign({},_patChipBase,{
-            padding:"9px 4px",borderRadius:14,fontSize:13,
-            border:"1.5px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.18)"),
-            background:sel?col+"22":"transparent",
-            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+            padding:"9px 4px",borderRadius:14,fontSize:13},
+            patChipState(col,sel,lit,empty))}>
           {p.name}
           {patBarsBadge(p)}
         </div>
