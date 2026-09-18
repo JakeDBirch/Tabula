@@ -5551,7 +5551,18 @@ export default function LoudLight(){
     if(el.scrollLeft!==was)_syncBarTrack(el);
   };
   const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
-  const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
+  // The dismissal guard is sized to the GESTURE THAT OPENED IT, not fixed at
+  // 400ms. That window exists for a HOLD: the menu opens with the finger still
+  // down, so the opening press's own trailing click has to be ignored or the
+  // menu closes the instant it appears. A TAP has already finished — the menu
+  // opens on the pointerup — so all it can emit is one trailing click a few ms
+  // later, and 400ms of deafness after that just makes a quick dismissal feel
+  // like it did not register. Which is exactly how the sweep found it: tap to
+  // open, tap to dismiss, and the second tap did nothing.
+  const _openBarOps=(bar,x,y,guardMs)=>{
+    barMenuAtR.current=Date.now()-(400-(guardMs==null?400:guardMs));
+    setBarMenu({bar,x,y});
+  };
   const _barHasNotes=(bi)=>{
     if(!editPat||!editPat.grid)return false;
     const a=bi*COLS,b=a+COLS;
@@ -6488,11 +6499,11 @@ export default function LoudLight(){
         const g=_spinR.current;
         if(e.button===2)return;
         // A tap — not the release of a scrub — opens this bar's ops.
-        if(!g.moved)_openBarOps(curBar,e.clientX,e.clientY);
+        if(!g.moved)_openBarOps(curBar,e.clientX,e.clientY,120);
         g.moved=false;
       }}
       onPointerCancel={()=>{_spinEnd();_spinR.current.moved=false;}}
-      onContextMenu={e=>{e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY);}}>
+      onContextMenu={e=>{e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY,120);}}>
       <span>{curBar+1}</span>
       <span style={{fontSize:10,fontWeight:600,opacity:0.55,marginLeft:1}}>{"/"+barCount}</span>
       {/* LOOP's steel underline, the one state the tile can still show on its
