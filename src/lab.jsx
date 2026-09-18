@@ -5002,8 +5002,34 @@ export default function LoudLight(){
   // overview. A view state, not persisted — it is where you are looking.
   const [drumFocus,setDrumFocus]=useState(null);
   const spillLane=spillParam?LANES.find(l=>l.key===spillParam)||null:null;
+  // The grid's ground carries the part's colour at the very bottom of its
+  // range. A lit note has taken its layer's colour since the icons landed, but
+  // the surface under it did not, so an empty POLY grid and an empty MONO grid
+  // were the same picture — and on a phone you switch layer far more often than
+  // you have notes down to tell them apart by. 0.045 alpha is deliberately
+  // under the quarter-beat column shading, so it reads as a TINT and never as
+  // content: the thing it must not do is look like a lit cell.
+  const layerTint="rgba("+noteRgb(activeLayer)+",0.045)";
   // Drums have no per-column params, so a spill cannot survive the trip there.
   useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
+  // Tapping anywhere that is not the spilled lane or the row of buttons puts it
+  // away. A spill is a MODE the grid is in, and a mode you can only leave by
+  // finding the one button that opened it is a trap — every other overlay in
+  // here closes on a tap outside, and this is the same promise.
+  //
+  // A capture-phase window listener rather than a backdrop element: a backdrop
+  // over the whole screen would eat the taps meant for the transport, the
+  // pattern chips and the bar tile, all of which stay live while a lane is up.
+  useEffect(()=>{
+    if(!spillParam)return;
+    const away=(e)=>{
+      const t=e.target;
+      if(t&&t.closest&&(t.closest("[data-spill]")||t.closest("[data-paramrow]")))return;
+      setSpillParam(null);
+    };
+    window.addEventListener("pointerdown",away,true);
+    return ()=>window.removeEventListener("pointerdown",away,true);
+  },[spillParam]);
   const LOOP_CHAIN_MS=2000;
   const LOOP_MAX_BARS=4;
   const loopChainR=useRef(0);
@@ -5522,10 +5548,19 @@ export default function LoudLight(){
   };
   const _barHoldEnd=()=>{if(barHoldR.current.tmr){clearTimeout(barHoldR.current.tmr);barHoldR.current.tmr=0;}};
   const _openBarOps=(bar,x,y)=>{barMenuAtR.current=Date.now();setBarMenu({bar,x,y});};
+  const _barHasNotes=(bi)=>{
+    if(!editPat||!editPat.grid)return false;
+    const a=bi*COLS,b=a+COLS;
+    for(let r=0;r<editPat.grid.length;r++){
+      const row=editPat.grid[r]; if(!row)continue;
+      for(let c=a;c<b;c++)if(row[c])return true;
+    }
+    return false;
+  };
   const barOpsMenu=!barMenu?null:(()=>{
     const bm=barMenu;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(230,vw-16),H=260;
+    const W=Math.min(260,vw-16),H=Math.min(vh-24,260+(barCount>1?Math.ceil(barCount/8)*24+14:0));
     const px=Math.max(8,Math.min(vw-W-8,bm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,bm.y+14));
     const close=()=>setBarMenu(null);
@@ -5560,12 +5595,44 @@ export default function LoudLight(){
                   +(m!==1&&lbl?" · "+lbl:"");
               })()}</span>
           </div>
+          {/* EVERY BAR, as a grid you can point at. The content ops below all
+              act on the bar you are LOOKING at, so copying bar 2 into bar 7
+              used to mean: open the menu, CPY, close it, scrub to 7, open it
+              again, PST. Two of those five moves were the menu. Tapping a bar
+              here selects it — the same `goToBar` a scrub does, so nothing
+              below needed changing — and the menu STAYS OPEN, which is the
+              whole point: CPY, tap 7, PST, without leaving.
+              Four columns and a cap of eight rows: 32 bars is the ceiling and
+              this is a menu, not a page. */}
+          {barCount>1&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:2,padding:"7px 8px",
+              background:"rgba(10,18,28,0.92)",borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+              {Array.from({length:barCount},(_,bi)=>{
+                const isSel=bi===bm.bar, isPlay=bi===playingBar, has=_barHasNotes(bi);
+                const dead=(partBarLens(editPat)[bi]||0)===0;
+                return(
+                  <button key={bi} data-barcell={bi}
+                    onClick={()=>{goToBar(bi);setBarMenu(m=>m?Object.assign({},m,{bar:bi}):m);}}
+                    style={{height:22,padding:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",
+                      fontSize:9,fontWeight:700,lineHeight:1,
+                      border:"1px solid "+(isSel?"rgba(255,206,130,0.85)":"rgba(168,190,212,0.14)"),
+                      background:isSel?"rgba(255,206,130,0.62)":dead?"rgba(186,208,230,0.03)":has?"rgba(186,208,230,0.15)":"rgba(186,208,230,0.06)",
+                      boxShadow:isPlay?"inset 0 0 0 1.5px "+C_VARY:"none",
+                      color:isSel?"rgba(10,20,32,0.85)":"rgba(178,199,219,0.55)"}}>{bi+1}</button>
+                );
+              })}
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {cell("RAND",()=>act(()=>isDrum?randDrumVel():randPatId(activePatternId)))}
             {cell("CLR", ()=>act(()=>isDrum?clearDrums():clearPatId(activePatternId)))}
             {cell("MUT8",()=>act(()=>isDrum?mutateDrumPat1():mutatePat1()))}
-            {cell("CPY", ()=>act(()=>copyPatId(activePatternId)),isDrum)}
-            {cell("PST", ()=>act(()=>pastePatId(activePatternId)),isDrum||!clipboard)}
+            {/* These two stay OPEN. Everything else here is a one-shot, but
+                copy and paste are a PAIR performed across two bars, and closing
+                between them is the move the bar grid above was added to
+                remove. */}
+            {cell("CPY", ()=>copyPatId(activePatternId),isDrum)}
+            {cell("PST", ()=>pastePatId(activePatternId),isDrum||!clipboard)}
             {cell("⧉ DUP",()=>act(()=>duplicateBar()),barCount>=MAX_BARS)}
           </div>
           {/* The three ways to gain a bar, together — ⧉ DUP above is the
@@ -6239,15 +6306,6 @@ export default function LoudLight(){
   //
   // Reads as a minimap: each segment is a bar, filled if it contains notes, so
   // you can see the shape of a long pattern and where you are in it at a glance.
-  const _barHasNotes=(bi)=>{
-    if(!editPat||!editPat.grid)return false;
-    const a=bi*COLS,b=a+COLS;
-    for(let r=0;r<editPat.grid.length;r++){
-      const row=editPat.grid[r]; if(!row)continue;
-      for(let c=a;c<b;c++)if(row[c])return true;
-    }
-    return false;
-  };
   // Chips only. Every control that used to sit alongside them (add / remove /
   // duplicate bar, follow) moved into the SEQUENCE drawer next to the pattern
   // ops, where the buttons can be a real touch size — a row of 18px glyphs above
@@ -6355,10 +6413,30 @@ export default function LoudLight(){
   // It absorbs the track row when collapsed, so the tile is the full height of
   // the strip block rather than a chip with a scrollbar under it. Same total
   // height in both states — the thing the rest of the column budgets against.
-  const _spinR=useRef({y:0,start:0,moved:false,tmr:0});
-  const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}};
+  const _spinR=useRef({y:0,start:0,moved:false,tmr:0,top:0,bot:0});
+  const _spinEdgeR=useRef(0);
+  const _spinEdgeStop=()=>{if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}};
+  const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}_spinEdgeStop();};
+  useEffect(()=>()=>_spinEdgeStop(),[]);
+  // Both the drag and the edge timer go through here, so "where am I" lives in
+  // one place and the two can't disagree about which bar is current.
+  const _spinStep=(n)=>{
+    if(!n)return;
+    const want=((((barPageR.current+n)%Math.max(1,barCount))+barCount)%Math.max(1,barCount));
+    if(want!==barPageR.current)goToBar(want);
+  };
   const _wrapBar=(b)=>{const n=Math.max(1,barCount);return ((b%n)+n)%n;};
-  const BAR_PX_PER_BAR=26;   // a thumb-length swipe is about four bars
+  // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
+  // was never broken; the TRAVEL was. The tile sits high on the screen, so an
+  // upward swipe runs out of phone long before it runs out of bars, and on an
+  // 8-bar part a full swipe lands you on the last one every time — which is
+  // exactly "swiping up impossibly high just takes me to the last bar".
+  // Re-anchoring makes the gesture incremental rather than absolute, so a
+  // second swipe carries on from where the first ended, and the edge
+  // acceleration below means one swipe held at the top keeps going. Between
+  // them the control has no reachable end, which is what wrapping was for.
+  const BAR_PX_PER_BAR=18;
+  const BAR_EDGE_MS=110;     // one bar per tick while the finger is past the edge
   const barTile=(extra)=>{
     const isPlaying=curBar===playingBar;
     const isLoop=loopMode===2?true:!!loopMode&&(()=>{
@@ -6377,17 +6455,26 @@ export default function LoudLight(){
       onPointerDown={e=>{
         e.stopPropagation();e.preventDefault();
         try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
-        _spinR.current={y:e.clientY,start:curBar,moved:false,tmr:0};
+        const r=e.currentTarget.getBoundingClientRect();
+        _spinR.current={y:e.clientY,start:curBar,moved:false,tmr:0,edge:0,top:r.top,bot:r.bottom};
       }}
       onPointerMove={e=>{
         if(!e.buttons)return;e.stopPropagation();
         const g=_spinR.current;
         // Up is forward, the way every other vertical control in here reads.
-        const d=Math.round((g.y-e.clientY)/BAR_PX_PER_BAR);
-        if(!d&&!g.moved)return;
-        g.moved=true;
-        const want=_wrapBar(g.start+d);
-        if(want!==curBar)goToBar(want);
+        // Whole bars are CONSUMED out of the delta and the anchor moves with
+        // them, so the gesture never accumulates an absolute distance it cannot
+        // travel — see BAR_PX_PER_BAR.
+        const d=Math.trunc((g.y-e.clientY)/BAR_PX_PER_BAR);
+        if(d){g.moved=true;g.y-=d*BAR_PX_PER_BAR;_spinStep(d);}
+        // Past either edge of the tile, keep going for as long as you hold it
+        // there. The same answer the song lane and the bar strip already use
+        // when a drag needs somewhere off-screen.
+        const dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;
+        if(dir!==g.edge){
+          g.edge=dir;_spinEdgeStop();
+          if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>_spinStep(dir),BAR_EDGE_MS);}
+        }
       }}
       onPointerUp={e=>{
         _spinEnd();
@@ -6546,19 +6633,36 @@ export default function LoudLight(){
   // across a 370px phone is ~44px a button — the width the bar chips gave back.
   // A lit button carries its lane's own colour, which is also the colour the
   // faders come up in, so the row says what you are about to see.
+  // Which lanes the step that is SOUNDING right now has an edit on. The buttons
+  // are the only thing on screen that can say a step carries a parameter at all
+  // once the lanes stopped being a page — so a note with a velocity dip or a
+  // ratchet lights its lane as it passes, and you can see where the edits are
+  // without opening any of them.
+  const _hotLanes=(()=>{
+    const out={};
+    if(!playing||playId!==activeId||step<0||!activePat)return out;
+    const sp=(activePat.params||null)&&activePat.params[step];
+    if(!sp)return out;
+    for(const l of LANES){
+      const v=sp[l.key]!=null?sp[l.key]:l.def;
+      if(v!==l.def)out[l.key]=true;
+    }
+    return out;
+  })();
   const paramRow=(
     <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:"100%",minHeight:BAR_ROW_H,touchAction:"none"}}>
       {LANES.map(lane=>{
         const on=spillParam===lane.key;
+        const hot=!on&&!!_hotLanes[lane.key];
         return(
-          <button key={lane.key} data-param={lane.key} aria-pressed={on}
+          <button key={lane.key} data-param={lane.key} data-hot={hot?"1":undefined} aria-pressed={on}
             onClick={e=>{e.stopPropagation();setSpillParam(on?null:lane.key);}}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
-              border:"1px solid "+(on?lane.color:lane.color+"33"),
-              background:on?lane.color+"2e":"rgba(186,208,230,0.04)",
-              color:on?lane.color:lane.color+"99",
+              border:"1px solid "+(on?lane.color:hot?lane.color+"cc":lane.color+"33"),
+              background:on?lane.color+"2e":hot?lane.color+"22":"rgba(186,208,230,0.04)",
+              color:on||hot?lane.color:lane.color+"99",
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
-              boxShadow:on?"0 0 8px "+lane.color+"44":"none",
+              boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 7px "+lane.color+"55":"none",
               transition:"background .08s, box-shadow .08s"}}>{lane.key==="glideT"?"GLD":lane.label}</button>
         );
       })}
@@ -6600,9 +6704,12 @@ export default function LoudLight(){
   // would silently install onClick={undefined}.
   const patChipData=patterns.map((p,i)=>({
     p,col:patCol(i),sel:p.id===activePatternId,
-    // Ring the pattern the song is currently sounding when it isn't the one
-    // you're looking at — that's the cue for "jump to what I can hear".
-    lit:playing&&songMode&&p.id===playId&&p.id!==activePatternId,
+    // The pattern the song is SOUNDING. It used to be suppressed on the chip
+    // you were editing, because the cue was a ring and the ring was also how
+    // "selected" read — so the two collided and one had to give way. They are
+    // different channels now (see the row below), so it is simply true whenever
+    // it is true, including on the chip you are looking at.
+    lit:playing&&songMode&&p.id===playId,
     empty:PART_LAYERS.every(l=>{
       const g=p.parts[l]&&p.parts[l].grid;
       return !g||!g.some(row=>row&&row.some(Boolean));
@@ -6628,9 +6735,20 @@ export default function LoudLight(){
             // landscape rail deliberately does NOT set this: that column
             // scrolls, and there is no lane in landscape to drag onto.)
             fontSize:IS_MOBILE?13:11,touchAction:"none",cursor:"grab",
-            border:"1px solid "+(sel?col:lit?"rgba(230,184,114,0.5)":"rgba(168,190,212,0.16)"),
-            background:sel?col+"22":"transparent",
-            color:sel?col:(empty?"rgba(178,199,219,0.3)":"rgba(178,199,219,0.7)")})}>
+            // TWO STATES, TWO CHANNELS. The halo is what you are EDITING; the
+            // symbol lighting up is what is SOUNDING. They used to share the
+            // border, so a pattern could not be both at once and the playing
+            // cue was suppressed on the selected chip to hide the collision.
+            //
+            // And every chip carries its own colour all the time, not only when
+            // selected: the colour is the pattern's identity — it is what you
+            // recognise it by in the song lane — so spending it as a selection
+            // cue made twelve of thirteen chips anonymous.
+            border:"1px solid "+col+(sel?"":"44"),
+            background:sel?col+"22":col+"0d",
+            boxShadow:sel?"0 0 0 2px "+col+"55, 0 0 10px "+col+"33":"none",
+            color:lit?"#fff":(empty?col+"66":col),
+            textShadow:lit?"0 0 8px "+col+",0 0 14px "+col+"88":"none"})}>
           {p.name}
           {patBarsBadge(p)}
         </div>
@@ -11300,7 +11418,7 @@ export default function LoudLight(){
               <div style={{width:gridPx||"80%",height:gridPx||"80%",display:"flex",position:"relative",flexShrink:0}}>
               {rowKeys}
               {spillOverlay()}
-              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
+              <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative",background:layerTint},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                 onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                 onContextMenu={handleGridContextMenu}>
                 {lenEdgeSynth}
@@ -11407,7 +11525,7 @@ export default function LoudLight(){
                 <div style={{width:dw||"80%",height:dw||"80%",flexShrink:0,pointerEvents:"none"}}/>
                 <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:dw||"80%",height:dh||"auto",display:"flex"}}>
                 {drumRowKeys}
-                <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative"})}>
+                <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative",background:layerTint})}>
                   {lenEdgeDrums}
                   {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
@@ -11905,7 +12023,7 @@ export default function LoudLight(){
                   <div style={{flex:1,minHeight:0,display:"flex",position:"relative"}}>
                   {rowKeys}
                   {spillOverlay()}
-                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative"},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
+                  <div ref={gridRef} data-grid="1" style={Object.assign({},S.gridWrap,shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",position:"relative",background:layerTint},spillLane?{opacity:0.34,pointerEvents:"none"}:{})}
                     onPointerDown={handleGridDown} onPointerMove={handleGridMove} onPointerUp={handleGridUp} onPointerCancel={handleGridUp}
                     onContextMenu={handleGridContextMenu}>
                     {lenEdgeSynth}
@@ -11987,7 +12105,7 @@ export default function LoudLight(){
                       <div style={{position:"absolute",top:0,left:0,right:0,display:"flex",flexDirection:"column",alignItems:"center"}}>
                       <div style={{width:SIZE,display:"flex",position:"relative"}}>
                       {drumRowKeys}
-                      <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative"}}>
+                      <div ref={drumGridRef} data-drumgrid="1" style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:GAP,touchAction:"none",position:"relative",background:layerTint}}>
                         {lenEdgeDrums}
                         {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
