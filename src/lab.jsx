@@ -219,6 +219,9 @@ const C_VARY="#e6b872";
 // fallback, and it is still what an inactive note and the brand furniture use.
 const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
+// 0..1 → the two hex digits an 8-digit colour string wants. The palette is
+// written as "#rrggbb"+"aa" all over this file, so this is the missing half.
+const _a=(v)=>Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,"0");
 // VARY IS DELETED. It re-rolled the grid at every bar boundary at PLAYBACK
 // time — a fresh drop/shift/ghost each pass, never written back — and it is
 // gone: a part plays what is written in it. The one piece kept is `MUT8_PARAMS`,
@@ -5033,14 +5036,29 @@ export default function LoudLight(){
   // over the instrument, which is a thing you do by accident constantly on a
   // row of three buttons your thumb lives on.
   const layerBtnProps=(lyr)=>({
+    // `touchAction:none` and the no-select pair are LOAD-BEARING, not tidiness:
+    // without them a long press on a <button> hands the gesture to the browser
+    // — text selection, the iOS callout — which fires `pointercancel` and kills
+    // the hold before it can land.
     onPointerDown:(e)=>{
       const x=e.clientX,y=e.clientY;
-      layerHoldR.current.held=false;_layerHoldEnd();
+      layerHoldR.current.held=false;layerHoldR.current.sx=x;layerHoldR.current.sy=y;
+      _layerHoldEnd();
       layerHoldR.current.tmr=setTimeout(()=>{
         layerHoldR.current.tmr=0;layerHoldR.current.held=true;_openLayerOps(lyr,x,y);
       },450);
     },
-    onPointerMove:(e)=>{if(e.buttons)_layerHoldEnd();},
+    // A THRESHOLD, not any movement. This is why the hold "wasn't working":
+    // it cancelled on the first pointermove, and a finger resting on a button
+    // for 450ms always moves a pixel or two — so on a phone the hold could
+    // essentially never complete, while a headless mouse (down, wait, up, no
+    // movement at all) passed it every time. The test was the wrong shape, not
+    // just the code.
+    onPointerMove:(e)=>{
+      if(!e.buttons)return;
+      const h=layerHoldR.current;
+      if(Math.abs(e.clientX-h.sx)>8||Math.abs(e.clientY-h.sy)>8)_layerHoldEnd();
+    },
     onPointerUp:()=>{_layerHoldEnd();},
     onPointerCancel:()=>{_layerHoldEnd();layerHoldR.current.held=false;},
     onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_layerHoldEnd();
@@ -6002,10 +6020,21 @@ export default function LoudLight(){
                   // _songMeasure caches for drops.
                   border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
                   boxSizing:"border-box",minWidth:0,
-                  outline:isHover?"2px solid rgba(232,220,205,0.9)":(isCursor?"2.5px solid #fff":"none"),
+                  // NO HALO ON THE SOUNDING SLOT. A ring around the cell says
+                  // "this cell", which you can already see — and the lane is a
+                  // row of identical squares, so a ring on one of them reads as
+                  // selection rather than as sound. The CHARACTER glows instead:
+                  // the symbol is what names the pattern, so lighting the symbol
+                  // is lighting the thing you are actually reading. Same
+                  // language as the pattern chips, where the glyph lights and
+                  // the halo means "editing".
+                  // The hover outline stays: that is a drop target, which is a
+                  // different question and only exists mid-drag.
+                  outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",
                   outlineOffset:"-1px",
-                  boxShadow:isCursor?"0 0 10px rgba(255,255,255,0.5)":"none",
-                  color:pat?"#0e1c2b":"transparent",fontSize:17,fontWeight:700,
+                  color:pat?(isCursor?"#fff":"#0e1c2b"):"transparent",
+                  textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",
+                  fontSize:17,fontWeight:700,
                   touchAction:"none",cursor:"pointer",userSelect:"none",
                   transition:"background .08s, outline .08s"}}
                 onPointerDown={(e)=>{
@@ -6562,9 +6591,14 @@ export default function LoudLight(){
   useEffect(()=>()=>_spinEdgeStop(),[]);
   // Both the drag and the edge timer go through here, so "where am I" lives in
   // one place and the two can't disagree about which bar is current.
+  // IT CLAMPS. It used to wrap, and wrapping is wrong for this control however
+  // neatly a part loops: a scrub with no ends has no position you can feel,
+  // only a number that keeps changing, and overshooting recycles you past the
+  // bar you were aiming for instead of parking you at the end. Bar 1 is the
+  // bottom of the travel and bar N is the top, the way a fader has ends.
   const _spinStep=(n)=>{
     if(!n)return;
-    const want=((((barPageR.current+n)%Math.max(1,barCount))+barCount)%Math.max(1,barCount));
+    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,barPageR.current+n));
     if(want!==barPageR.current)goToBar(want);
   };
   // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
@@ -6614,7 +6648,13 @@ export default function LoudLight(){
         const dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;
         if(dir!==g.edge){
           g.edge=dir;_spinEdgeStop();
-          if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>_spinStep(dir),BAR_EDGE_MS);}
+          // The timer stops itself at the end of the travel — without that it
+          // would sit there ticking against a clamp for as long as you held it.
+          if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>{
+            const at=barPageR.current;
+            _spinStep(dir);
+            if(barPageR.current===at)_spinEdgeStop();
+          },BAR_EDGE_MS);}
         }
       }}
       onPointerUp={e=>{
@@ -6779,14 +6819,28 @@ export default function LoudLight(){
   // once the lanes stopped being a page — so a note with a velocity dip or a
   // ratchet lights its lane as it passes, and you can see where the edits are
   // without opening any of them.
+  // VEL, OCT and RTCH are deliberately NOT in this scheme. The grid already
+  // says all three on the note itself — velocity as the note's opacity, octave
+  // as the bars above or below it, ratchet as the subdivisions drawn inside it
+  // — and a second readout of something already on screen is the duplicate this
+  // app keeps deleting. What is left is what the grid CANNOT show: the filter,
+  // the two sends, the length modifier and the glide.
+  //
+  // And it is a brightness, not a flag: the value is normalised against how far
+  // it can travel from its default, so a small filter move glows faintly and a
+  // full one glows hard. "This step has something on it" was worth knowing;
+  // "this step has a LOT of it" is what you actually listen for.
+  const HOT_LANES=LANES.filter(l=>["flt","dly","rev","dur","glideT"].indexOf(l.key)>=0);
   const _hotLanes=(()=>{
     const out={};
     if(!playing||playId!==activeId||step<0||!activePat)return out;
     const sp=(activePat.params||null)&&activePat.params[step];
     if(!sp)return out;
-    for(const l of LANES){
+    for(const l of HOT_LANES){
       const v=sp[l.key]!=null?sp[l.key]:l.def;
-      if(v!==l.def)out[l.key]=true;
+      if(v===l.def)continue;
+      const span=Math.max(Math.abs(l.max-l.def),Math.abs(l.def-l.min))||1;
+      out[l.key]=Math.max(0.18,Math.min(1,Math.abs(v-l.def)/span));
     }
     return out;
   })();
@@ -6794,16 +6848,18 @@ export default function LoudLight(){
     <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:"100%",minHeight:BAR_ROW_H,touchAction:"none"}}>
       {LANES.map(lane=>{
         const on=spillParam===lane.key;
-        const hot=!on&&!!_hotLanes[lane.key];
+        // 0 when cold, 0.18..1 when lit — how far this step's value has moved.
+        const heat=on?0:(_hotLanes[lane.key]||0);
+        const hot=heat>0;
         return(
           <button key={lane.key} data-param={lane.key} data-hot={hot?"1":undefined} aria-pressed={on}
             onClick={e=>{e.stopPropagation();setSpillParam(on?null:lane.key);}}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
-              border:"1px solid "+(on?lane.color:hot?lane.color+"cc":lane.color+"33"),
-              background:on?lane.color+"2e":hot?lane.color+"22":"rgba(186,208,230,0.04)",
+              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"33"),
+              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.04)",
               color:on||hot?lane.color:lane.color+"99",
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
-              boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 7px "+lane.color+"55":"none",
+              boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
               transition:"background .08s, box-shadow .08s"}}>{lane.key==="glideT"?"GLD":lane.label}</button>
         );
       })}
@@ -11403,7 +11459,8 @@ export default function LoudLight(){
                       border:"1px solid "+(over?`rgba(${rgb},0.85)`:isActive?`rgba(${rgb},0.55)`:"rgba(168,190,212,0.1)"),
                       borderRadius:8,cursor:"pointer",
                       background:over?`rgba(${rgb},0.18)`:isActive?`rgba(${rgb},0.06)`:"transparent",
-                      color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s"}}
+                      color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s",
+                      touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}
                     {...layerBtnProps(layer)}>
                     <LLIcon name={layer==="synth"?"poly":layer==="lead"?"mono":"drums"} size={18}/>
                   </div>
@@ -12084,7 +12141,7 @@ export default function LoudLight(){
               <div style={{flex:"3 1 0",display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
@@ -12410,8 +12467,19 @@ export default function LoudLight(){
                   is a real column with 765px in it. A mixer is the one thing in
                   here whose job is to use the height it is given. */}
               <div style={Object.assign({position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"},
-                (activeSheet==="sound"&&activeLayer==="drums"&&soundTab!=="fx")
-                  ?{height:isLandscape?"82vh":"calc(100dvh - 72px)",maxHeight:"none",overflowY:"hidden",display:"flex",flexDirection:"column",padding:"12px 10px 14px"}
+                // ONE BOX FOR ALL FOUR FACES. The drums mixer needed a definite
+                // height to be usable, and giving it one only for drums made the
+                // four faces of a single screen four different sizes — switching
+                // tab moved the ground under you. They share it now.
+                //
+                // And it clears the status bar. The old height put the sheet's
+                // top edge 12px from the top of the screen, which on a phone is
+                // under the notch: the first row of the mixer could not be
+                // reached at all. The gap is the safe-area inset plus a margin,
+                // so the top item is always a thumb's width below the hardware.
+                (activeSheet==="sound")
+                  ?{height:isLandscape?"82vh":"calc(100dvh - 60px - 52px - env(safe-area-inset-top))",
+                    maxHeight:"none",overflowY:"hidden",display:"flex",flexDirection:"column",padding:"12px 10px 14px"}
                   :{})}>
 
                 {/* TEMPO sheet */}
@@ -12562,10 +12630,12 @@ export default function LoudLight(){
                      the mixer's `flex:1` against nothing. That is the same
                      mistake as the sheet's own `maxHeight`, one level down — a
                      chain of flex is only as good as its weakest link. */
-                  <div style={(activeLayer==="drums"&&soundTab!=="fx")?{flex:1,minHeight:0,display:"flex",flexDirection:"column"}:undefined}>
+                  <div style={soundTab==="fx"
+                    ?{flexShrink:0,display:"flex",flexDirection:"column"}
+                    :{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
                     {soundTabs(true)}
                     {soundTab==="layer"&&activeLayer!=="drums"&&(
-                      <div style={{overflowY:"auto"}}>
+                      <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                         {/* Portrait is too narrow for two columns (knobs shrink and
                             labels like DETUNE clip) — stack full-width there; keep
                             two columns in the roomier landscape sheet. */}
@@ -12653,7 +12723,7 @@ export default function LoudLight(){
                 )}
                 {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="sound"&&soundTab==="fx"&&(
-                  <div>
+                  <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                     <div style={{marginBottom:16}}>{mixerBody}</div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
