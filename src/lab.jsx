@@ -3584,6 +3584,15 @@ export default function LoudLight(){
   // dismiss the sheet the instant it appeared; the backdrop ignores clicks for
   // a beat after this stamp.
   const sheetGuardR = useRef(0);
+  // ESC closes whichever sheet is open. The backdrop is the primary way out and
+  // stays so; this is the belt to its braces, and it costs nothing on a phone
+  // where there is no ESC to press — the ✕ in the sound header is that.
+  useEffect(()=>{
+    if(!activeSheet)return;
+    const k=(e)=>{if(e.key==="Escape")setActiveSheet(null);};
+    window.addEventListener("keydown",k);
+    return ()=>window.removeEventListener("keydown",k);
+  },[activeSheet]);
   const seqTrackRef=useRef(null);
   // Save / load / share / cloud all live behind one PROJECT menu — none of it
   // is needed while you're playing. Desktop opens it as a modal; on mobile it's
@@ -5665,6 +5674,13 @@ export default function LoudLight(){
   // shaping.
   const soundTabs=(compact)=>(
     <div data-soundtabs="1" style={{display:"flex",gap:4,flexShrink:0,marginBottom:compact?6:10}}>
+      {compact&&(
+        <button data-soundclose="1" aria-label="Close sound" title="Close"
+          onClick={()=>setActiveSheet(null)}
+          style={{flex:"0 0 auto",width:28,height:28,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+            border:"1px solid rgba(168,190,212,0.2)",background:"transparent",
+            color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1}}>✕</button>
+      )}
       {[["synth","POLY","#a8c5a0"],["lead","MONO","#79b8f2"],["drums","DRUMS","#c4727a"],["fx","FX",C_SAT]].map(([k,lbl,col])=>{
         const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
         return(
