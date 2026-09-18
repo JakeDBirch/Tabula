@@ -5018,6 +5018,45 @@ export default function LoudLight(){
   // the same state the grid uses and the two cannot disagree. A view state,
   // not persisted.
   const [soundTab,setSoundTab]=useState("layer");
+  // Which step lane's ops are open. When STEP stopped being a page, each lane's
+  // RST and RAND went with it — the functions survived, the way to reach them
+  // did not, and nothing replaced them. The buttons are where they belong: the
+  // lane's own control, under the house split (tap spills it, hold operates on
+  // it).
+  const [paramMenu,setParamMenu]=useState(null);
+  const paramMenuAtR=useRef(0);
+  const paramHoldR=useRef({tmr:0,held:false,sx:0,sy:0});
+  const randStepLaneR=useRef(null), resetStepLaneR=useRef(null);
+  const _paramHoldEnd=()=>{if(paramHoldR.current.tmr){clearTimeout(paramHoldR.current.tmr);paramHoldR.current.tmr=0;}};
+  const _openParamOps=(key,x,y)=>{paramMenuAtR.current=Date.now();setParamMenu({key,x,y});};
+  const paramBtnProps=(key,onTap)=>({
+    onPointerDown:(e)=>{
+      const x=e.clientX,y=e.clientY;
+      paramHoldR.current.held=false;paramHoldR.current.sx=x;paramHoldR.current.sy=y;
+      _paramHoldEnd();
+      paramHoldR.current.tmr=setTimeout(()=>{
+        paramHoldR.current.tmr=0;paramHoldR.current.held=true;_openParamOps(key,x,y);
+      },450);
+    },
+    // An 8px THRESHOLD, not any movement — the mistake that made the layer
+    // hold impossible on a phone while passing a motionless headless mouse.
+    onPointerMove:(e)=>{
+      if(!e.buttons)return;
+      const h=paramHoldR.current;
+      if(Math.abs(e.clientX-h.sx)>8||Math.abs(e.clientY-h.sy)>8)_paramHoldEnd();
+    },
+    onPointerUp:()=>{_paramHoldEnd();},
+    onPointerCancel:()=>{_paramHoldEnd();paramHoldR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_paramHoldEnd();
+      paramHoldR.current.held=true;_openParamOps(key,e.clientX,e.clientY);},
+    onClick:(e)=>{
+      e.stopPropagation();
+      // The hold already opened the menu; its trailing click must not also
+      // spill the lane underneath it.
+      if(paramHoldR.current.held){paramHoldR.current.held=false;return;}
+      onTap();
+    },
+  });
   // Which layer's hold menu is open, and where. RAND and CLEAR for a part,
   // without having to go to that part first.
   const [layerMenu,setLayerMenu]=useState(null);
@@ -5648,6 +5687,40 @@ export default function LoudLight(){
   // part's own button. It switches to that layer as it opens, so you can see
   // what you are about to change and every existing bar-scoped implementation
   // needed no changes.
+  const paramOpsMenu=!paramMenu?null:(()=>{
+    const lane=LANES.find(l=>l.key===paramMenu.key);
+    if(!lane)return null;
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=124;
+    const px=Math.max(8,Math.min(vw-W-8,paramMenu.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,paramMenu.y-H-10));   // above the row, which sits low
+    const close=()=>setParamMenu(null);
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-paramMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-paramMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:12,fontWeight:700,color:lane.color}}>{lane.label}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>BAR {curBar+1}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {[["RAND",()=>randStepLaneR.current&&randStepLaneR.current(lane.key)],
+              ["RESET",()=>resetStepLaneR.current&&resetStepLaneR.current(lane.key)]].map(([t,fn])=>(
+              <button key={t}
+                style={{padding:"11px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+                  color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
+                onClick={()=>{fn();close();}}>{t}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })();
   const layerOpsMenu=!layerMenu?null:(()=>{
     const lm=layerMenu, isDrum=lm.layer==="drums";
     const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
@@ -6819,18 +6892,19 @@ export default function LoudLight(){
   // once the lanes stopped being a page — so a note with a velocity dip or a
   // ratchet lights its lane as it passes, and you can see where the edits are
   // without opening any of them.
-  // VEL, OCT and RTCH are deliberately NOT in this scheme. The grid already
-  // says all three on the note itself — velocity as the note's opacity, octave
-  // as the bars above or below it, ratchet as the subdivisions drawn inside it
-  // — and a second readout of something already on screen is the duplicate this
-  // app keeps deleting. What is left is what the grid CANNOT show: the filter,
-  // the two sends, the length modifier and the glide.
+  // VEL, OCT, RTCH and DUR are deliberately NOT in this scheme. The grid says
+  // all four on the note itself — velocity as its opacity, octave as the bars
+  // above or below it, ratchet as the subdivisions inside it, and DUR as the
+  // note's drawn LENGTH, which is the most direct of the lot: a note held half
+  // as long is drawn half as long. A second readout of something already on
+  // screen is the duplicate this app keeps deleting. What is left is what the
+  // grid cannot show: the filter, the two sends and the glide.
   //
   // And it is a brightness, not a flag: the value is normalised against how far
   // it can travel from its default, so a small filter move glows faintly and a
   // full one glows hard. "This step has something on it" was worth knowing;
   // "this step has a LOT of it" is what you actually listen for.
-  const HOT_LANES=LANES.filter(l=>["flt","dly","rev","dur","glideT"].indexOf(l.key)>=0);
+  const HOT_LANES=LANES.filter(l=>["flt","dly","rev","glideT"].indexOf(l.key)>=0);
   const _hotLanes=(()=>{
     const out={};
     if(!playing||playId!==activeId||step<0||!activePat)return out;
@@ -6853,12 +6927,14 @@ export default function LoudLight(){
         const hot=heat>0;
         return(
           <button key={lane.key} data-param={lane.key} data-hot={hot?"1":undefined} aria-pressed={on}
-            onClick={e=>{e.stopPropagation();setSpillParam(on?null:lane.key);}}
+            title={lane.label+" — tap to spill it onto the grid, hold for RAND / RESET"}
+            {...paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key))}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
               border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"33"),
               background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.04)",
               color:on||hot?lane.color:lane.color+"99",
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
+              touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",
               boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
               transition:"background .08s, box-shadow .08s"}}>{lane.key==="glideT"?"GLD":lane.label}</button>
         );
@@ -10061,6 +10137,7 @@ export default function LoudLight(){
       return Object.assign({},p,{params});
     }));
   };
+  randStepLaneR.current=randStepLane;
   const randStepAll=()=>LANES.forEach(l=>randStepLane(l.key));
   const resetStepLane=(key)=>{pushHistory();setFollowSeq(false);
     const lane=LANES.find(l=>l.key===key);if(!lane)return;
@@ -10071,6 +10148,7 @@ export default function LoudLight(){
       return Object.assign({},p,{params});
     }));
   };
+  resetStepLaneR.current=resetStepLane;
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
@@ -11389,6 +11467,7 @@ export default function LoudLight(){
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
       {layerOpsMenu}
+      {paramOpsMenu}
       {scrubOverlay}
       {exportMenuEl}
 
@@ -11665,8 +11744,15 @@ export default function LoudLight(){
                           const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;
                           const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;
                           const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;
+                          // The note is drawn at the length it is PLAYED: the
+                          // engine does rawDur*(1+dur/100), so −50 draws half as
+                          // long and +100 draws twice. Ratcheted notes keep
+                          // their span — that box is divided into sub-hits, and
+                          // stretching it would say something untrue about them.
+                          const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;
+                          const vwD=Math.max(0.16,vw*(1+durMod));
                           const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;
-                          const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
+                          const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
                           rects.push(
                             <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:bright,
@@ -12240,7 +12326,7 @@ export default function LoudLight(){
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vw/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;const vwD=Math.max(0.16,vw*(1+durMod));const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
