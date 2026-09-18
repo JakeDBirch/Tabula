@@ -5001,6 +5001,49 @@ export default function LoudLight(){
   // Which drum channel the mixer is focused on, or null for the level-only
   // overview. A view state, not persisted — it is where you are looking.
   const [drumFocus,setDrumFocus]=useState(null);
+  // The SOUND screen shows one of four things: a layer's voice, or the global
+  // FX. "layer" means "whatever `activeLayer` is", so the selector inside it is
+  // the same state the grid uses and the two cannot disagree. A view state,
+  // not persisted.
+  const [soundTab,setSoundTab]=useState("layer");
+  // Which layer's hold menu is open, and where. RAND and CLEAR for a part,
+  // without having to go to that part first.
+  const [layerMenu,setLayerMenu]=useState(null);
+  const layerMenuAtR=useRef(0);
+  const layerHoldR=useRef({tmr:0,held:false});
+  const _layerHoldEnd=()=>{if(layerHoldR.current.tmr){clearTimeout(layerHoldR.current.tmr);layerHoldR.current.tmr=0;}};
+  const _openLayerOps=(lyr,x,y)=>{
+    if(activeLayerR.current!==lyr)switchLayer(lyr);
+    layerMenuAtR.current=Date.now();setLayerMenu({layer:lyr,x,y});
+  };
+  // TAP SWITCHES, HOLD OPENS THE OPS. The tap used to have a second function —
+  // tapping the layer you were already on opened its SOUND page — and that is
+  // gone: SOUND is its own screen now, reached from its own chip, so the second
+  // function had nowhere useful to point. It also cost more than it looked:
+  // a mis-tap on the layer you were already editing threw a full-screen sheet
+  // over the instrument, which is a thing you do by accident constantly on a
+  // row of three buttons your thumb lives on.
+  const layerBtnProps=(lyr)=>({
+    onPointerDown:(e)=>{
+      const x=e.clientX,y=e.clientY;
+      layerHoldR.current.held=false;_layerHoldEnd();
+      layerHoldR.current.tmr=setTimeout(()=>{
+        layerHoldR.current.tmr=0;layerHoldR.current.held=true;_openLayerOps(lyr,x,y);
+      },450);
+    },
+    onPointerMove:(e)=>{if(e.buttons)_layerHoldEnd();},
+    onPointerUp:()=>{_layerHoldEnd();},
+    onPointerCancel:()=>{_layerHoldEnd();layerHoldR.current.held=false;},
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_layerHoldEnd();
+      layerHoldR.current.held=true;_openLayerOps(lyr,e.clientX,e.clientY);},
+    onClick:(e)=>{
+      e.stopPropagation();
+      // The hold already opened something; its trailing click must not also
+      // switch layer underneath the menu.
+      if(layerHoldR.current.held){layerHoldR.current.held=false;return;}
+      if(activeLayerR.current!==lyr)switchLayer(lyr);
+    },
+  });
   const spillLane=spillParam?LANES.find(l=>l.key===spillParam)||null:null;
   // The grid's ground carries the part's colour at the very bottom of its
   // range. A lit note has taken its layer's colour since the icons landed, but
@@ -5572,6 +5615,70 @@ export default function LoudLight(){
     }
     return false;
   };
+  // RAND and CLEAR for a layer, on its button's HOLD. They act on the visible
+  // bar, exactly as the bar menu's do — the difference is that you do not have
+  // to go to that part first, which is the whole point of hanging them off the
+  // part's own button. It switches to that layer as it opens, so you can see
+  // what you are about to change and every existing bar-scoped implementation
+  // needed no changes.
+  const layerOpsMenu=!layerMenu?null:(()=>{
+    const lm=layerMenu, isDrum=lm.layer==="drums";
+    const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
+    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#79b8f2":"#c4727a";
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
+    const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
+    const close=()=>setLayerMenu(null);
+    const act=(fn)=>{fn();close();};
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={()=>{if(Date.now()-layerMenuAtR.current>400)close();}}
+        onClick={()=>{if(Date.now()-layerMenuAtR.current>400)close();}}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"9px 10px 8px",display:"flex",alignItems:"center",gap:6,
+            borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:12,fontWeight:700,color:col}}>{lbl}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.3)"}}>BAR {curBar+1}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {[["RAND",()=>isDrum?randDrumVel():randPatId(activePatternIdR.current)],
+              ["CLEAR",()=>isDrum?clearDrums():clearPatId(activePatternIdR.current)]].map(([t,fn])=>(
+              <button key={t}
+                style={{padding:"11px 0",background:"rgba(10,18,28,0.92)",border:"none",fontFamily:"inherit",
+                  color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
+                onClick={()=>act(fn)}>{t}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+  // The SOUND screen's own selector: three layers and the global FX, which is
+  // what makes it ONE screen rather than a sheet with a second sheet behind it.
+  // Picking a layer here sets `activeLayer` — the same state the grid uses, so
+  // "whose sound am I editing" and "whose notes am I editing" can never drift
+  // apart, and coming out of SOUND leaves you on the part you were just
+  // shaping.
+  const soundTabs=(compact)=>(
+    <div data-soundtabs="1" style={{display:"flex",gap:4,flexShrink:0,marginBottom:compact?6:10}}>
+      {[["synth","POLY","#a8c5a0"],["lead","MONO","#79b8f2"],["drums","DRUMS","#c4727a"],["fx","FX",C_SAT]].map(([k,lbl,col])=>{
+        const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
+        return(
+          <button key={k} data-soundtab={k} aria-pressed={on}
+            onClick={()=>{ if(k==="fx"){setSoundTab("fx");} else {setSoundTab("layer");if(activeLayer!==k)switchLayer(k);} }}
+            style={{flex:1,minWidth:0,height:compact?28:32,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+              fontSize:9,fontWeight:700,letterSpacing:1,
+              border:"1px solid "+(on?col:col+"33"),
+              background:on?col+"22":"transparent",
+              color:on?col:col+"99"}}>{lbl}</button>
+        );
+      })}
+    </div>
+  );
   const barOpsMenu=!barMenu?null:(()=>{
     const bm=barMenu;
     const vw=window.innerWidth,vh=window.innerHeight;
@@ -11209,6 +11316,7 @@ export default function LoudLight(){
       {patternOpsMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
+      {layerOpsMenu}
       {scrubOverlay}
       {exportMenuEl}
 
@@ -11280,15 +11388,7 @@ export default function LoudLight(){
                       borderRadius:8,cursor:"pointer",
                       background:over?`rgba(${rgb},0.18)`:isActive?`rgba(${rgb},0.06)`:"transparent",
                       color:isActive?`rgb(${rgb})`:"rgba(178,199,219,0.32)",transition:"all .1s"}}
-                    onClick={()=>{
-                      // Clicking the layer you are ALREADY on opens its sound
-                      // page, and toggles back — the house rule, and with no
-                      // SOUND tab a one-way door would need the tab row to
-                      // escape. DRUMS behaves identically; it used to do
-                      // nothing at all, which was a dead control.
-                      if(isActive){setPage(pg=>pg==="sound"?"edit":"sound");}
-                      else{switchLayer(layer);}
-                    }}>
+                    {...layerBtnProps(layer)}>
                     <LLIcon name={layer==="synth"?"poly":layer==="lead"?"mono":"drums"} size={18}/>
                   </div>
                 );
@@ -11371,7 +11471,7 @@ export default function LoudLight(){
                   that — the same rule, and the layer boxes already behaved that
                   way, so the tab was a second door to one room. */}
               <div style={{display:"flex",gap:4}}>
-                {[["edit","EDIT"],["fx","FX"]].map(([pg,lbl])=>(
+                {[["edit","EDIT"],["sound","SOUND"]].map(([pg,lbl])=>(
                   <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{})}
                     onClick={()=>setPage(pg)}>{lbl}</button>
                 ))}
@@ -11641,7 +11741,7 @@ export default function LoudLight(){
                 <span style={{fontSize:11,color:"rgba(178,199,219,0.2)",letterSpacing:2}}>DRUMS / STEP</span>
               </div>
             )}
-            {activeLayer==="drums"&&page==="sound"&&drumMixerBody()}
+            {soundTab==="layer"&&activeLayer==="drums"&&page==="sound"&&drumMixerBody()}
 
             {activeLayer!=="drums"&&page==="step"&&(
               <div style={{...S.stepPage, height:"100%", minHeight:0, overflowY:"scroll", paddingBottom:40, paddingLeft:4, paddingRight:4}}>
@@ -11695,7 +11795,10 @@ export default function LoudLight(){
                 </div>
               )}
             {/* (The two VARY pages were here; VARY is deleted.) */}
-            {activeLayer!=="drums"&&page==="sound"&&(
+            {page==="sound"&&(
+              <div style={{position:"absolute",top:8,left:12,right:12,zIndex:6}}>{soundTabs(false)}</div>
+            )}
+            {soundTab==="layer"&&activeLayer!=="drums"&&page==="sound"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
@@ -11783,7 +11886,7 @@ export default function LoudLight(){
             )}
             {/* Global FX page — reverb / delay design. Same
                 for every layer (these buses are shared), drums included. */}
-            {page==="fx"&&(
+            {page==="sound"&&soundTab==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{marginBottom:14}}>{mixerBody}</div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
@@ -11823,7 +11926,7 @@ export default function LoudLight(){
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
                   style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"})}
-                  onClick={()=>{ if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}else{switchLayer(lyr);} }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
+                  {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
               ))}
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               {/* PATTERN CHIPS — the same selector as portrait and desktop,
@@ -11886,10 +11989,16 @@ export default function LoudLight(){
                    playback intent, which is derived now. Three chips, each
                    wider for it. */}
               {/* FX chip — global reverb/delay design */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
-                onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.4)"}}>FX</span>
+              {/* SOUND, not FX. It is the one screen where you shape what the
+                  instrument sounds like: each layer's voice AND the global FX,
+                  chosen by a selector inside it. FX was only ever half of that,
+                  and the other half was hidden behind tapping a layer button
+                  you were already on — a door nobody would find, on a control
+                  whose real job is switching layers. */}
+              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.4)"}}>SOUND</span>
               </button>
               {/* SAVE — one tap onto the project you last loaded or saved. The
                    cue for unsaved work is the CHIP going amber, the same "lit"
@@ -11960,12 +12069,7 @@ export default function LoudLight(){
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
                   style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
-                  onClick={()=>{
-                    // Tapping the layer you are already on opens its sound
-                    // page, and toggles back out — the house rule.
-                    if(activeLayer===lyr){setActiveSheet(s=>s==="sound"?null:"sound");}
-                    else{switchLayer(lyr);}
-                  }}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
+                  {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
               <div style={{flex:"4 1 0",display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
@@ -12253,9 +12357,9 @@ export default function LoudLight(){
                   <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="fx"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="fx"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="fx"?null:"fx")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="fx"?C_SAT:"rgba(178,199,219,0.35)"}}>FX</span>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                  <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
                 <button data-save="1" data-dirty={dirty?"1":"0"}
                   aria-label={dirty?"Save — unsaved changes":"Save"}
@@ -12290,7 +12394,7 @@ export default function LoudLight(){
                   is a real column with 765px in it. A mixer is the one thing in
                   here whose job is to use the height it is given. */}
               <div style={Object.assign({position:"fixed",bottom:isLandscape?0:60,left:0,right:0,zIndex:200,background:"rgba(14,26,40,0.98)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,0.1)",borderRadius:"16px 16px 0 0",maxHeight:isLandscape?"82vh":"65vh",overflowY:"auto",padding:"16px 16px 24px"},
-                (activeSheet==="sound"&&activeLayer==="drums")
+                (activeSheet==="sound"&&activeLayer==="drums"&&soundTab!=="fx")
                   ?{height:isLandscape?"82vh":"calc(100dvh - 72px)",maxHeight:"none",overflowY:"hidden",display:"flex",flexDirection:"column",padding:"12px 10px 14px"}
                   :{})}>
 
@@ -12442,9 +12546,9 @@ export default function LoudLight(){
                      the mixer's `flex:1` against nothing. That is the same
                      mistake as the sheet's own `maxHeight`, one level down — a
                      chain of flex is only as good as its weakest link. */
-                  <div style={(activeLayer==="drums")?{flex:1,minHeight:0,display:"flex",flexDirection:"column"}:undefined}>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:activeLayer==="drums"?6:12,flexShrink:0}}>SOUND</div>
-                    {activeLayer!=="drums"&&(
+                  <div style={(activeLayer==="drums"&&soundTab!=="fx")?{flex:1,minHeight:0,display:"flex",flexDirection:"column"}:undefined}>
+                    {soundTabs(true)}
+                    {soundTab==="layer"&&activeLayer!=="drums"&&(
                       <div style={{overflowY:"auto"}}>
                         {/* Portrait is too narrow for two columns (knobs shrink and
                             labels like DETUNE clip) — stack full-width there; keep
@@ -12526,13 +12630,13 @@ export default function LoudLight(){
                         </div>
                       </div>
                     )}
-                    {activeLayer==="drums"&&(
+                    {soundTab==="layer"&&activeLayer==="drums"&&(
                       <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>{drumMixerBody()}</div>
                     )}
                   </div>
                 )}
                 {/* FX sheet — global reverb / delay design */}
-                {activeSheet==="fx"&&(
+                {activeSheet==="sound"&&soundTab==="fx"&&(
                   <div>
                     <div style={{marginBottom:16}}>{mixerBody}</div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
