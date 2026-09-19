@@ -905,6 +905,21 @@ contract for all three mounts.
   headroom, plus a timestamped log of the last faults. Tap it to copy the
   report. `_diag.mjs` asserts it reads correctly, detects the fault, and is
   entirely absent and inert without the flag.
+  - **It also says WHO STOPPED THE TRANSPORT, and whether the scheduler is being
+    STARVED.** `sched 0/s` can only tell you the interval is gone; it can never
+    tell you who cleared it — and "it plays for a second then stops" plus "the
+    button flips back to play" is that same sentence twice. So `_disengage`
+    takes a REASON and logs it with the calling frame and the page's visibility
+    (`transport STOPPED (stopTransport) vis=visible via …`); a HOLD is logged
+    differently from a STOP, and the lock screen names itself. Separately the
+    tick loop records its own GAPS: a page the OS has throttled — a background
+    tab, Low Power Mode — runs the 25ms interval at ~1Hz, and the catch-up guard
+    then resyncs bodily on every tick, so you hear **one step every second or
+    two** instead of a beat. That is a STARVED scheduler, and it is the OPPOSITE
+    shape from a doubled one: `ticks/s` reads LOW, not high, which is precisely
+    why the original overlay could not show it. `starved ticks` and `resyncs`
+    are on the face, each logged with its size. `_transportlog.mjs` covers all
+    of it, negative control included.
   - It exists because eight hypotheses were measured and eliminated against
     fixtures built here, and the fault still reproduces only on Jake's phone.
     When that happens, **stop hypothesising and ship an instrument** — the next
