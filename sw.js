@@ -11,7 +11,7 @@
  *
  * Bump CACHE when the shell/precache list changes to force a clean re-cache.
  */
-const CACHE = "loudlight-v1";
+const CACHE = "loudlight-v2";  // v2: evict any shell entry poisoned by a lab.html navigation
 
 // Must-have, small, same-origin. If any of these fail the install still
 // proceeds (we catch) — the fetch handler will fill gaps on first online use.
@@ -73,14 +73,28 @@ self.addEventListener("fetch", (e) => {
 
   const isNav = req.mode === "navigate" || req.destination === "document";
   if (isNav) {
+    // Only the SHIPPING page is the shell. This worker's scope is the whole
+    // origin, so it also sees navigations to lab.html — and storing those bytes
+    // under "./index.html" would make the next offline launch of the installed
+    // PWA open the LAB build, pointed at the lab's own storage island. The lab
+    // registers no worker of its own precisely to stay out of the live app's
+    // way; without this test, index.html's worker drags it back in.
+    let isShell = false;
+    try {
+      const u = new URL(req.url);
+      isShell = u.pathname.endsWith("/") || u.pathname.endsWith("/index.html");
+    } catch (_) {}
     // Network-first so a new deploy lands as soon as you're online.
     e.respondWith((async () => {
       try {
         const net = await fetch(req);
-        const c = await caches.open(CACHE);
-        c.put("./index.html", net.clone());
+        if (isShell) {
+          const c = await caches.open(CACHE);
+          c.put("./index.html", net.clone());
+        }
         return net;
       } catch (_) {
+        if (!isShell) return new Response("Offline", { status: 503, statusText: "Offline" });
         return (await caches.match("./index.html")) ||
                (await caches.match("./")) ||
                new Response("Offline", { status: 503, statusText: "Offline" });
