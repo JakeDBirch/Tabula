@@ -607,7 +607,24 @@ window[k]=function(){DG.ctxs++;for(var _len=arguments.length,a=new Array(_len),_
 // voice can ever get through, so there is never a second to flam against.
 // SCHED_RESYNC: past this much lag, stop walking the missed steps one by one
 // and move every clock forward together instead.
-var SCHED_LATE=0.025;var SCHED_RESYNC=0.25;var CORE_DEFAULT=false;// Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
+var SCHED_LATE=0.025;var SCHED_RESYNC=0.25;// ── THE TICK COMES FROM A WORKER, NOT FROM setInterval ON THE PAGE ────────
+// iOS throttles a hidden page's timers to roughly 1Hz. Measured on the device
+// at 989–1011ms against an expected 25, with the catch-up guard above then
+// resyncing bodily on EVERY tick — so a backgrounded transport sounds one step
+// a second and skips everything between, which is what "the beat continues but
+// like one step every couple of seconds" is. The scheduler was never at fault;
+// its clock was.
+//
+// A dedicated Worker keeps its own timer and is not throttled with the page,
+// which is the standard remedy for this and the reason every web sequencer
+// drives its lookahead from one. It does NOT make Web Audio survive an iOS
+// app switch — WebKit suspends the context regardless (see the background-audio
+// note) — it makes the audio that DOES survive keep its cadence instead of
+// stuttering. The core, being sample-driven, never had the problem at all.
+//
+// Falls back to setInterval if a Worker cannot be made (blocked blob: URL, an
+// exotic embedding), because a throttled tick still beats no tick.
+var TICK_SRC="var t=0;onmessage=function(e){clearInterval(t);t=0;"+"if(e.data==='stop')return;t=setInterval(function(){postMessage(0);},e.data||25);};";var CORE_DEFAULT=false;// Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
 // the only audio that survives the screen locking), so there it is always on.
 var CORE_NATIVE=typeof LLCore!=="undefined"&&LLCore.CoreHost.isNative;var CORE_ON=typeof LLCore!=="undefined"&&!/[?&]core=0\b/.test(location.search)&&(CORE_DEFAULT||CORE_NATIVE||/[?&]core=1\b/.test(location.search));var coreHost=CORE_ON?new LLCore.CoreHost():null;if(typeof window!=="undefined")window.__LL_CORE_HOST=coreHost;// LOOP's accent — same steel blue as the LOOP button, so the marked bar chip
 // reads as "this is the bar LOOP is holding".
@@ -1213,7 +1230,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-19 11:56Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-19 13:17Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -2209,7 +2226,7 @@ var doNew=function doNew(){// Stop playback if running — discarding work mid-p
 // not anything was playing: its position is this project's, not the new
 // one's. Cleared FIRST, because this is a long run of setters and a throw
 // anywhere below it must not leave a resumable pause behind.
-pausedR.current=false;setPaused(false);if(playing){clearInterval(tmrR.current);if(CORE_ON)coreHost.stop();setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}releaseWakeLock();}var p0=mkPattern(symPat(0));setBarPage(0);setPatterns([p0]);setActivePatId(p0.id);// Seed the lead store with a fresh empty pat so switching to MONO after
+pausedR.current=false;setPaused(false);if(playing){_stopTick();if(CORE_ON)coreHost.stop();setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}releaseWakeLock();}var p0=mkPattern(symPat(0));setBarPage(0);setPatterns([p0]);setActivePatId(p0.id);// Seed the lead store with a fresh empty pat so switching to MONO after
 setActiveLayer("synth");setLoopMode(false);setLoopBar(-1);setLoopBars(1);setLoopPat(null);setTrackMute({synth:false,lead:false,drums:false});setTrackSolo({synth:false,lead:false,drums:false});setSongView(false);setSong(Array(64).fill(null));setSongRep(Array(64).fill(1));setSongBar(-1);songBarR.current=-1;setSongBarLayer({synth:-1,lead:-1,drums:-1});setBpm(120);setScale("major");setUserMask(USER_MASK_DEF);setUserRoot(0);setTranspose(0);setSwing(0);setSpeedMult(1);setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());// Transient scheduler/UI state — clear so the next play starts fresh.
 stepR.current=0;if(layerLastFreqR)layerLastFreqR.current={synth:null,lead:null};if(layerLastGlideR)layerLastGlideR.current={synth:false,lead:false};if(freeR&&freeR.current){for(var _i22=0,_arr2=["synth","lead","drums"];_i22<_arr2.length;_i22++){var l=_arr2[_i22];if(freeR.current[l])freeR.current[l]={step:0,nextAt:0,bar:0};}}setPatternDrag(null);setSelDevId(null);setSelCloudId(null);setNameDraft(randomName(library.map(function(p){return p.name;})));setPage("edit");// Stop any in-flight sample recording + clear stored samples.
 if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(function(t){return t.stop();});recordStreamRef.current=null;}recorderRef.current=null;setRecordingVoice(null);setVoiceSamples({});// Reload the default kit's samples rather than dropping to bare synth.
@@ -3510,7 +3527,11 @@ at=drumEngine.current.ctx.currentTime+0.01;drumEngine.current.play(v.key,at,100,
 // other. Measured with ?diag=1: 40 ticks/s, 80 after one double-tap of the
 // pause toggle, 160 after four, and it stays that way for every play
 // afterwards. Everything that arms the scheduler goes through here.
-var _armScheduler=function _armScheduler(){clearInterval(tmrR.current);if(DIAG){DG.lastTick=0;dgNote("transport ARMED");}tmrR.current=setInterval(scheduler,25);};// The lock that makes the guards at the top of startPlaying / resumePlay mean
+// One handle was `tmrR`; there are two clocks now, so everything that used to
+// call `clearInterval(tmrR.current)` calls this instead. Miss one and the old
+// ORPHAN bug comes straight back — an interval nothing can see, surviving a
+// pause and a stop, stealing steps from the next play.
+var tickWkrR=useRef(null);var _tickWorker=function _tickWorker(){if(tickWkrR.current!==null)return tickWkrR.current;try{var url=URL.createObjectURL(new Blob([TICK_SRC],{type:"text/javascript"}));var w=new Worker(url);URL.revokeObjectURL(url);tickWkrR.current=w;}catch(e){tickWkrR.current=false;}return tickWkrR.current;};var _stopTick=function _stopTick(){clearInterval(tmrR.current);tmrR.current=null;var w=tickWkrR.current;if(w){try{w.onmessage=null;w.postMessage("stop");}catch(e){}}};var _armScheduler=function _armScheduler(){_stopTick();if(DIAG)DG.lastTick=0;var w=_tickWorker();if(w){w.onmessage=function(){scheduler();};try{w.postMessage(25);if(DIAG)dgNote("transport ARMED (worker tick)");return;}catch(e){tickWkrR.current=false;}}tmrR.current=setInterval(scheduler,25);if(DIAG)dgNote("transport ARMED (timer tick — worker unavailable)");};// The lock that makes the guards at the top of startPlaying / resumePlay mean
 // anything. Both AWAIT `_engage`, and until that resolves `playingR` is still
 // false — so a second tap walks straight past the guard into a second engage.
 // The pause button is a toggle you tap repeatedly, which is exactly the
@@ -3538,7 +3559,7 @@ var _disengage=function _disengage(full,why){// DIAG only. "It stops on its own 
 // back to play" are the same sentence: something called this. The log says
 // WHICH caller, because the overlay's `sched 0/s` can only tell you the
 // interval is gone, never who cleared it.
-if(DIAG){var via="";try{via=(new Error().stack||"").split("\n").slice(2,4).map(function(l){return l.trim().split(" ")[1]||"";}).filter(Boolean).join(" < ");}catch(e){}dgNote("transport "+(full?"STOPPED":"HELD")+" ("+(why||"unattributed")+") vis="+(typeof document!=="undefined"?document.visibilityState:"?")+(via?"  via "+via:""));}clearInterval(tmrR.current);if(CORE_ON)coreHost.stop();playingR.current=false;setPlaying(false);if(full&&silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}releaseWakeLock();if("mediaSession"in navigator)navigator.mediaSession.playbackState="paused";};// STOP REWINDS. That was always true of the PLAY button's second tap, and it
+if(DIAG){var via="";try{via=(new Error().stack||"").split("\n").slice(2,4).map(function(l){return l.trim().split(" ")[1]||"";}).filter(Boolean).join(" < ");}catch(e){}dgNote("transport "+(full?"STOPPED":"HELD")+" ("+(why||"unattributed")+") vis="+(typeof document!=="undefined"?document.visibilityState:"?")+(via?"  via "+via:""));}_stopTick();if(CORE_ON)coreHost.stop();playingR.current=false;setPlaying(false);if(full&&silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}releaseWakeLock();if("mediaSession"in navigator)navigator.mediaSession.playbackState="paused";};// STOP REWINDS. That was always true of the PLAY button's second tap, and it
 // has to stay true now that stop is its own control and a hold is a third
 // state: pressing stop while held must put the cursor back to the top, not
 // leave the held position sitting there to be resumed from by the next play.
@@ -3584,7 +3605,7 @@ var startStop=/*#__PURE__*/function(){var _ref71=_asyncToGenerator(/*#__PURE__*/
 // Note it does NOT go through `startStop`. That function still means
 // play-from-the-top / stop, because the MP3 bounce and the lock-screen
 // `start` command both mean exactly that, and neither wants a pause.
-var togglePlayPause=/*#__PURE__*/function(){var _ref72=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee39(){return _regenerator().w(function(_context39){while(1)switch(_context39.n){case 0:if(!(exportingR.current||engagingR.current)){_context39.n=1;break;}return _context39.a(2);case 1:if(!playingR.current){_context39.n=2;break;}pauseTransport();return _context39.a(2);case 2:if(!pausedR.current){_context39.n=4;break;}_context39.n=3;return resumePlay();case 3:return _context39.a(2);case 4:_context39.n=5;return startPlaying();case 5:return _context39.a(2);}},_callee39);}));return function togglePlayPause(){return _ref72.apply(this,arguments);};}();useEffect(function(){return function(){return clearInterval(tmrR.current);};},[]);// ── iOS audio session + wake lock management ──────────────────────────────
+var togglePlayPause=/*#__PURE__*/function(){var _ref72=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee39(){return _regenerator().w(function(_context39){while(1)switch(_context39.n){case 0:if(!(exportingR.current||engagingR.current)){_context39.n=1;break;}return _context39.a(2);case 1:if(!playingR.current){_context39.n=2;break;}pauseTransport();return _context39.a(2);case 2:if(!pausedR.current){_context39.n=4;break;}_context39.n=3;return resumePlay();case 3:return _context39.a(2);case 4:_context39.n=5;return startPlaying();case 5:return _context39.a(2);}},_callee39);}));return function togglePlayPause(){return _ref72.apply(this,arguments);};}();useEffect(function(){return function(){clearInterval(tmrR.current);var w=tickWkrR.current;if(w){try{w.terminate();}catch(e){}}};},[]);// ── iOS audio session + wake lock management ──────────────────────────────
 // Bringing the audio back after the OS took it away. This used to test every
 // context for state==="suspended", which is the ONE state an interrupted iOS
 // context is not in: WebKit has its own non-standard **"interrupted"** state

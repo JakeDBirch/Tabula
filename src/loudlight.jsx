@@ -296,6 +296,25 @@ const dgNote=(m)=>{if(!DIAG)return;DG.notes.push(new Date().toISOString().slice(
 // and move every clock forward together instead.
 const SCHED_LATE=0.025;
 const SCHED_RESYNC=0.25;
+// ── THE TICK COMES FROM A WORKER, NOT FROM setInterval ON THE PAGE ────────
+// iOS throttles a hidden page's timers to roughly 1Hz. Measured on the device
+// at 989–1011ms against an expected 25, with the catch-up guard above then
+// resyncing bodily on EVERY tick — so a backgrounded transport sounds one step
+// a second and skips everything between, which is what "the beat continues but
+// like one step every couple of seconds" is. The scheduler was never at fault;
+// its clock was.
+//
+// A dedicated Worker keeps its own timer and is not throttled with the page,
+// which is the standard remedy for this and the reason every web sequencer
+// drives its lookahead from one. It does NOT make Web Audio survive an iOS
+// app switch — WebKit suspends the context regardless (see the background-audio
+// note) — it makes the audio that DOES survive keep its cadence instead of
+// stuttering. The core, being sample-driven, never had the problem at all.
+//
+// Falls back to setInterval if a Worker cannot be made (blocked blob: URL, an
+// exotic embedding), because a throttled tick still beats no tick.
+const TICK_SRC="var t=0;onmessage=function(e){clearInterval(t);t=0;"
+  +"if(e.data==='stop')return;t=setInterval(function(){postMessage(0);},e.data||25);};";
 const CORE_DEFAULT=false;
 // Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
 // the only audio that survives the screen locking), so there it is always on.
@@ -4649,7 +4668,7 @@ export default function LoudLight(){
     // anywhere below it must not leave a resumable pause behind.
     pausedR.current=false;setPaused(false);
     if(playing){
-      clearInterval(tmrR.current);
+      _stopTick();
       if(CORE_ON)coreHost.stop();
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
@@ -8475,10 +8494,37 @@ export default function LoudLight(){
   // other. Measured with ?diag=1: 40 ticks/s, 80 after one double-tap of the
   // pause toggle, 160 after four, and it stays that way for every play
   // afterwards. Everything that arms the scheduler goes through here.
+  // One handle was `tmrR`; there are two clocks now, so everything that used to
+  // call `clearInterval(tmrR.current)` calls this instead. Miss one and the old
+  // ORPHAN bug comes straight back — an interval nothing can see, surviving a
+  // pause and a stop, stealing steps from the next play.
+  const tickWkrR=useRef(null);
+  const _tickWorker=()=>{
+    if(tickWkrR.current!==null)return tickWkrR.current;
+    try{
+      const url=URL.createObjectURL(new Blob([TICK_SRC],{type:"text/javascript"}));
+      const w=new Worker(url);
+      URL.revokeObjectURL(url);
+      tickWkrR.current=w;
+    }catch(e){ tickWkrR.current=false; }
+    return tickWkrR.current;
+  };
+  const _stopTick=()=>{
+    clearInterval(tmrR.current); tmrR.current=null;
+    const w=tickWkrR.current;
+    if(w){try{w.onmessage=null;w.postMessage("stop");}catch(e){}}
+  };
   const _armScheduler=()=>{
-    clearInterval(tmrR.current);
-    if(DIAG){DG.lastTick=0;dgNote("transport ARMED");}
+    _stopTick();
+    if(DIAG)DG.lastTick=0;
+    const w=_tickWorker();
+    if(w){
+      w.onmessage=()=>{scheduler();};
+      try{ w.postMessage(25); if(DIAG)dgNote("transport ARMED (worker tick)"); return; }
+      catch(e){ tickWkrR.current=false; }
+    }
     tmrR.current=setInterval(scheduler,25);
+    if(DIAG)dgNote("transport ARMED (timer tick — worker unavailable)");
   };
   // The lock that makes the guards at the top of startPlaying / resumePlay mean
   // anything. Both AWAIT `_engage`, and until that resolves `playingR` is still
@@ -8538,7 +8584,7 @@ export default function LoudLight(){
       dgNote("transport "+(full?"STOPPED":"HELD")+" ("+(why||"unattributed")
         +") vis="+(typeof document!=="undefined"?document.visibilityState:"?")+(via?"  via "+via:""));
     }
-    clearInterval(tmrR.current);
+    _stopTick();
     if(CORE_ON)coreHost.stop();
     playingR.current=false;
     setPlaying(false);
@@ -8662,7 +8708,10 @@ export default function LoudLight(){
     if(pausedR.current){ await resumePlay(); return; }
     await startPlaying();
   };
-  useEffect(()=>()=>clearInterval(tmrR.current),[]);
+  useEffect(()=>()=>{
+    clearInterval(tmrR.current);
+    const w=tickWkrR.current; if(w){try{w.terminate();}catch(e){}}
+  },[]);
 
   // ── iOS audio session + wake lock management ──────────────────────────────
   // Bringing the audio back after the OS took it away. This used to test every

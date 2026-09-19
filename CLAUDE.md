@@ -924,6 +924,28 @@ contract for all three mounts.
     fixtures built here, and the fault still reproduces only on Jake's phone.
     When that happens, **stop hypothesising and ship an instrument** — the next
     round is then data from the device instead of another guess.
+- **THE SCHEDULER'S TICK COMES FROM A WORKER, BECAUSE iOS THROTTLES A HIDDEN
+  PAGE'S TIMERS TO ~1Hz.** Measured on the device, through `?diag=1`: the moment
+  the page hides, `setInterval(scheduler,25)` starts firing at 989–1011ms, the
+  catch-up guard finds itself ~900ms behind on EVERY tick, resyncs bodily, and
+  sounds one step — so a backgrounded transport plays **one step every couple of
+  seconds** and skips everything between. Reported exactly that way. The
+  scheduler was never at fault; its clock was.
+  - A dedicated Worker keeps its own timer and is not throttled with the page,
+    which is why every web sequencer drives its lookahead from one. `TICK_SRC`
+    is the whole worker; it falls back to `setInterval` if a Worker cannot be
+    made, because a throttled tick still beats no tick.
+  - **It does NOT make Web Audio survive an iOS app switch** — WebKit suspends
+    the context regardless (see the background-audio note). It makes the audio
+    that DOES survive keep its cadence instead of stuttering. The core, being
+    sample-driven, never had this problem; `?core=1` was always the workaround.
+  - **There are TWO clocks now where there was one handle**, so every site that
+    used to call `clearInterval(tmrR.current)` calls **`_stopTick()`** instead —
+    the stop path, `doNew`, and `_armScheduler` itself. Miss one and the ORPHAN
+    bug comes straight back: a clock nothing can see, surviving a pause AND a
+    stop, stealing steps from every later play. `_wtick.mjs` is the guard and it
+    probes exactly that — eight rapid play/pause toggles must still read 40/s,
+    a stop must read 0/s, and the play after it must not be doubled.
 - **A LOOKAHEAD SCHEDULER MUST NEVER SCHEDULE INTO THE PAST.** The part loops
   ran `while(lf.nextAt < ctx.currentTime + LOOKAHEAD)` with no catch-up guard.
   If the main thread stalls — a big render, a GC pause, iOS handing the audio
