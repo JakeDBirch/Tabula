@@ -1213,7 +1213,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-19 03:00Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-19 11:56Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -3608,7 +3608,14 @@ useEffect(function(){window.__LL_RESUME_AUDIO=function(){resumeAudio();};return 
 // instrument that re-renders the app four times a second would perturb the
 // very thing it is measuring (main-thread stalls), which would make its own
 // readings worse the more closely you watched. Tap it to copy the report.
-useEffect(function(){if(!DIAG)return;var box=document.createElement("div");box.setAttribute("data-diag","1");box.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;padding:5px 8px;"+"font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre;color:#ffd28a;"+"background:rgba(6,14,22,0.92);border-bottom:1px solid rgba(255,210,138,0.35);"+"-webkit-user-select:none;user-select:none;cursor:pointer;max-height:42vh;overflow:auto";document.body.appendChild(box);var prevTicks=0,prevHits=0,worstFlam=0,worstNow=0,worstLate=0;var t=setInterval(function(){var ctx=bell.current&&bell.current.ctx||null;// The interval is 500ms, so a raw delta is per HALF second. Scale it, or
+useEffect(function(){if(!DIAG)return;var box=document.createElement("div");box.setAttribute("data-diag","1");// It hangs off the BOTTOM, not the top. In phone portrait the transport
+// and the layer buttons sit ABOVE the grid, near the top of the screen —
+// so a banner pinned to the top covers the one control you need while you
+// are diagnosing a transport fault, which is exactly how it was reported.
+// The bottom costs the step-button row instead, and that row is not what
+// you are reaching for with the overlay up. Padded past the home indicator
+// so the last line is readable on a phone with no bezel.
+box.style.cssText="position:fixed;left:0;right:0;bottom:0;z-index:99999;"+"padding:5px 8px calc(5px + env(safe-area-inset-bottom,0px));"+"font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre;color:#ffd28a;"+"background:rgba(6,14,22,0.92);border-top:1px solid rgba(255,210,138,0.35);"+"-webkit-user-select:none;user-select:none;cursor:pointer;max-height:42vh;overflow:auto";document.body.appendChild(box);var prevTicks=0,prevHits=0,worstFlam=0,worstNow=0,worstLate=0;var t=setInterval(function(){var ctx=bell.current&&bell.current.ctx||null;// The interval is 500ms, so a raw delta is per HALF second. Scale it, or
 // the "~40 expected" reference on screen is off by two and the reader
 // concludes the scheduler is running at half rate.
 var tps=(DG.ticks-prevTicks)*2;prevTicks=DG.ticks;var hps=(DG.hits-prevHits)*2;prevHits=DG.hits;worstFlam=Math.max(worstFlam,DG.flam);worstNow=Math.max(worstNow,DG.now);worstLate=Math.max(worstLate,DG.late);var head=DG.minHead>8?"-":Math.round(DG.minHead*1000)+"ms";box.textContent="BUILD "+BUILD_ID+"   engine "+(CORE_ON?"CORE":"JS")+"\n"+"ctx "+(ctx?ctx.state+" "+ctx.sampleRate+"Hz":"none")+"   AudioContexts "+DG.ctxs+"\n"+"sched "+tps+"/s (expect ~40; ~80 = TWO schedulers)\n"+"drum hits "+hps+"/s   total "+DG.hits+"\n"+"FLAMS "+DG.flam+"   played-NOW "+DG.now+"   late "+DG.late+"   min headroom "+head+"\n"+"starved ticks "+DG.gaps+" (worst "+Math.round(DG.worstGap)+"ms)   resyncs "+DG.resync+"   page "+(typeof document!=="undefined"?document.visibilityState:"?")+"\n"+(DG.notes.length?"\n"+DG.notes.slice(-8).join("\n"):"\n(no faults recorded yet)")+"\n\n[tap to copy]";},500);box.addEventListener("click",function(){var txt=box.textContent.replace("[tap to copy]","")+"\n--- full log ---\n"+DG.notes.join("\n");var done=function done(){var o=box.style.background;box.style.background="rgba(40,90,40,0.95)";setTimeout(function(){box.style.background=o;},400);};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,done);else{var ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();done();}});return function(){clearInterval(t);box.remove();};},[]);// ── Lock-screen / Control-Centre transport (iOS shell) ──────────────────

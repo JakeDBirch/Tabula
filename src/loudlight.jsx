@@ -8716,9 +8716,17 @@ export default function LoudLight(){
     if(!DIAG)return;
     const box=document.createElement("div");
     box.setAttribute("data-diag","1");
-    box.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;padding:5px 8px;"
+    // It hangs off the BOTTOM, not the top. In phone portrait the transport
+    // and the layer buttons sit ABOVE the grid, near the top of the screen —
+    // so a banner pinned to the top covers the one control you need while you
+    // are diagnosing a transport fault, which is exactly how it was reported.
+    // The bottom costs the step-button row instead, and that row is not what
+    // you are reaching for with the overlay up. Padded past the home indicator
+    // so the last line is readable on a phone with no bezel.
+    box.style.cssText="position:fixed;left:0;right:0;bottom:0;z-index:99999;"
+      +"padding:5px 8px calc(5px + env(safe-area-inset-bottom,0px));"
       +"font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre;color:#ffd28a;"
-      +"background:rgba(6,14,22,0.92);border-bottom:1px solid rgba(255,210,138,0.35);"
+      +"background:rgba(6,14,22,0.92);border-top:1px solid rgba(255,210,138,0.35);"
       +"-webkit-user-select:none;user-select:none;cursor:pointer;max-height:42vh;overflow:auto";
     document.body.appendChild(box);
     let prevTicks=0,prevHits=0,worstFlam=0,worstNow=0,worstLate=0;
