@@ -270,7 +270,8 @@ const ROWKEYS_ON=false;
 //    plays IMMEDIATELY. A handful of those in one tick is a pile-up, and it is
 //    reachable whenever `t` is negative or not finite.
 const DIAG=(typeof location!=="undefined")&&/[?&]diag=1\b/.test(location.search);
-const DG={ticks:0,hits:0,late:0,minHead:9,flam:0,now:0,ctxs:0,last:{},t0:0,notes:[]};
+const DG={ticks:0,hits:0,late:0,minHead:9,flam:0,now:0,ctxs:0,last:{},t0:0,notes:[],
+  gaps:0,worstGap:0,resync:0,lastTick:0};
 if(DIAG&&typeof window!=="undefined"){
   for(const k of ["AudioContext","webkitAudioContext"]){
     const C=window[k]; if(!C)continue;
@@ -8110,7 +8111,26 @@ export default function LoudLight(){
   const lastResumeTryR=useRef(0);
   const resumeAudioR=useRef(null);
   const scheduler=useCallback(()=>{
-    if(DIAG)DG.ticks++;
+    if(DIAG){
+      DG.ticks++;
+      // A STARVED scheduler, which is a different fault from a doubled one and
+      // the overlay's ticks/s cannot show it: a page the OS has throttled (a
+      // background tab, Low Power Mode) runs this interval at ~1Hz instead of
+      // 40Hz, and the catch-up guard below then resyncs bodily on every tick —
+      // so you hear one step every second or two instead of a beat. Recorded
+      // with the visibility state, because that is what distinguishes "iOS
+      // throttled us" from "the main thread is blocked".
+      const _tn=(typeof performance!=="undefined"?performance.now():Date.now());
+      if(DG.lastTick){
+        const _gap=_tn-DG.lastTick;
+        if(_gap>250){
+          DG.gaps++; DG.worstGap=Math.max(DG.worstGap,_gap);
+          dgNote("scheduler STARVED "+Math.round(_gap)+"ms (expected 25) vis="
+            +(typeof document!=="undefined"?document.visibilityState:"?"));
+        }
+      }
+      DG.lastTick=_tn;
+    }
     if(!bell.current.ready)return;
     const ctx=bell.current.ctx;
     // The transport's own watchdog. A context the OS interrupted just FREEZES
@@ -8157,6 +8177,7 @@ export default function LoudLight(){
     const _now=ctx.currentTime;
     const _lag=_now-nextNoteR.current;
     if(_lag>SCHED_RESYNC){
+      if(DIAG){DG.resync++;dgNote("clock RESYNCED forward "+Math.round(_lag*1000)+"ms — the steps it spanned are not sounded");}
       nextNoteR.current+=_lag;
       for(const l of PART_LAYERS){const lf=freeR.current[l];if(lf)lf.nextAt+=_lag;}
     }
@@ -8456,6 +8477,7 @@ export default function LoudLight(){
   // afterwards. Everything that arms the scheduler goes through here.
   const _armScheduler=()=>{
     clearInterval(tmrR.current);
+    if(DIAG){DG.lastTick=0;dgNote("transport ARMED");}
     tmrR.current=setInterval(scheduler,25);
   };
   // The lock that makes the guards at the top of startPlaying / resumePlay mean
@@ -8491,8 +8513,8 @@ export default function LoudLight(){
         // The lock screen's pause is a PAUSE now, and its stop a stop — the
         // three used to be one call, so every one of them rewound the song.
         navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)(pausedR.current?resumePlay():startStop());});
-        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)pauseTransport();});
-        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&(playingR.current||pausedR.current))stopTransport();});
+        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)pauseTransport("mediaSession");});
+        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&(playingR.current||pausedR.current))stopTransport("mediaSession");});
       }catch(e){}
     }
   };
@@ -8505,7 +8527,17 @@ export default function LoudLight(){
   // transport vanishing the moment you pause. A hold is meant to be brief: keep
   // the session, drop the wake lock (nothing is sounding; let the screen
   // sleep).
-  const _disengage=(full)=>{
+  const _disengage=(full,why)=>{
+    // DIAG only. "It stops on its own after a second" and "the button flips
+    // back to play" are the same sentence: something called this. The log says
+    // WHICH caller, because the overlay's `sched 0/s` can only tell you the
+    // interval is gone, never who cleared it.
+    if(DIAG){
+      let via="";
+      try{via=(new Error().stack||"").split("\n").slice(2,4).map(l=>l.trim().split(" ")[1]||"").filter(Boolean).join(" < ");}catch(e){}
+      dgNote("transport "+(full?"STOPPED":"HELD")+" ("+(why||"unattributed")
+        +") vis="+(typeof document!=="undefined"?document.visibilityState:"?")+(via?"  via "+via:""));
+    }
     clearInterval(tmrR.current);
     if(CORE_ON)coreHost.stop();
     playingR.current=false;
@@ -8524,8 +8556,8 @@ export default function LoudLight(){
   // stop is also what clears a PAUSE, and `resumePlay` (the other way out of a
   // hold) reads exactly these refs. Zero them here and a stop cannot be
   // resumed from by anything, whatever order the next calls come in.
-  const stopTransport=()=>{
-    _disengage(true);
+  const stopTransport=(why)=>{
+    _disengage(true,why||"stopTransport");
     pausedR.current=false;setPaused(false);
     pauseAtR.current=null;
     stepR.current=0;nextNoteR.current=0;songPosR.current=0;
@@ -8539,13 +8571,13 @@ export default function LoudLight(){
   // Hold. Everything the stop above clears is deliberately LEFT: the playhead,
   // the song position and the glide memory are the position, and showing you
   // where you are is half of what a pause is for.
-  const pauseTransport=()=>{
+  const pauseTransport=(why)=>{
     if(!playingR.current)return;
     // null, not 0, when there is no usable clock (with the core on, `bell` is a
     // stand-in): 0 would make the resume shift every cursor by the whole age of
     // the context — minutes into the future, and silence.
     try{pauseAtR.current=bell.current.ctx.currentTime;}catch(e){pauseAtR.current=null;}
-    _disengage(false);
+    _disengage(false,why||"pauseTransport");
     pausedR.current=true;setPaused(true);
   };
   const startPlaying=async()=>{
@@ -8706,6 +8738,8 @@ export default function LoudLight(){
         +"sched "+tps+"/s (expect ~40; ~80 = TWO schedulers)\n"
         +"drum hits "+hps+"/s   total "+DG.hits+"\n"
         +"FLAMS "+DG.flam+"   played-NOW "+DG.now+"   late "+DG.late+"   min headroom "+head+"\n"
+        +"starved ticks "+DG.gaps+" (worst "+Math.round(DG.worstGap)+"ms)   resyncs "+DG.resync
+        +"   page "+(typeof document!=="undefined"?document.visibilityState:"?")+"\n"
         +(DG.notes.length?("\n"+DG.notes.slice(-8).join("\n")):"\n(no faults recorded yet)")
         +"\n\n[tap to copy]";
     },500);
@@ -8795,6 +8829,9 @@ export default function LoudLight(){
   useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
     const onVisible=async()=>{
+      // DIAG only: the background is where the throttled-scheduler fault lives,
+      // so the log has to say when the page left and came back.
+      if(DIAG)dgNote("page "+document.visibilityState+(playingR.current?" (transport RUNNING)":pausedR.current?" (transport HELD)":" (transport stopped)"));
       if(document.visibilityState!=="visible")return;
       await resumeAudio();
       if(playingR.current)requestWakeLock();
