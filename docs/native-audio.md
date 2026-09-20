@@ -286,7 +286,14 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
 
 - **Limiter.** Chromium's `DynamicsCompressorNode` is its own algorithm; the
   core has a lookahead peak limiter with the same threshold (−1dB), attack
-  (2ms) and release (100ms). Judge by ear.
+  (2ms) and release (100ms). Judge by ear. It also carries a constant **+0.57dB
+  of makeup gain** that the node applies at every level, including levels far
+  below its threshold where it is not compressing at all — so the whole web
+  build is that much hotter than the core, all the time. Deliberately left
+  alone: it is in the path of every project ever made, so it is part of how the
+  app has always sounded, and taking it out now would change the loudness of
+  all of them. `_jsmaster.mjs` compares each engine against **its own** bypass
+  for exactly this reason.
 - **DRIVE's glue compressor.** The same difference a second time, and for the
   same reason: it is a `DynamicsCompressorNode` on the web and a hand-written
   feed-forward compressor in the core, given the same fixed threshold (−6dB),
@@ -294,7 +301,17 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
   on both sides — two independent detectors move the image around as the mix
   ducks, the one thing a bus compressor must not do — and the core's knee is
   hard where Chromium's is 6dB, so the core bites a little more abruptly right
-  at the threshold. Judge by ear.
+  at the threshold. Judge by ear. Its own makeup gain (+0.83dB in Chromium) is
+  **not** left alone, because this stage is only in the path when DRIVE is on
+  — uncorrected it was a level jump on the bypass switch, and a level jump into
+  the curve. It is measured at runtime (`measureGlueMakeup`; the number belongs
+  to the browser, and the phone is WebKit) and divided out immediately before
+  the shaper. This is the one place the two engines are still allowed to
+  disagree, and the disagreement has a **boundary**: below the threshold they
+  measure within 0.02dB and x1.01 on harmonics, above it up to 0.55dB and x1.47
+  (on CLIP, whose knee is a wall). `_jsmaster.mjs` computes that boundary from
+  the stage's own `drivePre` and `threshold` rather than hardcoding a knob
+  position.
 - **DRIVE's saturation curves** are *not* in that category. Each is a closed
   form of one sample (`ll_shape(chr, x, bias)` in the core, `llShape` in the
   JS, which samples it into the WaveShaper's table), so the two engines fold
@@ -310,12 +327,33 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
   `oversample:"4x"` free from `WaveShaperNode`; the core does its own, at 2×,
   with two biquads each way. Both are enough that the aliasing is well below
   the harmonics being generated on purpose; 4× for free is simply better than
-  4× paid for per sample on a phone.
+  4× paid for per sample on a phone. Measured, it makes no difference to the
+  harmonics at all at these levels — `none`, `2x` and `4x` all read the same.
+  - **But it is not free on a PARALLEL path.** Chromium's oversampling costs a
+    `WaveShaperNode` **128 samples of latency at `2x` and 192 at `4x`**, and
+    EXCITE's three generators run alongside the dry signal rather than in
+    series with it. 128 samples is 2.7ms — two thirds of a cycle at 1kHz — so
+    the band came back 118° out and SUBTRACTED: BODY at 70 made a 1kHz tone
+    1.1dB *quieter* where the core made it 3.5dB louder. All three generators
+    are `oversample:"none"` now, which is also what the core does (its run at
+    1×, sample-aligned with the dry). The DRIVE shaper keeps its `4x`: in
+    series, a constant delay is just latency.
 - **EXCITE's crossover corners** are shared constants (`LL_EX_*` in
   `core/ll.h`, `EX_*` in `src/loudlight.jsx`) for the reason the shelf corners
   used to be: a band that sits somewhere else in the other engine is a project
   that sounds different depending on which one is running. The generators
   themselves are `tanh` on both sides.
+- **`_jsmaster.mjs` is the JS half of `core/test/master.c`**, and the pair only
+  became necessary once something was measured on one engine and shipped on the
+  other. It renders the **real** `Bell` graph into an `OfflineAudioContext` —
+  that is what the optional 6th argument to `Bell.init` is for — pushes one
+  tone through it, and reads the bins that were empty going in, the same
+  instrument `master.c` points at the core. Then it runs the same tone through
+  `ll_debug_bus_probe` and asserts the two agree. Neither the oracle (attacks
+  only; a master stage changes none) nor `master.c` (the core only) can see a
+  JS-side defect on this bus, and the web runs the JS engine by default — which
+  is how a saturator that was 12dB loud and crunchy at its first notch shipped
+  with every test green.
 - Both stages are **bypassed at zero and the bypass is a real one** on both
   engines — the signal does not pass through the stage at all — so an existing
   project is unaffected, which `core/test/master.c` asserts bit-for-bit with

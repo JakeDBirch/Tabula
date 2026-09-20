@@ -1349,6 +1349,70 @@ most: you dial a setting in, flip it off, flip it back, and decide.
     inside that ramp at nearly full level. With the rest of the take 20dB down,
     that one transient dominated the rms and a clean 20dB step read as 14dB.
     Measure the steady state, not the ramp.
+- **THE TWO ENGINES DIVERGED ON THE WEB BUILD, AND NOTHING COULD SEE IT.** The
+  first shipped version of this was ~12dB loud and crunchy at the FIRST NOTCH
+  of DRIVE — reported exactly that way — while every test was green, because
+  the defect was **JS-only** and nothing measured the JS bus. The oracle
+  compares ATTACKS and a master stage changes none of them; `core/test/master.c`
+  measures harmonics but only in the C core; and the web runs the JS engine
+  (`CORE_DEFAULT=false`). The sweep that tuned DRIVE measured the core, so the
+  numbers in the notes above were right about an engine Jake wasn't listening
+  to. **`_jsmaster.mjs` is the instrument that closes this**: it renders the
+  REAL `Bell` graph into an `OfflineAudioContext` (that is what `Bell.init`'s
+  optional 6th argument is for), pushes one tone through it, and asserts the
+  two engines measure the SAME — within 0.02dB and x1.01 on harmonics.
+  - **A `WaveShaperNode` CLAMPS ITS INPUT TO ±1 AND MAPS THAT ACROSS THE WHOLE
+    TABLE**, whatever domain the table was sampled over. The table is sampled
+    over ±`SHAPER_RANGE`=4, so the node was computing `shape(x*4)`: at DRIVE 1
+    that is x3.8 (+11.6dB) of gain plus real distortion, on a setting whose
+    whole job is to be clean. `SHAPER_IN_GAIN` is the missing `1/4`, and it is
+    DERIVED from `SHAPER_RANGE` so the two cannot drift. The core calls
+    `ll_shape()` directly and has no table to mis-index, which is exactly why
+    it measured correct throughout.
+  - **A `DynamicsCompressorNode` APPLIES A MAKEUP GAIN AT EVERY LEVEL**,
+    including levels far below its threshold where it is not compressing at
+    all: measured in Chromium, +0.57dB for the limiter and +0.83dB for the glue
+    comp, and level-independent. The limiter's is left alone on purpose — it is
+    in the path of every project ever made, so it is simply part of how the app
+    has always sounded. The glue comp's is not: it is only in the path when
+    DRIVE is on, so it was a **level jump on the bypass switch**, which
+    destroys the A/B that is the entire use of a character stage. It was also a
+    level jump INTO the curve, which is why the web build measured a third more
+    distortion than the core at the same setting — one cause, three symptoms.
+  - **It is MEASURED, not hardcoded, because the number belongs to the
+    browser** and the phone this is played on is WebKit rather than Chromium.
+    `measureGlueMakeup` renders a tone 20dB under the knee in an
+    `OfflineAudioContext` once per page, and `_applyShaperIn` folds `1/makeup`
+    in beside the domain correction — one gain node holding everything the HOST
+    does that the design did not ask for. It is deliberately **not awaited**: a
+    calibration that never resolved would be an init that never finished, i.e.
+    an app with no sound, which is far too high a price for a fraction of a dB.
+  - **Measure the STEADY STATE, not the settle.** The first calibration window
+    was 200ms and read 1.076 instead of 1.100, leaving a fifth of a dB behind:
+    the node's gain takes ~0.2s to arrive (−1.52dB over the first 100ms,
+    +0.64dB over the second, +0.831dB and flat thereafter). Same lesson the
+    core's `masterGain` smoother already taught `master.c`, in a different
+    engine.
+  - **The remaining JS/core divergence has a BOUNDARY, and the harness computes
+    it rather than hardcoding a knob position.** The two glue compressors are
+    genuinely different algorithms (the sanctioned difference), so they can
+    only disagree where they are actually compressing — so each row asks
+    whether that drive setting pushes the test tone over the threshold, from
+    the stage's own `drivePre` and `threshold` values. Below it: 0.02dB and
+    x1.01. Above it: up to 0.55dB and x1.47, on CLIP, whose knee is a wall and
+    is therefore the most sensitive thing in here to a dB of input.
+- **THE EXCITER WAS A COMB FILTER, and the cause was LATENCY, not phase.**
+  Chromium's oversampling costs a `WaveShaperNode` 128 samples at `2x` and 192
+  at `4x` (measured with an impulse). The three generators run in PARALLEL with
+  the dry signal, so 128 samples — 2.7ms, two thirds of a cycle at 1kHz — came
+  back 118° out and SUBTRACTED: BODY at 70 made a 1kHz tone **1.1dB quieter**
+  where the core made it 3.5dB louder. An exciter that thins what it is meant
+  to thicken. All three are `oversample:"none"` now, which is also what the core
+  does (its generators run at 1x, sample-aligned with the dry) — the DRIVE
+  shaper keeps its `4x`, because it is in SERIES and a constant delay there is
+  just latency. `_jsmaster.mjs` asserts the DIRECTION (+3.57dB, not −1.1dB),
+  because "the levels are close" would have passed the broken version against
+  a broken expectation.
 - **`DRIVE_MAX_DB is not defined` is how the retune nearly shipped broken.**
   The old `_applyDrive` survived a scripted edit that aborted before writing,
   so the source kept a reference to a constant that no longer existed — and

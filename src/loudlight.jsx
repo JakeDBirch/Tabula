@@ -1710,12 +1710,72 @@ const llShape=(chr,x,bias)=>
 // A WaveShaperNode takes a table, so each curve is sampled once at module
 // scope. 4096 points over ±4 is far finer than the ear can resolve on a
 // curve this smooth, and the node interpolates between them.
-const SHAPER_N=4096, SHAPER_RANGE=4;
+//
+// ⚠ A WaveShaperNode CLAMPS ITS INPUT TO ±1 AND MAPS THAT ACROSS THE WHOLE
+// TABLE, whatever domain the table was generated over. So a table sampled
+// over ±4 is a node that computes shape(x*4), not shape(x) — the signal has
+// to be scaled by 1/SHAPER_RANGE on the way IN and nothing on the way out.
+// Missing that scaling is exactly how the shipped web build came out ~12dB
+// loud and crunchy at the first notch of DRIVE while the core measured
+// correct: the core calls ll_shape() directly and has no table to mis-index.
+// Anything that changes SHAPER_RANGE has to change the gain with it — which
+// is why SHAPER_IN_GAIN is derived here rather than written as a number.
+const SHAPER_N=4096, SHAPER_RANGE=4, SHAPER_IN_GAIN=1/SHAPER_RANGE;
 const makeShaperCurve=(chr,bias)=>{
   const c=new Float32Array(SHAPER_N);
   for(let i=0;i<SHAPER_N;i++)c[i]=llShape(chr,(i/(SHAPER_N-1)*2-1)*SHAPER_RANGE,bias);
   return c;
 };
+// A DynamicsCompressorNode applies a MAKEUP GAIN of its own, derived from its
+// threshold/knee/ratio, AT EVERY LEVEL — including levels far below the
+// threshold, where it is not compressing at all. Measured in Chromium: the
+// glue comp is +0.83dB with the tone 10dB under its knee, and level-INDEPENDENT
+// (identical at -40, -26 and -14dBFS).
+//
+// The master LIMITER has the same makeup (+0.57dB) and it is left alone on
+// purpose: it is in the path of every project ever made, so its gain is simply
+// part of how the app has always sounded, and taking it out now would change
+// the loudness of all of them. The glue comp is the opposite case — it is only
+// in the path when DRIVE is on — so its makeup is a LEVEL JUMP on the bypass
+// switch, and A/B is the entire use of a character stage. It is also a level
+// jump INTO the curve, which is why it made the web build measure a third more
+// distortion than the core at the same setting.
+//
+// It cannot be a constant: the number belongs to the browser, and the phone
+// this is played on is WebKit rather than Chromium. So it is MEASURED where it
+// is running, once, on a tone 20dB under the knee — where the compressor is
+// provably doing nothing, so whatever gain comes out is the makeup and nothing
+// else. Anything that fails (no OfflineAudioContext, a render that never
+// resolves) leaves it at 1, which is the uncompensated build.
+let _glueMakeup=null;
+const measureGlueMakeup=async()=>{
+  if(_glueMakeup!=null)return _glueMakeup;
+  _glueMakeup=1;
+  try{
+    const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+    if(!OAC)return _glueMakeup;
+    // 0.6s rendered, the last HALF measured. The window is not arbitrary: the
+    // node's gain takes ~0.2s to settle from silence (measured: -1.52dB over
+    // the first 100ms, +0.64dB over the second, +0.831dB and flat from 200ms
+    // on). A 0.2s window read 1.076 instead of 1.100 and left a fifth of a dB
+    // on the table — measure the steady state, not the settle, exactly as
+    // core/test/master.c has to.
+    const sr=48000,n=Math.round(sr*0.6),amp=0.05,oc=new OAC(1,n,sr);
+    const osc=oc.createOscillator(); osc.frequency.value=1000;
+    const g=oc.createGain(); g.gain.value=amp;
+    const c=oc.createDynamicsCompressor();
+    c.threshold.value=GLUE_THRESH_DB; c.knee.value=6; c.ratio.value=GLUE_RATIO;
+    c.attack.value=GLUE_ATTACK_MS/1000; c.release.value=GLUE_RELEASE_MS/1000;
+    osc.connect(g); g.connect(c); c.connect(oc.destination); osc.start(0);
+    const buf=await oc.startRendering();
+    const d=buf.getChannelData(0), from=n>>1;
+    let a=0; for(let i=from;i<n;i++)a+=d[i]*d[i];
+    const m=Math.sqrt(a/(n-from))/(amp/Math.SQRT2);
+    if(isFinite(m)&&m>0.25&&m<4)_glueMakeup=m;
+  }catch(e){}
+  return _glueMakeup;
+};
+
 // Per-flavour input gain and its matching output trim, scaled BY THE KNOB.
 // Each curve's knee is in a different place, so a shared pre-gain reaches one
 // of them and not the others: with one, CLIP — the aggressive flavour —
@@ -2582,7 +2642,7 @@ class Bell{
     // amounts are shadowed here because the bypasses are DERIVED from them and
     // an AudioParam's .value is not readable back reliably mid-ramp.
     this.drivePre=null;this.glue=null;this.tapeLp=null;this.headBump=null;
-    this.shaper=null;this.driveTrim=null;
+    this.shaperIn=null;this.shaper=null;this.driveTrim=null;this.glueMakeup=1;
     this.exIn=null;this.exOut=null;this.thGain=null;this.bdGain=null;this.arGain=null;
     this.busIn=null;this.busOut=null;this.driveOn=false;this.exOn=false;
     this._driveSw=false;this._exSw=false;
@@ -2598,9 +2658,15 @@ class Bell{
     // mono-style layers get added.
     this.monoActiveVoice=null;
   }
-  async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
-    this.ctx=new(window.AudioContext||window.webkitAudioContext)();
-    await this.ctx.resume();
+  // `offlineCtx` is a harness hook, and it is the reason this stage can be
+  // MEASURED rather than reasoned about: handed an OfflineAudioContext, the
+  // real graph — this graph, not a copy of it — renders a tone faster than
+  // real time and the harmonics can be read back. Neither the oracle (which
+  // only compares attacks) nor core/test/master.c (which only knows the C
+  // core) can see a bug on the JS master bus; _jsmaster.mjs can, and does.
+  async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV,offlineCtx){
+    this.ctx=offlineCtx||new(window.AudioContext||window.webkitAudioContext)();
+    if(!offlineCtx)await this.ctx.resume();
     const m=this.ctx.createGain();m.gain.value=0.55;this.master=m;
     // Master limiter — a fast compressor configured brick-wall-ish so the summed
     // layers can never reach digital clipping. Everything routes voices → m →
@@ -2644,9 +2710,19 @@ class Bell{
     // same thing by hand, at 2x.)
     const shaper=ctx.createWaveShaper();
     shaper.curve=makeShaperCurve(0,0); shaper.oversample="4x";
+    // Everything the HOST does to the signal that the design did not ask for,
+    // undone in one place, immediately before the curve. Two things:
+    //   · the table's DOMAIN (see SHAPER_RANGE) — the node maps ±1 across the
+    //     whole table, so without this the stage computes shape(x*4);
+    //   · the glue compressor's own MAKEUP GAIN (see measureGlueMakeup) — a
+    //     constant the browser adds even when nothing is being compressed.
+    // It sits AFTER the compressor deliberately: the compressor's threshold has
+    // to refer to true full scale. There is no matching gain on the way out,
+    // because what the shaper now receives is what the core's shaper receives.
+    const shaperIn=ctx.createGain(); shaperIn.gain.value=SHAPER_IN_GAIN;
     const driveTrim=ctx.createGain(); driveTrim.gain.value=1;
-    drivePre.connect(glue); glue.connect(tapeLp); tapeLp.connect(shaper);
-    shaper.connect(headBump); headBump.connect(driveTrim);
+    drivePre.connect(glue); glue.connect(tapeLp); tapeLp.connect(shaperIn);
+    shaperIn.connect(shaper); shaper.connect(headBump); headBump.connect(driveTrim);
     // EXCITE: three parallel generators. Each taps the bus, listens to one
     // band, makes harmonics, and adds them back — nothing is re-summed from
     // the bands, so the crossover only has to decide what each one hears.
@@ -2659,7 +2735,16 @@ class Bell{
     // reason: more sub would do nothing on a phone, which is where this gets
     // played.
     const thLp=ctx.createBiquadFilter(); thLp.type="lowpass"; thLp.frequency.value=EX_LO_HZ;
-    const thRect=ctx.createWaveShaper(); thRect.oversample="2x";
+    // oversample:"none" on all three, and it is not a quality compromise — it
+    // is the fix for a COMB FILTER. Chromium's oversampling costs a WaveShaper
+    // 128 samples of LATENCY at 2x and 192 at 4x (measured), and these three
+    // run in PARALLEL with the dry signal: 128 samples is 2.7ms, which at 1kHz
+    // is two thirds of a cycle, so the band came back 118° out and SUBTRACTED.
+    // Measured: BODY at 70 made a 1kHz tone 1.1dB QUIETER where the core made
+    // it 3.5dB louder — an exciter that thins what it is supposed to thicken.
+    // The core's three generators are not oversampled either (they run at 1x,
+    // sample-aligned with the dry), so this is also what makes the two agree.
+    const thRect=ctx.createWaveShaper(); thRect.oversample="none";
     {const n=2048,c=new Float32Array(n);
      for(let i=0;i<n;i++){const x=i/(n-1)*2-1; c[i]=Math.tanh((Math.abs(x)*2-0.5*Math.abs(x)));}
      thRect.curve=c;}
@@ -2670,7 +2755,7 @@ class Bell{
     // BODY — the mids, saturated and blended back. Density, not level.
     const bdHp=ctx.createBiquadFilter(); bdHp.type="highpass"; bdHp.frequency.value=EX_MID_LO_HZ;
     const bdLp=ctx.createBiquadFilter(); bdLp.type="lowpass";  bdLp.frequency.value=EX_MID_HI_HZ;
-    const bdSat=ctx.createWaveShaper(); bdSat.oversample="2x";
+    const bdSat=ctx.createWaveShaper(); bdSat.oversample="none";
     {const n=2048,c=new Float32Array(n);
      for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*2.2);
      bdSat.curve=c;}
@@ -2681,7 +2766,7 @@ class Bell{
     // was GENERATED. It is not a shelf; a shelf lifts what is already there,
     // and this makes detail that was not there to lift.
     const arHp=ctx.createBiquadFilter(); arHp.type="highpass"; arHp.frequency.value=EX_HI_HZ;
-    const arSat=ctx.createWaveShaper(); arSat.oversample="4x";
+    const arSat=ctx.createWaveShaper(); arSat.oversample="none";
     {const n=2048,c=new Float32Array(n);
      for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*3);
      arSat.curve=c;}
@@ -2691,12 +2776,19 @@ class Bell{
     arHp2.connect(arGain); arGain.connect(exOut);
 
     this.drivePre=drivePre; this.glue=glue; this.tapeLp=tapeLp;
-    this.headBump=headBump; this.shaper=shaper; this.driveTrim=driveTrim;
+    this.headBump=headBump; this.shaperIn=shaperIn; this.shaper=shaper;
+    this.driveTrim=driveTrim;
     this.exIn=exIn; this.exOut=exOut;
     this.thGain=thGain; this.bdGain=bdGain; this.arGain=arGain;
     this.driveOn=false; this.exOn=false;
     this._curveChar=0; this._curveBias=0;
     this.busIn=m; this.busOut=lim;
+    // NOT awaited. A calibration that never resolved would be an init that
+    // never finished, i.e. an app with no sound at all — far too high a price
+    // for a fraction of a dB. It lands in milliseconds, long before anyone
+    // reaches DRIVE, and until it does the stage is simply the uncompensated
+    // one.
+    measureGlueMakeup().then(m=>{ this.glueMakeup=m; this._applyShaperIn(); });
     this._wireMasterBus();
     lim.connect(this.ctx.destination); this.limiter=lim;
     // Per-layer mute buses. POLY and MONO voices route their DRY through their
@@ -2889,8 +2981,17 @@ class Bell{
   // curve, with 1/k back out. Unity through the linear region, so what the
   // knob changes is WHERE ON THE CURVE you are rather than how loud you are.
   // See DRIVE_IN_MIN for why a pre-gain starting at unity was wrong.
+  // The one place the host's two artefacts are undone. Guarded on the NODE
+  // rather than on `ready`, because the calibration can land before init has
+  // finished and a correction dropped on the floor would be a silent return to
+  // the uncompensated build.
+  _applyShaperIn(){
+    if(!this.shaperIn)return;
+    this.shaperIn.gain.value=SHAPER_IN_GAIN/(this.glueMakeup||1);
+  }
   _applyDrive(){
     if(!this.ready||!this.drivePre)return;
+    this._applyShaperIn();
     const raw=Math.max(0,Math.min(100,this._driveAmt))/100;
     const d=driveCurveOf(this._driveAmt);
     const chr=this._driveChar|0, t=this.ctx.currentTime;
