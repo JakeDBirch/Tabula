@@ -2265,6 +2265,23 @@ function LLIcon({name,size}){
       <path d="M8.8 6.2 L6.2 8.6 L8.8 11"/>
     </svg>
   );
+  if(name==="mix")return(
+    // The MIX face of the SOUND screen: three faders at three heights. It was
+    // the word FX, which named the buses and not the page — that face carries
+    // the layer mixer, the master bus and the sends all at once, and "the
+    // whole mix" is the only thing true of all three. A fader is what the page
+    // looks like, so the glyph is what it looks like.
+    //
+    // Caps at different heights on purpose: three at the same height reads as
+    // a grille or a bar chart at rest, and the whole point of a mixer is that
+    // the faders DISAGREE.
+    <svg {...common} aria-hidden="true">
+      <path d="M6 4.6 v14.8"/><path d="M12 4.6 v14.8"/><path d="M18 4.6 v14.8"/>
+      <rect x="3.2"  y="8.2"  width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
+      <rect x="9.2"  y="14"   width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
+      <rect x="15.2" y="10.6" width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
+    </svg>
+  );
   if(name==="follow")return(
     // Forward: keep up with what is playing.
     <svg {...common} aria-hidden="true">
@@ -3591,13 +3608,64 @@ export default function LoudLight(){
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
   const [library,   setLibrary]   = useState([]); // local projects, newest-saved first
+  // ── WHERE SAVE GOES, AND IT SURVIVES A RELAUNCH ─────────────────────────
+  // The project this session is WORKING ON: {store:"device"|"cloud", id, name}.
+  // It is what the one-tap SAVE writes to, and it is PERSISTED, which is the
+  // whole point of it.
+  //
+  // `selDevId` / `selCloudId` used to be the only answer to "where does SAVE
+  // go", and they are plain state — so closing the app forgot it, and the next
+  // SAVE made a NEW project under a NEW generated name. Reported as ending up
+  // with a heap of near-identical local copies of one project opened from the
+  // cloud, which is exactly what that does: every launch starts anonymous and
+  // every save files a fresh one. Those two ids are still the LIST's
+  // selection — a different question, and kept per tab; this is the session's
+  // home.
+  //
+  // It carries the STORE as well as the id, so a project opened from the cloud
+  // saves back to the cloud. An earlier note here said the cloud was too slow
+  // to fire from a chip you tap without thinking — true, and the alternative
+  // is worse: a SAVE that quietly files a cloud project on the device is how
+  // you get two divergent copies with nothing to say which is current.
+  //
+  // WRITTEN ONLY BY A SAVE OR A LOAD, never by an effect on mount — the
+  // row-keys lesson. A mount effect would stamp whatever the session happened
+  // to look like, turning "hasn't been filed anywhere yet" into "filed".
+  // Cleared by NEW PROJECT and by deleting the project it points at: a home
+  // that no longer exists is worse than none, because SAVE would recreate it
+  // under its old id and quietly undo the delete.
+  //
+  // Read SYNCHRONOUSLY out of localStorage rather than through the async
+  // storageGet, which lands a frame late — the SAVE chip would spend that
+  // frame saying it is about to make a new project, and the library a frame
+  // with nothing picked.
+  const [saveTarget,setSaveTargetState]=useState(()=>{
+    try{
+      const t=JSON.parse(localStorage.getItem(LS_NS+"target")||"null");
+      return (t&&t.id&&(t.store==="device"||t.store==="cloud"))?t:null;
+    }catch(e){return null;}
+  });
+  const setSaveTarget=(t)=>{
+    setSaveTargetState(t);
+    try{
+      if(t)localStorage.setItem(LS_NS+"target",JSON.stringify(t));
+      else localStorage.removeItem(LS_NS+"target");
+    }catch(e){}
+  };
   // Which project row is highlighted. The selection is the target of SAVE /
   // LOAD / CLEAR — one set of buttons acting on whatever is picked, rather than
-  // three buttons per slot. Kept per tab so switching back doesn't lose it.
-  const [selDevId,  setSelDevId]  = useState(null);
-  const [selCloudId,setSelCloudId]= useState(null);
-  const [libTab,    setLibTab]    = useState("device"); // "device" | "cloud"
-  const [nameDraft, setNameDraft] = useState(()=>randomName([])); // the selected row's name, editable
+  // three buttons per slot. Kept per tab so switching back doesn't lose it, and
+  // seeded from the restored target so the library opens with the row SAVE
+  // would overwrite already picked. (These initializers run once, so reading
+  // `saveTarget` here is the restored value and nothing else.)
+  const [selDevId,  setSelDevId]  = useState(saveTarget&&saveTarget.store==="device"?saveTarget.id:null);
+  const [selCloudId,setSelCloudId]= useState(saveTarget&&saveTarget.store==="cloud"?saveTarget.id:null);
+  // Open the library on the bank the session's project came from, so the list
+  // and SAVE agree about where the work lives.
+  const [libTab,    setLibTab]    = useState(saveTarget&&saveTarget.store==="cloud"?"cloud":"device"); // "device" | "cloud"
+  // The restored project's own name, so the field is not offering to make a new
+  // one under a random name for a session that already has a home.
+  const [nameDraft, setNameDraft] = useState(()=>(saveTarget&&saveTarget.name)||randomName([])); // the selected row's name, editable
   const [flash,     setFlash]     = useState("");
   const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
@@ -3658,8 +3726,6 @@ export default function LoudLight(){
   const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
   const exportBarR = useRef(null); // progress-bar DOM node — width driven directly (no re-render) during capture
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
-  // Where the transport's hold-to-export menu is anchored: {x,y} or null.
-  const [exportMenu,  setExportMenu]  = useState(null);
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
@@ -3725,6 +3791,7 @@ export default function LoudLight(){
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
+  const [addMenu,   setAddMenu]   = useState(null); // {x, y} — the pattern +'s hold
   const [barMenu,   setBarMenu]   = useState(null); // {bar, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
@@ -4099,7 +4166,6 @@ export default function LoudLight(){
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
-  const exportMenuAtR=useRef(0);
   const tempoPopAtR=useRef(0);
   const tempoFieldR=useRef("bpm");
   useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
@@ -4501,7 +4567,10 @@ export default function LoudLight(){
       : [row,...library];
     setLibrary(next);setSelDevId(pid);setNameDraft(nm);
     const ok=await storageSet("projects",JSON.stringify(next));
-    if(ok){showFlash("SAVED "+nm);markClean();}
+    // The session's home, and it outlives the app. Set only once the write
+    // actually landed: pointing SAVE at a project that failed to be written
+    // would have the next tap silently overwrite nothing.
+    if(ok){setSaveTarget({store:"device",id:pid,name:nm});showFlash("SAVED "+nm);markClean();}
     else{
       // Quota. Put the library back so the list matches what's on disk.
       setLibrary(library);
@@ -4528,14 +4597,38 @@ export default function LoudLight(){
   const [dirty,setDirty]=useState(false);
   const holdCleanR=useRef(0);
   const markClean=(ms)=>{setDirty(false);holdCleanR.current=Date.now()+(ms||900);};
-  // SAVE, one tap, onto whatever project was last loaded or saved. With nothing
-  // picked it behaves exactly as the library's own SAVE AS does — makes a new
-  // project under the generated name — rather than doing nothing, which is what
-  // a disabled button here would amount to.
+  // SAVE, one tap, onto whatever project was last loaded or saved — INCLUDING
+  // across a relaunch, and including back to the CLOUD if that is where this
+  // one came from. `saveTarget` is the whole answer; the two list selections
+  // are not consulted, because they are the library's own highlight and can be
+  // on a row you merely tapped to read.
+  //
+  // With no target it behaves exactly as the library's SAVE AS does — makes a
+  // new project under the generated name — rather than doing nothing, which is
+  // what a disabled button here would amount to.
+  //
+  // A missing row is treated as no target rather than as an error: a project
+  // deleted from the library (or from another device, in the cloud's case) is
+  // gone, and the sane reading of SAVE then is "file this somewhere", not
+  // "fail". The cloud branch cannot check that cheaply — the slot list is only
+  // fetched when the menu is opened — so it just writes, and a PostgREST
+  // upsert recreates the row under the same id, which is the right answer for
+  // work you have in front of you.
   const quickSave=()=>{
-    const sel=library.find(p=>p.id===selDevId);
-    doSave(sel?sel.id:null,sel?sel.name:nameDraft);
+    const t=saveTarget;
+    if(t&&t.store==="cloud"){doCloudSave(t.id,t.name);return;}
+    const sel=t&&t.store==="device"?library.find(p=>p.id===t.id):null;
+    doSave(sel?sel.id:null,sel?sel.name:(t&&t.name)||nameDraft);
   };
+  // The chip says WHERE it is about to write. It is a 42px square with one
+  // glyph on it, so the destination cannot be on its face — but a tooltip (and
+  // the accessible name, which is what a screen reader gets) can carry it, and
+  // "SAVE" with no object is exactly the ambiguity that let the old one file a
+  // cloud project onto the device without anybody noticing.
+  const saveDest=saveTarget?saveTarget.name+(saveTarget.store==="cloud"?" (cloud)":""):null;
+  const saveTitle=saveDest
+    ?(dirty?"Save changes to "+saveDest:"Saved to "+saveDest)
+    :"Save as a new project";
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   const doLoad=id=>{
     const row=library.find(p=>p.id===id);if(!row)return;
@@ -4597,7 +4690,10 @@ export default function LoudLight(){
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     _adoptSong(s);
 
-    setSelDevId(row.id);setNameDraft(row.name);
+    setSelDevId(row.id);setSelCloudId(null);setNameDraft(row.name);
+    // This project is now the session's home, and it stays so across a
+    // relaunch — that is the whole reason the target is persisted.
+    setSaveTarget({store:"device",id:row.id,name:row.name});
     showFlash("LOADED "+row.name);
     markClean(2500);   // the kit decodes asynchronously — see markClean
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
@@ -4613,6 +4709,9 @@ export default function LoudLight(){
     const next=library.filter(p=>p.id!==id);
     setLibrary(next);
     if(selDevId===id){setSelDevId(null);setNameDraft("");}
+    // A home that no longer exists is worse than none: SAVE would recreate it
+    // under its old id and quietly undo the delete.
+    if(saveTarget&&saveTarget.store==="device"&&saveTarget.id===id)setSaveTarget(null);
     const ok=await storageSet("projects",JSON.stringify(next));
     showFlash(ok?"DELETED "+(row?row.name:""):"DELETE FAILED");
   };
@@ -4701,6 +4800,10 @@ export default function LoudLight(){
     }
     setPatternDrag(null);
     setSelDevId(null);setSelCloudId(null);
+    // A new project has no home yet, so the next SAVE files it rather than
+    // overwriting whatever was open before — the one thing a persisted target
+    // must never do.
+    setSaveTarget(null);
     setNameDraft(randomName(library.map(p=>p.name)));
     setPage("edit");
     // Stop any in-flight sample recording + clear stored samples.
@@ -5792,16 +5895,26 @@ export default function LoudLight(){
             border:"1px solid rgba(168,190,212,0.2)",background:"transparent",
             color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1}}>✕</button>
       )}
-      {[["synth","POLY","#a8c5a0"],["lead","MONO","#79b8f2"],["drums","DRUMS","#c4727a"],["fx","FX",C_SAT]].map(([k,lbl,col])=>{
+      {/* The four faces are SHAPES, not words — the same three layer glyphs the
+          transport row wears, so "which part am I shaping" is one picture
+          wherever you are looking, plus a mixer for the whole mix. That last
+          one was the word FX, which named the buses rather than the page: the
+          face carries the layer faders, the master bus and the global sends,
+          and a mixer is the only thing true of all of it.
+          The accessible NAME is the noun; the hint goes in `title`. A whole
+          sentence as a name is read out on every focus and is not what the
+          control is called. */}
+      {[["synth","poly","Poly","#a8c5a0"],["lead","mono","Mono","#79b8f2"],["drums","drums","Drums","#c4727a"],["fx","mix","Mix",C_SAT]].map(([k,icon,name,col])=>{
         const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
         return(
-          <button key={k} data-soundtab={k} aria-pressed={on}
+          <button key={k} data-soundtab={k} aria-pressed={on} aria-label={name}
+            title={k==="fx"?"The whole mix — levels, master bus and sends":name+" sound"}
             onClick={()=>{ if(k==="fx"){setSoundTab("fx");} else {setSoundTab("layer");if(activeLayer!==k)switchLayer(k);} }}
             style={{flex:1,minWidth:0,height:compact?28:32,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
-              fontSize:9,fontWeight:700,letterSpacing:1,
+              display:"flex",alignItems:"center",justifyContent:"center",
               border:"1px solid "+(on?col:col+"33"),
               background:on?col+"22":"transparent",
-              color:on?col:col+"99"}}>{lbl}</button>
+              color:on?col:col+"99"}}><LLIcon name={icon} size={compact?15:17}/></button>
         );
       })}
     </div>
@@ -6010,6 +6123,68 @@ export default function LoudLight(){
                   onClick={()=>{setPatternMaster(l);}}>{lbl}</button>
               );
             })}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
+  // ── The pattern +'s hold menu — the ways to MAKE a pattern ──────────────
+  // Two rows, because the + makes patterns and these are the two ways: an
+  // empty one, or one made out of the whole song. SONG → PATTERN had no
+  // visible name anywhere in portrait or on desktop before this — it was a
+  // bare hold — so it was findable only by accident.
+  //
+  // The refusal is drawn IN THE ROW rather than fired as a toast. A menu that
+  // greys out a row and says why underneath it is the honest form: you are
+  // looking at the control when you learn it cannot run, instead of reading a
+  // message at the top of the screen about something you pressed at the
+  // bottom of it. (The toast still carries the RESULT, which is a different
+  // message and is worth having fly.)
+  const addPatMenu=!addMenu?null:(()=>{
+    const vw=window.innerWidth,vh=window.innerHeight;
+    const W=Math.min(246,vw-16),H=176;
+    const px=Math.max(8,Math.min(vw-W-8,addMenu.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,addMenu.y+12));
+    const close=()=>setAddMenu(null);
+    const dismiss=()=>{if(Date.now()-addMenuAtR.current>400)close();};
+    const full=patterns.length>=MAX_PATTERNS;
+    // Ask the real planner, so the row's reason is the same sentence the op
+    // would have flashed — never a second guess at what it would refuse.
+    // songSeq, not songSeqR: the ref is written by an effect, which runs AFTER
+    // the render that changed it, so a menu built off it would describe the
+    // song as it was one commit ago.
+    const entries=songSeq.map(id=>patterns.find(p2=>p2.id===id)).filter(Boolean);
+    const {blockers,totalBars}=collapseBlockers(entries,patterns.length);
+    const why=blockers[0]||"";
+    const row=(label,sub,fn,disabled)=>(
+      <button disabled={!!disabled}
+        style={{width:"100%",padding:"10px 12px",textAlign:"left",background:"rgba(10,18,28,0.92)",
+          border:"none",fontFamily:"inherit",cursor:disabled?"default":"pointer",
+          display:"flex",flexDirection:"column",gap:3}}
+        onClick={disabled?undefined:()=>{close();fn();}}>
+        <span style={{fontSize:11,fontWeight:700,letterSpacing:1.4,
+          color:disabled?"rgba(178,199,219,0.22)":"rgba(212,226,240,0.86)"}}>{label}</span>
+        <span style={{fontSize:8,letterSpacing:1.1,lineHeight:1.4,
+          color:disabled?"rgba(214,166,90,0.6)":"rgba(178,199,219,0.35)"}}>{sub}</span>
+      </button>
+    );
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={dismiss} onClick={dismiss}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"8px 12px 6px",borderBottom:"1px solid rgba(168,190,212,0.1)",
+            fontSize:8,letterSpacing:2,fontWeight:600,color:"rgba(178,199,219,0.3)"}}>NEW PATTERN</div>
+          <div style={{display:"flex",flexDirection:"column",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {row("＋ EMPTY",full?"THE PATTERN LIST IS FULL":"AN EMPTY PATTERN, SELECTED",
+              ()=>addPattern(),full)}
+            {row("SONG → PATTERN",
+              why?why:"FLATTEN THE WHOLE SONG INTO ONE "+totalBars+"-BAR PATTERN",
+              ()=>collapseSong(),!!why)}
           </div>
         </div>
       </div>
@@ -6316,12 +6491,18 @@ export default function LoudLight(){
           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
         };
-        const strip=(label,val,color,onChange,layerKey,fxVal,onFx)=>{
+        // A strip is headed by its layer's SYMBOL, not its name. The three
+        // glyphs are already what the transport row and the SOUND selector
+        // wear, so a channel is recognised the same way wherever you meet it —
+        // and at 8px a word on this navy is the least legible thing on the
+        // page. `name` stays as the accessible label and the tooltip.
+        const strip=(name,icon,val,color,onChange,layerKey,fxVal,onFx)=>{
           const muted=!!trackMute[layerKey], solo=!!trackSolo[layerKey];
           const dim=muted||(anySolo&&!solo);
           return(
             <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
-              <span style={{fontSize:8,letterSpacing:1.5,fontWeight:700,color}}>{label}</span>
+              <span role="img" aria-label={name} title={name} style={{color,display:"flex",alignItems:"center",justifyContent:"center",height:14}}>
+                <LLIcon name={icon} size={13}/></span>
               {/* One tall band holds everything: the fader, then M/S, then the
                   FX trim on the far side of them. All three want vertical
                   travel or nothing, and the height is where the room is —
@@ -6369,9 +6550,9 @@ export default function LoudLight(){
             {/* Strips are capped and left-aligned so three channels read as a
                 mixer rather than three faders stranded across the page. */}
             <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?176:236}}>
-              {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
-              {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead",monoFx,setLeadFx)}
-              {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
+              {strip("Poly","poly",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
+              {strip("Mono","mono",monoMix,"#79b8f2",setLeadMix,"lead",monoFx,setLeadFx)}
+              {strip("Drums","drums",drumLevel,"#c4727a",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
             </div>
           </div>
         );
@@ -6388,26 +6569,36 @@ export default function LoudLight(){
   // the drag has to be able to CANCEL it. A wobble under 6px does not; only a
   // real drag does.
   // ── The pattern + ────────────────────────────────────────────────────────
-  // Tap adds an empty pattern; HOLD (or right-click) makes one out of the whole
-  // song. Both halves add a pattern, which is what makes them one control
-  // rather than two crammed together — and SONG → PATTERN needed a home once
-  // the song page stopped being somewhere portrait and desktop could reach.
-  // The usual hold trap applies: swallow the trailing click, or flattening the
-  // song is followed immediately by a stray empty pattern behind the result.
+  // Tap adds an empty pattern; HOLD (or right-click) OPENS A MENU of the ways
+  // to make one, which is where SONG → PATTERN lives. Both halves still add a
+  // pattern — that is what makes this one control rather than two crammed
+  // together — and the menu is what gives the second half a NAME.
+  //
+  // The hold used to fire SONG → PATTERN outright, and that was the whole
+  // problem with it: a hold has no affordance, so the only thing on screen
+  // that ever said the function existed was an aria-label and a toast after
+  // the fact. Reported as not being able to find it at all, having just used
+  // it by accident. A menu hangs the label off the thing it acts on, the same
+  // way a bar chip's hold and a pattern chip's hold do, and it can say WHY it
+  // is refusing in place rather than firing a toast across the screen.
+  //
+  // The usual hold traps apply: swallow the trailing click (or the menu
+  // arrives with a stray empty pattern behind it), and ignore dismissals for
+  // ~400ms (or the opening press's own trailing click closes it instantly).
   // Deferred calls, never bare references: addPattern and collapseSong are
   // declared further down and Babel lowers const to var.
   const addPatR=useRef({tmr:0,held:false});
+  const addMenuAtR=useRef(0);
   const _addHoldEnd=()=>{if(addPatR.current.tmr){clearTimeout(addPatR.current.tmr);addPatR.current.tmr=0;}};
-  const _collapseFromAdd=()=>{
-    if(!songSeqR.current.length){showFlash("NO SONG TO FLATTEN");return;}
-    collapseSong();
-  };
+  const _openAddMenu=(x,y)=>{addMenuAtR.current=Date.now();setAddMenu({x,y});};
   const addChipProps={
-    "aria-label":"New pattern (hold to flatten the whole song into one)",
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();addPatR.current.held=true;_collapseFromAdd();},
+    "aria-label":"New pattern",
+    title:"New pattern — hold for SONG → PATTERN",
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();addPatR.current.held=true;_openAddMenu(e.clientX,e.clientY);},
     onPointerDown:(e)=>{
       e.stopPropagation();addPatR.current.held=false;_addHoldEnd();
-      addPatR.current.tmr=setTimeout(()=>{addPatR.current.tmr=0;addPatR.current.held=true;_collapseFromAdd();},450);
+      const x=e.clientX,y=e.clientY;
+      addPatR.current.tmr=setTimeout(()=>{addPatR.current.tmr=0;addPatR.current.held=true;_openAddMenu(x,y);},450);
     },
     onPointerUp:()=>_addHoldEnd(), onPointerLeave:()=>_addHoldEnd(), onPointerCancel:()=>{_addHoldEnd();addPatR.current.held=false;},
     onClick:(e)=>{e.stopPropagation();if(addPatR.current.held){addPatR.current.held=false;return;}addPattern();},
@@ -7519,7 +7710,9 @@ export default function LoudLight(){
     const pid=id||mkProjId();
     const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),pid,nm,payload));
     if(!ok)return;
-    setSelCloudId(pid);setNameDraft(nm);showFlash("SAVED "+nm+" TO CLOUD");
+    setSelCloudId(pid);setSelDevId(null);setNameDraft(nm);
+    setSaveTarget({store:"cloud",id:pid,name:nm});
+    showFlash("SAVED "+nm+" TO CLOUD");
     cloudLoadRows();
   };
   const doCloudLoad=async id=>{
@@ -7532,6 +7725,9 @@ export default function LoudLight(){
     try{parsed=JSON.parse(raw);}catch(e){showFlash(label+" IS UNREADABLE","warn");return;}
     applyShareState(parsed);
     setSelDevId(null);setSelCloudId(id);setNameDraft(label);
+    // Opened from the cloud, so SAVE goes back to the cloud — and keeps doing
+    // so after a relaunch, which is the whole point.
+    setSaveTarget({store:"cloud",id,name:label});
     showFlash("LOADED "+label);
   };
   const doCloudClear=async id=>{
@@ -7539,6 +7735,7 @@ export default function LoudLight(){
     const [ok]=await cloudRun("DELETING",async()=>cloudDelSlot(await cloudTokenR.current(),id));
     if(!ok)return;
     if(selCloudId===id){setSelCloudId(null);setNameDraft("");}
+    if(saveTarget&&saveTarget.store==="cloud"&&saveTarget.id===id)setSaveTarget(null);
     showFlash("DELETED "+(row?row.name:""));
     cloudLoadRows();
   };
@@ -7883,7 +8080,10 @@ export default function LoudLight(){
     if(hash){
       window.location.hash="";                          // clear regardless of validity
       const s=decodeState(hash);
-      if(s){applyShareState(s);loadedFromShareR.current=true;autosaveReadyR.current=true;return;}
+      // A shared link is somebody ELSE'S project, so it inherits no home:
+      // leaving the restored target in place would have the first SAVE
+      // overwrite your own work with theirs.
+      if(s){applyShareState(s);setSaveTarget(null);loadedFromShareR.current=true;autosaveReadyR.current=true;return;}
       // corrupt/unreadable hash → ignore it and restore the user's autosave below
     }
     (async()=>{
@@ -8851,38 +9051,30 @@ export default function LoudLight(){
     if(!h)return;
     try{h.postMessage({playing:!!playing,paused:!!paused,title:_npTitle});}catch(e){}
   },[playing,paused,_npTitle]);
-  // ── The lock screen or the mix — you cannot have both ───────────────────
+  // ── The audio route is FIXED on the lock screen ─────────────────────────
   // A `.mixWithOthers` session is a SECONDARY audio source and iOS gives the
   // lock screen to the primary one, so the transport registered above simply
-  // does not appear while Loud Light is mixable. That makes "play over a
-  // reference track" and "control it from the lock screen" mutually exclusive
-  // on the device — not a bug to route around, a choice to make.
+  // does not appear while Loud Light is mixable. That is still true, and it is
+  // still a real trade — but it was a TOGGLE in the PROJECT menu for a while
+  // and it is not: it is a decision you make once and never think about again,
+  // sitting in a list of things you do constantly, taking the room EXPORT
+  // wanted. One of the two had to go and it was not export.
   //
-  // It is a preference rather than the build-time constant it started as
-  // because each side is right for a different session, and the only other way
-  // to change a constant is a whole TestFlight round trip.
+  // So the page pushes one STATE, always, and never reads the old preference
+  // back. Pushed rather than left to the shell's own default because the
+  // shell's is a UserDefaults value an earlier build may have set to MIX —
+  // deleting the control must not strand anyone on the side that has no lock
+  // screen. It is unconditional and idempotent: the shell ignores a value it
+  // is already on, so a launch does not tear the session down for nothing and
+  // a dropped message is repaired by the next render.
   //
-  // A DEVICE preference, deliberately NOT project state: loading someone's
-  // project must not decide what your phone does with its audio route. Read
-  // synchronously so the first push to the shell carries the real value, and
-  // WRITTEN ONLY BY THE TOGGLE — an effect that stamps it on mount would turn
-  // "hasn't decided" into "decided" and strand every install on today's
-  // default (the lesson the row-keys preference cost).
-  const [exclAudio,setExclAudio]=useState(()=>{
-    try{const v=localStorage.getItem(LS_NS+"excl-audio");return v===null?true:v==="1";}catch(e){return true;}
-  });
+  // `tnori-excl-audio` is now dead and unread. Whoever puts the choice back
+  // gives it a home that is not this list.
   useEffect(()=>{
     const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.audioSession;
     if(!h)return;
-    // State, not a transition: the shell re-reads this on every launch and
-    // ignores a value it is already on, so pushing it unconditionally costs
-    // nothing and a dropped message is repaired by the next render.
-    try{h.postMessage({exclusive:!!exclAudio});}catch(e){}
-  },[exclAudio]);
-  const setExclusiveAudio=(v)=>{
-    setExclAudio(!!v);
-    try{localStorage.setItem(LS_NS+"excl-audio",v?"1":"0");}catch(e){}
-  };
+    try{h.postMessage({exclusive:true});}catch(e){}
+  },[]);
   useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
     const onVisible=async()=>{
@@ -10816,48 +11008,21 @@ export default function LoudLight(){
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
-  // ── EXPORT lives on the transport's HOLD ────────────────────────────────
-  // It used to be a section of the PROJECT drawer, which is a list that wants
-  // every pixel of height it can get. Export is not filing — it is rendering
-  // the song OUT — so it belongs on the control that plays the song, under the
-  // deliberate gesture, exactly like every other second function in here.
+  // ── The play button does ONE thing ──────────────────────────────────────
+  // It carried export on its hold for a while, and that was the wrong control
+  // to hang a second function on: it is the one
+  // you press mid-take, on a phone, without looking — and a finger that rests
+  // on it for half a second threw a menu over the instrument. Export is back in
+  // the PROJECT menu, which is where the rest of "do something with this song
+  // outside the app" lives.
   //
-  // The MP3 pass count is folded into the menu rather than being a second
-  // screen: it is still asked before the bounce starts (a bounce runs in REAL
-  // TIME, so an accidental 8-pass one costs minutes you cannot cancel), but
-  // choosing the count IS starting it, so a bounce is one gesture rather than
-  // three. The count is passed to exportMP3 as an argument — reading it back
-  // from state in the same handler would get the previous value.
-  const playHoldR=useRef({tmr:0,held:false});
-  const _playHoldEnd=()=>{const t=playHoldR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
+  // `data-playbtn` stays as the harnesses' hook. They used to find this button
+  // by its title, which was the constant "Hold to export"; the title says what
+  // the next press does now, so it changes with the transport and is no longer
+  // an id. (Same argument as data-playcol and data-drumgrid.)
   const playBtnProps={
-    // A stable hook for the harnesses. They used to find this button by its
-    // title, which was the constant "Hold to export"; the title now says what
-    // the next press does, so it changes with the transport and is no longer
-    // an id. (Same argument as data-playcol and data-drumgrid.)
     "data-playbtn":"1",
-    onPointerDown:(e)=>{
-      if(e.button===2)return;
-      const t=playHoldR.current;t.held=false;_playHoldEnd();
-      const el=e.currentTarget;
-      t.tmr=setTimeout(()=>{
-        t.tmr=0;t.held=true;
-        const r=el.getBoundingClientRect();
-        exportMenuAtR.current=Date.now();
-        setExportMenu({x:r.left+r.width/2,y:r.bottom});
-      },450);
-    },
-    onPointerUp:()=>_playHoldEnd(),
-    onPointerCancel:()=>{_playHoldEnd();playHoldR.current.held=false;},
-    onPointerLeave:()=>_playHoldEnd(),
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_playHoldEnd();
-      const t=playHoldR.current;t.held=true;
-      const r=e.currentTarget.getBoundingClientRect();
-      exportMenuAtR.current=Date.now();
-      setExportMenu({x:r.left+r.width/2,y:r.bottom});},
-    // The hold swallows its own trailing click, or opening the menu would also
-    // start playback behind it.
-    onClick:()=>{const t=playHoldR.current;if(t.held){t.held=false;return;}togglePlayPause();},
+    onClick:()=>togglePlayPause(),
   };
 
   // ── The TEMPO chip: tap opens the drawer, HOLD edits it in place ─────────
@@ -10975,51 +11140,6 @@ export default function LoudLight(){
     return ()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("keydown",kd);};
   },[tempoPop]);
 
-  const exportMenuEl=!exportMenu?null:(()=>{
-    const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(216,vw-16),H=176;
-    const left=Math.max(8,Math.min(vw-W-8,exportMenu.x-W/2));
-    const top=Math.max(8,Math.min(vh-H-8,exportMenu.y+12));
-    const close=()=>setExportMenu(null);
-    const dismiss=()=>{if(Date.now()-exportMenuAtR.current>400)close();};
-    return(
-      <div style={{position:"fixed",inset:0,zIndex:500}}
-        onPointerDown={dismiss} onClick={dismiss}>
-        <div style={{position:"absolute",left,top,width:W,
-          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
-          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-          <div style={{padding:"9px 10px 8px",borderBottom:"1px solid rgba(168,190,212,0.1)",
-            display:"flex",alignItems:"baseline",gap:6}}>
-            <span style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(232,220,205,0.9)"}}>EXPORT</span>
-            <span style={{flex:1,fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
-              {songSeq.length?"THE SONG":"THIS PATTERN"}</span>
-          </div>
-          <button style={{width:"100%",padding:"11px 0",background:"none",border:"none",fontFamily:"inherit",
-            color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.6,cursor:"pointer"}}
-            onClick={()=>{close();exportMIDI();}}>MIDI</button>
-          <div style={{padding:"2px 10px 4px",borderTop:"1px solid rgba(168,190,212,0.1)",
-            display:"flex",alignItems:"baseline",gap:6}}>
-            <span style={{fontSize:10,fontWeight:700,letterSpacing:1.6,
-              color:exporting?"rgba(178,199,219,0.3)":"rgba(212,226,240,0.82)"}}>MP3</span>
-            <span style={{flex:1,fontSize:7,letterSpacing:1.2,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
-              {exporting?"BOUNCING…":"PASSES — REAL TIME"}</span>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,padding:"2px 10px 10px"}}>
-            {[1,2,4,8].map(n=>(
-              <button key={n} disabled={exporting}
-                onClick={()=>{close();setExportLoops(n);exportMP3(n);}}
-                style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",
-                  cursor:exporting?"wait":"pointer",borderRadius:6,opacity:exporting?0.4:1,
-                  border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.06)",
-                  color:"rgba(226,236,247,0.85)"}}>×{n}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  })();
 
   // ── ONE full-screen readout for every tempo scrubber ─────────────────────
   // The drawer's three widgets each carried their own copy of this overlay, and
@@ -11283,30 +11403,45 @@ export default function LoudLight(){
         })()}
       </div>
 
-      {/* ── Audio route (iOS app only) ──────────────────────────────────────
-          Not a setting so much as a fork: iOS hands the lock screen to the
-          PRIMARY audio app, and a mixable app is a secondary one. So this is
-          "lock-screen transport" or "jam over a reference track", and which is
-          right depends on the session rather than on taste. Hidden everywhere
-          else because nothing outside the shell has a session to set. */}
-      {IS_NATIVE&&(
-        <div>
-          <div style={Object.assign({},mSecLbl,{marginBottom:8})}>AUDIO ROUTE</div>
-          <div style={{display:"flex",gap:0,border:"1px solid rgba(168,190,212,0.15)",borderRadius:6,overflow:"hidden",marginBottom:7}}>
-            {[[true,"LOCK SCREEN"],[false,"MIX"]].map(([v,lbl])=>(
-              <button key={lbl} data-audioroute={v?"excl":"mix"} onClick={()=>setExclusiveAudio(v)}
-                style={{flex:1,padding:"7px 8px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:8,letterSpacing:1.5,fontWeight:700,
-                  background:exclAudio===v?"rgba(230,184,114,0.13)":"transparent",
-                  color:exclAudio===v?"#e6b872":"rgba(178,199,219,0.4)"}}>{lbl}</button>
-            ))}
-          </div>
-          <div style={{fontSize:9,lineHeight:1.5,color:"rgba(178,199,219,0.4)"}}>
-            {exclAudio
-              ?"Loud Light owns the route, so the lock screen and Control Centre carry its transport. It interrupts whatever else is playing."
-              :"Loud Light plays over other apps, so you can jam along with a reference track. The lock-screen transport won't appear."}
-          </div>
+      {/* ── EXPORT ──────────────────────────────────────────────────────────
+          Back where filing lives, in the room the AUDIO ROUTE toggle was
+          holding. It spent a while on the PLAY button's hold, on the argument
+          that MIDI and MP3 render the song OUT of the app rather than filing
+          it, and that the drawer is a list that wants every pixel of height.
+          Both still true — and both cost less than what the hold cost: the one
+          control you press mid-take grew a second function that throws a menu
+          over the instrument, and a hold has no affordance, so the only way to
+          learn export had moved was to trip over it.
+          The MP3 pass count is still folded in rather than being a second
+          screen. A bounce runs in real time on the JS engine, so an accidental
+          8-pass one costs minutes you cannot cancel — but CHOOSING the count
+          is what starts it, so a bounce stays one gesture. The count goes to
+          exportMP3 as an ARGUMENT: a handler that set exportLoops and then
+          read it back would bounce the previous value. */}
+      <div>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+          <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>EXPORT</div>
+          <span style={{fontSize:8,letterSpacing:1.4,color:"rgba(178,199,219,0.3)"}}>
+            {songSeq.length?"THE SONG":"THIS PATTERN"}</span>
         </div>
-      )}
+        <button data-export="midi" style={Object.assign({},mBtn,{marginBottom:7})}
+          onClick={()=>exportMIDI()}>MIDI</button>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:5}}>
+          <span style={{flex:1,fontSize:10,letterSpacing:1.4,fontWeight:700,
+            color:exporting?"rgba(178,199,219,0.3)":"rgba(212,226,240,0.7)"}}>MP3</span>
+          <span style={{fontSize:8,letterSpacing:1.2,color:"rgba(178,199,219,0.3)"}}>
+            {exporting?"BOUNCING…":CORE_ON?"PASSES · OFFLINE":"PASSES · REAL TIME"}</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+          {[1,2,4,8].map(n=>(
+            <button key={n} data-export={"mp3-"+n} disabled={exporting}
+              onClick={()=>{setExportLoops(n);exportMP3(n);}}
+              style={Object.assign({},mBtn,{padding:"9px 0",fontSize:11,
+                opacity:exporting?0.4:1,cursor:exporting?"wait":"pointer",
+                color:"rgba(226,236,247,0.8)"})}>×{n}</button>
+          ))}
+        </div>
+      </div>
 
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
@@ -11386,8 +11521,14 @@ export default function LoudLight(){
           AUDIO INTERRUPTED — TAP TO RESTORE
         </div>
       )}
+      {/* The toast clears the notch / Dynamic Island. It used to sit at a bare
+          top:10, which on a phone puts it UNDER the camera — and these carry
+          the only diagnosis there is when something refuses, so an unreadable
+          one is the same as no message at all (reported exactly that way, of a
+          SONG → PATTERN refusal). The interrupted-audio banner a few lines up
+          already had the inset; this is the same sum. */}
       {flash&&(
-        <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+        <div style={{position:"fixed",top:"calc(env(safe-area-inset-top, 0px) + 10px)",left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get
               when something server-side refuses, and half a sentence is no use. */}
           <div onClick={()=>{if(flashTone==="warn"){clearTimeout(flashTmr.current);setFlash("");}}}
@@ -11558,12 +11699,12 @@ export default function LoudLight(){
       {/* Pattern pill context menu */}
       {/* Pattern ops — the + button's hold menu. One mount, both platforms. */}
       {patternOpsMenu}
+      {addPatMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
       {layerOpsMenu}
       {paramOpsMenu}
       {scrubOverlay}
-      {exportMenuEl}
 
       {/* The BPM / ST / SWING drag overlays used to be three more copies of
           the readout, mounted here. They are `scrubOverlay` above now. */}
@@ -11736,7 +11877,7 @@ export default function LoudLight(){
               <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",justifyContent:"center"}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
                 <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>{playGlyph(11)}</button>
+                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>{playGlyph(11)}</button>
                 {stopBtn({width:38,height:38},11)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
@@ -12259,8 +12400,8 @@ export default function LoudLight(){
                    colour alone is a poor signal at 42px on a bright pavement,
                    and the dot reads even when the chip does not. */}
               <button data-save="1" data-dirty={dirty?"1":"0"}
-                aria-label={dirty?"Save — unsaved changes":"Save"}
-                title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
+                aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
+                title={saveTitle}
                 style={{flex:1,height:42,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
                   border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.12)"),borderRadius:9,
                   background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
@@ -12326,7 +12467,7 @@ export default function LoudLight(){
               ))}
               </div>
               <div style={{flex:"4 1 0",display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
-              <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
+              <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
                 {playGlyph(11)}
               </button>
               {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},13)}
@@ -12585,7 +12726,7 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
             <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
+              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
                 {playGlyph(13)}
               </button>
               {stopBtn({width:"100%",height:32,flexShrink:0},13)}
@@ -12615,8 +12756,8 @@ export default function LoudLight(){
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
                 <button data-save="1" data-dirty={dirty?"1":"0"}
-                  aria-label={dirty?"Save — unsaved changes":"Save"}
-                  title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
+                  aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
+                  title={saveTitle}
                   style={{flexShrink:0,height:40,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                     border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,
                     background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
