@@ -31,7 +31,7 @@ const LLCore=(()=>{
   function packPattern(pat,norm){
     const parts=[pat.parts.synth,pat.parts.lead,pat.parts.drums];
     const hs=parts.map(norm);
-    let size=16;
+    let size=20;   // header: magic, id, bars, master, bpm
     for(let l=0;l<2;l++){const W=hs[l].bars*16;size+=4+hs[l].bars*8+16*W*2+W*9;}
     const dm=parts[2].motion&&typeof parts[2].motion==="object"?parts[2].motion:null;
     {const W=hs[2].bars*16;size+=4+hs[2].bars*8+13*W*3+4+(dm?7*13*W*2:0);}
@@ -39,6 +39,9 @@ const LLCore=(()=>{
     const i32=v=>{dv.setInt32(o,v|0,true);o+=4;},f32=v=>{dv.setFloat32(o,+v||0,true);o+=4;},i16=v=>{dv.setInt16(o,v,true);o+=2;};
     i32(0x31504C4C);i32(pat.id|0);i32(Math.max(hs[0].bars,hs[1].bars,hs[2].bars));
     i32(pat.master==="synth"?1:pat.master==="lead"?2:pat.master==="drums"?3:0);
+    // The pattern's OWN tempo; 0 means inherit the global one. Keep this in
+    // step with ll_pattern_load and core/test/wire.h.
+    f32(pat.bpm>1?pat.bpm:0);
     for(let l=0;l<2;l++){
       const p=parts[l],h=hs[l],W=h.bars*16;
       i32(h.bars);for(let i=0;i<h.bars;i++)i32(h.lens[i]);for(let i=0;i<h.bars;i++)f32(h.mults[i]);

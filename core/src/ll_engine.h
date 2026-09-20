@@ -55,7 +55,11 @@ typedef struct {
   int hasMotion;
   int16_t motion[LL_NMOTION][LL_DRUM_ROWS][LL_MAX_COLS];
 } ll_dpart;
-typedef struct { int used, id, bars, master; ll_spart s[2]; ll_dpart d; } ll_pattern;
+/* `bpm` is the pattern's OWN tempo, and 0 means inherit the global one. Zero
+ * rather than a flag because a tempo of zero is not a tempo, so the sentinel
+ * cannot collide with a real value — and a pattern loaded from an older wire
+ * format zeroes to "inherit", which is what it always did. */
+typedef struct { int used, id, bars, master; float bpm; ll_spart s[2]; ll_dpart d; } ll_pattern;
 
 /* A synth voice — Bell.play, with its node graph flattened. */
 typedef struct {

@@ -18,7 +18,8 @@ typedef struct {
   uint8_t grid[13][LL_MAX_COLS], vel[13][LL_MAX_COLS], rat[13][LL_MAX_COLS];
   int hasMotion; int16_t motion[7][13][LL_MAX_COLS];
 } tdrm;
-typedef struct { int id, master; tsyn s[2]; tdrm d; } tpat;
+/* `bpm` 0 = inherit the global, exactly as ll_pattern means it. */
+typedef struct { int id, master; float bpm; tsyn s[2]; tdrm d; } tpat;
 static void tpat_init(tpat*p,int id,int bars){
   memset(p,0,sizeof *p); p->id=id;
   for(int l=0;l<2;l++){ p->s[l].bars=bars; for(int i=0;i<bars;i++){p->s[l].lens[i]=16;p->s[l].mults[i]=1;} 
@@ -29,7 +30,10 @@ static void tpat_init(tpat*p,int id,int bars){
 }
 static int tpat_bars(const tpat*p){ int b=p->d.bars; if(p->s[0].bars>b)b=p->s[0].bars; if(p->s[1].bars>b)b=p->s[1].bars; return b; }
 static void tpat_pack(const tpat*p,wbuf*w){
+  /* Header: keep in step with packPattern in core/host.js and the reader in
+   * ll_pattern_load. A mismatch is silent corruption, not an error. */
   w->n=0; wb_i32(w,0x31504C4C); wb_i32(w,p->id); wb_i32(w,tpat_bars(p)); wb_i32(w,p->master);
+  wb_f32(w,p->bpm);
   for(int l=0;l<2;l++){ const tsyn*s=&p->s[l]; int W=s->bars*16;
     wb_i32(w,s->bars); for(int i=0;i<s->bars;i++)wb_i32(w,s->lens[i]); for(int i=0;i<s->bars;i++)wb_f32(w,s->mults[i]);
     for(int r=0;r<16;r++)wb_bytes(w,s->grid[r],W); for(int r=0;r<16;r++)wb_bytes(w,s->durs[r],W);

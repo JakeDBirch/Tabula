@@ -45,6 +45,10 @@ const buildFixture=(scenario)=>({
     // A part SHORTER than the pattern, for the loop-wrap scenario: LOOP pins a
     // bar of the pattern, and the drums have to wrap it into their own length.
     if(${JSON.stringify(!!scenario.shortDrums)}){ A.parts.drums=resizePatBars(A.parts.drums,1); }
+    // A PER-PATTERN TEMPO. A carries one, B does not — so in a song the clock
+    // has to be re-priced at the entry boundary, which is the half that a
+    // single-pattern test cannot reach.
+    if(${JSON.stringify(scenario.patBpm||0)}){ A.bpm=${JSON.stringify(scenario.patBpm||0)}; }
     const patterns=[syncPatBars(A),syncPatBars(B)];
     // songMode is DERIVED from the song's contents now — the song plays when
     // there is a song — so "free-running" has to mean an EMPTY song, not a flag
@@ -193,6 +197,12 @@ const SCENARIOS=[
   // pattern and holds the song's place; `barLock` is what is off, so every part
   // runs its own full length and the master its full cycle.
   {name:'LOOP the whole pattern, song on',loop:2,song:true,seconds:9,horizon:8},
+  // A pattern carrying its OWN tempo, free-running: every onset in it is
+  // priced from 80bpm while the project says 120.
+  {name:'A at its own tempo (80 vs global 120)',song:false,patBpm:80,seconds:7,horizon:6},
+  // …and the same tempo inside a SONG, where B follows the global — so the
+  // clock changes at the entry boundary rather than once at the top.
+  {name:'per-pattern tempo, song on',song:true,patBpm:80,seconds:11,horizon:10},
 ];
 for(const sc of SCENARIOS){
   console.log('\n── '+sc.name+' ──');
@@ -202,6 +212,37 @@ for(const sc of SCENARIOS){
   const core=await replay(c.log,c.sr,sc.seconds);
   console.log(`   sr ${c.sr}, JS attacks ${j.att.length}, core attacks ${core.length}`);
   compare(j.att,core,c.sr,sc.horizon,sc.name);
+}
+
+// ── What a PER-PATTERN TEMPO means, not just that the two engines agree ───
+// The oracle matches JS against the core, so a tempo bug written into both
+// passes it — the same hole the loop-wrap silence went through. State the
+// behaviour outright instead: pattern A's grid is 16 steps to the bar, so at
+// 80bpm a step is 60/80/4 = 0.1875s and at 120 it is 0.125s. Measure the
+// SPACING of the onsets and it either reads the pattern's tempo or it doesn't.
+console.log('\n── a pattern plays at its OWN tempo ──');
+{
+  const at80=await captureJS({name:'x',song:false,patBpm:80},6);
+  const at120=await captureJS({name:'x',song:false},6);
+  // The drum part is a straight 16ths hat line, so consecutive CH onsets are
+  // one step apart. Take the median gap to shrug off the first/last partial.
+  const gaps=(a)=>{
+    const t=a.att.filter(x=>x.l===2&&x.row===7).map(x=>x.t).sort((p,q)=>p-q);
+    const g=[]; for(let i=1;i<t.length;i++)g.push(t[i]-t[i-1]);
+    g.sort((p,q)=>p-q); return g.length?g[g.length>>1]:0;
+  };
+  const g80=gaps(at80), g120=gaps(at120);
+  console.log('   median hat gap: 80bpm '+g80.toFixed(4)+'s, 120bpm '+g120.toFixed(4)+'s');
+  // The hat line is written every SECOND column (c+=2 in the fixture), so a
+  // gap is two steps: 2*60/bpm/4. Stated as the arithmetic rather than as a
+  // measured number, so it stays true if the fixture's tempo ever moves.
+  const want=(b)=>2*60/b/4;
+  ck(Math.abs(g120-want(120))<0.004,
+     'at the global tempo the grid is 120bpm ('+g120.toFixed(4)+'s, want '+want(120).toFixed(4)+')');
+  ck(Math.abs(g80-want(80))<0.006,
+     'a pattern carrying bpm 80 plays at 80 ('+g80.toFixed(4)+'s, want '+want(80).toFixed(4)+')');
+  ck(g80>0&&Math.abs(g80/g120-120/80)<0.03,
+     '  which is 1.5x slower than the same pattern at 120 (ratio '+(g80/g120).toFixed(3)+')');
 }
 
 // ── What pattern-loop MEANS, not just that the two engines agree ──────────

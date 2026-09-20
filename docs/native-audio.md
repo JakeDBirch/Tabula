@@ -338,6 +338,14 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
     are `oversample:"none"` now, which is also what the core does (its run at
     1×, sample-aligned with the dry). The DRIVE shaper keeps its `4x`: in
     series, a constant delay is just latency.
+- **The pattern wire header is 20 bytes**, not 16: magic, id, bars, master and
+  now **bpm** (float, 0 = inherit the global). A pattern may carry its own
+  tempo, and the core resolves it in `ctx_setup` — right after it picks the
+  pattern that is playing — rather than through `LL_P_BPM`, so in a song the
+  clock re-prices at the entry boundary with nothing posted from the host.
+  `packPattern` (core/host.js), `ll_pattern_load` and `core/test/wire.h` change
+  TOGETHER; the core reads a flat array, so a mismatch is silent corruption.
+  The oracle covers it free-running and inside a song.
 - **EXCITE's crossover corners** are shared constants (`LL_EX_*` in
   `core/ll.h`, `EX_*` in `src/loudlight.jsx`) for the reason the shelf corners
   used to be: a band that sits somewhere else in the other engine is a project

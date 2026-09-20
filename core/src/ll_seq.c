@@ -17,7 +17,7 @@ typedef struct {
    * a whole-pattern loop is inLoop without barLock: everything runs its own
    * full length, the song just doesn't advance. */
   ll_pattern*pat; int inSong, inLoop, barLock, loopBarIdx, loopOff;
-  int mLayer; ll_phead*mHead; int patLen; float absStep; int loopMasterLen, mLoopBar, loopBars;
+  int mLayer; ll_phead*mHead; int patLen; float absStep, bpm; int loopMasterLen, mLoopBar, loopBars;
 } ctx_t;
 
 static ll_pattern* find_pat(int id){ if(id<0)return 0; for(int i=0;i<LL_MAX_PATTERNS;i++)if(G.pat[i].used&&G.pat[i].id==id)return &G.pat[i]; return 0; }
@@ -89,7 +89,12 @@ static int build_ctx(ctx_t*c){
   c->loopOff=c->loopBarIdx*LL_COLS;   /* the PATTERN's bar; each part wraps it */
   c->mLayer=master_layer(cur);
   c->mHead=c->mLayer>=0?part_head(cur,c->mLayer):0;
-  c->absStep=G.sr*60.f/(G.p[LL_P_BPM]>1.f?G.p[LL_P_BPM]:1.f)/4.f;
+  /* THE PATTERN'S OWN TEMPO WINS, and it is resolved HERE rather than at the
+   * param, because in a song the pattern changes under the clock: ctx_setup
+   * runs per block and has already picked `cur`, so a tempo change lands on
+   * the entry that asked for it without the host being told anything. */
+  c->bpm=cur->bpm>1.f?cur->bpm:(G.p[LL_P_BPM]>1.f?G.p[LL_P_BPM]:1.f);
+  c->absStep=G.sr*60.f/c->bpm/4.f;
   /* The master is a part like any other and can be the SHORT one, so it wraps
    * the pinned bar into its own length exactly as the others do. */
   c->mLoopBar=0; c->loopMasterLen=LL_COLS;
@@ -112,7 +117,7 @@ static double master_dur(ctx_t*c,int i){
 }
 
 /* ── step players ───────────────────────────────────────────────────────── */
-static void play_synth_step(int layer,ll_pattern*P,int s,double at,double stepDur){
+static void play_synth_step(int layer,ll_pattern*P,int s,double at,double stepDur,float bpm){
   ll_spart*part=&P->s[layer];
   const float*lp=G.lp[layer];
   float ratio=ll_exp2(G.p[LL_P_TRANSPOSE]/12.f);
@@ -121,7 +126,8 @@ static void play_synth_step(int layer,ll_pattern*P,int s,double at,double stepDu
   int rhy=sp?(sp->rhy<1?1:sp->rhy):1; int ratch=rhy;
   double subDur=stepDur/ratch;
   int monoOne=lp[LL_L_MONO]>0.5f;
-  float bpm=G.p[LL_P_BPM]>1.f?G.p[LL_P_BPM]:1.f;
+  /* The EFFECTIVE tempo, passed in: the layer glide is "up to ~1 beat", and
+   * a beat belongs to whatever tempo the pattern is actually playing at. */
   for(int r=0;r<LL_ROWS;r++){
     if(!part->grid[r][s])continue;
     int dur=part->durs[r][s]<1?1:part->durs[r][s];
@@ -212,7 +218,7 @@ static void part_tick(ctx_t*c,int layer){
   float sw=G.p[LL_P_SWING];
   double playAt=(sw>0.f&&(s%2==1))?at+(sw/100.f)*(stepDur/3.0):at;
   int audible=layer==LL_DRUMS?G.p[LL_P_DRUM_AUDIBLE]>0.5f:G.lp[layer][LL_L_AUDIBLE]>0.5f;
-  if(audible){ if(layer==LL_DRUMS)play_drum_step(P,s,playAt,stepDur); else play_synth_step(layer,P,s,playAt,stepDur); }
+  if(audible){ if(layer==LL_DRUMS)play_drum_step(P,s,playAt,stepDur); else play_synth_step(layer,P,s,playAt,stepDur,c->bpm); }
   ev_push(LL_EV_STEP,layer,s,playAt);
   G.playPatId=P->id;            /* truth; ui_sync below handles delivery */
   G.cur[layer].step=c->barLock?(st+1)%loopLen:(st+1)%len;

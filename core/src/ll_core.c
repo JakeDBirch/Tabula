@@ -213,6 +213,10 @@ int ll_pattern_load(int slot,int bytes){
   static ll_pattern tmp; zero(&tmp,sizeof tmp);
   if(rd_i32(&r)!=0x31504C4C)return -1;
   tmp.id=rd_i32(&r); tmp.bars=rd_i32(&r); tmp.master=rd_i32(&r);
+  /* Per-pattern tempo. Keep this read in step with packPattern in
+   * core/host.js AND with core/test/wire.h: the core reads a flat array, so a
+   * mismatch here is silent corruption rather than an error. */
+  tmp.bpm=rd_f32(&r);
   for(int l=0;l<2;l++){
     ll_spart*s=&tmp.s[l];
     if(rd_head(&r,&s->h))return -2;

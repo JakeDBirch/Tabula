@@ -386,6 +386,56 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   finishes; everything else loops to fill and is snapped at the boundary, as
   before. `cycleBars(pat)` is what the song page's bar dots count — bars the
   pattern *sounds* for, so a dot can't be drawn that the playhead never lights.
+- **A PATTERN MAY CARRY ITS OWN TEMPO** (`pat.bpm`), set from the pattern
+  chip's hold menu. Absent — which is every pattern ever saved — means INHERIT
+  the global, so this is additive by construction and a project that never
+  touches it is unchanged. `patBpm(pat, global)` is the one resolver and
+  `hasOwnBpm` the one test; nothing reads `pat.bpm` directly.
+  - **It is resolved where the CLOCK is priced, not at the param.** In a song
+    the playing pattern changes under the clock, so the tempo has to change
+    with the arrangement, entry by entry — which means the scheduler cannot
+    know the step duration until it knows which pattern is playing.
+    `absStepDur` therefore moved BELOW `curPat` in the JS tick (above it, Babel
+    hoists the `var` and every step is priced from `undefined`), and the core
+    sets `c->bpm` in `ctx_setup` right after it picks `cur`. No host round trip,
+    no message, nothing to arrive late.
+  - **The wire format grew a field**, which is the half that is easy to forget:
+    the pattern header went from 16 to 20 bytes. `packPattern` in
+    `core/host.js`, the reader in `ll_pattern_load`, and `core/test/wire.h`'s
+    own packer change TOGETHER — the core reads a flat array, so a mismatch is
+    silent corruption rather than an error. `0` means inherit, because a tempo
+    of zero is not a tempo and so the sentinel cannot collide with a real value.
+  - **INHERIT IS THE ABSENCE OF THE FIELD, not a copy of the number.**
+    `↺ GLOBAL` deletes it rather than writing today's global, because only the
+    absent one keeps following when the global moves later — the same
+    persist-a-CHOICE-not-a-state lesson the row keys taught. Tested both ways:
+    the global moving drags an inheriting pattern with it and leaves an
+    overriding one alone.
+  - **The layer glide follows it too.** That knob is "up to ~1 beat", and a
+    beat belongs to whatever tempo is sounding, so the effective bpm is passed
+    into `playSynthLayerStep` / `play_synth_step` rather than read off
+    `bpmR` / `LL_P_BPM` inside them.
+  - **MIDI export emits a tempo event per entry** when the effective tempo
+    changes. A per-pattern tempo is compositional rather than a performance
+    layer (which is why `speedMult` is still deliberately NOT baked in), and a
+    Standard MIDI File has a tempo track built for exactly this.
+  - **SONG → PATTERN refuses a song with mixed tempos**, and this one is a real
+    limit rather than a missing feature. Speed is per BAR, so a stretched copy
+    expresses it exactly; tempo is one number for a whole pattern, and the
+    flattened result is one pattern. Compared as the raw field, so two entries
+    that both follow the global agree whatever the global is.
+  - **Two honest limits.** The tempo-synced DELAY still runs at the global bpm:
+    it is a shared bus with a ringing tail, and re-timing it at every entry
+    boundary would click (delay time changes jump — see the core doc). And
+    there is **no cue outside the menu** that a pattern is overriding: the
+    pattern chip is its NAME and nothing else by rule, and putting a second
+    number on the TEMPO chip would mean the chip showing one tempo while
+    editing another.
+  - Covered twice over: `core/test/oracle.mjs` has two scenarios (free-running
+    and inside a song) proving the ENGINES AGREE, plus an absolute check that
+    a pattern carrying bpm 80 really puts its onsets 2×60/80/4 apart — because
+    the oracle alone would pass a bug written into both. `_pattempo.mjs` covers
+    the control, inheritance, undo/redo and the relaunch.
 - **The master is editable and visible** in a pattern chip's hold menu. It
   decides the pattern's length, so leaving it purely implicit would mean a
   pattern playing a length you could neither account for nor change, made
@@ -802,6 +852,12 @@ could only find by tapping a layer button you were ALREADY on.
   switching tab moved the ground under you — and that height put the sheet's top
   edge 12px from the top of the screen, under the notch, where the first row of
   the mixer could not be reached at all.
+- **ESC closes a HOLD MENU too**, and that was missing rather than decided:
+    with a pattern, bar or `+` menu open, ESC fell through to the transport, so
+    the keyboard way of dismissing a menu STOPPED THE SONG. The menus now take
+    the keyboard the way the PROJECT modal does — ESC closes and returns. (The
+    branch reads `patMenu`/`barMenu`/`addMenu` directly, which is safe because
+    that effect has no dep array and re-registers every render.)
 - **It has a ✕**, and ESC closes any sheet. A nearly full-screen sheet leaves no
   reachable backdrop, so the biggest sheet was the one you could not tap outside
   of. Same lesson as the landscape bar menu.
@@ -1218,11 +1274,28 @@ rest of the width unused, which is exactly the room this needs.
   alone is ~61px so the mixer cannot give the width back, and a knob is not a
   control at 80px. `_master.mjs` asserts BOTH arrangements by measured
   position: to the right on desktop, below on a 15 and an SE.
-- **DRIVE and EXCITE were two `SynthSection`s and are now one.** Inside it they
-  keep their names as **rules** — a heading with a line through the spare width
-  — rather than as boxes, which says "these belong together" at a fraction of
-  the height two bordered sections cost. That height is what makes the whole
-  stage fit beside the faders at all.
+- **DRIVE and EXCITE were two `SynthSection`s and are now one.**
+- **THE FOUR AMOUNTS ARE VERTICAL FADERS IN ONE ROW.** Four full-width
+  `KnobSlider`s made the panel 410px tall; the same four upright are **306px**
+  and no wider, because a fader spends HEIGHT — which this panel has going
+  spare beside a 250px mixer — instead of stacking rows it does not. It also
+  puts MOJO in the same idiom as the layer faders immediately to its left,
+  which is what it is: four amounts over the mix. `mojoFader` is ONE body with
+  four mounts, on the mixer strip's drag contract (ballistic, double-tap to the
+  default, `HIST.mark` on the first real change rather than on the press).
+  - The two halves are told apart by a **rule between them** — one fader, a
+    divider, three faders — rather than by a heading above each, which would
+    cost two rows to say what the gap already says.
+  - **The exciter prose went with the rotation.** THUMP / BODY / AIR are named
+    for what they do and each reads its own word, so a paragraph restating that
+    is the duplicate readout this app keeps deleting — and it cost four lines
+    of exactly the height the upright faders had just bought back. The FLAVOUR
+    line stays: three curves are not guessable from three nouns, and it changes
+    with the choice.
+  - **A selector that names a DOM SHAPE breaks when the shape changes.**
+    `_master.mjs` read the word readout as `children[0].children[1]`, which was
+    KnobSlider's internals; rotating the panel deleted that node. It reads
+    `data-knobword` now, and `data-knobtrack` is the drag target.
 
 **IT IS CHARACTER, NOT CORRECTION, AND NOTHING IN IT SHOWS A NUMBER.** This
 shipped once as a bus compressor with THRESH / RATIO / ATTACK / RELEASE /
@@ -1458,7 +1531,9 @@ most: you dial a setting in, flip it off, flip it back, and decide.
   selector failing later. The lesson is the one already in here: **grep every
   removed identifier**, and read `pageerror` in the harness rather than only
   the assertions.
-- `data-knob` / `data-knobval` on every `KnobSlider`, `data-mojo-sw` on the
+- `data-patbpm` on the pattern menu's tempo cell (`"global"` or the number),
+  `data-knobtrack` / `data-knobword` on each MOJO fader, `data-knob` /
+  `data-knobval` as before, `data-mojo-sw` on the
   bypass switch, `data-mojo` / `data-mixer` on the two blocks of the MIX row
   (a wrap has no state to read, only positions, so measuring them is the only
   way to assert the layout), `data-drivechar` on the flavour row, and

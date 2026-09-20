@@ -753,6 +753,21 @@ const partBars=part=>Math.max(1,Math.min(MAX_BARS,Math.round(partWidth(part)/COL
 // The pattern's own `bars` is the LONGEST part — it's what the master clock
 // uses for the cycle everything re-synchronises on, and what the song page
 // draws as a slot's length. Re-derive it after any part changes shape.
+// ── A PATTERN MAY CARRY ITS OWN TEMPO ────────────────────────────────────
+// `pat.bpm` absent (or <=1) means INHERIT the global, which is what every
+// pattern ever saved means, so this is additive by construction. A number
+// overrides it for as long as that pattern is the one playing — in a song the
+// tempo therefore changes with the arrangement, entry by entry.
+//
+// Resolved in ONE place, and the core has the twin (`c->bpm` in ll_seq.c).
+// Nothing reads `pat.bpm` directly.
+const BPM_MIN=30, BPM_MAX=300;
+const patBpm=(pat,glob)=>{
+  const v=pat&&pat.bpm;
+  return (typeof v==="number"&&v>1)?Math.max(BPM_MIN,Math.min(BPM_MAX,v)):glob;
+};
+const hasOwnBpm=(pat)=>typeof (pat&&pat.bpm)==="number"&&pat.bpm>1;
+
 const syncPatBars=(p)=>{
   if(!p||!p.parts)return p;
   let b=1;
@@ -1051,6 +1066,20 @@ const collapseBlockers=(entries,patternCount)=>{
   // There is deliberately no speed refusal here any more. Mixed speeds are
   // representable — see collapseEntries — and refusing them meant the button
   // only worked on songs simple enough not to need it.
+  //
+  // MIXED TEMPOS are a different matter, and this one IS a real limit. Speed
+  // is per bar, so a stretched copy expresses it exactly; TEMPO is one number
+  // for a whole pattern, and the flattened result is ONE pattern — so a song
+  // whose entries run at different tempos cannot be written onto a single grid
+  // without changing what it sounds like. Refusing is the honest answer;
+  // flattening it quietly would break the one promise this button makes.
+  // Compared as the RAW field (absent = follows the global), which is exactly
+  // the right test: two entries that both follow the global agree whatever the
+  // global happens to be.
+  {
+    const tempos=[...new Set(entries.map(e=>hasOwnBpm(e)?Math.round(e.bpm):0))];
+    if(tempos.length>1)bad.push("THE SONG USES "+tempos.length+" DIFFERENT TEMPOS");
+  }
   return Object.assign({blockers:bad},plan);
 };
 // Flatten the arrangement onto ONE grid.
@@ -1186,6 +1215,10 @@ const collapseEntries=(entries,name)=>{
     dst.barLens=Array.from({length:totalBars},(_,i)=>Math.max(0,Math.min(COLS,totalCols-i*COLS)));
     dst.speedMult=dm;
   }
+  // Every entry agrees on the tempo (collapseBlockers refuses otherwise), so
+  // the flattened copy inherits it — including "follows the global", which is
+  // the absence of the field.
+  if(entries[0]&&hasOwnBpm(entries[0]))out.bpm=entries[0].bpm;
   // The drum bus settings aren't per-column, so they come from the first entry.
   const first=entries[0];
   if(first&&first.parts.drums){
@@ -4937,6 +4970,17 @@ export default function LoudLight(){
         if(e.key==="Escape"){e.preventDefault();setMenuOpen(false);setConfirmAction(null);}
         return;
       }
+      // A hold menu takes the keyboard the same way the PROJECT modal does:
+      // ESC closes it and nothing else happens. Without this ESC reached the
+      // transport instead, so dismissing a menu STOPPED THE SONG — and the
+      // menus were the one dismissable thing in the app with no keyboard way
+      // out. (Safe to read these directly: this effect has no dep array, so it
+      // re-registers every render and the values are never stale.)
+      if(!isEditable&&e.key==="Escape"&&(patMenu||barMenu||addMenu)){
+        e.preventDefault();
+        setPatMenu(null);setDelArm(null);setBarMenu(null);setAddMenu(null);
+        return;
+      }
       // Spacebar is the PLAY/PAUSE button's keyboard twin — the same three-state
       // toggle, not the old play/stop one, so the key and the button under it
       // cannot mean different things. ESC is stop-and-rewind, the keyboard
@@ -6126,6 +6170,20 @@ export default function LoudLight(){
     pushHistory();
     setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
   };
+  // A pattern's OWN tempo. `null` deletes the field rather than storing a
+  // number equal to the global: those are different intentions, and only the
+  // absent one keeps following the global when the global moves. It takes the
+  // id explicitly rather than reading activePatternId — the menu does select
+  // the pattern it opens on, but a setter that says which pattern it means
+  // cannot be wrong about it later.
+  const setPatternBpm=(id,v)=>{
+    setPatterns(ps=>ps.map(p2=>{
+      if(p2.id!==id)return p2;
+      const n=Object.assign({},p2);
+      if(v==null)delete n.bpm; else n.bpm=Math.max(BPM_MIN,Math.min(BPM_MAX,Math.round(v)));
+      return n;
+    }));
+  };
   // ── BAR OPS — a bar chip's second function ──────────────────────────────
   // The ops that act on ONE BAR hang off that bar's chip, which is the thing
   // they act on. They used to sit on the pattern +'s menu alongside the
@@ -6484,7 +6542,7 @@ export default function LoudLight(){
     const cur=patterns.find(x=>x.id===pm.id)||patterns.find(x=>x.id===activePatternId)||patterns[0];
     if(!cur)return null;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(230,vw-16),H=250;
+    const W=Math.min(230,vw-16),H=330;
     const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
     const close=()=>{setPatMenu(null);setDelArm(null);};
@@ -6531,6 +6589,57 @@ export default function LoudLight(){
               would mean a pattern that plays a length you cannot account for
               and cannot change. It is claimed by whichever layer you composed
               first; this is the way to say otherwise. */}
+          {/* A PATTERN MAY CARRY ITS OWN TEMPO. Absent it follows the global
+              one, which is what every pattern has always done — so this is
+              additive, and a project that never touches it is unchanged. In a
+              SONG the tempo therefore changes with the arrangement, entry by
+              entry, because the clock is priced from whichever pattern is
+              playing rather than from a param. */}
+          {head(hasOwnBpm(cur)?"TEMPO — THIS PATTERN":"TEMPO — FOLLOWING GLOBAL")}
+          <div style={{display:"grid",gridTemplateColumns:"1.35fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {/* Drag it. A number is the one thing on a pattern you DO want to
+                aim at, so unlike MOJO this shows one — the ladder-of-words rule
+                is about quantities you can only judge by ear. */}
+            <div data-patbpm={hasOwnBpm(cur)?String(cur.bpm):"global"}
+              style={{padding:"7px 0 6px",background:"rgba(10,18,28,0.92)",cursor:"ns-resize",
+                touchAction:"none",userSelect:"none",textAlign:"center"}}
+              onPointerDown={e=>{
+                e.stopPropagation();
+                // CAPTURE THE ELEMENT. React reuses its synthetic event, so
+                // `e.currentTarget` is NULL by the time the pointerup handler
+                // runs — the listeners then never come off and the teardown
+                // throws instead. Read it once, here, while it is still live.
+                const el=e.currentTarget;
+                el.setPointerCapture(e.pointerId);
+                let val=patBpm(cur,bpm), last=e.clientY, marked=false;
+                const mv=ev=>{
+                  const d=last-ev.clientY; last=ev.clientY;
+                  // Same gearing as the GLOBAL bpm scrubber (0.5), so the same
+                  // crawl moves a pattern's tempo by the same amount it moves
+                  // the project's. Two tempo controls that geared differently
+                  // would be two different feels for one quantity.
+                  val=Math.max(BPM_MIN,Math.min(BPM_MAX,val+ballisticNudge(d,0.5)));
+                  // Mark on the first REAL change of the gesture, never on the
+                  // press: pushHistory does not dedupe, so a snapshot per
+                  // pointerdown fills the ring with no-ops.
+                  if(!marked){marked=true;pushHistory();}
+                  setPatternBpm(cur.id,val);
+                };
+                const up=()=>{
+                  el.removeEventListener("pointermove",mv);
+                  el.removeEventListener("pointerup",up);
+                  el.removeEventListener("pointercancel",up);
+                };
+                el.addEventListener("pointermove",mv);
+                el.addEventListener("pointerup",up);
+                el.addEventListener("pointercancel",up);
+              }}>
+              <div style={{fontSize:17,fontWeight:700,fontVariantNumeric:"tabular-nums",
+                color:hasOwnBpm(cur)?"#e6b872":"rgba(178,199,219,0.45)"}}>{Math.round(patBpm(cur,bpm))}</div>
+              <div style={{fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.3)"}}>BPM · DRAG</div>
+            </div>
+            {cell("\u21ba GLOBAL",()=>{pushHistory();setPatternBpm(cur.id,null);},!hasOwnBpm(cur))}
+          </div>
           {head("MASTER — SETS THE LENGTH")}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {PART_LAYERS.map(l=>{
@@ -8235,9 +8344,23 @@ export default function LoudLight(){
     // and this export is the underlying composition.
     const _midiCellSteps=(bar)=>_patStepsOf(bar.synth);
     let _runTick=0;
+    // A per-pattern TEMPO is not a performance layer the way speedMult is — it
+    // is compositional, and a Standard MIDI File has a tempo track built for
+    // exactly this. So each entry emits a tempo meta event when its effective
+    // tempo differs from the one already running; a song at one tempo emits
+    // nothing beyond the header event it always did.
+    let _runBpm=bpm;
     bars.forEach((bar)=>{
       const barTick=_runTick;
       const cellSteps=_midiCellSteps(bar);
+      {
+        const eb=Math.round(patBpm(patterns.find(x=>x.id===bar.synth),bpm));
+        if(eb!==Math.round(_runBpm)){
+          const u=Math.round(60000000/Math.max(1,eb));
+          meta.push({tick:barTick,data:[0xFF,0x51,0x03,(u>>16)&255,(u>>8)&255,u&255]});
+          _runBpm=eb;
+        }
+      }
       _runTick+=cellSteps*TICKS_16;
       [["synth",synthEv,0],["lead",leadEv,1]].forEach(([layer,ev,ch])=>{
         const pat=_partOf(bar[layer],layer);
@@ -8580,7 +8703,11 @@ export default function LoudLight(){
   // mid-note (FLT/OCT/GLIDE) mods for tied notes — i.e. everything the
   // synth-track main path used to do, but per-layer so each layer's plays
   // are independent (and per-pat speedMult can apply correctly).
-  const playSynthLayerStep=(layer,pat,s,at,stepDur)=>{
+  // `stepBpm` is the EFFECTIVE tempo of the pattern being played, passed in
+  // rather than read off bpmR: a pattern may carry its own, and the layer
+  // glide is "up to ~1 beat" — a beat belongs to whatever tempo is sounding.
+  // The C twin takes it the same way (play_synth_step's `bpm` argument).
+  const playSynthLayerStep=(layer,pat,s,at,stepDur,stepBpm)=>{
     if(!pat||!pat.grid)return;
     const layerLP = layerParamsR.current[layer];
     const freqs = curFreqsR.current;
@@ -8624,7 +8751,7 @@ export default function LoudLight(){
       // a step-glide note uses whichever glide time is longer.
       const layerGlide01=Math.max(0,Math.min(100,layerLP.glide||0))/100;
       const stepGlideTime=(glidePct/100)*stepDur; // 50% == the old fixed 1/32 note
-      const layerGlideTime=layerGlide01*(60/bpmR.current); // up to ~1 beat
+      const layerGlideTime=layerGlide01*(60/stepBpm); // up to ~1 beat
       const usePrev=layerLastGlideR.current[layer]||layerGlide01>0;
       const prevF=usePrev?(layerLastFreqR.current[layer]??null):null;
       const glideTime=(prevF&&prevF!==actualF)
@@ -8795,10 +8922,6 @@ export default function LoudLight(){
       return;
     }
     const LOOKAHEAD=0.1; // seconds ahead to schedule
-    // Master clock = absolute, BPM-derived. NO per-pat multiplier here.
-    // Each pattern plays at its own speedMult as an independent multiplier
-    // on this clock — see playSynthLayerStep / playDrumStep call sites below.
-    const absStepDur=60/bpmR.current/4;
 
     // ── CATCH-UP GUARD — a lookahead scheduler must never schedule into the
     // PAST. If the main thread stalls (a big render, a GC pause, iOS handing
@@ -8857,6 +8980,17 @@ export default function LoudLight(){
     if(inLoop){const lp=allPats.find(p=>p.id===loopPatR.current);if(lp)curPat=lp;}
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
+    // Master clock = absolute, tempo-derived. NO per-pat speed multiplier here;
+    // each pattern plays at its own speedMult as an independent multiplier on
+    // this clock (see the playSynthLayerStep / playDrumStep call sites below).
+    //
+    // It is computed HERE, below curPat, because a pattern may carry its own
+    // tempo — so the clock cannot be priced until it is known which pattern is
+    // playing, and in a song that changes entry by entry. Declared above
+    // `curPat` it would read a Babel-hoisted `var` and price every step from
+    // `undefined`; declared here it simply follows the arrangement.
+    const curBpm=patBpm(curPat,bpmR.current);
+    const absStepDur=60/curBpm/4;
     // LOOP cycles ONE bar of whatever pattern is playing (the song's current
     // entry in song mode, the pattern you're editing otherwise), in every part,
     // so you can sit on it and work. The bar is the one that was visible when
@@ -8961,7 +9095,7 @@ export default function LoudLight(){
         const onTime=playAt>=ctx.currentTime-lateTol;
         if(onTime&&isLayerAudibleR.current(layer)){
           if(layer==="drums")playDrumStep(pat,s,playAt,layerStepDur);
-          else playSynthLayerStep(layer,pat,s,playAt,layerStepDur);
+          else playSynthLayerStep(layer,pat,s,playAt,layerStepDur,curBpm);
         }
         // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
@@ -11699,15 +11833,63 @@ export default function LoudLight(){
         background:on?C_MASTER+"22":"transparent",
         color:on?C_MASTER:C_MASTER+"77"}}>{on?"ON":"BYPASSED"}</button>
   );
-  // The two halves are still two halves — saturation, then harmonics — so
-  // they keep their names as RULES inside the panel rather than as boxes
-  // around it. A heading with a line through the spare width says "these
-  // belong together" at a fraction of the height two bordered sections cost,
-  // which is what makes the whole stage fit beside the faders.
-  const mojoRule=(label)=>(
-    <div style={{display:"flex",alignItems:"center",gap:7,marginTop:2}}>
-      <span style={{fontSize:8,letterSpacing:1.6,fontWeight:700,color:C_MASTER+"AA"}}>{label}</span>
-      <span style={{flex:1,height:1,background:C_MASTER+"22"}}/>
+  // The two halves are still two halves — saturation, then harmonics — but
+  // upright they are told apart by a RULE BETWEEN THEM rather than by two
+  // headings above them: one fader, a divider, three faders. A heading per
+  // half would cost two more rows to say what the gap already says, which is
+  // the height the rotation was for.
+  // THE FOUR AMOUNTS ARE VERTICAL FADERS IN ONE ROW, not four stacked knobs.
+  // Four full-width KnobSliders made the panel 410px tall; the same four
+  // upright are ~250px and no wider, because a fader spends HEIGHT — which
+  // this panel has going spare beside a 236px mixer — instead of stacking
+  // rows it does not. It also puts MOJO in the same idiom as the layer faders
+  // immediately to its left, which is what it is: four amounts over the mix.
+  //
+  // ONE BODY, four mounts. The drag contract is the mixer strip's and the
+  // knob's: ballistic relative motion, double-tap back to the default, and
+  // HIST.mark on the first REAL change of the gesture rather than on the press
+  // (pushHistory does not dedupe, so a snapshot per pointerdown fills the ring
+  // with no-ops and undo looks dead for several presses).
+  const mojoFader=(label,value,onChange,words,def)=>(
+    <div key={label} data-knob={label} data-knobval={value} data-knobword={mojoWord(value,words)}
+      style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+      <span style={{fontSize:8,letterSpacing:1.2,fontWeight:700,color:C_MASTER+"BB"}}>{label}</span>
+      <div data-knobtrack={label}
+        style={{width:16,height:132,background:"rgba(186,208,230,0.07)",borderRadius:8,
+          position:"relative",cursor:"ns-resize",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          if(isDoubleTap(e,"mojo"+label)){if(value!==def){HIST.mark();onChange(def);}return;}
+          // Capture the element: React reuses its synthetic event, so
+          // e.currentTarget is null by the time pointerup runs.
+          const el=e.currentTarget;
+          el.setPointerCapture(e.pointerId);
+          const dim=el.getBoundingClientRect().height;
+          let cur=value,last=e.clientY,marked=false;
+          const mv=ev=>{
+            const pd=last-ev.clientY; last=ev.clientY;   // up = more
+            cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            if(!marked&&Math.round(cur)!==value){marked=true;HIST.mark();}
+            onChange(Math.round(cur));
+          };
+          const up=()=>{
+            el.removeEventListener("pointermove",mv);
+            el.removeEventListener("pointerup",up);
+            el.removeEventListener("pointercancel",up);
+          };
+          el.addEventListener("pointermove",mv);
+          el.addEventListener("pointerup",up);
+          el.addEventListener("pointercancel",up);
+        }}>
+        <div style={{position:"absolute",left:0,right:0,bottom:0,height:value+"%",
+          background:C_MASTER+"99",borderRadius:8}}/>
+        <div style={{position:"absolute",left:-4,right:-4,height:7,bottom:`calc(${value}% - 3.5px)`,
+          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+C_MASTER+"88"}}/>
+      </div>
+      {/* The word, not the number — see the section note. At this width it is
+          the one thing that has to stay legible, so it gets its own line. */}
+      <span style={{fontSize:7,letterSpacing:0.8,fontWeight:700,textAlign:"center",
+        color:value>0?C_MASTER+"CC":"rgba(178,199,219,0.28)"}}>{mojoWord(value,words)}</span>
     </div>
   );
   // data-mojo / data-mixer are the harness's hooks for WHERE these two sit:
@@ -11722,17 +11904,16 @@ export default function LoudLight(){
             path — legible, still adjustable, and saying without a word that
             what you are turning is not currently being heard. */}
         <div style={{opacity:mojoOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
-          {mojoRule("DRIVE")}
           {/* The flavour is the first decision and the one you make rarely, so
-              it sits above the knob rather than behind a menu. Three words, and
-              they are three genuinely different curves — see ll_shape. */}
+              it sits above the faders rather than behind a menu. Three words,
+              and they are three genuinely different curves — see ll_shape. */}
           <div data-drivechar={driveChar} style={{display:"flex",gap:4}}>
             {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
               const on=driveChar===i;
               return(
                 <button key={lbl} aria-pressed={on}
                   onClick={()=>{if(driveChar!==i){pushHistory();setDriveChar(i);}}}
-                  style={{flex:1,minWidth:0,padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+                  style={{flex:1,minWidth:0,padding:"6px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
                     fontSize:9,fontWeight:700,letterSpacing:1.4,
                     border:"1px solid "+(on?C_MASTER:C_MASTER+"30"),
                     background:on?C_MASTER+"22":"transparent",
@@ -11740,30 +11921,29 @@ export default function LoudLight(){
               );
             })}
           </div>
-          {/* One knob over a fixed glue compressor AND a saturator, the way a
-              console's input gain is: it scales the signal INTO the curve and
-              back out, so what changes is where on the curve you are. */}
-          <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={SESSION_DEFAULTS.driveAmt}
-            onChange={setDriveAmt} display={mojoWord(driveAmt,W_DRIVE)} accent={C_MASTER}/>
-          <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
-            {driveChar===0?"Tape: soft, loses a little top, gains a little bottom."
-             :driveChar===1?"Tube: asymmetric, so it makes even harmonics. Warm."
-             :"Clip: clean until it isn't. A wall, not a curve."}
+          {/* DRIVE is one knob over a fixed glue compressor AND a saturator,
+              the way a console's input gain is; THUMP / BODY / AIR are three
+              generators each listening to one band and adding its harmonics
+              back. The rules name the two halves without boxing them. */}
+          <div style={{display:"flex",alignItems:"flex-end",gap:6,paddingTop:2}}>
+            {mojoFader("DRIVE",driveAmt,setDriveAmt,W_DRIVE,SESSION_DEFAULTS.driveAmt)}
+            <div style={{width:1,alignSelf:"stretch",background:C_MASTER+"22",margin:"14px 2px 18px"}}/>
+            {mojoFader("THUMP",exThump,setExThump,W_THUMP,SESSION_DEFAULTS.exThump)}
+            {mojoFader("BODY", exBody, setExBody, W_BODY, SESSION_DEFAULTS.exBody)}
+            {mojoFader("AIR",  exAir,  setExAir,  W_AIR,  SESSION_DEFAULTS.exAir)}
           </div>
-          {mojoRule("EXCITE")}
-          {/* Three generators, each listening to one band and adding its
-              HARMONICS back. Named for what they do to the sound, not for the
-              frequencies they sit on — a corner in Hz is the wrong answer to
-              "make the bass land on a phone". */}
-          <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={SESSION_DEFAULTS.exThump}
-            onChange={setExThump} display={mojoWord(exThump,W_THUMP)} accent={C_MASTER}/>
-          <KnobSlider label="BODY" value={exBody} min={0} max={100} def={SESSION_DEFAULTS.exBody}
-            onChange={setExBody} display={mojoWord(exBody,W_BODY)} accent={C_MASTER}/>
-          <KnobSlider label="AIR" value={exAir} min={0} max={100} def={SESSION_DEFAULTS.exAir}
-            onChange={setExAir} display={mojoWord(exAir,W_AIR)} accent={C_MASTER}/>
-          <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
-            Harmonics, not tone controls. THUMP makes bass you can hear on a
-            phone; AIR makes detail that was not there to lift.
+          {/* ONE line, and only the one the controls cannot say themselves.
+              The exciter prose went with the rotation: THUMP / BODY / AIR are
+              already named for what they do and each reads its own word, so a
+              paragraph restating that is the duplicate readout this app keeps
+              deleting — and here it cost four lines of the height the upright
+              faders had just bought back. The FLAVOUR line stays because three
+              curves are not guessable from three nouns, and it changes with
+              the choice. */}
+          <div style={{fontSize:8,letterSpacing:0.6,lineHeight:1.45,color:"rgba(178,199,219,0.32)"}}>
+            {driveChar===0?"TAPE: soft, loses a little top, gains a little bottom."
+             :driveChar===1?"TUBE: asymmetric, so it makes even harmonics. Warm."
+             :"CLIP: clean until it isn't. A wall, not a curve."}
           </div>
         </div>
       </div>
