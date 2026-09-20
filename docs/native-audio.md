@@ -53,7 +53,7 @@ on a device.
 | `src/ll_seq.c` | per-part cursors over `partSeq`, per-bar lengths and speeds, master cycle, song, LOOP, swing, ratchets, tied-note mods, glide state, drum MOTION overlays | `scheduler`, `playSynthLayerStep`, `playDrumStep` |
 | `src/ll_synth.c` | the synth voice: VCO×2 + sub, spread, VCF (LP, Q in dB), VCA and filter envelopes, mid-note FLT/OCT/GLIDE automation, mono choke, sends | `Bell.play` |
 | `src/ll_drums.c` | 13 synthesised voices, sampler (round-robin / velocity layers / gate), per-voice strips (filter, saturation, level, pan, sends), OH choke | `DrumEngine` |
-| `src/ll_fx.c` | stereo echo with HP/LP in the loop, Schroeder 8-comb reverb (tap before the shelves, LFO'd lengths), master gain, limiter | `Bell.init` |
+| `src/ll_fx.c` | stereo echo with HP/LP in the loop, Schroeder 8-comb reverb (tap before the shelves, LFO'd lengths), master gain, bus compressor, 3-band master EQ, limiter | `Bell.init` |
 | `src/ll_dsp.h` | biquad (Web Audio semantics), AudioParam-style automation, polyBLEP oscillator, delay line, noise, smoothers | — |
 | `src/ll_math.h` | exp2 / log2 / pow / sin / tanh with no libm | — |
 | `core/host.js` | the web host: wire packer, the worklet processor (as a string), `CoreHost`, and the `Bell` / `Drums` facades | — |
@@ -236,6 +236,21 @@ exists) the core is always on.
     non-silent, under 0dBFS, every attack on the grid, a WAV to listen to.
   - `wasm.mjs` — the same pattern through the JS packer into the wasm, and
     the render compared **sample for sample** against the native one.
+  - `master.c` — the **master bus**, which is the half the oracle structurally
+    cannot see: the oracle matches ATTACKS, and a compressor and an EQ change
+    none of them, so a stage that silently did nothing would pass every
+    scenario there is. This renders the same bar several ways and asserts what
+    you would HEAR — that OFF is bit-identical to no master bus at all (with
+    the values set, so it is the SWITCH being tested, not the defaults), that
+    each shelf tilts the balance the way it names, and that a 20dB step at the
+    input comes out smaller than 20dB with the compressor engaged, which is
+    the defining property and the one thing a plain gain stage cannot fake.
+    Two earlier versions of it asserted the wrong things and are worth not
+    repeating: **crest factor** went the wrong way (a 1ms attack with a 100ms
+    release squashes the body of a hit harder than the transient that caused
+    it — perfectly ordinary, and a reminder that crest measures the time
+    constants as much as the ratio), and an **absolute band energy** reading
+    measured the limiter rather than the shelf.
 - `_core_bounce.mjs` (local harness) — the offline bounce end to end: ×1 and
   ×2 of a 2s bar come back as 4s and 6s MP3s (decoded and measured), with
   music in them, quiet tails, the transport left stopped, in about a second.
@@ -263,6 +278,24 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
 - **Limiter.** Chromium's `DynamicsCompressorNode` is its own algorithm; the
   core has a lookahead peak limiter with the same threshold (−1dB), attack
   (2ms) and release (100ms). Judge by ear.
+- **Bus compressor.** The same difference a second time, and for the same
+  reason: the master bus compressor is a `DynamicsCompressorNode` on the web
+  and a hand-written feed-forward compressor in the core, given the same
+  threshold / ratio / attack / release. The detector is stereo-LINKED on both
+  sides (one envelope off the louder channel — two independent detectors move
+  the image around as the mix ducks, which is the one thing a bus compressor
+  must not do), and the core's knee is hard where Chromium's default is 30dB,
+  so the core bites a little more abruptly right at the threshold. Judge by
+  ear. It is **bypassed by default and the bypass is a real one** on both
+  engines — the signal does not pass through the stage at all — so an existing
+  project is unaffected, which `core/test/master.c` asserts bit-for-bit.
+- **Master EQ** is *not* in this category. Web Audio's `lowshelf` / `peaking` /
+  `highshelf` biquads are the Audio EQ Cookbook and so is `bq_set`, with S=1
+  shelves either side, so the two agree to float precision. The corners
+  (`LL_EQ_LO_HZ` 120, `LL_EQ_HI_HZ` 6k, `LL_EQ_MID_Q` 0.9) live in `core/ll.h`
+  beside their JS twins in `src/loudlight.jsx` — a master EQ whose shelves sit
+  at different frequencies in the two engines is a project that sounds
+  different depending on which one is running.
 - **Oscillators.** Web Audio's saw/square are wavetable-bandlimited; the core
   uses polyBLEP (a little residual aliasing far up), and its triangle is naive.
 - **Saturation.** The drum strip's waveshaper and the kick's `tanh` are

@@ -61,6 +61,12 @@ static void defaults(void){
   p[LL_P_DRUM_LEVEL]=85; p[LL_P_DRUM_FXTRIM]=100; p[LL_P_DRUM_AUDIBLE]=1;
   p[LL_P_SONG_MODE]=0; p[LL_P_LOOP]=0; p[LL_P_LOOP_BAR]=0; p[LL_P_LOOP_BARS]=1; p[LL_P_LOOP_PAT]=-1; p[LL_P_ACTIVE_PAT]=-1;
   p[LL_P_MASTER]=0.55f; p[LL_P_MOTION]=0; p[LL_P_STOP_AFTER]=0;
+  /* Master bus — OFF and FLAT, so a project made before this stage existed
+   * renders exactly what it always did. See src/loudlight.jsx's
+   * SESSION_DEFAULTS, which carries the same ten numbers. */
+  p[LL_P_COMP_ON]=0; p[LL_P_COMP_THRESH]=-12; p[LL_P_COMP_RATIO]=2;
+  p[LL_P_COMP_ATTACK]=20; p[LL_P_COMP_RELEASE]=200; p[LL_P_COMP_MAKEUP]=0;
+  p[LL_P_EQ_LOW]=0; p[LL_P_EQ_MID]=0; p[LL_P_EQ_MIDHZ]=1000; p[LL_P_EQ_HIGH]=0;
   for(int l=0;l<2;l++){
     float*q=G.lp[l];
     q[LL_L_WAVE]=WV_SAW; q[LL_L_DETUNE]=l?0:8; q[LL_L_ATTACK]=8; q[LL_L_DECAY]=400; q[LL_L_SUSTAIN]=40;

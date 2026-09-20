@@ -204,6 +204,10 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
+// The master bus — a colour of its own, deliberately not one of the layer
+// accents: this stage is over ALL of them, and borrowing POLY's green would
+// say it belonged to a part.
+const C_MASTER="#c9b78f";
 const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
@@ -1654,6 +1658,22 @@ const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 const RV_DAMP_DB=-7;  // per-pass shelf cut; compounds over recirculations. Gentler
                       // than the old -12 so the damping eases in around the corner
                       // instead of clamping hard just past it.
+// ── MASTER EQ — the two shelf corners and the mid bell's Q ──────────────
+// The same three numbers are in core/ll.h (LL_EQ_LO_HZ / LL_EQ_HI_HZ /
+// LL_EQ_MID_Q). A master EQ whose shelves sit at different frequencies in the
+// two engines is a project that sounds different depending on which one is
+// running, which is the one thing the core exists not to be.
+//
+// Fixed corners because the band GAIN is what you reach for on a master EQ
+// twenty times to the corner's once, and three fixed bands with one sweepable
+// mid is the shape that has been on every mixing desk for fifty years. The
+// mid sweeps because "which mid" is the question that actually varies.
+const EQ_LO_HZ=120, EQ_HI_HZ=6000, EQ_MID_Q=0.9;
+const EQ_MID_MIN=200, EQ_MID_MAX=6000;
+// Log sweep, so the knob's travel is musical rather than crowding everything
+// below 1k into the first eighth of it.
+const eqMidHzOf=pct=>Math.round(EQ_MID_MIN*Math.pow(EQ_MID_MAX/EQ_MID_MIN,Math.max(0,Math.min(100,pct))/100));
+const eqMidPctOf=hz=>Math.round(Math.log(Math.max(EQ_MID_MIN,Math.min(EQ_MID_MAX,hz))/EQ_MID_MIN)/Math.log(EQ_MID_MAX/EQ_MID_MIN)*100);
 const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
 const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
 const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
@@ -1679,6 +1699,14 @@ const SESSION_DEFAULTS = Object.freeze({
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   loopMode:0, loopBar:-1, loopBars:1, loopPat:null,
+  // Master bus — OFF and FLAT. A stage in the path of every saved project is
+  // the last place to ship a default that colours anything: an existing
+  // project has to render exactly what it rendered before this existed, and
+  // "approximately transparent" is what the VARY disaster was made of. Both
+  // engines bypass rather than pass through flat, so this is literal.
+  // The same ten numbers are in core/src/ll_core.c's defaults().
+  compOn:false, compThresh:-12, compRatio:2, compAttack:20, compRelease:200, compMakeup:0,
+  eqLow:0, eqMid:0, eqMidHz:1000, eqHigh:0,
 });
 
 
@@ -2097,7 +2125,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const onUp=useCallback(()=>{drag.current=null;},[]); // end the drag on release so it can't linger
   if(vertical){
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
+      <div data-knob={label} data-knobval={String(value)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
         <div style={{fontSize:10,letterSpacing:1,fontWeight:500,color:col+"bb",textAlign:"center",lineHeight:1.4}}>
           <div>{label}</div>
           <div style={{color:col,letterSpacing:0}}>{display}</div>
@@ -2114,8 +2142,12 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
       </div>
     );
   }
+  // data-knob / data-knobval are the harnesses' hook. A knob is a ballistic
+  // pointer drag with no accessible value of its own, so without these there is
+  // no way to ask a headless run what one is set to — and gestures are exactly
+  // what headless tests are worst at, so the ones that CAN be read should be.
   return(
-    <div style={S.knobWrap}>
+    <div data-knob={label} data-knobval={String(value)} style={S.knobWrap}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
         <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
         <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
@@ -2487,6 +2519,12 @@ class Bell{
   constructor(){
     this.ctx=null;this.master=null;this.rev=null;
     this.dly=null;this.dlyFb=null;this.dlyReturn=null;this.dlySend=null;this.dlyHp=null;this.dlyLp=null;
+    // Master bus — built in init(), routed by _wireMasterBus(). The three EQ
+    // gains are shadowed here because the bypass is DERIVED from them and an
+    // AudioParam's .value is not readable back reliably mid-ramp.
+    this.comp=null;this.compMakeup=null;this.eqLo=null;this.eqMid=null;this.eqHi=null;
+    this.busIn=null;this.busOut=null;this.compOn=false;this.eqOn=false;
+    this._eqLoDb=0;this._eqMidDb=0;this._eqHiDb=0;
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;this.masterLevel=0.55;
@@ -2509,7 +2547,40 @@ class Bell{
     const lim=this.ctx.createDynamicsCompressor();
     lim.threshold.value=-1.0; lim.knee.value=0; lim.ratio.value=20;
     lim.attack.value=0.002; lim.release.value=0.1;
-    m.connect(lim); lim.connect(this.ctx.destination); this.limiter=lim;
+    // ── THE MASTER BUS: compressor → 3-band EQ → limiter ────────────────
+    // Between the summing gain and the limiter, in that order: the compressor
+    // reacts to the mix as it is, the EQ shapes what comes out of it, and the
+    // limiter is the thing nothing gets past. (Putting the EQ first would have
+    // the compressor chasing a boost you just dialled in, which is a bus comp
+    // that never settles.)
+    //
+    // Both stages are BYPASSED by default, and bypass here means the signal
+    // does not pass through the nodes at all rather than passing through them
+    // flat. That is what makes adding a master section cost an existing
+    // project exactly nothing — the VARY lesson, applied before the fact: a
+    // stage in the path of every saved project is the last place to be
+    // approximately transparent.
+    //
+    // The nodes are built once and the ROUTING is what changes, because
+    // rebuilding an AudioNode graph mid-playback clicks.
+    const comp=this.ctx.createDynamicsCompressor();
+    comp.threshold.value=-12; comp.knee.value=6; comp.ratio.value=2;
+    comp.attack.value=0.02; comp.release.value=0.2;
+    const compMakeup=this.ctx.createGain(); compMakeup.gain.value=1;
+    const eqLo=this.ctx.createBiquadFilter(); eqLo.type="lowshelf";
+    eqLo.frequency.value=EQ_LO_HZ; eqLo.gain.value=0;
+    const eqMid=this.ctx.createBiquadFilter(); eqMid.type="peaking";
+    eqMid.frequency.value=1000; eqMid.Q.value=EQ_MID_Q; eqMid.gain.value=0;
+    const eqHi=this.ctx.createBiquadFilter(); eqHi.type="highshelf";
+    eqHi.frequency.value=EQ_HI_HZ; eqHi.gain.value=0;
+    comp.connect(compMakeup);
+    eqLo.connect(eqMid); eqMid.connect(eqHi);
+    this.comp=comp; this.compMakeup=compMakeup;
+    this.eqLo=eqLo; this.eqMid=eqMid; this.eqHi=eqHi;
+    this.compOn=false; this.eqOn=false;
+    this.busIn=m; this.busOut=lim;
+    this._wireMasterBus();
+    lim.connect(this.ctx.destination); this.limiter=lim;
     // Per-layer mute buses. POLY and MONO voices route their DRY through their
     // own gain (→ master) so mute/solo can cut a layer instantly in the audio
     // domain (ramped, click-free) — not just by gating note scheduling. Reverb/
@@ -2676,6 +2747,60 @@ class Bell{
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
   }
+  // ── The master bus ──────────────────────────────────────────────────────
+  // Four routings between the summing gain and the limiter, picked by which
+  // stages are engaged. The nodes are permanent and only the CONNECTIONS
+  // change: rebuilding a graph mid-playback clicks, and this is the one place
+  // in the app where everything you can hear is passing through.
+  //
+  // Each re-wire is a full disconnect-and-reconnect rather than a diff, which
+  // is a handful of calls on a toggle nobody presses per bar, and is the only
+  // version of this that cannot leave a stale edge behind.
+  _wireMasterBus(){
+    const m=this.busIn, out=this.busOut;
+    if(!m||!out)return;
+    try{m.disconnect();}catch(e){}
+    try{this.compMakeup.disconnect();}catch(e){}
+    try{this.eqHi.disconnect();}catch(e){}
+    const head = this.compOn ? this.comp : (this.eqOn ? this.eqLo : out);
+    m.connect(head);
+    if(this.compOn) this.compMakeup.connect(this.eqOn?this.eqLo:out);
+    if(this.eqOn)   this.eqHi.connect(out);
+  }
+  setCompOn(on){
+    const v=!!on;
+    if(!this.ready||this.compOn===v){this.compOn=v;return;}
+    this.compOn=v;this._wireMasterBus();
+  }
+  setCompThresh(db){if(!this.ready||!this.comp)return;
+    this.comp.threshold.setTargetAtTime(Math.max(-60,Math.min(0,db)),this.ctx.currentTime,0.02);}
+  setCompRatio(r){if(!this.ready||!this.comp)return;
+    this.comp.ratio.setTargetAtTime(Math.max(1,Math.min(20,r)),this.ctx.currentTime,0.02);}
+  setCompAttack(ms){if(!this.ready||!this.comp)return;
+    this.comp.attack.setTargetAtTime(Math.max(0.1,Math.min(200,ms))/1000,this.ctx.currentTime,0.01);}
+  setCompRelease(ms){if(!this.ready||!this.comp)return;
+    this.comp.release.setTargetAtTime(Math.max(5,Math.min(2000,ms))/1000,this.ctx.currentTime,0.01);}
+  setCompMakeup(db){if(!this.ready||!this.compMakeup)return;
+    this.compMakeup.gain.setTargetAtTime(Math.pow(10,Math.max(0,Math.min(24,db))/20),this.ctx.currentTime,0.02);}
+  // The EQ's bypass is derived from the three gains rather than being its own
+  // switch: flat IS off, there is nothing else it could mean, and a separate
+  // toggle would let a boosted EQ sit in the path saying it was bypassed.
+  _eqRewire(){
+    const on=!!(this._eqLoDb||this._eqMidDb||this._eqHiDb);
+    if(on===this.eqOn)return;
+    this.eqOn=on;this._wireMasterBus();
+  }
+  setEqLow(db){if(!this.ready||!this.eqLo)return;
+    this._eqLoDb=Math.max(-24,Math.min(24,db));
+    this.eqLo.gain.setTargetAtTime(this._eqLoDb,this.ctx.currentTime,0.02);this._eqRewire();}
+  setEqMid(db){if(!this.ready||!this.eqMid)return;
+    this._eqMidDb=Math.max(-24,Math.min(24,db));
+    this.eqMid.gain.setTargetAtTime(this._eqMidDb,this.ctx.currentTime,0.02);this._eqRewire();}
+  setEqHigh(db){if(!this.ready||!this.eqHi)return;
+    this._eqHiDb=Math.max(-24,Math.min(24,db));
+    this.eqHi.gain.setTargetAtTime(this._eqHiDb,this.ctx.currentTime,0.02);this._eqRewire();}
+  setEqMidHz(hz){if(!this.ready||!this.eqMid)return;
+    this.eqMid.frequency.setTargetAtTime(Math.max(20,Math.min(18000,hz)),this.ctx.currentTime,0.02);}
   // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
   // Each entry schedules a smooth filter cutoff transition at that time using
   // the entry's flt/vel/oct/glide. Used by the scheduler for tied notes — sub-
@@ -3955,6 +4080,26 @@ export default function LoudLight(){
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
   const [rvMod,      setRvMod]      = useState(0);  // tail modulation depth (0..100 → chorused tail)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
+  // ── THE MASTER BUS — a compressor and a three-band EQ over the whole mix ──
+  // Between the summing gain and the limiter (see Bell.init). Both OFF/flat by
+  // default, and the bypass is a real one on both engines: an existing project
+  // renders exactly what it rendered before this section existed.
+  //
+  // The compressor gets a real control set rather than one AMOUNT knob because
+  // a bus compressor is a thing you tune — the whole difference between glue
+  // and pumping is attack against release against ratio, and a single knob can
+  // only pick one point on that surface and call it the answer.
+  const [compOn,      setCompOn]      = useState(false);
+  const [compThresh,  setCompThresh]  = useState(-12); // dB
+  const [compRatio,   setCompRatio]   = useState(2);   // :1
+  const [compAttack,  setCompAttack]  = useState(20);  // ms
+  const [compRelease, setCompRelease] = useState(200); // ms
+  const [compMakeup,  setCompMakeup]  = useState(0);   // dB
+  // Three bands: two fixed shelves and one sweepable bell. See EQ_LO_HZ.
+  const [eqLow,   setEqLow]   = useState(0);    // dB at EQ_LO_HZ
+  const [eqMid,   setEqMid]   = useState(0);    // dB at eqMidHz
+  const [eqMidHz, setEqMidHz] = useState(1000); // Hz, EQ_MID_MIN..EQ_MID_MAX
+  const [eqHigh,  setEqHigh]  = useState(0);    // dB at EQ_HI_HZ
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -4312,6 +4457,19 @@ export default function LoudLight(){
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setRvMod&&bell.current.setRvMod(rvMod);},[rvMod]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
+  // Master bus. Guarded with && like every other one of these: `bell.current`
+  // is a facade when the core is on, and a method with no twin over there is
+  // silently absent rather than an error.
+  useEffect(()=>{bell.current.setCompOn&&bell.current.setCompOn(compOn);},[compOn]);
+  useEffect(()=>{bell.current.setCompThresh&&bell.current.setCompThresh(compThresh);},[compThresh]);
+  useEffect(()=>{bell.current.setCompRatio&&bell.current.setCompRatio(compRatio);},[compRatio]);
+  useEffect(()=>{bell.current.setCompAttack&&bell.current.setCompAttack(compAttack);},[compAttack]);
+  useEffect(()=>{bell.current.setCompRelease&&bell.current.setCompRelease(compRelease);},[compRelease]);
+  useEffect(()=>{bell.current.setCompMakeup&&bell.current.setCompMakeup(compMakeup);},[compMakeup]);
+  useEffect(()=>{bell.current.setEqLow&&bell.current.setEqLow(eqLow);},[eqLow]);
+  useEffect(()=>{bell.current.setEqMid&&bell.current.setEqMid(eqMid);},[eqMid]);
+  useEffect(()=>{bell.current.setEqMidHz&&bell.current.setEqMidHz(eqMidHz);},[eqMidHz]);
+  useEffect(()=>{bell.current.setEqHigh&&bell.current.setEqHigh(eqHigh);},[eqHigh]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   useEffect(()=>{drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);},[drumFxTrim]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
@@ -4400,6 +4558,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
+    compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     loopMode,loopBar,loopBars,loopPat,
@@ -4468,6 +4627,7 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4556,7 +4716,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4675,6 +4835,7 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
@@ -4789,6 +4950,14 @@ export default function LoudLight(){
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
+    // Master bus back to off and flat. (This is inside the long run of setters
+    // that a single throw abandons — see the doNew cliff lesson — so it stays
+    // with the rest of the sound resets rather than at the end.)
+    setCompOn(SESSION_DEFAULTS.compOn);setCompThresh(SESSION_DEFAULTS.compThresh);
+    setCompRatio(SESSION_DEFAULTS.compRatio);setCompAttack(SESSION_DEFAULTS.compAttack);
+    setCompRelease(SESSION_DEFAULTS.compRelease);setCompMakeup(SESSION_DEFAULTS.compMakeup);
+    setEqLow(SESSION_DEFAULTS.eqLow);setEqMid(SESSION_DEFAULTS.eqMid);
+    setEqMidHz(SESSION_DEFAULTS.eqMidHz);setEqHigh(SESSION_DEFAULTS.eqHigh);
     // Transient scheduler/UI state — clear so the next play starts fresh.
     stepR.current=0;
     if(layerLastFreqR)layerLastFreqR.current={synth:null,lead:null};
@@ -7554,6 +7723,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
+    compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -7612,6 +7782,7 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     _adoptSong(s);
 
@@ -8120,7 +8291,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Unsaved-work flag. The autosave deps above minus `playing` and minus the
   // navigation/transport state — see markClean for why those are left out.
   useEffect(()=>{
@@ -8129,6 +8300,7 @@ export default function LoudLight(){
     setDirty(true);
   },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
      dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
+     compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
      trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
@@ -8622,6 +8794,20 @@ export default function LoudLight(){
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
     bell.current.setRvMod&&bell.current.setRvMod(rvMod);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
+    // Master bus, same argument: a loaded project's compressor and EQ have to
+    // reach the engine on the first play, not on the first nudge of a knob.
+    // Order matters by a hair — the values first, then the switch, so the
+    // stage is never briefly in the path set to whatever it was built with.
+    bell.current.setCompThresh&&bell.current.setCompThresh(compThresh);
+    bell.current.setCompRatio&&bell.current.setCompRatio(compRatio);
+    bell.current.setCompAttack&&bell.current.setCompAttack(compAttack);
+    bell.current.setCompRelease&&bell.current.setCompRelease(compRelease);
+    bell.current.setCompMakeup&&bell.current.setCompMakeup(compMakeup);
+    bell.current.setCompOn&&bell.current.setCompOn(compOn);
+    bell.current.setEqMidHz&&bell.current.setEqMidHz(eqMidHz);
+    bell.current.setEqLow&&bell.current.setEqLow(eqLow);
+    bell.current.setEqMid&&bell.current.setEqMid(eqMid);
+    bell.current.setEqHigh&&bell.current.setEqHigh(eqHigh);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -8956,6 +9142,13 @@ export default function LoudLight(){
   // The shell calls this after it has re-activated the AVAudioSession, which is
   // the half of the handshake a web page cannot do for itself.
   useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
+  // One reference for the harnesses, the same bargain as __LL_LAST_EXPORT.
+  // The master bus's whole promise is that OFF is a real bypass — the signal
+  // does not pass through the nodes — and that is a fact about the audio
+  // GRAPH, which no DOM attribute can carry. Without this there is no way to
+  // check it headlessly at all, and "approximately transparent" in the path of
+  // every saved project is exactly the shape of the VARY disaster.
+  useEffect(()=>{window.__LL_BELL=bell.current;},[]);
   // ── DIAGNOSTIC OVERLAY (`?diag=1`) ──────────────────────────────────────
   // Built with plain DOM and written by an interval, NOT React state: an
   // instrument that re-renders the app four times a second would perturb the
@@ -11200,6 +11393,66 @@ export default function LoudLight(){
   // (shared by every layer); each layer's SOUND page only carries its own SEND
   // amount into the reverb/delay buses. Rendered identically on the desktop FX
   // tab and the mobile FX sheet.
+  // ── THE MASTER BUS — over the whole mix, in front of the limiter ────────
+  // Two sections on the MIX face, because that is the face that already means
+  // "everything at once": the layer faders decide the balance, and this decides
+  // what happens to the sum of them.
+  //
+  // Both are OFF / FLAT by default and both BYPASS rather than sit in the path
+  // transparently, so a project made before this existed sounds exactly as it
+  // did. The COMP's ON switch is explicit; the EQ's is derived from its three
+  // gains, because flat IS off and a separate toggle would let a boosted EQ sit
+  // in the path claiming to be bypassed.
+  //
+  // Every control here goes through KnobSlider, which calls HIST.mark on the
+  // first real change of a gesture — so the whole master section got undo from
+  // the one hook rather than from ten pushHistory calls.
+  const masterBusSections = (<>
+    <SynthSection title="BUS COMP" accent={C_MASTER}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+        {/* The switch is a real bypass — see Bell._wireMasterBus. It pushes
+            history outright rather than through HIST.mark: a toggle is a
+            discrete edit, and there is no gesture to wait for the first real
+            change of. */}
+        <button data-comp-on={compOn?"1":"0"} aria-pressed={compOn}
+          onClick={()=>{pushHistory();setCompOn(v=>!v);}}
+          style={{width:"100%",padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+            fontSize:9,fontWeight:700,letterSpacing:1.6,
+            border:"1px solid "+(compOn?C_MASTER:C_MASTER+"33"),
+            background:compOn?C_MASTER+"22":"transparent",
+            color:compOn?C_MASTER:C_MASTER+"88"}}>{compOn?"ON":"BYPASSED"}</button>
+        <KnobSlider label="THRESH" value={compThresh} min={-40} max={0} def={-12}
+          onChange={setCompThresh} display={compThresh+"dB"} accent={C_MASTER}/>
+        <KnobSlider label="RATIO" value={compRatio} min={1} max={12} def={2}
+          onChange={setCompRatio} display={compRatio+":1"} accent={C_MASTER}/>
+        <KnobSlider label="ATTACK" value={compAttack} min={1} max={100} def={20}
+          onChange={setCompAttack} display={compAttack+"ms"} accent={C_MASTER}/>
+        <KnobSlider label="RELEASE" value={compRelease} min={20} max={600} def={200}
+          onChange={setCompRelease} display={compRelease+"ms"} accent={C_MASTER}/>
+        <KnobSlider label="MAKEUP" value={compMakeup} min={0} max={12} def={0}
+          onChange={setCompMakeup} display={"+"+compMakeup+"dB"} accent={C_MASTER}/>
+      </div>
+    </SynthSection>
+    <SynthSection title="MASTER EQ" accent={C_MASTER}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
+        {/* Two fixed shelves and one sweepable bell — the shape that has been
+            on every mixing desk for fifty years, because the band GAIN is what
+            you reach for twenty times to the corner's once. "Which mid" is the
+            question that actually varies, so that is the one that sweeps.
+            The corners live beside their C twins in core/ll.h. */}
+        <KnobSlider label={"LOW "+fmtHz(EQ_LO_HZ)} value={eqLow} min={-12} max={12} def={0}
+          onChange={setEqLow} display={(eqLow>0?"+":"")+eqLow+"dB"} accent={C_MASTER}/>
+        <KnobSlider label="MID" value={eqMid} min={-12} max={12} def={0}
+          onChange={setEqMid} display={(eqMid>0?"+":"")+eqMid+"dB"} accent={C_MASTER}/>
+        <KnobSlider label="MID FREQ" value={eqMidPctOf(eqMidHz)} min={0} max={100}
+          def={eqMidPctOf(SESSION_DEFAULTS.eqMidHz)}
+          onChange={v=>setEqMidHz(eqMidHzOf(v))} display={fmtHz(eqMidHz)} accent={C_MASTER}/>
+        <KnobSlider label={"HIGH "+fmtHz(EQ_HI_HZ)} value={eqHigh} min={-12} max={12} def={0}
+          onChange={setEqHigh} display={(eqHigh>0?"+":"")+eqHigh+"dB"} accent={C_MASTER}/>
+      </div>
+    </SynthSection>
+  </>);
+
   const globalFxSections = (<>
     <SynthSection title="DELAY" accent={C_DLY}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
@@ -12283,6 +12536,13 @@ export default function LoudLight(){
             {page==="sound"&&soundTab==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
                 <div style={{marginBottom:14}}>{mixerBody}</div>
+                {/* MASTER before GLOBAL FX: the page reads down the signal —
+                    the channel faders, then what happens to their sum, then
+                    the buses they feed. */}
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>MASTER</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start",marginBottom:16}}>
+                  {masterBusSections}
+                </div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
                   {globalFxSections}
@@ -13046,6 +13306,10 @@ export default function LoudLight(){
                 {activeSheet==="sound"&&soundTab==="fx"&&(
                   <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                     <div style={{marginBottom:16}}>{mixerBody}</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>MASTER</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+                      {masterBusSections}
+                    </div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                       {globalFxSections}

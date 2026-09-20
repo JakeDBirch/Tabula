@@ -187,10 +187,47 @@ must not share the grid's aspect-ratio box; the lane sits above the chips; two
 rows of icon chrome, not three).
 
 **ONE-TAP SAVE lives in the tool row, with an unsaved-work cue.** It writes to
-whichever project was last loaded or saved (`selDevId`); with nothing picked it
-makes a new one under the generated name, exactly as the library's SAVE AS does,
-rather than being a dead button. Device library only — the cloud is a network
-round trip and should not fire from a chip you tap without thinking.
+whichever project was last loaded or saved; with nothing open it makes a new one
+under the generated name, exactly as the library's SAVE AS does, rather than
+being a dead button.
+
+**AND IT REMEMBERS WHERE THAT IS ACROSS A RELAUNCH.** `saveTarget` —
+`{store:"device"|"cloud", id, name}`, persisted under `tnori-target` — is the
+session's HOME, and it is the only thing `quickSave` consults. It used to be
+`selDevId`, which is plain state: closing the app forgot where the work came
+from, so the next SAVE filed a NEW project under a NEW generated name. Reported
+as ending up with a heap of near-identical local copies of one project opened
+from the cloud, which is exactly what that does — every launch starts anonymous
+and every save files a fresh one. `selDevId` / `selCloudId` are still the
+LIST's highlight, which is a different question and is kept per tab; they are
+seeded from the target on mount so the library opens on the row SAVE would
+overwrite, and `libTab` and `nameDraft` come from it too.
+- **It carries the STORE**, so a project opened from the cloud saves back to
+  the cloud. An earlier note here said the cloud was too slow to fire from a
+  chip you tap without thinking — true, and the alternative is worse: a SAVE
+  that quietly files a cloud project on the device is how you get two divergent
+  copies with nothing to say which is current.
+- **WRITTEN ONLY BY A SAVE OR A LOAD**, never by an effect on mount — the
+  row-keys lesson, which is about persisting a CHOICE rather than a state. A
+  mount effect would turn "hasn't been filed anywhere yet" into "filed". It is
+  cleared by NEW PROJECT, by deleting the project it points at (a home that no
+  longer exists is worse than none: SAVE would recreate it under its old id and
+  quietly undo the delete), and by a share link, since somebody else's project
+  inherits no home. On a device save it is set only once the write actually
+  LANDED — pointing SAVE at a project that failed to be written would have the
+  next tap silently overwrite nothing.
+- **Read SYNCHRONOUSLY** out of localStorage in the `useState` initializers,
+  not through the async `storageGet`: that lands a frame late, and the chip
+  would spend that frame saying it was about to make a new project.
+- The chip is a 42px square with one glyph, so the destination cannot be on its
+  face — but `title` and the accessible name carry it ("Save — Dusty Ribbon"),
+  because "SAVE" with no object is exactly the ambiguity that let the old one
+  file a cloud project onto the device unnoticed.
+- `_savetarget.mjs` drives the real chip and the real list and asserts against
+  what is on disk, with a **negative control**: wipe the stored target before
+  the reload — which is precisely the old build — and the copy-per-launch comes
+  straight back.
+
 `dirty` is a **reminder, not a guarantee**: it is set by an effect over the
 project's CONTENT state rather than by comparing against the saved bytes, since
 a real comparison would mean packing the whole project on every keystroke. Two
@@ -215,7 +252,14 @@ Three things about it are worth knowing before touching it. The cells take a fix
 **The cost, stated plainly:** a fixed one-line lane gives back the height it used to absorb, and on a tall phone the grid cannot use it — the grid is width-bound in portrait. An iPhone 15 has ~160px spare above and below the block as a result. That is the trade the linear form buys: a predictable layout instead of a self-sizing one.
 
 
-**SONG → PATTERN** (`collapseEntries`) flattens the arrangement into one editable pattern — five 1-bar patterns over an 8-bar song become one 8-bar pattern that sounds identical. The exactness comes from copying each part at the length it actually **sounds**, not its stored length: the source column is `i % gridLen`, the same modulo the scheduler applies, so a 1-bar drum part under a 4-bar entry is written out four times. Destination `gridLen` is the full width. It's **non-destructive** — the song and its patterns are untouched and the collapsed copy is appended and selected, so it's a fork, not a conversion. It then **leaves song view and opens the result**: appending a chip and staying put read as "the button does nothing", because the only visible change was a chip in a row you weren't looking at plus a flash that faded in under two seconds. The label is the transformation, not the jargon — "COLLAPSE" didn't say what it would do. **It lives on the pattern `+`'s HOLD** (`addChipProps`; the landscape song page keeps its header button too). Tap the `+` and you get an empty pattern, hold it and you get one made out of the whole song: both halves add a pattern, which is what makes them one control rather than two crammed together, and it needed a home the moment the song page stopped being somewhere portrait and desktop could reach.
+**SONG → PATTERN** (`collapseEntries`) flattens the arrangement into one editable pattern — five 1-bar patterns over an 8-bar song become one 8-bar pattern that sounds identical. The exactness comes from copying each part at the length it actually **sounds**, not its stored length: the source column is `i % gridLen`, the same modulo the scheduler applies, so a 1-bar drum part under a 4-bar entry is written out four times. Destination `gridLen` is the full width. It's **non-destructive** — the song and its patterns are untouched and the collapsed copy is appended and selected, so it's a fork, not a conversion. It then **leaves song view and opens the result**: appending a chip and staying put read as "the button does nothing", because the only visible change was a chip in a row you weren't looking at plus a flash that faded in under two seconds. The label is the transformation, not the jargon — "COLLAPSE" didn't say what it would do. **It lives on the pattern `+`'s HOLD, WHICH OPENS A MENU** (`addChipProps` → `addPatMenu`; the landscape song page keeps its header button too). Tap the `+` and you get an empty pattern; hold it and you get a two-row menu — `＋ EMPTY` and `SONG → PATTERN` — because both halves add a pattern, which is what makes them one control rather than two crammed together.
+
+**The menu is what gives it a NAME.** The hold used to fire the flatten outright, and that was the whole problem: a hold has no affordance, so the only thing on screen that ever said the function existed was an `aria-label` and a toast after the fact. Reported as not being able to find it at all, having just tripped over it by accident. A menu hangs the label off the thing it acts on, exactly as a bar chip's hold and a pattern chip's hold do.
+- **The refusal is drawn IN THE ROW**, greyed with its reason underneath, rather than fired as a toast — you are looking at the control when you learn it cannot run, instead of reading a message at the top of the screen about something you pressed at the bottom of it. The reason comes from `collapseBlockers` itself, never a second guess at what it would refuse. (The toast still carries the RESULT, which is a different message and is worth having fly.)
+- It builds from `songSeq`, **not `songSeqR`**: the ref is written by an effect, which runs after the render that changed it, so a menu built off it would describe the song as it was one commit ago.
+- Both hold traps apply and both are tested: the trailing click is swallowed (or the menu arrives with a stray empty pattern behind it), and the backdrop ignores dismissals for ~400ms (or the opening press's own trailing click closes it instantly). `_addmenu.mjs` covers it on portrait and desktop, and its hold **WOBBLES** — a finger always moves a pixel or two, and a headless mouse that goes down and up without moving passes a gesture no hand can make.
+
+**And the toast clears the notch.** It sat at a bare `top:10`, which on a phone is straight under the camera — which is how a `SONG → PATTERN` refusal arrived unreadable, and is the report that turned into all of the above. It is `calc(env(safe-area-inset-top, 0px) + 10px)` now, the same sum the interrupted-audio banner a few lines above it already used. These messages carry the only diagnosis there is when something refuses, so an unreadable one is the same as no message at all.
 
 **The flattened pattern lands on 1× whenever the music allows it.** `collapsePlan` prefers a 1× grid over the finest one, because the result then reads as ordinary time: bars are bars, the step lanes line up with the beat, and everything downstream — a further collapse, MIDI export, anything that assumes a step is a step — sees a normal pattern rather than one carrying a speed multiplier. Reachable means every populated part's speed is a **whole number of 1× steps** (m ∈ {1,2,3,4}); in the half-step units the gcd is worked in, that test is simply "is the gcd even". A part at 2× (m=0.5) or ⅔× (m=1.5) has onsets on *half* a 1× step, which a 1× grid cannot hold at all — no amount of adjusting placement or duration fixes that, so those keep the finer grid. The cost of normalising is columns (a ½× song doubles its width), so if 1× would push it past `MAX_BARS` the finer grid is kept rather than refusing. Either way the sound is identical; only the grid it is written on differs, and the flash names the grid and the reason whenever it isn't 1×.
 
@@ -734,10 +778,22 @@ two can be compared. Delete them once this has been lived with.
 
 **One screen for everything that shapes the sound**, reached from its own chip
 (what used to be `≋ FX`). Inside it a selector picks **POLY / MONO / DRUMS /
-FX** — three voices and the global bus. It was split before: the FX chip carried
-the global buses, and each layer's voice was behind a door you could only find
-by tapping a layer button you were ALREADY on.
+MIX** — three voices and everything over all of them. It was split before: the
+FX chip carried the global buses, and each layer's voice was behind a door you
+could only find by tapping a layer button you were ALREADY on.
 
+- **THE FOUR FACES ARE SHAPES, NOT WORDS.** The same three layer glyphs the
+  transport row wears — so "which part am I shaping" is one picture wherever
+  you meet it — plus a **mixer glyph** (three faders at three heights) for the
+  fourth. That one was the word **FX**, which named the buses and not the page:
+  the face carries the layer faders, the master bus and the global sends, and
+  *the whole mix* is the only thing true of all three. The mixer strips inside
+  are headed by the same glyphs for the same reason — at 8px a word on this
+  navy is the least legible thing on the page. The accessible NAME is the noun
+  (`aria-label="Mix"`) with the hint in `title`, per the icon rule.
+  - The faders' caps sit at three different heights deliberately: three at one
+    height reads as a grille or a bar chart at rest, and the whole point of a
+    mixer is that the faders DISAGREE.
 - The selector sets `activeLayer`, deliberately — the same state the grid uses,
   so "whose sound am I editing" and "whose notes am I editing" cannot drift, and
   coming out leaves you on the part you were shaping.
@@ -1139,12 +1195,76 @@ sheet). They were two near-copies, the mobile one written as "mirrors the deskto
 layout", which is exactly how two surfaces drift.
 
 **The LAYER mixer** — POLY / MONO / DRUMS faders with M/S and an FX send trim —
-lives on the SOUND screen's FX face. Values land where they always did: POLY/MONO
+lives on the SOUND screen's MIX face. Values land where they always did: POLY/MONO
 in `layerParams[layer].mix`, DRUMS in the global `drumLevel`; the trims in
 `layerParams[layer].fxTrim` and `drumFxTrim`, read per note inside `Bell.play`
 and as a bus scaler on `DrumEngine.setFxTrim`. A missing trim on an old save
 reads as 100, i.e. exactly what the app did before it existed. `mixerBody`, one
 body, two mounts: don't fork it.
+
+### THE MASTER BUS — a compressor and a 3-band EQ over the whole mix
+
+On the MIX face, under the layer faders and above GLOBAL FX, because the page
+reads down the signal: the channel faders, then what happens to their sum, then
+the buses they feed. `master gain → bus comp → EQ → limiter → out`, on **both
+engines**. The comp is before the EQ so it reacts to the mix as it is rather
+than chasing a boost you have just dialled in, which is a bus comp that never
+settles.
+
+- **OFF AND FLAT IS A REAL BYPASS, NOT A TRANSPARENT SETTING.** The signal does
+  not pass through the stage at all. That is the whole reason this could be
+  added to a shipping app at all: a project made before it existed renders
+  *exactly* what it always did, asserted bit-for-bit in `core/test/master.c`
+  with the values set and only the switch off — so it is the switch under test,
+  not the defaults. It is the VARY lesson applied before the fact rather than
+  after: a stage in the path of every saved project is the last place to be
+  approximately transparent.
+- **The COMP's switch is explicit; the EQ's is DERIVED from its three gains.**
+  Flat IS off, there is nothing else it could mean, and a separate EQ toggle
+  would let a boosted EQ sit in the path claiming to be bypassed. In JS the
+  nodes are permanent and the **routing** is what changes (`_wireMasterBus`) —
+  rebuilding an AudioNode graph mid-playback clicks; each re-wire is a full
+  disconnect-and-reconnect rather than a diff, which is the only version that
+  cannot leave a stale edge behind.
+- **The compressor gets a real control set** (THRESH / RATIO / ATTACK / RELEASE
+  / MAKEUP) rather than one AMOUNT knob: the difference between glue and pumping
+  is attack against release against ratio, and a single knob can only pick one
+  point on that surface and call it the answer.
+- **The EQ is two fixed shelves and one sweepable bell** — the shape that has
+  been on every desk for fifty years, because band GAIN is what you reach for
+  twenty times to the corner's once, and "which mid" is the question that
+  actually varies. The corners are **constants shared with the core**
+  (`EQ_LO_HZ`/`EQ_HI_HZ`/`EQ_MID_Q` here, `LL_EQ_*` in `core/ll.h`): a master EQ
+  whose shelves sit at different frequencies in the two engines is a project
+  that sounds different depending on which one is running.
+- **Ten new params through every persistence site**, plus a core param each and
+  a facade twin each in `core/host.js` — the multi-site rule's longest walk yet.
+  A method added to the JS `Bell` with no twin over there is *silently ignored*:
+  the app would look right and the core would render a flat, uncompressed mix.
+- **The core's compressor is the limiter's sanctioned difference a second
+  time** — `DynamicsCompressorNode` on the web, hand-written feed-forward in C,
+  same numbers, judged by ear. The detector is **stereo-linked** on both sides:
+  two independent detectors move the image around as the mix ducks, which is the
+  one thing a bus compressor must not do. The EQ is *not* in that category —
+  both sides are the Audio EQ Cookbook and agree to float precision.
+- **`core/test/master.c` is the test the oracle structurally cannot be.** The
+  oracle matches ATTACKS, and a compressor and an EQ change none of them, so a
+  stage that silently did nothing passes every scenario there is. Two of its
+  assertions were wrong first and are worth not repeating: **crest factor** went
+  the wrong way (a 1ms attack with a 100ms release squashes the body of a hit
+  harder than the transient that caused it — ordinary, and a reminder that crest
+  measures the time constants as much as the ratio), and an **absolute band
+  energy** reading measured the limiter rather than the shelf. What it asserts
+  now is the defining property: *a 20dB step at the input comes out smaller than
+  20dB*, which nothing a plain gain stage does can fake.
+  - One trap it cost: `G.masterGain` is a SMOOTHER initialised to 0.55, so
+    `ll_set(LL_P_MASTER, …)` **ramps** over ~20ms — and the first kick lands
+    inside that ramp at nearly full level. With the rest of the take 20dB down,
+    that one transient dominated the rms and a clean 20dB step read as 14dB.
+    Measure the steady state, not the ramp.
+- `data-knob` / `data-knobval` on every `KnobSlider` are the harnesses' hook. A
+  knob is a ballistic pointer drag with no accessible value of its own, so
+  without them there is no way to ask a headless run what one is set to.
 
 ### The PROJECT menu
 
@@ -1162,7 +1282,9 @@ DEVICE and CLOUD are the same list against different stores, chosen by a segment
 
 **Sharing is gone.** The share LINK, JSON EXPORT and JSON IMPORT were removed once the named library and the cloud covered keeping and moving work — a preset file was a fourth way to do the same job. `encodeState` and `shareFlash` went with them; **`decodeState` stayed**, because the mount still reads a project out of a `#hash` and a link already sent to someone should still open. `getShareState` / `applyShareState` keep their names — they're the serialization pair for autosave, the library and the cloud, and renaming them would touch every persistence site for nothing.
 
-**EXPORT is gone from the menu too — it lives on the transport's HOLD.** MIDI and MP3 render the song *out* of the app into something another tool plays, which is not filing; and the drawer they were in is a **list**, which wants every pixel of height it can get. So they moved onto the control that plays the song, under the deliberate gesture (`playBtnProps`, on all three play-button mounts). The **MP3 pass count is folded into that menu** rather than being a second screen: it is still asked before the bounce starts — a bounce runs in real time, so an accidental 8-pass one costs minutes you can't cancel — but choosing the count *is* starting it, so a bounce is one gesture instead of three. `mp3Arm` and its disarm-on-close effect are gone with the old two-step chooser. The count is still passed to `exportMP3(n)` as an **argument**: the handler that sets `exportLoops` and starts the bounce would read the previous value out of state. **With the core on, the bounce is offline and faster than real time** (`exportMP3Core`: a Worker renders a fresh core from the live one's snapshot, and the core stops itself at the last cycle top — see `docs/native-audio.md`); the realtime capture path stays for the JS engine and goes with it.
+**EXPORT IS IN THE PROJECT MENU, and the PLAY BUTTON DOES ONE THING.** It spent a while on the transport's HOLD, on the argument that MIDI and MP3 render the song *out* of the app rather than filing it, and that the drawer is a **list** wanting every pixel of height. Both still true; both cost less than the hold cost. The play button is the one control you press mid-take, on a phone, without looking — and a finger resting on it for half a second threw a menu over the instrument. `playBtnProps` is now a `data-playbtn` hook and an `onClick`, nothing else; `playHoldR`, `exportMenu` and `exportMenuEl` are deleted. The **MP3 pass count stays folded in** rather than being a second screen: it is still asked before the bounce starts — a bounce runs in real time on the JS engine, so an accidental 8-pass one costs minutes you can't cancel — but choosing the count *is* starting it, so a bounce is one gesture instead of three. The count is passed to `exportMP3(n)` as an **argument**: a handler that set `exportLoops` and then read it back would bounce the previous value. **With the core on, the bounce is offline and faster than real time** (`exportMP3Core`: a Worker renders a fresh core from the live one's snapshot, and the core stops itself at the last cycle top — see `docs/native-audio.md`); the realtime capture path stays for the JS engine and goes with it.
+
+**It took the AUDIO ROUTE toggle's room, and that toggle is gone.** The lock-screen-versus-mix trade is real and unchanged (`.mixWithOthers` makes the app a secondary audio source, and iOS gives the lock screen to the primary one) — but it is a decision you make once and never think about again, sitting in a list of things you do constantly. One of the two had to have the space and it was not export. The page now pushes `{exclusive:true}` to the shell **unconditionally on mount**, rather than leaving the shell on its own `UserDefaults` value: deleting the control must not strand an install that an earlier build left on MIX, which has no lock screen at all. The push is idempotent (the shell ignores a value it is already on), and `tnori-excl-audio` is dead and unread. Whoever puts the choice back gives it a home that is not this list.
 
 `showFlash` used to print into that always-visible panel, so hiding the panel would have hidden "SAVED S1" / "UNDO" / "MIDI EXPORTED". There's now one **floating status toast** (top-centre, above the modal's scrim) for the whole app. Note `loadKit` finishes with its own `showFlash(kit.label)`, so a LOAD's confirmation is usually stomped by the kit name a beat later — pre-existing, mildly annoying, unfixed.
 

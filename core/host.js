@@ -381,6 +381,18 @@ self.onmessage=(e)=>{
     setRvPreDelay(v){this.host.set(P.P.RV_PREDELAY,v);} setRvMod(v){this.host.set(P.P.RV_MOD,v);} setDlyToRev(v){this.host.set(P.P.DLY_TO_REV,v);}
     setDlyTime(s){this.host.set(P.P.DLY_TIME,s);} setDlyFb(v){this.host.set(P.P.DLY_FB,v);} setDlyHp(v){this.host.set(P.P.DLY_HP,v);} setDlyLp(v){this.host.set(P.P.DLY_LP,v);}
     setDelaySend(){} 
+    // Master bus. A method added to the JS Bell needs a twin HERE or the core
+    // silently ignores it — that is the whole contract of the facade.
+    setCompOn(v){this.host.set(P.P.COMP_ON,v?1:0);}
+    setCompThresh(v){this.host.set(P.P.COMP_THRESH,v);}
+    setCompRatio(v){this.host.set(P.P.COMP_RATIO,v);}
+    setCompAttack(v){this.host.set(P.P.COMP_ATTACK,v);}
+    setCompRelease(v){this.host.set(P.P.COMP_RELEASE,v);}
+    setCompMakeup(v){this.host.set(P.P.COMP_MAKEUP,v);}
+    setEqLow(v){this.host.set(P.P.EQ_LOW,v);}
+    setEqMid(v){this.host.set(P.P.EQ_MID,v);}
+    setEqMidHz(v){this.host.set(P.P.EQ_MIDHZ,v);}
+    setEqHigh(v){this.host.set(P.P.EQ_HIGH,v);}
     setLayerGain(layer,v){this.host.setLayer(layer,P.L.AUDIBLE,v);}
     flushTail(){this.host.flush();}
   }

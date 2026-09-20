@@ -62,8 +62,30 @@ enum ll_param {
   LL_P_MASTER,       /* master gain, 0.55 default */
   LL_P_MOTION,       /* 0/1 — drum MOTION automation on */
   LL_P_STOP_AFTER,   /* stop the transport at the top of this many cycles (0 = never) — the bounce */
+  /* ── The master bus: a compressor and a three-band EQ, in that order, in
+   * front of the limiter. Appended to the END of this enum on purpose — the
+   * host addresses params by index, so inserting one anywhere else would
+   * silently renumber every param above it. */
+  LL_P_COMP_ON,      /* 0/1 — off is a real BYPASS, not a transparent setting */
+  LL_P_COMP_THRESH,  /* dB, -40..0 */
+  LL_P_COMP_RATIO,   /* :1, 1..12 */
+  LL_P_COMP_ATTACK,  /* ms, 1..100 */
+  LL_P_COMP_RELEASE, /* ms, 20..600 */
+  LL_P_COMP_MAKEUP,  /* dB, 0..12 */
+  LL_P_EQ_LOW,       /* dB, -12..12 — low shelf at LL_EQ_LO_HZ */
+  LL_P_EQ_MID,       /* dB, -12..12 — peaking */
+  LL_P_EQ_MIDHZ,     /* Hz, 200..6000 */
+  LL_P_EQ_HIGH,      /* dB, -12..12 — high shelf at LL_EQ_HI_HZ */
   LL_P_COUNT
 };
+
+/* Fixed corners for the two shelves, and the mid bell's Q. The same three
+ * numbers are in src/loudlight.jsx — a master EQ whose shelf corners differ
+ * between the two engines is a project that sounds different depending on
+ * which one is running. */
+#define LL_EQ_LO_HZ  120.f
+#define LL_EQ_HI_HZ  6000.f
+#define LL_EQ_MID_Q  0.9f
 
 /* Per-layer synth parameters — ll_set_layer(layer, id, v). Only SYNTH and
  * LEAD have these. Mirrors layerParams[layer]. */

@@ -10,7 +10,7 @@
  * Q is in dB for lowpass/highpass (that is how the spec and Chromium define
  * it, and Bell sets vcfRes*0.28 dB on that basis); linear for bandpass. The
  * shelves take a gain in dB with S=1. Transposed direct form II. */
-enum { BQ_LP, BQ_HP, BQ_BP, BQ_LSH, BQ_HSH };
+enum { BQ_LP, BQ_HP, BQ_BP, BQ_LSH, BQ_HSH, BQ_PEAK };
 typedef struct { float b0,b1,b2,a1,a2,z1,z2; } ll_bq;
 static inline void bq_reset(ll_bq*f){ f->z1=f->z2=0.f; }
 static inline void bq_bypass(ll_bq*f){ f->b0=1.f;f->b1=f->b2=f->a1=f->a2=0.f; }
@@ -30,6 +30,15 @@ static inline void bq_set(ll_bq*f,int type,float hz,float q,float gaindb,float s
     if(cut<=0.f||cut>=1.f||q<=0.f){ f->b0=f->b1=f->b2=f->a1=f->a2=0.f; return; }
     float th=LL_PI*cut, al=ll_sin(th)/(2.f*q), cs=ll_cos(th);
     b0=al;b1=0.f;b2=-al;a0=1.f+al;a1=-2.f*cs;a2=1.f-al;
+  } else if(type==BQ_PEAK){
+    /* Peaking EQ, the cookbook form Web Audio's "peaking" biquad uses: Q is
+     * LINEAR here (not the dB that LP/HP take above), and A is 10^(dB/40).
+     * The master EQ's mid band is the only user of it. */
+    if(cut<=0.f||cut>=1.f||q<=0.f){ bq_bypass(f); return; }
+    float A=ll_pow(10.f,gaindb*0.025f);
+    float th=LL_PI*cut, al=ll_sin(th)/(2.f*q), cs=ll_cos(th);
+    b0=1.f+al*A; b1=-2.f*cs; b2=1.f-al*A;
+    a0=1.f+al/A; a1=-2.f*cs; a2=1.f-al/A;
   } else {
     float A=ll_pow(10.f,gaindb*0.025f);
     if(cut>=1.f){ if(type==BQ_LSH){f->b0=A*A;f->b1=f->b2=f->a1=f->a2=0.f;} else bq_bypass(f); return; }

@@ -6,10 +6,21 @@
  *     damping compounds per recirculation; slow LFO on each comb's length)
  *     → ×0.6 → master
  *   master = (synth×gain + mono×gain + drums×level×gain + rev + echo) × 0.55
- *          → limiter → out
- * The limiter is the one part with no exact Web Audio twin (Chromium's
- * DynamicsCompressor is its own algorithm): a lookahead peak limiter with the
- * same threshold / attack / release numbers, judged by ear. */
+ *          → bus compressor → 3-band EQ → limiter → out
+ *
+ * TWO parts have no exact Web Audio twin, and they are the same part twice.
+ * Chromium's DynamicsCompressor is its own algorithm with its own detector
+ * and release curve, so neither the LIMITER nor the BUS COMPRESSOR can be
+ * matched sample for sample — both are written here with the SAME threshold /
+ * ratio / attack / release numbers the JS node is given, and judged by ear.
+ * That is the sanctioned difference documented in docs/native-audio.md, now
+ * with a second member.
+ *
+ * The EQ is not in that category: Web Audio's lowshelf / peaking / highshelf
+ * biquads ARE the Audio EQ Cookbook, and so is bq_set, so the two agree to
+ * float precision. The corners live in ll.h next to their JS twins, because a
+ * master EQ whose shelves sit at different frequencies in the two engines is a
+ * project that sounds different depending on which one is running. */
 #include "ll_engine.h"
 
 #define COMB_LEN   16384      /* ≥ 0.0451s × 2.6 × 96k + modulation */
@@ -24,6 +35,26 @@ static inline float lp_hz(float v){ return ll_round(400.f*ll_pow(50.f,v/100.f));
 static inline float rv_hf_hz(float p){ return 20000.f*ll_pow(1200.f/20000.f,ll_clamp(p,0,100)/100.f); }
 static inline float rv_lf_hz(float p){ return 20.f*ll_pow(800.f/20.f,ll_clamp(p,0,100)/100.f); }
 
+/* Attack and release as one-pole coefficients, recomputed only when those
+ * params move — a per-sample ll_exp of two constants is pure waste. */
+static void comp_coef(void){
+  const float sr=G.sr>0.f?G.sr:48000.f;
+  float a=G.compAtt>0.f?G.compAtt:20.f, r=G.compRel>0.f?G.compRel:200.f;
+  G.compAttK=1.f-ll_exp(-1.f/(a*0.001f*sr));
+  G.compRelK=1.f-ll_exp(-1.f/(r*0.001f*sr));
+}
+/* The EQ is BYPASSED when all three gains are zero, and that is a real
+ * bypass rather than a flat curve: it is what makes adding this stage cost an
+ * existing project exactly nothing, in CPU and in sound alike. */
+static void eq_coef(void){
+  const float sr=G.sr>0.f?G.sr:48000.f;
+  G.eqOn=(G.eqLoDb!=0.f||G.eqMidDb!=0.f||G.eqHiDb!=0.f);
+  if(!G.eqOn)return;
+  float mhz=G.eqMidHz>0.f?G.eqMidHz:1000.f;
+  bq_set(&G.eqLoL ,BQ_LSH ,LL_EQ_LO_HZ,0,G.eqLoDb ,sr); G.eqLoR =G.eqLoL;
+  bq_set(&G.eqMidL,BQ_PEAK,mhz,LL_EQ_MID_Q,G.eqMidDb,sr); G.eqMidR=G.eqMidL;
+  bq_set(&G.eqHiL ,BQ_HSH ,LL_EQ_HI_HZ,0,G.eqHiDb ,sr); G.eqHiR =G.eqHiL;
+}
 void fx_reset(void){
   const float sr=G.sr;
   static const float baseL[4]={0.0297f,0.0371f,0.0411f,0.0437f}, baseR[4]={0.0306f,0.0383f,0.0421f,0.0451f};
@@ -42,6 +73,10 @@ void fx_reset(void){
   G.eTime=0.375f*sr;
   bq_set(&G.eHpL,BQ_HP,G.eHp.v,0.5f,0,sr); G.eHpR=G.eHpL; bq_set(&G.eLpL,BQ_LP,G.eLp.v,0.5f,0,sr); G.eLpR=G.eLpL;
   G.limEnv=0.f; G.limGain=1.f; G.fxCoefN=0; G.rvSizeFactor=1.f;
+  G.compEnv=0.f; G.compGain=1.f;
+  comp_coef();
+  bq_reset(&G.eqLoL);bq_reset(&G.eqLoR);bq_reset(&G.eqMidL);bq_reset(&G.eqMidR);bq_reset(&G.eqHiL);bq_reset(&G.eqHiR);
+  eq_coef();
 }
 void fx_param(int id,float v){
   switch(id){
@@ -55,6 +90,16 @@ void fx_param(int id,float v){
     case LL_P_DLY_FB: sm_set(&G.eFb,v); break;
     case LL_P_DLY_HP: sm_set(&G.eHp,hp_hz(v)); break;
     case LL_P_DLY_LP: sm_set(&G.eLp,lp_hz(v)); break;
+    case LL_P_COMP_ON:      G.compOn=v>0.5f?1:0; break;
+    case LL_P_COMP_THRESH:  G.compThr=ll_clamp(v,-60,0); break;
+    case LL_P_COMP_RATIO:   G.compRatio=ll_clamp(v,1,20); break;
+    case LL_P_COMP_ATTACK:  G.compAtt=ll_clamp(v,0.1f,200); comp_coef(); break;
+    case LL_P_COMP_RELEASE: G.compRel=ll_clamp(v,5,2000);   comp_coef(); break;
+    case LL_P_COMP_MAKEUP:  G.compMakeup=ll_clamp(v,0,24); break;
+    case LL_P_EQ_LOW:   G.eqLoDb =ll_clamp(v,-24,24); eq_coef(); break;
+    case LL_P_EQ_MID:   G.eqMidDb=ll_clamp(v,-24,24); eq_coef(); break;
+    case LL_P_EQ_MIDHZ: G.eqMidHz=ll_clamp(v,20,18000); eq_coef(); break;
+    case LL_P_EQ_HIGH:  G.eqHiDb =ll_clamp(v,-24,24); eq_coef(); break;
     default: break;
   }
 }
@@ -104,6 +149,36 @@ void fx_render(float*outL,float*outR,int n){
     float dLev=sm_tick(&G.drumLevel), mg=sm_tick(&G.masterGain);
     float L=(G.busL[LL_SYNTH][i]*gS+G.busL[LL_LEAD][i]*gM+G.busL[LL_DRUMS][i]*dLev*gD+rvL+retL)*mg;
     float R=(G.busR[LL_SYNTH][i]*gS+G.busR[LL_LEAD][i]*gM+G.busR[LL_DRUMS][i]*dLev*gD+rvR+retR)*mg;
+    /* ── bus compressor ── (off is a real bypass: an untouched project must
+     * render exactly what it rendered before this stage existed) */
+    if(G.compOn){
+      /* Stereo-linked peak detector, attack when rising and release when
+       * falling — the classic feed-forward arrangement, and the same numbers
+       * the JS DynamicsCompressor is handed. */
+      float pk=ll_max(ll_fabs(L),ll_fabs(R));
+      G.compEnv+=(pk-G.compEnv)*(pk>G.compEnv?G.compAttK:G.compRelK);
+      float g=1.f;
+      float thrLin=ll_db2lin(G.compThr);
+      if(G.compEnv>thrLin&&G.compEnv>1e-9f){
+        /* over^(1/ratio - 1): the gain that puts `over` dB above threshold
+         * back down to over/ratio dB above it, done in the linear domain so
+         * there is no log/exp pair per sample beyond the one pow. */
+        float over=G.compEnv/thrLin;
+        /* A ratio of 0 is unreachable through fx_param (it clamps to 1..20),
+         * but G is zeroed at init and COMP_ON could in principle arrive first
+         * — and 1/0 here is an inf that would take the whole render with it. */
+        float ratio=G.compRatio>=1.f?G.compRatio:1.f;
+        g=ll_pow(over,1.f/ratio-1.f);
+      }
+      G.compGain=g;
+      float mk=ll_db2lin(G.compMakeup);
+      L*=G.compGain*mk; R*=G.compGain*mk;
+    }
+    /* ── master EQ ── (bypassed flat, see eq_coef) */
+    if(G.eqOn){
+      L=bq_run(&G.eqHiL,bq_run(&G.eqMidL,bq_run(&G.eqLoL,L)));
+      R=bq_run(&G.eqHiR,bq_run(&G.eqMidR,bq_run(&G.eqLoR,R)));
+    }
     /* ── limiter ── */
     float pk=ll_max(ll_fabs(L),ll_fabs(R));
     if(pk>G.limEnv)G.limEnv=pk; else G.limEnv+=(pk-G.limEnv)*relK;
@@ -115,4 +190,6 @@ void fx_render(float*outL,float*outR,int n){
   }
   for(int k=0;k<8;k++){ bq_undenorm(&G.comb[k].hsh); bq_undenorm(&G.comb[k].lsh); }
   bq_undenorm(&G.eHpL);bq_undenorm(&G.eHpR);bq_undenorm(&G.eLpL);bq_undenorm(&G.eLpR);
+  if(G.eqOn){ bq_undenorm(&G.eqLoL);bq_undenorm(&G.eqLoR);bq_undenorm(&G.eqMidL);
+              bq_undenorm(&G.eqMidR);bq_undenorm(&G.eqHiL);bq_undenorm(&G.eqHiR); }
 }

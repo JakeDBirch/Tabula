@@ -133,6 +133,15 @@ typedef struct {
   float rvSizeFactor;
   ll_dline preD; ll_dline echoL, echoR; ll_bq eHpL, eHpR, eLpL, eLpR; ll_smooth eFb, eHp, eLp; float eTime;
   int fxCoefN;
+  /* master bus: compressor -> EQ -> limiter.
+   * The compressor's detector is STEREO-LINKED (one envelope off the louder
+   * channel), because two independent detectors move the image around as the
+   * mix ducks — which is the one thing a bus compressor must not do. Its
+   * coefficients are recomputed only when attack/release actually change. */
+  int compOn; float compThr, compRatio, compAtt, compRel, compMakeup;
+  float compEnv, compGain, compAttK, compRelK;
+  int eqOn; ll_bq eqLoL, eqLoR, eqMidL, eqMidR, eqHiL, eqHiR;
+  float eqLoDb, eqMidDb, eqHiDb, eqMidHz;
   /* master limiter */
   ll_dline limL, limR; float limEnv, limGain;
   /* queues */
