@@ -289,18 +289,23 @@ against the JS engine — `?core=1` vs `?core=0` on the same project.
   (2ms) and release (100ms). Judge by ear.
 - **DRIVE's glue compressor.** The same difference a second time, and for the
   same reason: it is a `DynamicsCompressorNode` on the web and a hand-written
-  feed-forward compressor in the core, given the same fixed threshold (−14dB),
-  ratio (2:1), attack (15ms) and release (180ms). The detector is stereo-LINKED
+  feed-forward compressor in the core, given the same fixed threshold (−6dB),
+  ratio (1.8:1), attack (25ms) and release (200ms). The detector is stereo-LINKED
   on both sides — two independent detectors move the image around as the mix
   ducks, the one thing a bus compressor must not do — and the core's knee is
   hard where Chromium's is 6dB, so the core bites a little more abruptly right
   at the threshold. Judge by ear.
 - **DRIVE's saturation curves** are *not* in that category. Each is a closed
-  form of one sample (`ll_shape` in the core, `llShape` in the JS, which
-  samples it into the WaveShaper's table), so the two engines fold on one
-  definition rather than on two descriptions of an intent — they agree to
-  float precision, tanh's last bit aside. Same for the per-flavour input gain
-  and output trim, which are the same two expressions on both sides.
+  form of one sample (`ll_shape(chr, x, bias)` in the core, `llShape` in the
+  JS, which samples it into the WaveShaper's table), so the two engines fold
+  on one definition rather than on two descriptions of an intent — they agree
+  to float precision, tanh's last bit aside. Same for the per-flavour input
+  gain and output trim, and for `k` — the scale into and back out of the
+  curve, which is what the DRIVE knob actually moves.
+  - TUBE's `bias` scales with the knob, so its curve is not static: the core
+    passes it per sample, and the JS rebuilds the WaveShaper's 4096-point
+    table when it changes (cached against the last bias, or a knob drag would
+    rebuild it per pointermove for the two flavours that never use one).
 - **Oversampling round the saturator differs, deliberately.** The web gets
   `oversample:"4x"` free from `WaveShaperNode`; the core does its own, at 2×,
   with two biquads each way. Both are enough that the aliasing is well below

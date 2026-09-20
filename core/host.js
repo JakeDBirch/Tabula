@@ -385,6 +385,8 @@ self.onmessage=(e)=>{
     // twin HERE or the core silently ignores it: the app would look right and
     // the wasm would render a clean, unexcited mix. That is the whole
     // contract of the facade.
+    setDriveOn(v){this.host.set(P.P.DRIVE_ON,v?1:0);}
+    setExOn(v){this.host.set(P.P.EX_ON,v?1:0);}
     setDrive(v){this.host.set(P.P.DRIVE,v);}
     setDriveChar(v){this.host.set(P.P.DRIVE_CHAR,v);}
     setExThump(v){this.host.set(P.P.EX_THUMP,v);}

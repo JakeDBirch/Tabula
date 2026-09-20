@@ -81,8 +81,10 @@ static void defaults(void){
   /* Master bus — all the way OFF, so a project made before this stage
    * existed renders exactly what it always did. See src/loudlight.jsx's
    * SESSION_DEFAULTS, which carries the same five numbers. */
-  p[LL_P_DRIVE]=0; p[LL_P_DRIVE_CHAR]=LL_DRIVE_TAPE;
-  p[LL_P_EX_THUMP]=0; p[LL_P_EX_BODY]=0; p[LL_P_EX_AIR]=0;
+  /* Both stages BYPASSED, but with amounts already at a sensible place: the
+   * switch is the thing you flip, so flipping it has to do something. */
+  p[LL_P_DRIVE_ON]=0; p[LL_P_DRIVE]=35; p[LL_P_DRIVE_CHAR]=LL_DRIVE_TAPE;
+  p[LL_P_EX_ON]=0; p[LL_P_EX_THUMP]=25; p[LL_P_EX_BODY]=20; p[LL_P_EX_AIR]=25;
   for(int l=0;l<2;l++){
     float*q=G.lp[l];
     q[LL_L_WAVE]=WV_SAW; q[LL_L_DETUNE]=l?0:8; q[LL_L_ATTACK]=8; q[LL_L_DECAY]=400; q[LL_L_SUSTAIN]=40;

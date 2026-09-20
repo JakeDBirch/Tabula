@@ -60,17 +60,18 @@ static inline float rv_lf_hz(float p){ return 20.f*ll_pow(800.f/20.f,ll_clamp(p,
  *         flavour and two lies.
  */
 static inline float shape_tape(float x){ return ll_tanh(x); }
-static inline float shape_tube(float x){
-  const float B=0.35f;                       /* bias, in the curve's own units */
-  static const float OFF=0.336376f;          /* ll_tanh(0.35), taken back off */
-  return ll_tanh(x+B)-OFF;
+static inline float shape_tube(float x,float b){
+  /* The bias is passed in rather than fixed, because it SCALES WITH DRIVE —
+   * see LL_TUBE_BIAS. Taking ll_tanh(b) back off is what keeps silence
+   * silent; without it the stage would sit on a DC offset. */
+  return ll_tanh(x+b)-ll_tanh(b);
 }
 static inline float shape_clip(float x){
   float x2=x*x, x6=x2*x2*x2;
   return x*ll_pow(1.f+x6,-1.f/6.f);
 }
-float ll_shape(int chr,float x){
-  return chr==LL_DRIVE_CLIP?shape_clip(x):chr==LL_DRIVE_TUBE?shape_tube(x):shape_tape(x);
+float ll_shape(int chr,float x,float bias){
+  return chr==LL_DRIVE_CLIP?shape_clip(x):chr==LL_DRIVE_TUBE?shape_tube(x,bias):shape_tape(x);
 }
 
 /* DRIVE's derived coefficients. Recomputed only when the knob or the flavour
@@ -84,8 +85,11 @@ float ll_shape(int chr,float x){
  * make the knob feel like it was doing nothing. */
 static void drive_coef(void){
   const float sr=G.sr>0.f?G.sr:48000.f;
-  const float d=ll_clamp(G.driveAmt,0.f,1.f);
-  G.driveOn=(d>0.f);
+  /* The knob's own curve — most of the travel is the gentle half. */
+  const float raw=ll_clamp(G.driveAmt,0.f,1.f);
+  const float d=ll_pow(raw,LL_DRIVE_CURVE);
+  G.driveOn=(G.driveSw&&raw>0.f);
+  G.driveBias=(G.driveChar==LL_DRIVE_TUBE)?LL_TUBE_BIAS*d:0.f;
   /* Each flavour needs its OWN amount of signal to bite on, because the knee
    * is in a different place on each curve. CLIP stays linear until nearly
    * unity by design, and the glue compressor in front of it holds the level
@@ -96,19 +100,24 @@ static void drive_coef(void){
    * The extra gain SCALES WITH THE KNOB rather than being a constant, so at
    * low DRIVE all three are still gentle and the choice is a colour; it is
    * only as you push that they separate into three different kinds of loud. */
-  float charIn  = (G.driveChar==LL_DRIVE_CLIP)?1.f+d*1.9f
-                : (G.driveChar==LL_DRIVE_TUBE)?1.f+d*0.25f : 1.f;
-  float charOut = (G.driveChar==LL_DRIVE_CLIP)?1.f/(1.f+d*1.05f)
-                : (G.driveChar==LL_DRIVE_TUBE)?1.f/(1.f+d*0.18f) : 1.f;
-  G.drivePre=ll_db2lin(d*LL_DRIVE_MAX_DB)*charIn;
-  G.driveTrim=ll_db2lin(-d*LL_DRIVE_MAX_DB*0.78f)*charOut;
+  float charIn  = (G.driveChar==LL_DRIVE_CLIP)?1.f+d*0.85f
+                : (G.driveChar==LL_DRIVE_TUBE)?1.f+d*0.10f : 1.f;
+  float charOut = (G.driveChar==LL_DRIVE_CLIP)?1.f/(1.f+d*0.55f)
+                : (G.driveChar==LL_DRIVE_TUBE)?1.f/(1.f+d*0.08f) : 1.f;
+  /* k scales INTO the curve; 1/k scales back out, so the stage is unity
+   * through the linear region and only departs from it as the signal climbs
+   * into the bend. That is what makes DRIVE a character control: what changes
+   * is WHERE ON THE CURVE you are, not how loud the result is. */
+  const float k=LL_DRIVE_IN_MIN+d*(LL_DRIVE_IN_MAX-LL_DRIVE_IN_MIN);
+  G.drivePre=k*charIn;
+  G.driveTrim=(1.f/k)*charOut;
   G.glueAttK=1.f-ll_exp(-1.f/(LL_GLUE_ATTACK_MS *0.001f*sr));
   G.glueRelK=1.f-ll_exp(-1.f/(LL_GLUE_RELEASE_MS*0.001f*sr));
   /* TAPE's two filters, and they scale WITH the knob — tape loses top and
    * gains bottom the harder you hit it, which is most of why it is recognised
    * by ear at all. The other two flavours leave the signal's balance alone. */
-  float lossHz = 20000.f-d*11000.f;           /* 20k clean -> ~9k melted */
-  float bumpDb = (G.driveChar==LL_DRIVE_TAPE)? d*2.6f : 0.f;
+  float lossHz = 20000.f-d*7000.f;            /* 20k clean -> 13k melted */
+  float bumpDb = (G.driveChar==LL_DRIVE_TAPE)? d*1.4f : 0.f;
   bq_set(&G.tapeLpL,BQ_LP,(G.driveChar==LL_DRIVE_TAPE)?lossHz:20000.f,0,0,sr);
   G.tapeLpR=G.tapeLpL;
   bq_set(&G.headBumpL,BQ_LSH,90.f,0,bumpDb,sr); G.headBumpR=G.headBumpL;
@@ -129,7 +138,7 @@ static void os_coef(void){
  * existing project exactly nothing, in CPU and in sound alike. */
 static void excite_coef(void){
   const float sr=G.sr>0.f?G.sr:48000.f;
-  G.exOn=(G.exThump>0.f||G.exBody>0.f||G.exAir>0.f);
+  G.exOn=(G.exSw&&(G.exThump>0.f||G.exBody>0.f||G.exAir>0.f));
   if(!G.exOn)return;
   bq_set(&G.exLoL   ,BQ_LP,LL_EX_LO_HZ    ,0,0,sr); G.exLoR   =G.exLoL;
   bq_set(&G.exThHpL ,BQ_HP,LL_EX_LO_HP_HZ ,0,0,sr); G.exThHpR =G.exThHpL;
@@ -177,8 +186,10 @@ void fx_param(int id,float v){
     case LL_P_DLY_FB: sm_set(&G.eFb,v); break;
     case LL_P_DLY_HP: sm_set(&G.eHp,hp_hz(v)); break;
     case LL_P_DLY_LP: sm_set(&G.eLp,lp_hz(v)); break;
+    case LL_P_DRIVE_ON:   G.driveSw=v>0.5f?1:0; drive_coef(); break;
     case LL_P_DRIVE:      G.driveAmt=ll_clamp(v,0,100)/100.f; drive_coef(); break;
     case LL_P_DRIVE_CHAR: G.driveChar=(int)ll_clamp(v,0,2);     drive_coef(); break;
+    case LL_P_EX_ON:      G.exSw=v>0.5f?1:0; excite_coef(); break;
     case LL_P_EX_THUMP:   G.exThump=ll_clamp(v,0,100)/100.f; excite_coef(); break;
     case LL_P_EX_BODY:    G.exBody =ll_clamp(v,0,100)/100.f; excite_coef(); break;
     case LL_P_EX_AIR:     G.exAir  =ll_clamp(v,0,100)/100.f; excite_coef(); break;
@@ -263,8 +274,8 @@ void fx_render(float*outL,float*outR,int n){
           float uL=k?0.f:L*2.f, uR=k?0.f:R*2.f;
           uL=bq_run(&G.osUpL2,bq_run(&G.osUpL1,uL));
           uR=bq_run(&G.osUpR2,bq_run(&G.osUpR1,uR));
-          uL=ll_shape(G.driveChar,uL);
-          uR=ll_shape(G.driveChar,uR);
+          uL=ll_shape(G.driveChar,uL,G.driveBias);
+          uR=ll_shape(G.driveChar,uR,G.driveBias);
           uL=bq_run(&G.osDnL2,bq_run(&G.osDnL1,uL));
           uR=bq_run(&G.osDnR2,bq_run(&G.osDnR1,uR));
           if(k==0){ oL=uL; oR=uR; }

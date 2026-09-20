@@ -1222,17 +1222,45 @@ underneath; only the readout is coarse, which is exactly the point.
 `_master.mjs` asserts that no control on the face shows a digit, because that
 is the whole brief and it is the kind of thing that erodes.
 
+**The one thing that is NOT a word is each stage's bypass switch**, which says
+ON or BYPASSED. That is state, not quantity, and it is the control you press
+most: you dial a setting in, flip it off, flip it back, and decide.
+
+- **BOTH STAGES HAVE THEIR OWN BYPASS SWITCH**, and it is a switch rather than
+  "turn the knob to zero". The whole use of a character stage is A/B — dial it
+  in, flip it off, flip it back — and winding a knob down to compare loses the
+  setting you were comparing. It also lets the amounts default to somewhere
+  sensible (DRIVE 35, THUMP 25, BODY 20, AIR 25), so flipping a switch on a
+  fresh project does something rather than nothing. Engaged means *switch on
+  AND something turned up*; all-zero is still the free version of the same
+  bypass. Everything under a switch dims while that stage is out of the path.
+  An old save carrying amounts but no switch loads BYPASSED, which is the safe
+  direction.
 - **DRIVE is ONE knob over a FIXED glue compressor and a saturator**, the way a
   console's input gain is: turning it up gets you more compression AND more
   saturation together, which is what "glue" has always meant. The compressor
-  is still there — threshold −14dB, 2:1, 15ms, 180ms, stereo-LINKED — it is
-  just underneath, where you cannot fiddle with it. Zero is a real BYPASS.
-  - **The output is level-compensated, and that is what makes it a character
-    control rather than a volume knob.** `driveTrim` takes ~78% of the pre-gain
-    back out. Most, not all: a saturator genuinely raises the average level as
-    it eats the peaks, and compensating that away entirely would make the knob
-    feel like it was doing nothing. The test asserts each flavour changes the
-    sound by more than it changes the level.
+  is still there — threshold −6dB, 1.8:1, 25ms, 200ms, stereo-LINKED — it is
+  just underneath, where you cannot fiddle with it.
+- **WHAT THE KNOB MOVES IS `k`: THE SCALE INTO THE CURVE**, with `1/k` back
+  out (`y = shape(x*k)/k`). At small k the signal sits near the origin where
+  every one of these curves is a straight line, so the stage is clean however
+  loud the mix is; as k rises the same signal climbs into the bend. That is
+  also the level compensation — unity through the linear region — which is
+  what makes it a character control rather than a volume knob.
+  - **The first version had no k at all**, just a pre-GAIN starting at unity,
+    so the shaper always saw the mix at full level — and this bus peaks around
+    0.45, which is already well into tanh's curve. DRIVE at its FIRST NOTCH put
+    **1.3% third harmonic** on a 1kHz tone and there was no clean end to the
+    travel at all. Reported as "way too aggressive", correctly. It is 0.22%
+    there now, and `LL_DRIVE_CURVE` spends most of the knob on the gentle half.
+  - **Two attempts to fix it by moving the COMPRESSOR made it worse**, and the
+    reason is worth keeping: the glue comp was *protecting* the shaper, so
+    every dB of compression taken away arrived at the saturator instead.
+    Raising its threshold from −14dB to −6dB took TAPE's first notch from
+    1.28% to 2.15%. The saturator's own input scale was the lever all along.
+  - **Tuned by MEASUREMENT, not by arithmetic in my head** — a sweep that
+    prints harmonic percentages and level against the clean render, for all
+    three flavours across the whole knob. Three wrong guesses preceded it.
 - **Three flavours, and they have to MEASURE different or they are one
   flavour and two lies.** TAPE is `tanh` — symmetric, so odd harmonics only,
   plus an HF loss and a low head bump that scale with the knob (tape loses top
@@ -1241,6 +1269,19 @@ is the whole brief and it is the kind of thing that erodes.
   taken back off: an **asymmetric** transfer curve is the only thing that makes
   EVEN harmonics, and even harmonics are what "warm" means. CLIP is
   `x/(1+x^6)^(1/6)` — linear until nearly unity and then a wall.
+  - **TUBE's bias SCALES WITH THE KNOB**, and that was a real defect rather
+    than a tuning number. A constant bias is asymmetric at every signal level,
+    so TUBE at the first notch was as lopsided as TUBE at the stop — 6.4%
+    second harmonic before you had really turned it on. The flavour arrived
+    fully formed and the knob only made it louder. Scaled, DRIVE means the
+    same thing on all three, and at bias 0 TUBE simply *is* TAPE — which is
+    the property both tests assert.
+  - **"CLIP is harder than TAPE" is only true AT THE STOP.** Below it CLIP is
+    the *cleaner* of the two, because it stays linear while tanh is already
+    bending, and that crossover IS the flavour. An assertion that CLIP was
+    harder at DRIVE 85 failed at 3.5% against TAPE's 4.1%: the curve was right
+    and the test was describing a different kind of distortion box. It now
+    asserts cleaner at 60 (0.38% vs 2.16%) and harder at 100 (8.3% vs 5.4%).
   - **The first CLIP was the classic cubic soft clip `x - x³/3`, and it
     measured as barely harder than TAPE** (3rd harmonic 4.2% against 3.4%). Of
     course it did: `x - x³/3` is the first two terms of tanh's own series, so
@@ -1265,20 +1306,18 @@ is the whole brief and it is the kind of thing that erodes.
   - **The bands are never re-summed**, so the crossover is a ROUTER rather than
     a filter bank and does not have to add back to unity. That is what keeps
     it to six biquads instead of a Linkwitz-Riley tree.
-  - Its bypass is **derived from the three amounts** rather than being its own
-    switch: all three at zero IS off, and a separate toggle would let a lit
-    exciter sit in the path claiming to be bypassed.
+  - It has its own switch, plus the free all-zero bypass underneath it.
 - **OFF IS A REAL BYPASS, NOT A NULL SETTING.** The signal does not pass
   through either stage at all. That is the whole reason this could be added to
   a shipping app: a project made before it existed renders *exactly* what it
-  rendered before, asserted bit-for-bit in `core/test/master.c` with a flavour
-  chosen and only the amounts at zero — so it is the switch under test, not
-  the defaults. The VARY lesson applied before the fact rather than after.
+  rendered before, asserted bit-for-bit in `core/test/master.c` with both
+  switches off and every amount at **100** — so it is the switches under test,
+  not the defaults. The VARY lesson applied before the fact rather than after.
 - In JS the nodes are permanent and the **routing** is what changes
   (`_wireMasterBus`) — rebuilding an AudioNode graph mid-playback clicks — and
   each re-wire is a full disconnect-and-reconnect rather than a diff, the only
   version that cannot leave a stale edge behind.
-- **Five params through every persistence site**, plus a core param each and a
+- **Seven params through every persistence site**, plus a core param each and a
   facade twin each in `core/host.js`. A method added to the JS `Bell` with no
   twin over there is *silently ignored*: the app would look right and the core
   would render a clean, unexcited mix.
@@ -1310,8 +1349,17 @@ is the whole brief and it is the kind of thing that erodes.
     inside that ramp at nearly full level. With the rest of the take 20dB down,
     that one transient dominated the rms and a clean 20dB step read as 14dB.
     Measure the steady state, not the ramp.
-- `data-knob` / `data-knobval` on every `KnobSlider`, `data-drivechar` on the
-  flavour row, and `window.__LL_SHAPE` are the harnesses' hooks. A knob is a
+- **`DRIVE_MAX_DB is not defined` is how the retune nearly shipped broken.**
+  The old `_applyDrive` survived a scripted edit that aborted before writing,
+  so the source kept a reference to a constant that no longer existed — and
+  Babel compiled it happily. The build was green, the page threw at runtime the
+  first time a knob moved, and the only symptom in the harness was an unrelated
+  selector failing later. The lesson is the one already in here: **grep every
+  removed identifier**, and read `pageerror` in the harness rather than only
+  the assertions.
+- `data-knob` / `data-knobval` on every `KnobSlider`, `data-mojo-sw` on each
+  bypass switch, `data-drivechar` on the flavour row, and `window.__LL_SHAPE`
+  (which takes the bias now) are the harnesses' hooks. A knob is a
   ballistic pointer drag with no accessible value of its own, and the curve is
   the one part of this whose "three genuinely different flavours" claim would
   otherwise be a comment rather than a check.

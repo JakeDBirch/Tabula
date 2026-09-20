@@ -139,8 +139,9 @@ typedef struct {
    * The compressor's detector is STEREO-LINKED (one envelope off the louder
    * channel), because two independent detectors move the image around as the
    * mix ducks — the one thing a bus compressor must not do. */
-  int driveOn, driveChar;
-  float driveAmt, drivePre, driveTrim;        /* amt 0..1, pre/trim linear */
+  int driveSw, driveOn, driveChar;            /* Sw = the user's bypass switch;
+                                               * On = Sw AND a non-zero amount */
+  float driveAmt, drivePre, driveTrim, driveBias;
   float glueEnv, glueGain, glueAttK, glueRelK;
   ll_bq tapeLpL, tapeLpR;                     /* TAPE's HF loss */
   ll_bq headBumpL, headBumpR;                 /* TAPE's low-end bump */
@@ -152,7 +153,7 @@ typedef struct {
   /* EXCITE: three generators listening to three bands, each adding harmonics
    * back in PARALLEL to the dry signal. The bands never sum, so the crossover
    * is a router rather than a filter bank. */
-  int exOn; float exThump, exBody, exAir;
+  int exSw, exOn; float exThump, exBody, exAir;
   ll_bq exLoL, exLoR;                         /* LP -> thump generator */
   ll_bq exThHpL, exThHpR;                     /* HP on what thump gives back */
   ll_bq exMidHpL, exMidHpR, exMidLpL, exMidLpR;

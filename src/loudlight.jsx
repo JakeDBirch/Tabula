@@ -1668,8 +1668,19 @@ const RV_DAMP_DB=-7;  // per-pass shelf cut; compounds over recirculations. Gent
 // than a shortcut: a console has one input gain, and turning it up gets you
 // more compression AND more saturation together. That is what "glue" has
 // always meant, and it is one knob instead of five.
-const GLUE_THRESH_DB=-14, GLUE_RATIO=2, GLUE_ATTACK_MS=15, GLUE_RELEASE_MS=180;
-const DRIVE_MAX_DB=14;                   // pre-gain at DRIVE 100
+const GLUE_THRESH_DB=-6, GLUE_RATIO=1.8, GLUE_ATTACK_MS=25, GLUE_RELEASE_MS=200;
+// ── WHERE ON THE CURVE THE SIGNAL SITS — this is the whole of DRIVE ──────
+// The saturator is scaled INTO and back OUT of: y = shape(x*k)/k. At small k
+// the signal sits near the origin, where every one of these curves is a
+// straight line, so the stage is clean however loud the mix is; as k rises
+// the same signal climbs into the bend. k IS the drive.
+//
+// The first version had no k: a pre-GAIN starting at unity, so the shaper
+// always saw the mix at full level — and this bus peaks around 0.45, which is
+// already well into tanh's curve. DRIVE at its FIRST NOTCH put 1.3% third
+// harmonic on a 1kHz tone and there was no clean end to the travel at all.
+// Measured, not guessed (core/test's sweep): 0.22% at the same notch now.
+const DRIVE_IN_MIN=0.22, DRIVE_IN_MAX=2.40, DRIVE_CURVE=1.9;
 const DRIVE_CHARS=["tape","tube","clip"]; // index === LL_DRIVE_* in the core
 // Exciter crossover corners. The bands are never re-summed — each generator
 // adds its harmonics in PARALLEL to the dry signal — so the crossover is a
@@ -1687,18 +1698,22 @@ const EX_LO_HZ=160, EX_LO_HP_HZ=90, EX_MID_LO_HZ=300, EX_MID_HI_HZ=3000, EX_HI_H
 //         curve can only ever give you the odd ones, which is a fuzz pedal.
 //   CLIP  x/(1+x^6)^(1/6) — unity slope at zero and saturating at ±1 like the
 //         others, but LINEAR until it nearly gets there and then a wall.
-const TUBE_BIAS=0.35, TUBE_OFF=Math.tanh(0.35);
-const llShape=(chr,x)=>
+// TUBE's bias SCALES WITH THE KNOB. A constant bias is asymmetric at every
+// signal level, so TUBE at the first notch was as lopsided as TUBE at the
+// stop — the flavour arrived fully formed and the knob only made it louder.
+// Scaled, DRIVE means the same thing on all three: how much.
+const TUBE_BIAS=0.30;
+const llShape=(chr,x,bias)=>
   chr===2 ? x*Math.pow(1+Math.pow(x*x,3),-1/6)
-: chr===1 ? Math.tanh(x+TUBE_BIAS)-TUBE_OFF
+: chr===1 ? Math.tanh(x+(bias||0))-Math.tanh(bias||0)
 :           Math.tanh(x);
 // A WaveShaperNode takes a table, so each curve is sampled once at module
 // scope. 4096 points over ±4 is far finer than the ear can resolve on a
 // curve this smooth, and the node interpolates between them.
 const SHAPER_N=4096, SHAPER_RANGE=4;
-const makeShaperCurve=(chr)=>{
+const makeShaperCurve=(chr,bias)=>{
   const c=new Float32Array(SHAPER_N);
-  for(let i=0;i<SHAPER_N;i++)c[i]=llShape(chr,(i/(SHAPER_N-1)*2-1)*SHAPER_RANGE);
+  for(let i=0;i<SHAPER_N;i++)c[i]=llShape(chr,(i/(SHAPER_N-1)*2-1)*SHAPER_RANGE,bias);
   return c;
 };
 // Per-flavour input gain and its matching output trim, scaled BY THE KNOB.
@@ -1708,8 +1723,12 @@ const makeShaperCurve=(chr)=>{
 // below the point where CLIP bends at all. Scaling with the knob keeps all
 // three gentle at low DRIVE, so the choice is a colour down there and only
 // separates into three kinds of loud as you push. Same numbers as drive_coef.
-const driveCharGain=(chr,d)=> chr===2 ? 1+d*1.9 : chr===1 ? 1+d*0.25 : 1;
-const driveCharTrim=(chr,d)=> chr===2 ? 1/(1+d*1.05) : chr===1 ? 1/(1+d*0.18) : 1;
+const driveCharGain=(chr,d)=> chr===2 ? 1+d*0.85 : chr===1 ? 1+d*0.10 : 1;
+const driveCharTrim=(chr,d)=> chr===2 ? 1/(1+d*0.55) : chr===1 ? 1/(1+d*0.08) : 1;
+// One place that turns the knob into everything derived from it, so the JS
+// and the core cannot drift on the arithmetic rather than on the algebra.
+const driveShapeK=(d)=>DRIVE_IN_MIN+d*(DRIVE_IN_MAX-DRIVE_IN_MIN);
+const driveCurveOf=(pct)=>Math.pow(Math.max(0,Math.min(100,pct))/100,DRIVE_CURVE);
 const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
 const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
 const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
@@ -1741,7 +1760,12 @@ const SESSION_DEFAULTS = Object.freeze({
   // "approximately transparent" is what the VARY disaster was made of. Both
   // engines BYPASS rather than pass through at null, so this is literal.
   // The same five numbers are in core/src/ll_core.c's defaults().
-  driveAmt:0, driveChar:0, exThump:0, exBody:0, exAir:0,
+  // Both stages BYPASSED, with the amounts already somewhere sensible: the
+  // SWITCH is the thing you flip, so flipping it has to do something. An old
+  // save carrying amounts but no switch therefore loads bypassed, which is
+  // the safe direction.
+  driveOn:false, driveAmt:35, driveChar:0,
+  exOn:false, exThump:25, exBody:20, exAir:25,
 });
 
 
@@ -2561,7 +2585,9 @@ class Bell{
     this.shaper=null;this.driveTrim=null;
     this.exIn=null;this.exOut=null;this.thGain=null;this.bdGain=null;this.arGain=null;
     this.busIn=null;this.busOut=null;this.driveOn=false;this.exOn=false;
+    this._driveSw=false;this._exSw=false;
     this._driveAmt=0;this._driveChar=0;this._exThump=0;this._exBody=0;this._exAir=0;
+    this._curveChar=-1;this._curveBias=-1;
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;this.masterLevel=0.55;
@@ -2617,7 +2643,7 @@ class Bell{
     // reads as cheap fizz rather than as character. (The core pays for the
     // same thing by hand, at 2x.)
     const shaper=ctx.createWaveShaper();
-    shaper.curve=makeShaperCurve(0); shaper.oversample="4x";
+    shaper.curve=makeShaperCurve(0,0); shaper.oversample="4x";
     const driveTrim=ctx.createGain(); driveTrim.gain.value=1;
     drivePre.connect(glue); glue.connect(tapeLp); tapeLp.connect(shaper);
     shaper.connect(headBump); headBump.connect(driveTrim);
@@ -2669,8 +2695,7 @@ class Bell{
     this.exIn=exIn; this.exOut=exOut;
     this.thGain=thGain; this.bdGain=bdGain; this.arGain=arGain;
     this.driveOn=false; this.exOn=false;
-    this._driveAmt=0; this._driveChar=0;
-    this._exThump=0; this._exBody=0; this._exAir=0;
+    this._curveChar=0; this._curveBias=0;
     this.busIn=m; this.busOut=lim;
     this._wireMasterBus();
     lim.connect(this.ctx.destination); this.limiter=lim;
@@ -2860,34 +2885,40 @@ class Bell{
     if(this.driveOn) this.driveTrim.connect(this.exOn?this.exIn:out);
     if(this.exOn)    this.exOut.connect(out);
   }
-  // DRIVE — one knob. Pre-gain into a FIXED glue compressor, then the
-  // flavour's curve, then a trim that takes MOST of the pre-gain back out.
-  // Most, not all: a saturator genuinely raises the average level as it eats
-  // the peaks, and compensating that away entirely would make the knob feel
-  // like it was doing nothing. Taking none of it out would make it a fader.
+  // DRIVE — one knob, and what it moves is k: the scale INTO the saturator's
+  // curve, with 1/k back out. Unity through the linear region, so what the
+  // knob changes is WHERE ON THE CURVE you are rather than how loud you are.
+  // See DRIVE_IN_MIN for why a pre-gain starting at unity was wrong.
   _applyDrive(){
     if(!this.ready||!this.drivePre)return;
-    const d=Math.max(0,Math.min(100,this._driveAmt))/100;
+    const raw=Math.max(0,Math.min(100,this._driveAmt))/100;
+    const d=driveCurveOf(this._driveAmt);
     const chr=this._driveChar|0, t=this.ctx.currentTime;
-    const on=d>0;
-    this.drivePre.gain.setTargetAtTime(Math.pow(10,d*DRIVE_MAX_DB/20)*driveCharGain(chr,d),t,0.02);
-    this.driveTrim.gain.setTargetAtTime(Math.pow(10,-d*DRIVE_MAX_DB*0.78/20)*driveCharTrim(chr,d),t,0.02);
+    const on=!!this._driveSw&&raw>0;
+    const k=driveShapeK(d);
+    this.drivePre.gain.setTargetAtTime(k*driveCharGain(chr,d),t,0.02);
+    this.driveTrim.gain.setTargetAtTime((1/k)*driveCharTrim(chr,d),t,0.02);
     // TAPE alone colours the balance; the other two leave it where it is.
     const tape=chr===0;
-    this.tapeLp.frequency.setTargetAtTime(tape?20000-d*11000:20000,t,0.02);
-    this.headBump.gain.setTargetAtTime(tape?d*2.6:0,t,0.02);
+    this.tapeLp.frequency.setTargetAtTime(tape?20000-d*7000:20000,t,0.02);
+    this.headBump.gain.setTargetAtTime(tape?d*1.4:0,t,0.02);
+    // TUBE's curve depends on the knob, so its table is rebuilt as the knob
+    // moves — cached against the last bias, because a drag would otherwise
+    // rebuild 4096 floats on every pointermove for the two flavours that do
+    // not use a bias at all.
+    const bias=chr===1?TUBE_BIAS*d:0;
+    if(this.shaper&&(chr!==this._curveChar||bias!==this._curveBias)){
+      this.shaper.curve=makeShaperCurve(chr,bias);
+      this._curveChar=chr; this._curveBias=bias;
+    }
     if(on!==this.driveOn){ this.driveOn=on; this._wireMasterBus(); }
   }
+  setDriveOn(v){ this._driveSw=!!v; this._applyDrive(); }
   setDrive(v){ this._driveAmt=v; this._applyDrive(); }
-  setDriveChar(v){
-    this._driveChar=Math.max(0,Math.min(2,v|0));
-    if(this.shaper)this.shaper.curve=makeShaperCurve(this._driveChar);
-    this._applyDrive();
-  }
-  // EXCITE — its bypass is DERIVED from the three amounts rather than being
-  // its own switch: all three at zero IS off, there is nothing else it could
-  // mean, and a separate toggle would let a lit exciter sit in the path
-  // claiming to be bypassed.
+  setDriveChar(v){ this._driveChar=Math.max(0,Math.min(2,v|0)); this._applyDrive(); }
+  // EXCITE — engaged when its switch is on AND something is turned up. The
+  // switch is what you flip to A/B a setting you have already dialled in; the
+  // amounts all being zero is the free version of the same thing.
   _applyExcite(){
     if(!this.ready||!this.thGain)return;
     const t=this.ctx.currentTime;
@@ -2895,9 +2926,10 @@ class Bell{
     this.thGain.gain.setTargetAtTime(n(this._exThump)*0.9,t,0.02);
     this.bdGain.gain.setTargetAtTime(n(this._exBody)*0.33,t,0.02);
     this.arGain.gain.setTargetAtTime(n(this._exAir)*0.42,t,0.02);
-    const on=!!(this._exThump||this._exBody||this._exAir);
+    const on=!!this._exSw&&!!(this._exThump||this._exBody||this._exAir);
     if(on!==this.exOn){ this.exOn=on; this._wireMasterBus(); }
   }
+  setExOn(v){ this._exSw=!!v; this._applyExcite(); }
   setExThump(v){ this._exThump=v; this._applyExcite(); }
   setExBody(v){ this._exBody=v; this._applyExcite(); }
   setExAir(v){ this._exAir=v; this._applyExcite(); }
@@ -4192,11 +4224,13 @@ export default function LoudLight(){
   // wrong instrument to bolt onto the end of something you play with your
   // thumbs. The glue compressor is still there; it is just UNDER the DRIVE
   // knob, fixed, the way a console's is.
-  const [driveAmt,  setDriveAmt]  = useState(0);  // 0..100, 0 = bypassed
+  const [driveOn,   setDriveOn]   = useState(false); // the stage's own bypass
+  const [driveAmt,  setDriveAmt]  = useState(35); // 0..100
   const [driveChar, setDriveChar] = useState(0);  // 0 TAPE, 1 TUBE, 2 CLIP
-  const [exThump,   setExThump]   = useState(0);  // 0..100
-  const [exBody,    setExBody]    = useState(0);  // 0..100
-  const [exAir,     setExAir]     = useState(0);  // 0..100
+  const [exOn,      setExOn]      = useState(false);
+  const [exThump,   setExThump]   = useState(25); // 0..100
+  const [exBody,    setExBody]    = useState(20); // 0..100
+  const [exAir,     setExAir]     = useState(25); // 0..100
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -4557,6 +4591,8 @@ export default function LoudLight(){
   // Master bus. Guarded with && like every other one of these: `bell.current`
   // is a facade when the core is on, and a method with no twin over there is
   // silently absent rather than an error.
+  useEffect(()=>{bell.current.setDriveOn&&bell.current.setDriveOn(driveOn);},[driveOn]);
+  useEffect(()=>{bell.current.setExOn&&bell.current.setExOn(exOn);},[exOn]);
   useEffect(()=>{bell.current.setDrive&&bell.current.setDrive(driveAmt);},[driveAmt]);
   useEffect(()=>{bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);},[driveChar]);
   useEffect(()=>{bell.current.setExThump&&bell.current.setExThump(exThump);},[exThump]);
@@ -4650,7 +4686,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    driveAmt,driveChar,exThump,exBody,exAir,
+    driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     loopMode,loopBar,loopBars,loopPat,
@@ -4719,7 +4755,7 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4808,7 +4844,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveAmt,driveChar,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4927,7 +4963,7 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
@@ -5045,7 +5081,8 @@ export default function LoudLight(){
     // Master bus back to off. (This is inside the long run of setters that a
     // single throw abandons — see the doNew cliff lesson — so it stays with
     // the rest of the sound resets rather than at the end.)
-    setDriveAmt(SESSION_DEFAULTS.driveAmt);setDriveChar(SESSION_DEFAULTS.driveChar);
+    setDriveOn(SESSION_DEFAULTS.driveOn);setDriveAmt(SESSION_DEFAULTS.driveAmt);
+    setDriveChar(SESSION_DEFAULTS.driveChar);setExOn(SESSION_DEFAULTS.exOn);
     setExThump(SESSION_DEFAULTS.exThump);setExBody(SESSION_DEFAULTS.exBody);
     setExAir(SESSION_DEFAULTS.exAir);
     // Transient scheduler/UI state — clear so the next play starts fresh.
@@ -7813,7 +7850,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    driveAmt,driveChar,exThump,exBody,exAir,
+    driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -7872,7 +7909,7 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     _adoptSong(s);
 
@@ -8381,7 +8418,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveAmt,driveChar,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Unsaved-work flag. The autosave deps above minus `playing` and minus the
   // navigation/transport state — see markClean for why those are left out.
   useEffect(()=>{
@@ -8390,7 +8427,7 @@ export default function LoudLight(){
     setDirty(true);
   },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
      dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
-     driveAmt,driveChar,exThump,exBody,exAir,
+     driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
      trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
@@ -8890,9 +8927,11 @@ export default function LoudLight(){
     // amount is what decides whether that curve is in the path at all.
     bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);
     bell.current.setDrive&&bell.current.setDrive(driveAmt);
+    bell.current.setDriveOn&&bell.current.setDriveOn(driveOn);
     bell.current.setExThump&&bell.current.setExThump(exThump);
     bell.current.setExBody&&bell.current.setExBody(exBody);
     bell.current.setExAir&&bell.current.setExAir(exAir);
+    bell.current.setExOn&&bell.current.setExOn(exOn);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -11511,9 +11550,28 @@ export default function LoudLight(){
   const W_THUMP=["\u2014","ROUND","FULL","BIG","MASSIVE"];
   const W_BODY =["\u2014","SOLID","THICK","CHEWY","GNARLY"];
   const W_AIR  =["\u2014","OPEN","CRISP","BRIGHT","GLASSY"];
+  // Both stages carry their OWN bypass, and it is a switch rather than "turn
+  // the knob to zero". The whole use of a character stage is A/B — dial it in,
+  // flip it off, flip it back — and winding a knob down to compare loses the
+  // setting you were comparing. It also means the amounts can default to
+  // somewhere sensible, so flipping ON does something on a fresh project.
+  const mojoSwitch=(on,set,label)=>(
+    <button data-mojo-sw={label} aria-pressed={on} aria-label={label+(on?" on":" bypassed")}
+      onClick={()=>{pushHistory();set(v=>!v);}}
+      style={{width:"100%",padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+        fontSize:9,fontWeight:700,letterSpacing:1.6,
+        border:"1px solid "+(on?C_MASTER:C_MASTER+"33"),
+        background:on?C_MASTER+"22":"transparent",
+        color:on?C_MASTER:C_MASTER+"77"}}>{on?"ON":"BYPASSED"}</button>
+  );
   const masterBusSections = (<>
     <SynthSection title="DRIVE" accent={C_MASTER}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
+        {mojoSwitch(driveOn,setDriveOn,"DRIVE")}
+        {/* Everything below the switch dims while the stage is out of the
+            path — legible, still adjustable, and saying without a word that
+            what you are turning is not currently being heard. */}
+        <div style={{opacity:driveOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
         {/* The flavour is the first decision and the one you make rarely, so
             it sits above the knob rather than behind a menu. Three words, and
             they are three genuinely different curves — see ll_shape. */}
@@ -11532,31 +11590,36 @@ export default function LoudLight(){
           })}
         </div>
         {/* One knob over a fixed glue compressor AND a saturator, the way a
-            console's input gain is. 0 is a real bypass. */}
-        <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={0}
+            console's input gain is: it scales the signal INTO the curve and
+            back out, so what changes is where on the curve you are. */}
+        <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={SESSION_DEFAULTS.driveAmt}
           onChange={setDriveAmt} display={mojoWord(driveAmt,W_DRIVE)} accent={C_MASTER}/>
         <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
           {driveChar===0?"Tape: soft, loses a little top, gains a little bottom."
            :driveChar===1?"Tube: asymmetric, so it makes even harmonics. Warm."
            :"Clip: clean until it isn't. A wall, not a curve."}
         </div>
+        </div>
       </div>
     </SynthSection>
     <SynthSection title="EXCITE" accent={C_MASTER}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
+        {mojoSwitch(exOn,setExOn,"EXCITE")}
         {/* Three generators, each listening to one band and adding its
             HARMONICS back. Named for what they do to the sound, not for the
             frequencies they sit on — a corner in Hz is the wrong answer to
             "make the bass land on a phone". */}
-        <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={0}
+        <div style={{opacity:exOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
+        <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={SESSION_DEFAULTS.exThump}
           onChange={setExThump} display={mojoWord(exThump,W_THUMP)} accent={C_MASTER}/>
-        <KnobSlider label="BODY" value={exBody} min={0} max={100} def={0}
+        <KnobSlider label="BODY" value={exBody} min={0} max={100} def={SESSION_DEFAULTS.exBody}
           onChange={setExBody} display={mojoWord(exBody,W_BODY)} accent={C_MASTER}/>
-        <KnobSlider label="AIR" value={exAir} min={0} max={100} def={0}
+        <KnobSlider label="AIR" value={exAir} min={0} max={100} def={SESSION_DEFAULTS.exAir}
           onChange={setExAir} display={mojoWord(exAir,W_AIR)} accent={C_MASTER}/>
         <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
           Harmonics, not tone controls. THUMP makes bass you can hear on a
           phone; AIR makes detail that was not there to lift.
+        </div>
         </div>
       </div>
     </SynthSection>

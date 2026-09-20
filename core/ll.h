@@ -72,10 +72,13 @@ enum ll_param {
    * three EQ gains and a frequency — was a mixing desk, and a mixing desk is
    * the wrong instrument to bolt onto the end of a toy you play with your
    * thumbs. */
+  LL_P_DRIVE_ON,     /* 0/1 — the stage's own BYPASS, so you can A/B a setting
+                      * without losing it. Separate from the amount on purpose. */
   LL_P_DRIVE,        /* 0..100 — into a FIXED bus compressor, then a saturator.
-                      * 0 is a real BYPASS. Output is level-compensated, so
-                      * this is a character control and not a volume knob. */
+                      * Output is level-compensated, so this is a character
+                      * control and not a volume knob. */
   LL_P_DRIVE_CHAR,   /* 0 TAPE, 1 TUBE, 2 CLIP */
+  LL_P_EX_ON,        /* 0/1 — EXCITE's own bypass, same argument */
   LL_P_EX_THUMP,     /* 0..100 — low-band exciter: harmonics ABOVE the bass */
   LL_P_EX_BODY,      /* 0..100 — mid-band saturation blended in parallel */
   LL_P_EX_AIR,       /* 0..100 — high-band exciter, Aphex-style */
@@ -88,11 +91,46 @@ enum { LL_DRIVE_TAPE=0, LL_DRIVE_TUBE=1, LL_DRIVE_CLIP=2 };
  * a real console has one input gain, and turning it up gets you more
  * compression AND more saturation together, which is what "glue" has always
  * meant. The same five numbers are in src/loudlight.jsx. */
-#define LL_GLUE_THRESH_DB  (-14.f)
-#define LL_GLUE_RATIO      2.f
-#define LL_GLUE_ATTACK_MS  15.f
-#define LL_GLUE_RELEASE_MS 180.f
-#define LL_DRIVE_MAX_DB    14.f   /* pre-gain at DRIVE 100 */
+/* The threshold sits just above a normal programme level, so the compressor
+ * only catches peaks until DRIVE pushes signal into it — one gain in, more
+ * compression and more saturation out, together, which is the console model.
+ * The attack is slow for a bus compressor: it lets transients through, and a
+ * fast one ripples at the signal frequency and makes harmonics of its own. */
+#define LL_GLUE_THRESH_DB  (-6.f)
+#define LL_GLUE_RATIO      1.8f
+#define LL_GLUE_ATTACK_MS  25.f
+#define LL_GLUE_RELEASE_MS 200.f
+
+/* ── WHERE ON THE CURVE THE SIGNAL SITS ─────────────────────────────────
+ * This is the whole of DRIVE, and getting it wrong is what made the first
+ * version far too aggressive. The saturator is scaled INTO and back OUT of:
+ *
+ *     y = shape(x * k) / k
+ *
+ * At small k the signal sits near the origin, where every one of these curves
+ * is a straight line, and the stage is clean however loud the mix is. As k
+ * rises the same signal climbs into the bend. So k IS the drive.
+ *
+ * The first version had no k at all: it was a pre-GAIN starting at unity, so
+ * the shaper always saw the mix at full level — and the master bus peaks
+ * around 0.45, which is already well into tanh's curve. DRIVE at its FIRST
+ * NOTCH therefore put 1.3% third harmonic on a 1kHz tone, and there was no
+ * clean end to the travel at all. Two attempts at fixing it by moving the
+ * compressor made it worse, for a reason worth remembering: the glue comp was
+ * PROTECTING the shaper, so every dB of compression taken away arrived at the
+ * saturator instead.
+ *
+ * LL_DRIVE_CURVE then spends most of the knob on the gentle half, which is
+ * the shape a drive control wants when the thing it is driving is a whole mix
+ * rather than one guitar. */
+#define LL_DRIVE_IN_MIN    0.22f
+#define LL_DRIVE_IN_MAX    2.40f
+#define LL_DRIVE_CURVE     1.9f
+/* TUBE's bias SCALES WITH THE KNOB. A constant bias is asymmetric at every
+ * signal level, so TUBE at the first notch was as lopsided as TUBE at the
+ * stop — the flavour arrived fully formed and the knob only made it louder.
+ * Scaled, DRIVE means the same thing on all three flavours: how much. */
+#define LL_TUBE_BIAS       0.30f
 
 /* Exciter crossover corners, shared with the JS engine for the same reason
  * the shelf corners were: a band that sits somewhere else in the other engine
@@ -184,11 +222,13 @@ void  ll_set_drum(int voice, int id, float v);
 float ll_get(int id);
 
 /* DRIVE's saturation curve, as a pure function of one sample — exported so a
- * host (or a test) can sample it into a table. `chr` is an LL_DRIVE_* value.
+ * host (or a test) can sample it into a table. `chr` is an LL_DRIVE_* value;
+ * `bias` is TUBE's operating point (0 for the symmetric flavours) and scales
+ * with DRIVE, so TUBE's curve is rebuilt as the knob moves.
  * The JS engine holds the SAME closed forms, written out in Bell's curve
  * builder, so the two fold on one definition rather than on two descriptions
  * of the same intent; they agree to float precision, tanh's last bit aside. */
-float ll_shape(int chr, float x);
+float ll_shape(int chr, float x, float bias);
 
 /* Samples. One arena, cleared wholesale (kits load whole; clearing also
  * silences any hit still reading the old ones). kind: 0 single, 1 round-robin,
