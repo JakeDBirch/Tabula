@@ -204,9 +204,10 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
-// The master bus — a colour of its own, deliberately not one of the layer
-// accents: this stage is over ALL of them, and borrowing POLY's green would
-// say it belonged to a part.
+// MOJO — the master bus. A colour of its own, deliberately not one of the
+// layer accents: this stage is over ALL of them, and borrowing POLY's green
+// would say it belonged to a part. Warm sand, because everything it does is
+// some flavour of heat.
 const C_MASTER="#c9b78f";
 const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
@@ -1658,22 +1659,57 @@ const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 const RV_DAMP_DB=-7;  // per-pass shelf cut; compounds over recirculations. Gentler
                       // than the old -12 so the damping eases in around the corner
                       // instead of clamping hard just past it.
-// ── MASTER EQ — the two shelf corners and the mid bell's Q ──────────────
-// The same three numbers are in core/ll.h (LL_EQ_LO_HZ / LL_EQ_HI_HZ /
-// LL_EQ_MID_Q). A master EQ whose shelves sit at different frequencies in the
-// two engines is a project that sounds different depending on which one is
-// running, which is the one thing the core exists not to be.
+// ── THE MASTER BUS: DRIVE and EXCITE ────────────────────────────────────
+// Every number here has a twin in core/ll.h, because a character stage that
+// sits somewhere else in the other engine is a project that sounds different
+// depending on which one is running — the one thing the core exists not to be.
 //
-// Fixed corners because the band GAIN is what you reach for on a master EQ
-// twenty times to the corner's once, and three fixed bands with one sweepable
-// mid is the shape that has been on every mixing desk for fifty years. The
-// mid sweeps because "which mid" is the question that actually varies.
-const EQ_LO_HZ=120, EQ_HI_HZ=6000, EQ_MID_Q=0.9;
-const EQ_MID_MIN=200, EQ_MID_MAX=6000;
-// Log sweep, so the knob's travel is musical rather than crowding everything
-// below 1k into the first eighth of it.
-const eqMidHzOf=pct=>Math.round(EQ_MID_MIN*Math.pow(EQ_MID_MAX/EQ_MID_MIN,Math.max(0,Math.min(100,pct))/100));
-const eqMidPctOf=hz=>Math.round(Math.log(Math.max(EQ_MID_MIN,Math.min(EQ_MID_MAX,hz))/EQ_MID_MIN)/Math.log(EQ_MID_MAX/EQ_MID_MIN)*100);
+// The glue compressor under DRIVE is FIXED, and that is the design rather
+// than a shortcut: a console has one input gain, and turning it up gets you
+// more compression AND more saturation together. That is what "glue" has
+// always meant, and it is one knob instead of five.
+const GLUE_THRESH_DB=-14, GLUE_RATIO=2, GLUE_ATTACK_MS=15, GLUE_RELEASE_MS=180;
+const DRIVE_MAX_DB=14;                   // pre-gain at DRIVE 100
+const DRIVE_CHARS=["tape","tube","clip"]; // index === LL_DRIVE_* in the core
+// Exciter crossover corners. The bands are never re-summed — each generator
+// adds its harmonics in PARALLEL to the dry signal — so the crossover is a
+// router, not a filter bank, and does not have to add back to unity.
+const EX_LO_HZ=160, EX_LO_HP_HZ=90, EX_MID_LO_HZ=300, EX_MID_HI_HZ=3000, EX_HI_HZ=3500;
+
+// ── The saturation curves, and they are the SAME ALGEBRA as ll_shape ─────
+// Three lines of maths written out in two languages rather than two
+// descriptions of one intent. Keep them in step with core/src/ll_fx.c.
+//
+//   TAPE  tanh — symmetric, so odd harmonics only. Gentle.
+//   TUBE  tanh with a DC bias pushed through and taken back off. An
+//         ASYMMETRIC transfer curve is the only thing that makes EVEN
+//         harmonics, and even harmonics are what "warm" means; a symmetric
+//         curve can only ever give you the odd ones, which is a fuzz pedal.
+//   CLIP  x/(1+x^6)^(1/6) — unity slope at zero and saturating at ±1 like the
+//         others, but LINEAR until it nearly gets there and then a wall.
+const TUBE_BIAS=0.35, TUBE_OFF=Math.tanh(0.35);
+const llShape=(chr,x)=>
+  chr===2 ? x*Math.pow(1+Math.pow(x*x,3),-1/6)
+: chr===1 ? Math.tanh(x+TUBE_BIAS)-TUBE_OFF
+:           Math.tanh(x);
+// A WaveShaperNode takes a table, so each curve is sampled once at module
+// scope. 4096 points over ±4 is far finer than the ear can resolve on a
+// curve this smooth, and the node interpolates between them.
+const SHAPER_N=4096, SHAPER_RANGE=4;
+const makeShaperCurve=(chr)=>{
+  const c=new Float32Array(SHAPER_N);
+  for(let i=0;i<SHAPER_N;i++)c[i]=llShape(chr,(i/(SHAPER_N-1)*2-1)*SHAPER_RANGE);
+  return c;
+};
+// Per-flavour input gain and its matching output trim, scaled BY THE KNOB.
+// Each curve's knee is in a different place, so a shared pre-gain reaches one
+// of them and not the others: with one, CLIP — the aggressive flavour —
+// measured CLEANER than TAPE, because the glue compressor holds the level
+// below the point where CLIP bends at all. Scaling with the knob keeps all
+// three gentle at low DRIVE, so the choice is a colour down there and only
+// separates into three kinds of loud as you push. Same numbers as drive_coef.
+const driveCharGain=(chr,d)=> chr===2 ? 1+d*1.9 : chr===1 ? 1+d*0.25 : 1;
+const driveCharTrim=(chr,d)=> chr===2 ? 1/(1+d*1.05) : chr===1 ? 1/(1+d*0.18) : 1;
 const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
 const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
 const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
@@ -1699,14 +1735,13 @@ const SESSION_DEFAULTS = Object.freeze({
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   loopMode:0, loopBar:-1, loopBars:1, loopPat:null,
-  // Master bus — OFF and FLAT. A stage in the path of every saved project is
-  // the last place to ship a default that colours anything: an existing
+  // Master bus — all the way OFF. A stage in the path of every saved project
+  // is the last place to ship a default that colours anything: an existing
   // project has to render exactly what it rendered before this existed, and
   // "approximately transparent" is what the VARY disaster was made of. Both
-  // engines bypass rather than pass through flat, so this is literal.
-  // The same ten numbers are in core/src/ll_core.c's defaults().
-  compOn:false, compThresh:-12, compRatio:2, compAttack:20, compRelease:200, compMakeup:0,
-  eqLow:0, eqMid:0, eqMidHz:1000, eqHigh:0,
+  // engines BYPASS rather than pass through at null, so this is literal.
+  // The same five numbers are in core/src/ll_core.c's defaults().
+  driveAmt:0, driveChar:0, exThump:0, exBody:0, exAir:0,
 });
 
 
@@ -2519,12 +2554,14 @@ class Bell{
   constructor(){
     this.ctx=null;this.master=null;this.rev=null;
     this.dly=null;this.dlyFb=null;this.dlyReturn=null;this.dlySend=null;this.dlyHp=null;this.dlyLp=null;
-    // Master bus — built in init(), routed by _wireMasterBus(). The three EQ
-    // gains are shadowed here because the bypass is DERIVED from them and an
-    // AudioParam's .value is not readable back reliably mid-ramp.
-    this.comp=null;this.compMakeup=null;this.eqLo=null;this.eqMid=null;this.eqHi=null;
-    this.busIn=null;this.busOut=null;this.compOn=false;this.eqOn=false;
-    this._eqLoDb=0;this._eqMidDb=0;this._eqHiDb=0;
+    // Master bus — built in init(), routed by _wireMasterBus(). The five
+    // amounts are shadowed here because the bypasses are DERIVED from them and
+    // an AudioParam's .value is not readable back reliably mid-ramp.
+    this.drivePre=null;this.glue=null;this.tapeLp=null;this.headBump=null;
+    this.shaper=null;this.driveTrim=null;
+    this.exIn=null;this.exOut=null;this.thGain=null;this.bdGain=null;this.arGain=null;
+    this.busIn=null;this.busOut=null;this.driveOn=false;this.exOn=false;
+    this._driveAmt=0;this._driveChar=0;this._exThump=0;this._exBody=0;this._exAir=0;
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;this.masterLevel=0.55;
@@ -2547,37 +2584,93 @@ class Bell{
     const lim=this.ctx.createDynamicsCompressor();
     lim.threshold.value=-1.0; lim.knee.value=0; lim.ratio.value=20;
     lim.attack.value=0.002; lim.release.value=0.1;
-    // ── THE MASTER BUS: compressor → 3-band EQ → limiter ────────────────
-    // Between the summing gain and the limiter, in that order: the compressor
-    // reacts to the mix as it is, the EQ shapes what comes out of it, and the
-    // limiter is the thing nothing gets past. (Putting the EQ first would have
-    // the compressor chasing a boost you just dialled in, which is a bus comp
-    // that never settles.)
+    // ── THE MASTER BUS: DRIVE → EXCITE → limiter ────────────────────────
+    // Between the summing gain and the limiter. DRIVE is one knob over a
+    // FIXED glue compressor and a saturator; EXCITE is three generators each
+    // listening to one band and adding its HARMONICS back in parallel. Then
+    // the limiter, which is the thing nothing gets past.
     //
-    // Both stages are BYPASSED by default, and bypass here means the signal
-    // does not pass through the nodes at all rather than passing through them
-    // flat. That is what makes adding a master section cost an existing
-    // project exactly nothing — the VARY lesson, applied before the fact: a
-    // stage in the path of every saved project is the last place to be
-    // approximately transparent.
+    // Both stages are BYPASSED at zero, and bypass here means the signal does
+    // not pass through the nodes at all rather than passing through them
+    // set to null. That is what makes adding a master section cost an
+    // existing project exactly nothing — the VARY lesson, applied before the
+    // fact: a stage in the path of every saved project is the last place to
+    // be approximately transparent.
     //
     // The nodes are built once and the ROUTING is what changes, because
     // rebuilding an AudioNode graph mid-playback clicks.
-    const comp=this.ctx.createDynamicsCompressor();
-    comp.threshold.value=-12; comp.knee.value=6; comp.ratio.value=2;
-    comp.attack.value=0.02; comp.release.value=0.2;
-    const compMakeup=this.ctx.createGain(); compMakeup.gain.value=1;
-    const eqLo=this.ctx.createBiquadFilter(); eqLo.type="lowshelf";
-    eqLo.frequency.value=EQ_LO_HZ; eqLo.gain.value=0;
-    const eqMid=this.ctx.createBiquadFilter(); eqMid.type="peaking";
-    eqMid.frequency.value=1000; eqMid.Q.value=EQ_MID_Q; eqMid.gain.value=0;
-    const eqHi=this.ctx.createBiquadFilter(); eqHi.type="highshelf";
-    eqHi.frequency.value=EQ_HI_HZ; eqHi.gain.value=0;
-    comp.connect(compMakeup);
-    eqLo.connect(eqMid); eqMid.connect(eqHi);
-    this.comp=comp; this.compMakeup=compMakeup;
-    this.eqLo=eqLo; this.eqMid=eqMid; this.eqHi=eqHi;
-    this.compOn=false; this.eqOn=false;
+    const ctx=this.ctx;
+    // DRIVE: pre-gain → glue → shaper → trim.
+    const drivePre=ctx.createGain(); drivePre.gain.value=1;
+    const glue=ctx.createDynamicsCompressor();
+    glue.threshold.value=GLUE_THRESH_DB; glue.knee.value=6; glue.ratio.value=GLUE_RATIO;
+    glue.attack.value=GLUE_ATTACK_MS/1000; glue.release.value=GLUE_RELEASE_MS/1000;
+    // TAPE's HF loss and head bump. They scale WITH the knob — tape loses top
+    // and gains bottom the harder you hit it, which is most of why it is
+    // recognised by ear at all — and sit at unity for the other two flavours.
+    const tapeLp=ctx.createBiquadFilter(); tapeLp.type="lowpass";
+    tapeLp.frequency.value=20000; tapeLp.Q.value=0.0001;
+    const headBump=ctx.createBiquadFilter(); headBump.type="lowshelf";
+    headBump.frequency.value=90; headBump.gain.value=0;
+    // oversample:"4x" is free here and worth taking: a waveshaper folds
+    // harmonics back off Nyquist as aliasing, and on a MASTER stage that
+    // reads as cheap fizz rather than as character. (The core pays for the
+    // same thing by hand, at 2x.)
+    const shaper=ctx.createWaveShaper();
+    shaper.curve=makeShaperCurve(0); shaper.oversample="4x";
+    const driveTrim=ctx.createGain(); driveTrim.gain.value=1;
+    drivePre.connect(glue); glue.connect(tapeLp); tapeLp.connect(shaper);
+    shaper.connect(headBump); headBump.connect(driveTrim);
+    // EXCITE: three parallel generators. Each taps the bus, listens to one
+    // band, makes harmonics, and adds them back — nothing is re-summed from
+    // the bands, so the crossover only has to decide what each one hears.
+    const exIn=ctx.createGain(), exOut=ctx.createGain();
+    exIn.connect(exOut);                                    // the DRY path
+    // THUMP — the low band through a rectifier. A rectifier is a frequency
+    // DOUBLER, so what comes back is the bass's own harmonics an octave up,
+    // which the ear reads as weight even on a speaker that cannot reproduce
+    // the fundamental at all. High-passed on the way back for exactly that
+    // reason: more sub would do nothing on a phone, which is where this gets
+    // played.
+    const thLp=ctx.createBiquadFilter(); thLp.type="lowpass"; thLp.frequency.value=EX_LO_HZ;
+    const thRect=ctx.createWaveShaper(); thRect.oversample="2x";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++){const x=i/(n-1)*2-1; c[i]=Math.tanh((Math.abs(x)*2-0.5*Math.abs(x)));}
+     thRect.curve=c;}
+    const thHp=ctx.createBiquadFilter(); thHp.type="highpass"; thHp.frequency.value=EX_LO_HP_HZ;
+    const thGain=ctx.createGain(); thGain.gain.value=0;
+    exIn.connect(thLp); thLp.connect(thRect); thRect.connect(thHp);
+    thHp.connect(thGain); thGain.connect(exOut);
+    // BODY — the mids, saturated and blended back. Density, not level.
+    const bdHp=ctx.createBiquadFilter(); bdHp.type="highpass"; bdHp.frequency.value=EX_MID_LO_HZ;
+    const bdLp=ctx.createBiquadFilter(); bdLp.type="lowpass";  bdLp.frequency.value=EX_MID_HI_HZ;
+    const bdSat=ctx.createWaveShaper(); bdSat.oversample="2x";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*2.2);
+     bdSat.curve=c;}
+    const bdGain=ctx.createGain(); bdGain.gain.value=0;
+    exIn.connect(bdHp); bdHp.connect(bdLp); bdLp.connect(bdSat);
+    bdSat.connect(bdGain); bdGain.connect(exOut);
+    // AIR — Aphex-style: take the top, distort it, and hand back only what
+    // was GENERATED. It is not a shelf; a shelf lifts what is already there,
+    // and this makes detail that was not there to lift.
+    const arHp=ctx.createBiquadFilter(); arHp.type="highpass"; arHp.frequency.value=EX_HI_HZ;
+    const arSat=ctx.createWaveShaper(); arSat.oversample="4x";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*3);
+     arSat.curve=c;}
+    const arHp2=ctx.createBiquadFilter(); arHp2.type="highpass"; arHp2.frequency.value=EX_HI_HZ*1.2;
+    const arGain=ctx.createGain(); arGain.gain.value=0;
+    exIn.connect(arHp); arHp.connect(arSat); arSat.connect(arHp2);
+    arHp2.connect(arGain); arGain.connect(exOut);
+
+    this.drivePre=drivePre; this.glue=glue; this.tapeLp=tapeLp;
+    this.headBump=headBump; this.shaper=shaper; this.driveTrim=driveTrim;
+    this.exIn=exIn; this.exOut=exOut;
+    this.thGain=thGain; this.bdGain=bdGain; this.arGain=arGain;
+    this.driveOn=false; this.exOn=false;
+    this._driveAmt=0; this._driveChar=0;
+    this._exThump=0; this._exBody=0; this._exAir=0;
     this.busIn=m; this.busOut=lim;
     this._wireMasterBus();
     lim.connect(this.ctx.destination); this.limiter=lim;
@@ -2754,53 +2847,60 @@ class Bell{
   // in the app where everything you can hear is passing through.
   //
   // Each re-wire is a full disconnect-and-reconnect rather than a diff, which
-  // is a handful of calls on a toggle nobody presses per bar, and is the only
+  // is a handful of calls on a control nobody turns per bar, and is the only
   // version of this that cannot leave a stale edge behind.
   _wireMasterBus(){
     const m=this.busIn, out=this.busOut;
     if(!m||!out)return;
     try{m.disconnect();}catch(e){}
-    try{this.compMakeup.disconnect();}catch(e){}
-    try{this.eqHi.disconnect();}catch(e){}
-    const head = this.compOn ? this.comp : (this.eqOn ? this.eqLo : out);
+    try{this.driveTrim.disconnect();}catch(e){}
+    try{this.exOut.disconnect();}catch(e){}
+    const head = this.driveOn ? this.drivePre : (this.exOn ? this.exIn : out);
     m.connect(head);
-    if(this.compOn) this.compMakeup.connect(this.eqOn?this.eqLo:out);
-    if(this.eqOn)   this.eqHi.connect(out);
+    if(this.driveOn) this.driveTrim.connect(this.exOn?this.exIn:out);
+    if(this.exOn)    this.exOut.connect(out);
   }
-  setCompOn(on){
-    const v=!!on;
-    if(!this.ready||this.compOn===v){this.compOn=v;return;}
-    this.compOn=v;this._wireMasterBus();
+  // DRIVE — one knob. Pre-gain into a FIXED glue compressor, then the
+  // flavour's curve, then a trim that takes MOST of the pre-gain back out.
+  // Most, not all: a saturator genuinely raises the average level as it eats
+  // the peaks, and compensating that away entirely would make the knob feel
+  // like it was doing nothing. Taking none of it out would make it a fader.
+  _applyDrive(){
+    if(!this.ready||!this.drivePre)return;
+    const d=Math.max(0,Math.min(100,this._driveAmt))/100;
+    const chr=this._driveChar|0, t=this.ctx.currentTime;
+    const on=d>0;
+    this.drivePre.gain.setTargetAtTime(Math.pow(10,d*DRIVE_MAX_DB/20)*driveCharGain(chr,d),t,0.02);
+    this.driveTrim.gain.setTargetAtTime(Math.pow(10,-d*DRIVE_MAX_DB*0.78/20)*driveCharTrim(chr,d),t,0.02);
+    // TAPE alone colours the balance; the other two leave it where it is.
+    const tape=chr===0;
+    this.tapeLp.frequency.setTargetAtTime(tape?20000-d*11000:20000,t,0.02);
+    this.headBump.gain.setTargetAtTime(tape?d*2.6:0,t,0.02);
+    if(on!==this.driveOn){ this.driveOn=on; this._wireMasterBus(); }
   }
-  setCompThresh(db){if(!this.ready||!this.comp)return;
-    this.comp.threshold.setTargetAtTime(Math.max(-60,Math.min(0,db)),this.ctx.currentTime,0.02);}
-  setCompRatio(r){if(!this.ready||!this.comp)return;
-    this.comp.ratio.setTargetAtTime(Math.max(1,Math.min(20,r)),this.ctx.currentTime,0.02);}
-  setCompAttack(ms){if(!this.ready||!this.comp)return;
-    this.comp.attack.setTargetAtTime(Math.max(0.1,Math.min(200,ms))/1000,this.ctx.currentTime,0.01);}
-  setCompRelease(ms){if(!this.ready||!this.comp)return;
-    this.comp.release.setTargetAtTime(Math.max(5,Math.min(2000,ms))/1000,this.ctx.currentTime,0.01);}
-  setCompMakeup(db){if(!this.ready||!this.compMakeup)return;
-    this.compMakeup.gain.setTargetAtTime(Math.pow(10,Math.max(0,Math.min(24,db))/20),this.ctx.currentTime,0.02);}
-  // The EQ's bypass is derived from the three gains rather than being its own
-  // switch: flat IS off, there is nothing else it could mean, and a separate
-  // toggle would let a boosted EQ sit in the path saying it was bypassed.
-  _eqRewire(){
-    const on=!!(this._eqLoDb||this._eqMidDb||this._eqHiDb);
-    if(on===this.eqOn)return;
-    this.eqOn=on;this._wireMasterBus();
+  setDrive(v){ this._driveAmt=v; this._applyDrive(); }
+  setDriveChar(v){
+    this._driveChar=Math.max(0,Math.min(2,v|0));
+    if(this.shaper)this.shaper.curve=makeShaperCurve(this._driveChar);
+    this._applyDrive();
   }
-  setEqLow(db){if(!this.ready||!this.eqLo)return;
-    this._eqLoDb=Math.max(-24,Math.min(24,db));
-    this.eqLo.gain.setTargetAtTime(this._eqLoDb,this.ctx.currentTime,0.02);this._eqRewire();}
-  setEqMid(db){if(!this.ready||!this.eqMid)return;
-    this._eqMidDb=Math.max(-24,Math.min(24,db));
-    this.eqMid.gain.setTargetAtTime(this._eqMidDb,this.ctx.currentTime,0.02);this._eqRewire();}
-  setEqHigh(db){if(!this.ready||!this.eqHi)return;
-    this._eqHiDb=Math.max(-24,Math.min(24,db));
-    this.eqHi.gain.setTargetAtTime(this._eqHiDb,this.ctx.currentTime,0.02);this._eqRewire();}
-  setEqMidHz(hz){if(!this.ready||!this.eqMid)return;
-    this.eqMid.frequency.setTargetAtTime(Math.max(20,Math.min(18000,hz)),this.ctx.currentTime,0.02);}
+  // EXCITE — its bypass is DERIVED from the three amounts rather than being
+  // its own switch: all three at zero IS off, there is nothing else it could
+  // mean, and a separate toggle would let a lit exciter sit in the path
+  // claiming to be bypassed.
+  _applyExcite(){
+    if(!this.ready||!this.thGain)return;
+    const t=this.ctx.currentTime;
+    const n=v=>Math.max(0,Math.min(100,v))/100;
+    this.thGain.gain.setTargetAtTime(n(this._exThump)*0.9,t,0.02);
+    this.bdGain.gain.setTargetAtTime(n(this._exBody)*0.33,t,0.02);
+    this.arGain.gain.setTargetAtTime(n(this._exAir)*0.42,t,0.02);
+    const on=!!(this._exThump||this._exBody||this._exAir);
+    if(on!==this.exOn){ this.exOn=on; this._wireMasterBus(); }
+  }
+  setExThump(v){ this._exThump=v; this._applyExcite(); }
+  setExBody(v){ this._exBody=v; this._applyExcite(); }
+  setExAir(v){ this._exAir=v; this._applyExcite(); }
   // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
   // Each entry schedules a smooth filter cutoff transition at that time using
   // the entry's flt/vel/oct/glide. Used by the scheduler for tied notes — sub-
@@ -4080,26 +4180,23 @@ export default function LoudLight(){
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
   const [rvMod,      setRvMod]      = useState(0);  // tail modulation depth (0..100 → chorused tail)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
-  // ── THE MASTER BUS — a compressor and a three-band EQ over the whole mix ──
-  // Between the summing gain and the limiter (see Bell.init). Both OFF/flat by
-  // default, and the bypass is a real one on both engines: an existing project
-  // renders exactly what it rendered before this section existed.
+  // ── THE MASTER BUS — DRIVE and EXCITE over the whole mix ────────────────
+  // Between the summing gain and the limiter (see Bell.init). Both all the way
+  // OFF by default, and the bypass is a real one on both engines: an existing
+  // project renders exactly what it rendered before this section existed.
   //
-  // The compressor gets a real control set rather than one AMOUNT knob because
-  // a bus compressor is a thing you tune — the whole difference between glue
-  // and pumping is attack against release against ratio, and a single knob can
-  // only pick one point on that surface and call it the answer.
-  const [compOn,      setCompOn]      = useState(false);
-  const [compThresh,  setCompThresh]  = useState(-12); // dB
-  const [compRatio,   setCompRatio]   = useState(2);   // :1
-  const [compAttack,  setCompAttack]  = useState(20);  // ms
-  const [compRelease, setCompRelease] = useState(200); // ms
-  const [compMakeup,  setCompMakeup]  = useState(0);   // dB
-  // Three bands: two fixed shelves and one sweepable bell. See EQ_LO_HZ.
-  const [eqLow,   setEqLow]   = useState(0);    // dB at EQ_LO_HZ
-  const [eqMid,   setEqMid]   = useState(0);    // dB at eqMidHz
-  const [eqMidHz, setEqMidHz] = useState(1000); // Hz, EQ_MID_MIN..EQ_MID_MAX
-  const [eqHigh,  setEqHigh]  = useState(0);    // dB at EQ_HI_HZ
+  // Five values, none of them a unit. This stage is CHARACTER, not correction,
+  // so there is nothing in here to dial to a number — which is why what was
+  // here first (threshold, ratio, attack, release, makeup, three EQ gains and
+  // a frequency) was wrong. That was a mixing desk, and a mixing desk is the
+  // wrong instrument to bolt onto the end of something you play with your
+  // thumbs. The glue compressor is still there; it is just UNDER the DRIVE
+  // knob, fixed, the way a console's is.
+  const [driveAmt,  setDriveAmt]  = useState(0);  // 0..100, 0 = bypassed
+  const [driveChar, setDriveChar] = useState(0);  // 0 TAPE, 1 TUBE, 2 CLIP
+  const [exThump,   setExThump]   = useState(0);  // 0..100
+  const [exBody,    setExBody]    = useState(0);  // 0..100
+  const [exAir,     setExAir]     = useState(0);  // 0..100
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -4460,16 +4557,11 @@ export default function LoudLight(){
   // Master bus. Guarded with && like every other one of these: `bell.current`
   // is a facade when the core is on, and a method with no twin over there is
   // silently absent rather than an error.
-  useEffect(()=>{bell.current.setCompOn&&bell.current.setCompOn(compOn);},[compOn]);
-  useEffect(()=>{bell.current.setCompThresh&&bell.current.setCompThresh(compThresh);},[compThresh]);
-  useEffect(()=>{bell.current.setCompRatio&&bell.current.setCompRatio(compRatio);},[compRatio]);
-  useEffect(()=>{bell.current.setCompAttack&&bell.current.setCompAttack(compAttack);},[compAttack]);
-  useEffect(()=>{bell.current.setCompRelease&&bell.current.setCompRelease(compRelease);},[compRelease]);
-  useEffect(()=>{bell.current.setCompMakeup&&bell.current.setCompMakeup(compMakeup);},[compMakeup]);
-  useEffect(()=>{bell.current.setEqLow&&bell.current.setEqLow(eqLow);},[eqLow]);
-  useEffect(()=>{bell.current.setEqMid&&bell.current.setEqMid(eqMid);},[eqMid]);
-  useEffect(()=>{bell.current.setEqMidHz&&bell.current.setEqMidHz(eqMidHz);},[eqMidHz]);
-  useEffect(()=>{bell.current.setEqHigh&&bell.current.setEqHigh(eqHigh);},[eqHigh]);
+  useEffect(()=>{bell.current.setDrive&&bell.current.setDrive(driveAmt);},[driveAmt]);
+  useEffect(()=>{bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);},[driveChar]);
+  useEffect(()=>{bell.current.setExThump&&bell.current.setExThump(exThump);},[exThump]);
+  useEffect(()=>{bell.current.setExBody&&bell.current.setExBody(exBody);},[exBody]);
+  useEffect(()=>{bell.current.setExAir&&bell.current.setExAir(exAir);},[exAir]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   useEffect(()=>{drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);},[drumFxTrim]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
@@ -4558,7 +4650,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
+    driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     loopMode,loopBar,loopBars,loopPat,
@@ -4627,7 +4719,7 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
@@ -4716,7 +4808,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveAmt,driveChar,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4835,7 +4927,7 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
@@ -4950,14 +5042,12 @@ export default function LoudLight(){
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
-    // Master bus back to off and flat. (This is inside the long run of setters
-    // that a single throw abandons — see the doNew cliff lesson — so it stays
-    // with the rest of the sound resets rather than at the end.)
-    setCompOn(SESSION_DEFAULTS.compOn);setCompThresh(SESSION_DEFAULTS.compThresh);
-    setCompRatio(SESSION_DEFAULTS.compRatio);setCompAttack(SESSION_DEFAULTS.compAttack);
-    setCompRelease(SESSION_DEFAULTS.compRelease);setCompMakeup(SESSION_DEFAULTS.compMakeup);
-    setEqLow(SESSION_DEFAULTS.eqLow);setEqMid(SESSION_DEFAULTS.eqMid);
-    setEqMidHz(SESSION_DEFAULTS.eqMidHz);setEqHigh(SESSION_DEFAULTS.eqHigh);
+    // Master bus back to off. (This is inside the long run of setters that a
+    // single throw abandons — see the doNew cliff lesson — so it stays with
+    // the rest of the sound resets rather than at the end.)
+    setDriveAmt(SESSION_DEFAULTS.driveAmt);setDriveChar(SESSION_DEFAULTS.driveChar);
+    setExThump(SESSION_DEFAULTS.exThump);setExBody(SESSION_DEFAULTS.exBody);
+    setExAir(SESSION_DEFAULTS.exAir);
     // Transient scheduler/UI state — clear so the next play starts fresh.
     stepR.current=0;
     if(layerLastFreqR)layerLastFreqR.current={synth:null,lead:null};
@@ -7723,7 +7813,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
+    driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -7782,7 +7872,7 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["compOn",setCompOn],["compThresh",setCompThresh],["compRatio",setCompRatio],["compAttack",setCompAttack],["compRelease",setCompRelease],["compMakeup",setCompMakeup],["eqLow",setEqLow],["eqMid",setEqMid],["eqMidHz",setEqMidHz],["eqHigh",setEqHigh],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
     _adoptSong(s);
 
@@ -8291,7 +8381,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveAmt,driveChar,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Unsaved-work flag. The autosave deps above minus `playing` and minus the
   // navigation/transport state — see markClean for why those are left out.
   useEffect(()=>{
@@ -8300,7 +8390,7 @@ export default function LoudLight(){
     setDirty(true);
   },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
      dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
-     compOn,compThresh,compRatio,compAttack,compRelease,compMakeup,eqLow,eqMid,eqMidHz,eqHigh,
+     driveAmt,driveChar,exThump,exBody,exAir,
      trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
@@ -8794,20 +8884,15 @@ export default function LoudLight(){
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
     bell.current.setRvMod&&bell.current.setRvMod(rvMod);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
-    // Master bus, same argument: a loaded project's compressor and EQ have to
+    // Master bus, same argument: a loaded project's DRIVE and EXCITE have to
     // reach the engine on the first play, not on the first nudge of a knob.
-    // Order matters by a hair — the values first, then the switch, so the
-    // stage is never briefly in the path set to whatever it was built with.
-    bell.current.setCompThresh&&bell.current.setCompThresh(compThresh);
-    bell.current.setCompRatio&&bell.current.setCompRatio(compRatio);
-    bell.current.setCompAttack&&bell.current.setCompAttack(compAttack);
-    bell.current.setCompRelease&&bell.current.setCompRelease(compRelease);
-    bell.current.setCompMakeup&&bell.current.setCompMakeup(compMakeup);
-    bell.current.setCompOn&&bell.current.setCompOn(compOn);
-    bell.current.setEqMidHz&&bell.current.setEqMidHz(eqMidHz);
-    bell.current.setEqLow&&bell.current.setEqLow(eqLow);
-    bell.current.setEqMid&&bell.current.setEqMid(eqMid);
-    bell.current.setEqHigh&&bell.current.setEqHigh(eqHigh);
+    // The flavour goes FIRST, because it swaps the shaper's curve and the
+    // amount is what decides whether that curve is in the path at all.
+    bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);
+    bell.current.setDrive&&bell.current.setDrive(driveAmt);
+    bell.current.setExThump&&bell.current.setExThump(exThump);
+    bell.current.setExBody&&bell.current.setExBody(exBody);
+    bell.current.setExAir&&bell.current.setExAir(exAir);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -9142,7 +9227,12 @@ export default function LoudLight(){
   // The shell calls this after it has re-activated the AVAudioSession, which is
   // the half of the handshake a web page cannot do for itself.
   useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
-  // One reference for the harnesses, the same bargain as __LL_LAST_EXPORT.
+  // Two references for the harnesses, the same bargain as __LL_LAST_EXPORT.
+  // The saturation curve is the one thing in the master bus that has a twin
+  // in the core (ll_shape), so being able to read it back is what makes
+  // "three flavours, three genuinely different curves" checkable at all
+  // rather than a claim in a comment.
+  useEffect(()=>{window.__LL_SHAPE=llShape;},[]);
   // The master bus's whole promise is that OFF is a real bypass — the signal
   // does not pass through the nodes — and that is a fact about the audio
   // GRAPH, which no DOM attribute can carry. Without this there is no way to
@@ -11393,62 +11483,81 @@ export default function LoudLight(){
   // (shared by every layer); each layer's SOUND page only carries its own SEND
   // amount into the reverb/delay buses. Rendered identically on the desktop FX
   // tab and the mobile FX sheet.
-  // ── THE MASTER BUS — over the whole mix, in front of the limiter ────────
-  // Two sections on the MIX face, because that is the face that already means
-  // "everything at once": the layer faders decide the balance, and this decides
-  // what happens to the sum of them.
+  // ── MOJO — DRIVE and EXCITE, over the whole mix ─────────────────────────
+  // On the MIX face, under the layer faders and above GLOBAL FX, because the
+  // page reads down the signal: the channel faders, then what happens to their
+  // sum, then the buses they feed.
   //
-  // Both are OFF / FLAT by default and both BYPASS rather than sit in the path
-  // transparently, so a project made before this existed sounds exactly as it
-  // did. The COMP's ON switch is explicit; the EQ's is derived from its three
-  // gains, because flat IS off and a separate toggle would let a boosted EQ sit
-  // in the path claiming to be bypassed.
+  // NOTHING IN HERE SHOWS A NUMBER, and that is the design rather than a
+  // shortcut. This stage is character — you turn it until it sounds good and
+  // then you stop — so a readout in dB or ms would be inviting you to aim at
+  // a value you have no way to want. Each control names WHERE IT HAS GOT TO
+  // instead, on its own five-word ladder. The knobs are still continuous
+  // underneath; only the readout is coarse, which is precisely the point.
   //
-  // Every control here goes through KnobSlider, which calls HIST.mark on the
-  // first real change of a gesture — so the whole master section got undo from
-  // the one hook rather than from ten pushHistory calls.
+  // This replaced a threshold, a ratio, an attack, a release, a makeup gain
+  // and a three-band EQ. Those are a mixing desk, and a mixing desk is the
+  // wrong instrument to bolt onto the end of something you play with your
+  // thumbs.
+  // words[0] is OFF and the rest split the travel evenly, so the very first
+  // nudge off zero already reads as "on" rather than spending a quarter of the
+  // knob still saying nothing is happening.
+  const mojoWord=(v,words)=>{
+    const n=words.length;
+    if(!(v>0))return words[0];
+    return words[Math.min(n-1,1+Math.floor((Math.min(100,v)-1)/100*(n-1)))];
+  };
+  const W_DRIVE=["CLEAN","WARM","PUSHED","HOT","MELTED"];
+  const W_THUMP=["\u2014","ROUND","FULL","BIG","MASSIVE"];
+  const W_BODY =["\u2014","SOLID","THICK","CHEWY","GNARLY"];
+  const W_AIR  =["\u2014","OPEN","CRISP","BRIGHT","GLASSY"];
   const masterBusSections = (<>
-    <SynthSection title="BUS COMP" accent={C_MASTER}>
-      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        {/* The switch is a real bypass — see Bell._wireMasterBus. It pushes
-            history outright rather than through HIST.mark: a toggle is a
-            discrete edit, and there is no gesture to wait for the first real
-            change of. */}
-        <button data-comp-on={compOn?"1":"0"} aria-pressed={compOn}
-          onClick={()=>{pushHistory();setCompOn(v=>!v);}}
-          style={{width:"100%",padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
-            fontSize:9,fontWeight:700,letterSpacing:1.6,
-            border:"1px solid "+(compOn?C_MASTER:C_MASTER+"33"),
-            background:compOn?C_MASTER+"22":"transparent",
-            color:compOn?C_MASTER:C_MASTER+"88"}}>{compOn?"ON":"BYPASSED"}</button>
-        <KnobSlider label="THRESH" value={compThresh} min={-40} max={0} def={-12}
-          onChange={setCompThresh} display={compThresh+"dB"} accent={C_MASTER}/>
-        <KnobSlider label="RATIO" value={compRatio} min={1} max={12} def={2}
-          onChange={setCompRatio} display={compRatio+":1"} accent={C_MASTER}/>
-        <KnobSlider label="ATTACK" value={compAttack} min={1} max={100} def={20}
-          onChange={setCompAttack} display={compAttack+"ms"} accent={C_MASTER}/>
-        <KnobSlider label="RELEASE" value={compRelease} min={20} max={600} def={200}
-          onChange={setCompRelease} display={compRelease+"ms"} accent={C_MASTER}/>
-        <KnobSlider label="MAKEUP" value={compMakeup} min={0} max={12} def={0}
-          onChange={setCompMakeup} display={"+"+compMakeup+"dB"} accent={C_MASTER}/>
+    <SynthSection title="DRIVE" accent={C_MASTER}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
+        {/* The flavour is the first decision and the one you make rarely, so
+            it sits above the knob rather than behind a menu. Three words, and
+            they are three genuinely different curves — see ll_shape. */}
+        <div data-drivechar={driveChar} style={{display:"flex",gap:4}}>
+          {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
+            const on=driveChar===i;
+            return(
+              <button key={lbl} aria-pressed={on}
+                onClick={()=>{if(driveChar!==i){pushHistory();setDriveChar(i);}}}
+                style={{flex:1,minWidth:0,padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+                  fontSize:9,fontWeight:700,letterSpacing:1.4,
+                  border:"1px solid "+(on?C_MASTER:C_MASTER+"30"),
+                  background:on?C_MASTER+"22":"transparent",
+                  color:on?C_MASTER:C_MASTER+"88"}}>{lbl}</button>
+            );
+          })}
+        </div>
+        {/* One knob over a fixed glue compressor AND a saturator, the way a
+            console's input gain is. 0 is a real bypass. */}
+        <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={0}
+          onChange={setDriveAmt} display={mojoWord(driveAmt,W_DRIVE)} accent={C_MASTER}/>
+        <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
+          {driveChar===0?"Tape: soft, loses a little top, gains a little bottom."
+           :driveChar===1?"Tube: asymmetric, so it makes even harmonics. Warm."
+           :"Clip: clean until it isn't. A wall, not a curve."}
+        </div>
       </div>
     </SynthSection>
-    <SynthSection title="MASTER EQ" accent={C_MASTER}>
-      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
-        {/* Two fixed shelves and one sweepable bell — the shape that has been
-            on every mixing desk for fifty years, because the band GAIN is what
-            you reach for twenty times to the corner's once. "Which mid" is the
-            question that actually varies, so that is the one that sweeps.
-            The corners live beside their C twins in core/ll.h. */}
-        <KnobSlider label={"LOW "+fmtHz(EQ_LO_HZ)} value={eqLow} min={-12} max={12} def={0}
-          onChange={setEqLow} display={(eqLow>0?"+":"")+eqLow+"dB"} accent={C_MASTER}/>
-        <KnobSlider label="MID" value={eqMid} min={-12} max={12} def={0}
-          onChange={setEqMid} display={(eqMid>0?"+":"")+eqMid+"dB"} accent={C_MASTER}/>
-        <KnobSlider label="MID FREQ" value={eqMidPctOf(eqMidHz)} min={0} max={100}
-          def={eqMidPctOf(SESSION_DEFAULTS.eqMidHz)}
-          onChange={v=>setEqMidHz(eqMidHzOf(v))} display={fmtHz(eqMidHz)} accent={C_MASTER}/>
-        <KnobSlider label={"HIGH "+fmtHz(EQ_HI_HZ)} value={eqHigh} min={-12} max={12} def={0}
-          onChange={setEqHigh} display={(eqHigh>0?"+":"")+eqHigh+"dB"} accent={C_MASTER}/>
+    <SynthSection title="EXCITE" accent={C_MASTER}>
+      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
+        {/* Three generators, each listening to one band and adding its
+            HARMONICS back. Named for what they do to the sound, not for the
+            frequencies they sit on — a corner in Hz is the wrong answer to
+            "make the bass land on a phone". */}
+        <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={0}
+          onChange={setExThump} display={mojoWord(exThump,W_THUMP)} accent={C_MASTER}/>
+        <KnobSlider label="BODY" value={exBody} min={0} max={100} def={0}
+          onChange={setExBody} display={mojoWord(exBody,W_BODY)} accent={C_MASTER}/>
+        <KnobSlider label="AIR" value={exAir} min={0} max={100} def={0}
+          onChange={setExAir} display={mojoWord(exAir,W_AIR)} accent={C_MASTER}/>
+        <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
+          Harmonics, not tone controls. THUMP makes bass you can hear on a
+          phone; AIR makes detail that was not there to lift.
+        </div>
       </div>
     </SynthSection>
   </>);
@@ -12539,7 +12648,7 @@ export default function LoudLight(){
                 {/* MASTER before GLOBAL FX: the page reads down the signal —
                     the channel faders, then what happens to their sum, then
                     the buses they feed. */}
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>MASTER</div>
+                <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>MOJO</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start",marginBottom:16}}>
                   {masterBusSections}
                 </div>
@@ -13306,7 +13415,7 @@ export default function LoudLight(){
                 {activeSheet==="sound"&&soundTab==="fx"&&(
                   <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                     <div style={{marginBottom:16}}>{mixerBody}</div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>MASTER</div>
+                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>MOJO</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
                       {masterBusSections}
                     </div>

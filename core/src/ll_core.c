@@ -50,6 +50,23 @@ void att_push(int layer,int row,double frame,double dur,float hz){
   G.attq[G.attn++]=(int32_t)(dur+0.5); G.attq[G.attn++]=u.i;
 }
 int ll_events(int32_t*out,int cap){ int n=G.evn<cap?G.evn:cap; n-=n%4; for(int i=0;i<n;i++)out[i]=G.evq[i]; G.evn=0; return n; }
+/* See ll.h. Pins the gains rather than honouring them, so what comes out is
+ * the bus's own contribution and not a measurement of the master fader. */
+void ll_debug_bus_probe(const float*inL,const float*inR,int n,float*outL,float*outR){
+  if(!G.inited)ll_init(48000);
+  sm_jump(&G.masterGain,1.f);
+  for(int l=0;l<LL_NLAYERS;l++)sm_jump(&G.layerGain[l],1.f);
+  sm_jump(&G.drumLevel,1.f);
+  int off=0;
+  while(off<n){
+    int m=n-off; if(m>LL_BLOCK)m=LL_BLOCK;
+    for(int l=0;l<LL_NLAYERS;l++)for(int i=0;i<m;i++){ G.busL[l][i]=0.f; G.busR[l][i]=0.f; }
+    for(int i=0;i<m;i++){ G.rvL[i]=G.rvR[i]=G.dlL[i]=G.dlR[i]=0.f; }
+    for(int i=0;i<m;i++){ G.busL[LL_SYNTH][i]=inL[off+i]; G.busR[LL_SYNTH][i]=inR[off+i]; }
+    fx_render(outL+off,outR+off,m);
+    off+=m;
+  }
+}
 int ll_debug_attacks(int32_t*out,int cap){ int n=G.attn<cap?G.attn:cap; n-=n%5; for(int i=0;i<n;i++)out[i]=G.attq[i]; G.attn=0; return n; }
 
 /* ── lifecycle ──────────────────────────────────────────────────────────── */
@@ -61,12 +78,11 @@ static void defaults(void){
   p[LL_P_DRUM_LEVEL]=85; p[LL_P_DRUM_FXTRIM]=100; p[LL_P_DRUM_AUDIBLE]=1;
   p[LL_P_SONG_MODE]=0; p[LL_P_LOOP]=0; p[LL_P_LOOP_BAR]=0; p[LL_P_LOOP_BARS]=1; p[LL_P_LOOP_PAT]=-1; p[LL_P_ACTIVE_PAT]=-1;
   p[LL_P_MASTER]=0.55f; p[LL_P_MOTION]=0; p[LL_P_STOP_AFTER]=0;
-  /* Master bus — OFF and FLAT, so a project made before this stage existed
-   * renders exactly what it always did. See src/loudlight.jsx's
-   * SESSION_DEFAULTS, which carries the same ten numbers. */
-  p[LL_P_COMP_ON]=0; p[LL_P_COMP_THRESH]=-12; p[LL_P_COMP_RATIO]=2;
-  p[LL_P_COMP_ATTACK]=20; p[LL_P_COMP_RELEASE]=200; p[LL_P_COMP_MAKEUP]=0;
-  p[LL_P_EQ_LOW]=0; p[LL_P_EQ_MID]=0; p[LL_P_EQ_MIDHZ]=1000; p[LL_P_EQ_HIGH]=0;
+  /* Master bus — all the way OFF, so a project made before this stage
+   * existed renders exactly what it always did. See src/loudlight.jsx's
+   * SESSION_DEFAULTS, which carries the same five numbers. */
+  p[LL_P_DRIVE]=0; p[LL_P_DRIVE_CHAR]=LL_DRIVE_TAPE;
+  p[LL_P_EX_THUMP]=0; p[LL_P_EX_BODY]=0; p[LL_P_EX_AIR]=0;
   for(int l=0;l<2;l++){
     float*q=G.lp[l];
     q[LL_L_WAVE]=WV_SAW; q[LL_L_DETUNE]=l?0:8; q[LL_L_ATTACK]=8; q[LL_L_DECAY]=400; q[LL_L_SUSTAIN]=40;

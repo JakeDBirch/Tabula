@@ -1202,69 +1202,119 @@ and as a bus scaler on `DrumEngine.setFxTrim`. A missing trim on an old save
 reads as 100, i.e. exactly what the app did before it existed. `mixerBody`, one
 body, two mounts: don't fork it.
 
-### THE MASTER BUS — a compressor and a 3-band EQ over the whole mix
+### MOJO — the master bus: DRIVE and EXCITE
 
 On the MIX face, under the layer faders and above GLOBAL FX, because the page
 reads down the signal: the channel faders, then what happens to their sum, then
-the buses they feed. `master gain → bus comp → EQ → limiter → out`, on **both
-engines**. The comp is before the EQ so it reacts to the mix as it is rather
-than chasing a boost you have just dialled in, which is a bus comp that never
-settles.
+the buses they feed. `master gain → DRIVE → EXCITE → limiter → out`, on **both
+engines**.
 
-- **OFF AND FLAT IS A REAL BYPASS, NOT A TRANSPARENT SETTING.** The signal does
-  not pass through the stage at all. That is the whole reason this could be
-  added to a shipping app at all: a project made before it existed renders
-  *exactly* what it always did, asserted bit-for-bit in `core/test/master.c`
-  with the values set and only the switch off — so it is the switch under test,
-  not the defaults. It is the VARY lesson applied before the fact rather than
-  after: a stage in the path of every saved project is the last place to be
-  approximately transparent.
-- **The COMP's switch is explicit; the EQ's is DERIVED from its three gains.**
-  Flat IS off, there is nothing else it could mean, and a separate EQ toggle
-  would let a boosted EQ sit in the path claiming to be bypassed. In JS the
-  nodes are permanent and the **routing** is what changes (`_wireMasterBus`) —
-  rebuilding an AudioNode graph mid-playback clicks; each re-wire is a full
-  disconnect-and-reconnect rather than a diff, which is the only version that
-  cannot leave a stale edge behind.
-- **The compressor gets a real control set** (THRESH / RATIO / ATTACK / RELEASE
-  / MAKEUP) rather than one AMOUNT knob: the difference between glue and pumping
-  is attack against release against ratio, and a single knob can only pick one
-  point on that surface and call it the answer.
-- **The EQ is two fixed shelves and one sweepable bell** — the shape that has
-  been on every desk for fifty years, because band GAIN is what you reach for
-  twenty times to the corner's once, and "which mid" is the question that
-  actually varies. The corners are **constants shared with the core**
-  (`EQ_LO_HZ`/`EQ_HI_HZ`/`EQ_MID_Q` here, `LL_EQ_*` in `core/ll.h`): a master EQ
-  whose shelves sit at different frequencies in the two engines is a project
-  that sounds different depending on which one is running.
-- **Ten new params through every persistence site**, plus a core param each and
-  a facade twin each in `core/host.js` — the multi-site rule's longest walk yet.
-  A method added to the JS `Bell` with no twin over there is *silently ignored*:
-  the app would look right and the core would render a flat, uncompressed mix.
-- **The core's compressor is the limiter's sanctioned difference a second
-  time** — `DynamicsCompressorNode` on the web, hand-written feed-forward in C,
-  same numbers, judged by ear. The detector is **stereo-linked** on both sides:
-  two independent detectors move the image around as the mix ducks, which is the
-  one thing a bus compressor must not do. The EQ is *not* in that category —
-  both sides are the Audio EQ Cookbook and agree to float precision.
-- **`core/test/master.c` is the test the oracle structurally cannot be.** The
-  oracle matches ATTACKS, and a compressor and an EQ change none of them, so a
-  stage that silently did nothing passes every scenario there is. Two of its
-  assertions were wrong first and are worth not repeating: **crest factor** went
-  the wrong way (a 1ms attack with a 100ms release squashes the body of a hit
-  harder than the transient that caused it — ordinary, and a reminder that crest
-  measures the time constants as much as the ratio), and an **absolute band
-  energy** reading measured the limiter rather than the shelf. What it asserts
-  now is the defining property: *a 20dB step at the input comes out smaller than
-  20dB*, which nothing a plain gain stage does can fake.
+**IT IS CHARACTER, NOT CORRECTION, AND NOTHING IN IT SHOWS A NUMBER.** This
+shipped once as a bus compressor with THRESH / RATIO / ATTACK / RELEASE /
+MAKEUP and a three-band EQ, and that was the wrong instrument: a mixing desk
+bolted onto the end of something you play with your thumbs. You do not tune a
+master bus on a phone, you turn it until it sounds good and then you stop — so
+a readout in dB or ms is inviting you to aim at a value you have no way to
+want. Every control names **where it has got to** on its own five-word ladder
+instead (`mojoWord`): DRIVE reads CLEAN · WARM · PUSHED · HOT · MELTED, THUMP
+reads ROUND · FULL · BIG · MASSIVE, and so on. The knobs are still continuous
+underneath; only the readout is coarse, which is exactly the point.
+`_master.mjs` asserts that no control on the face shows a digit, because that
+is the whole brief and it is the kind of thing that erodes.
+
+- **DRIVE is ONE knob over a FIXED glue compressor and a saturator**, the way a
+  console's input gain is: turning it up gets you more compression AND more
+  saturation together, which is what "glue" has always meant. The compressor
+  is still there — threshold −14dB, 2:1, 15ms, 180ms, stereo-LINKED — it is
+  just underneath, where you cannot fiddle with it. Zero is a real BYPASS.
+  - **The output is level-compensated, and that is what makes it a character
+    control rather than a volume knob.** `driveTrim` takes ~78% of the pre-gain
+    back out. Most, not all: a saturator genuinely raises the average level as
+    it eats the peaks, and compensating that away entirely would make the knob
+    feel like it was doing nothing. The test asserts each flavour changes the
+    sound by more than it changes the level.
+- **Three flavours, and they have to MEASURE different or they are one
+  flavour and two lies.** TAPE is `tanh` — symmetric, so odd harmonics only,
+  plus an HF loss and a low head bump that scale with the knob (tape loses top
+  and gains bottom the harder you hit it, which is most of why it is
+  recognised by ear). TUBE is the same curve with a DC bias pushed through and
+  taken back off: an **asymmetric** transfer curve is the only thing that makes
+  EVEN harmonics, and even harmonics are what "warm" means. CLIP is
+  `x/(1+x^6)^(1/6)` — linear until nearly unity and then a wall.
+  - **The first CLIP was the classic cubic soft clip `x - x³/3`, and it
+    measured as barely harder than TAPE** (3rd harmonic 4.2% against 3.4%). Of
+    course it did: `x - x³/3` is the first two terms of tanh's own series, so
+    "cubic soft clip" and "tanh" are the same curve wearing different names.
+  - **Each flavour then needs its OWN input gain**, because the knee is in a
+    different place on each curve. With one shared pre-gain the second CLIP
+    measured *cleaner* than TAPE (0.5% against 3.4%) — the glue compressor
+    holds the level below the point where CLIP bends at all. A flavour you
+    cannot reach is not a flavour. The extra gain scales WITH the knob, so at
+    low DRIVE all three are still gentle and the choice is a colour; they only
+    separate into three kinds of loud as you push.
+- **EXCITE is three generators, each listening to one band and adding its
+  HARMONICS back in parallel.** Named for what they do to the sound, not for
+  the frequencies they sit on. THUMP rectifies the low band — a rectifier is a
+  frequency DOUBLER, so what comes back is the bass's own harmonics an octave
+  up, which the ear reads as weight even on a speaker that cannot reproduce
+  the fundamental; it is high-passed on the way back for exactly that reason,
+  since more sub does nothing on a phone. BODY saturates the mids for density.
+  AIR is Aphex-style: distort the top, hand back only what was GENERATED — it
+  is not a shelf, because a shelf lifts what is already there and this makes
+  detail that was not there to lift.
+  - **The bands are never re-summed**, so the crossover is a ROUTER rather than
+    a filter bank and does not have to add back to unity. That is what keeps
+    it to six biquads instead of a Linkwitz-Riley tree.
+  - Its bypass is **derived from the three amounts** rather than being its own
+    switch: all three at zero IS off, and a separate toggle would let a lit
+    exciter sit in the path claiming to be bypassed.
+- **OFF IS A REAL BYPASS, NOT A NULL SETTING.** The signal does not pass
+  through either stage at all. That is the whole reason this could be added to
+  a shipping app: a project made before it existed renders *exactly* what it
+  rendered before, asserted bit-for-bit in `core/test/master.c` with a flavour
+  chosen and only the amounts at zero — so it is the switch under test, not
+  the defaults. The VARY lesson applied before the fact rather than after.
+- In JS the nodes are permanent and the **routing** is what changes
+  (`_wireMasterBus`) — rebuilding an AudioNode graph mid-playback clicks — and
+  each re-wire is a full disconnect-and-reconnect rather than a diff, the only
+  version that cannot leave a stale edge behind.
+- **Five params through every persistence site**, plus a core param each and a
+  facade twin each in `core/host.js`. A method added to the JS `Bell` with no
+  twin over there is *silently ignored*: the app would look right and the core
+  would render a clean, unexcited mix.
+- **The saturation curves are shared as ALGEBRA, not as intent** — `ll_shape`
+  in C, `llShape` in JS (which samples it into the WaveShaper's table). Same
+  for the per-flavour gain and trim. The glue compressor is the limiter's
+  sanctioned difference a second time (Chromium's DynamicsCompressor is its own
+  algorithm); the oversampling differs on purpose, 4× free from `WaveShaperNode`
+  on the web against 2× by hand in the core.
+- **`core/test/master.c` is the test the oracle structurally cannot be**, and
+  for a character stage it asserts HARMONICS. The oracle matches attacks and
+  nothing here changes one, so a no-op would pass every scenario there is; and
+  a plain gain can fake "louder" while a filter can fake "brighter", but
+  nothing except a nonlinearity can put energy at a frequency that was not in
+  the input. So it pushes ONE TONE through the bus (`ll_debug_bus_probe`,
+  which exists for exactly this) and reads the bins that were empty going in,
+  with a one-bin Goertzel rather than an FFT — a mix already has energy
+  everywhere, which is what makes the music fixture useless for this and right
+  for "is it finite, is it under 0dBFS, is it still roughly as loud".
+  - Three of its assertions were wrong first. **Crest factor** went the wrong
+    way for the old compressor (a 1ms attack with a 100ms release squashes the
+    body of a hit harder than the transient that caused it — ordinary, and a
+    reminder that crest measures the time constants as much as the ratio). An
+    **absolute band energy** reading measured the limiter rather than the
+    filter under test. And a ratio against a **numerically empty bin** printed
+    `x7e12` and meant nothing: measure a generated harmonic against the TONE.
   - One trap it cost: `G.masterGain` is a SMOOTHER initialised to 0.55, so
     `ll_set(LL_P_MASTER, …)` **ramps** over ~20ms — and the first kick lands
     inside that ramp at nearly full level. With the rest of the take 20dB down,
     that one transient dominated the rms and a clean 20dB step read as 14dB.
     Measure the steady state, not the ramp.
-- `data-knob` / `data-knobval` on every `KnobSlider` are the harnesses' hook. A
-  knob is a ballistic pointer drag with no accessible value of its own, so
-  without them there is no way to ask a headless run what one is set to.
+- `data-knob` / `data-knobval` on every `KnobSlider`, `data-drivechar` on the
+  flavour row, and `window.__LL_SHAPE` are the harnesses' hooks. A knob is a
+  ballistic pointer drag with no accessible value of its own, and the curve is
+  the one part of this whose "three genuinely different flavours" claim would
+  otherwise be a comment rather than a check.
 
 ### The PROJECT menu
 

@@ -1,15 +1,19 @@
-/* THE MASTER BUS in the core — bus compressor, then 3-band EQ, then the
- * limiter. This is the half the oracle structurally cannot see: the oracle
- * matches ATTACKS (layer, time, length, pitch, velocity), and a master bus
- * changes none of them. A stage that silently did nothing would pass every
- * oracle scenario there is.
+/* THE MASTER BUS in the core — DRIVE (a fixed glue compressor into a
+ * saturator) then EXCITE (three band generators in parallel), in front of the
+ * limiter.
  *
- * So this renders the same bar four ways and asserts what you would HEAR:
- *   1. OFF is a real bypass — bit-identical to the engine before the stage
- *      existed, which is the promise every already-saved project depends on;
- *   2. the shelves actually move the bands they name, and only those;
- *   3. the compressor actually reduces peaks, and its makeup gives it back;
- *   4. nothing in there can produce a non-finite sample or break the limiter.
+ * This is the half the oracle structurally cannot see: the oracle matches
+ * ATTACKS (layer, time, length, pitch, velocity) and nothing in here changes
+ * one, so a stage that silently did nothing would pass every scenario there
+ * is.
+ *
+ * And for a CHARACTER stage the thing to assert is HARMONICS, not levels. A
+ * plain gain can fake "louder" and a filter can fake "brighter"; nothing but
+ * a nonlinearity can put energy at a frequency that was not in the input. So
+ * most of this feeds ONE TONE through the bus (ll_debug_bus_probe) and reads
+ * the bins that were empty going in — a mix already has energy everywhere,
+ * which makes the music fixture useless for this and right for "is it finite,
+ * is it under 0dBFS, is it still roughly the same loudness".
  */
 #include "wire.h"
 #include <math.h>
@@ -18,30 +22,30 @@ static int fails=0;
 
 #define SR   48000
 #define NSMP (SR*2)
-static float L[NSMP],R[NSMP];
+static float L[NSMP],R[NSMP],sig[NSMP];
+static float dryL[NSMP],dryR[NSMP];
 
-/* Energy below ~120Hz and above ~4kHz. Crude on purpose — the question is
- * "did the shelf move that end of the spectrum", and this answers it without
- * dragging an FFT into the test build — but the LOW side is a CASCADED pair,
- * measured at the shelf's own corner. A single 250Hz one-pole leaks so much
- * midrange that a 120Hz shelf at +12dB shows up as a few percent, which is a
- * blunt instrument reporting a working filter as a broken one. */
-static void bands(const float*x,int n,double*lo,double*hi){
-  double slow=0,shi=0;
-  const double kl=1.0-exp(-2.0*M_PI*120.0/SR), kh=1.0-exp(-2.0*M_PI*4000.0/SR);
-  double z1=0,z2=0,zh=0;
-  for(int i=0;i<n;i++){
-    z1+=(x[i]-z1)*kl; z2+=(z1-z2)*kl; slow+=z2*z2;      /* 2-pole LP -> low energy  */
-    zh+=(x[i]-zh)*kh; { double h=x[i]-zh; shi+=h*h; }   /* 1-pole HP -> high energy */
-  }
-  *lo=sqrt(slow/n); *hi=sqrt(shi/n);
+/* One-bin Goertzel — no FFT in the test build, and one bin is all a harmonic
+ * check needs. Skips the first 0.25s so the filters and the glue compressor's
+ * envelope are settled. */
+#define SKIP (SR/4)
+static double bin(const float*x,double hz){
+  double w=2.0*M_PI*hz/(double)SR, c=2.0*cos(w), s1=0,s2=0;
+  int n=NSMP-SKIP;
+  for(int i=SKIP;i<NSMP;i++){ double s0=x[i]+c*s1-s2; s2=s1; s1=s0; }
+  return sqrt(s1*s1+s2*s2-c*s1*s2)/(n*0.5);
 }
-static float peak_of(const float*x,int n){ float p=0; for(int i=0;i<n;i++){ float a=fabsf(x[i]); if(a>p)p=a; } return p; }
 static double rms_of(const float*x,int n){ double s=0; for(int i=0;i<n;i++)s+=x[i]*x[i]; return sqrt(s/n); }
-static int finite_of(const float*a,const float*b,int n){ for(int i=0;i<n;i++)if(!isfinite(a[i])||!isfinite(b[i]))return 0; return 1; }
+static float  peak_of(const float*x,int n){ float p=0; for(int i=0;i<n;i++){ float a=fabsf(x[i]); if(a>p)p=a; } return p; }
+static int    finite_of(const float*a,const float*b,int n){ for(int i=0;i<n;i++)if(!isfinite(a[i])||!isfinite(b[i]))return 0; return 1; }
 
-/* One deterministic bar, rendered from a cold engine every time so nothing
- * carries over in a filter's state or the limiter's envelope. */
+static void probe(double hz,double amp,void(*setup)(void)){
+  ll_init(SR);
+  if(setup)setup();
+  for(int i=0;i<NSMP;i++)sig[i]=(float)(amp*sin(2.0*M_PI*hz*i/(double)SR));
+  ll_debug_bus_probe(sig,sig,NSMP,L,R);
+}
+/* One deterministic bar of real music, from a cold engine every time. */
 static void render(void(*setup)(void)){
   ll_init(SR);
   tpat p; tpat_init(&p,3,1);
@@ -55,121 +59,131 @@ static void render(void(*setup)(void)){
   for(int off=0;off<NSMP;off+=256)ll_render(L+off,R+off,256);
   ll_stop();
 }
-static void save(float*dl,float*dr){ for(int i=0;i<NSMP;i++){dl[i]=L[i];dr[i]=R[i];} }
 
-static void s_none(void){}
-static void s_hi_up(void){ ll_set(LL_P_EQ_HIGH,12); }
-static void s_lo_up(void){ ll_set(LL_P_EQ_LOW,12); }
-static void s_mid_cut(void){ ll_set(LL_P_EQ_MIDHZ,1000); ll_set(LL_P_EQ_MID,-12); }
-static void s_flat(void){ ll_set(LL_P_EQ_LOW,0); ll_set(LL_P_EQ_MID,0); ll_set(LL_P_EQ_HIGH,0); }
-static void s_comp(void){ ll_set(LL_P_COMP_ON,1); ll_set(LL_P_COMP_THRESH,-30);
-                          ll_set(LL_P_COMP_RATIO,8); ll_set(LL_P_COMP_ATTACK,1);
-                          ll_set(LL_P_COMP_RELEASE,100); ll_set(LL_P_COMP_MAKEUP,0); }
-static void s_comp_mk(void){ s_comp(); ll_set(LL_P_COMP_MAKEUP,12); }
-static void s_comp_off(void){ ll_set(LL_P_COMP_ON,0); ll_set(LL_P_COMP_THRESH,-30);
-                              ll_set(LL_P_COMP_RATIO,8); ll_set(LL_P_COMP_MAKEUP,12); }
-/* Two input levels 20dB apart, set BEFORE the first play. Setting the master
- * for a SECOND pass over an already-rendered engine does not work: the first
- * pass's reverb and delay tails are still in the buffers at the old level and
- * bleed straight into the measurement, which read a clean 20dB step as 14dB. */
-static void s_off_hi (void){ s_comp_off(); ll_set(LL_P_MASTER,0.55f); }
-static void s_off_lo (void){ s_comp_off(); ll_set(LL_P_MASTER,0.055f); }
-static void s_comp_hi(void){ s_comp();     ll_set(LL_P_MASTER,0.55f); }
-static void s_comp_lo(void){ s_comp();     ll_set(LL_P_MASTER,0.055f); }
-
-static float dryL[NSMP],dryR[NSMP];
+static void s_none (void){}
+/* Everything SET but every amount at zero — so the bypass checks test the
+ * SWITCHES rather than the defaults. */
+static void s_allset_off(void){ ll_set(LL_P_DRIVE_CHAR,LL_DRIVE_CLIP); ll_set(LL_P_DRIVE,0);
+                                ll_set(LL_P_EX_THUMP,0); ll_set(LL_P_EX_BODY,0); ll_set(LL_P_EX_AIR,0); }
+static void s_tape (void){ ll_set(LL_P_DRIVE_CHAR,LL_DRIVE_TAPE); ll_set(LL_P_DRIVE,85); }
+static void s_tube (void){ ll_set(LL_P_DRIVE_CHAR,LL_DRIVE_TUBE); ll_set(LL_P_DRIVE,85); }
+static void s_clip (void){ ll_set(LL_P_DRIVE_CHAR,LL_DRIVE_CLIP); ll_set(LL_P_DRIVE,85); }
+static void s_full (void){ ll_set(LL_P_DRIVE_CHAR,LL_DRIVE_TAPE); ll_set(LL_P_DRIVE,100); }
+static void s_thump(void){ ll_set(LL_P_EX_THUMP,100); }
+static void s_body (void){ ll_set(LL_P_EX_BODY,100); }
+static void s_air  (void){ ll_set(LL_P_EX_AIR,100); }
+static void s_all  (void){ s_clip(); ll_set(LL_P_EX_THUMP,100); ll_set(LL_P_EX_BODY,100); ll_set(LL_P_EX_AIR,100); }
 
 int main(int argc,char**argv){
   (void)argc;(void)argv;
-  /* ── the baseline ── */
-  render(s_none); save(dryL,dryR);
-  double dryLo,dryHi; bands(dryL,NSMP,&dryLo,&dryHi);
-  float dryPk=peak_of(dryL,NSMP); double dryRms=rms_of(dryL,NSMP);
-  CK(finite_of(dryL,dryR,NSMP),"baseline render is finite");
-  CK(dryRms>0.01,"baseline is not silent (rms %.4f, peak %.3f)",dryRms,dryPk);
 
-  /* ── 1. OFF IS A REAL BYPASS ──────────────────────────────────────────
-   * The values are set, the switches are not — and the output has to be
-   * bit-identical, not merely close. This is the assertion that says an
-   * existing project renders exactly what it always did. */
-  render(s_comp_off);
-  int same=1; float worst=0;
-  for(int i=0;i<NSMP;i++){ float d=fabsf(L[i]-dryL[i]); if(d>worst)worst=d; if(L[i]!=dryL[i]||R[i]!=dryR[i])same=0; }
-  CK(same,"COMP off with a -30dB threshold and +12dB makeup is BIT-IDENTICAL to no master bus (max |d| %.3e)",worst);
-  render(s_flat);
-  same=1; for(int i=0;i<NSMP;i++)if(L[i]!=dryL[i]||R[i]!=dryR[i]){same=0;break;}
-  CK(same,"a FLAT EQ is bit-identical too — flat is bypassed, not passed through");
-
-  /* ── 2. the EQ moves the band it names ────────────────────────────────── */
-  /* Measured as a BALANCE (high energy over low), not as absolute energy in a
-   * band: the limiter sits after the EQ, so a +12 boost that pushes into it
-   * comes back partly gained down, and an absolute assertion would be
-   * measuring the limiter as much as the shelf. The balance is immune to any
-   * gain applied to both ends. (The first cut of this test asserted absolute
-   * energy and LOW +12 read as a mere +9%, which is the limiter, not a broken
-   * shelf.) */
-  const double dryBal=dryHi/dryLo;
-  render(s_hi_up); double hLo,hHi; bands(L,NSMP,&hLo,&hHi);
-  CK(finite_of(L,R,NSMP),"HIGH +12 render is finite");
-  CK(hHi/hLo>dryBal*1.2,"HIGH +12 tilts the balance UP (hi/lo %.3f -> %.3f)",dryBal,hHi/hLo);
-
-  render(s_lo_up); double lLo,lHi; bands(L,NSMP,&lLo,&lHi);
-  CK(finite_of(L,R,NSMP),"LOW +12 render is finite");
-  CK(lHi/lLo<dryBal*0.85,"LOW +12 tilts it DOWN (hi/lo %.3f -> %.3f)",dryBal,lHi/lLo);
-
-  render(s_mid_cut);
-  CK(finite_of(L,R,NSMP),"MID -12 at 1kHz render is finite");
-  CK(rms_of(L,NSMP)<dryRms,"MID -12 at 1kHz takes energy out (rms %.4f -> %.4f)",dryRms,rms_of(L,NSMP));
-
-  /* ── 3. the compressor compresses ─────────────────────────────────────── */
-  render(s_comp);
-  float cPk=peak_of(L,NSMP); double cRms=rms_of(L,NSMP);
-  CK(finite_of(L,R,NSMP),"compressed render is finite");
-  CK(cPk<dryPk,"the compressor brings the peak down (%.3f -> %.3f)",dryPk,cPk);
-  CK(cRms<dryRms,"  and the overall level with it (rms %.4f -> %.4f)",dryRms,cRms);
-  /* THE DEFINING PROPERTY, and the only one worth asserting: a change of
-   * INPUT level produces a SMALLER change of OUTPUT level. Everything else a
-   * compressor does follows from that, and nothing a plain gain stage does
-   * can fake it.
-   *
-   * The first cut of this test used CREST FACTOR instead and it went the
-   * other way — 6.80 to 8.49. That is not a bug: with a 1ms attack and a
-   * 100ms release the detector clamps down on a transient and then holds the
-   * gain down through the body of the hit, so the body is squashed harder
-   * than the peak that caused it. Perfectly ordinary over-compression, and a
-   * reminder that crest factor measures the TIME CONSTANTS at least as much
-   * as it measures the ratio. */
+  /* ── 1. THE CURVES THEMSELVES ─────────────────────────────────────────
+   * ll_shape is the contract the JS engine writes out again from the same
+   * algebra, so its shape is worth stating directly rather than only
+   * inferring it from a spectrum. */
   {
-    /* Measured from 0.25s in, NOT from the top. G.masterGain is a SMOOTHER
-     * initialised to 0.55, so ll_set(LL_P_MASTER, …) ramps to the new value
-     * over ~20ms — and the first kick lands inside that ramp, at nearly full
-     * level. With the rest of the take scaled down 20dB, that one transient
-     * dominates the rms and a clean 20dB step reads as 14dB. The smoothing is
-     * right (it is what stops a gain change clicking); measuring the steady
-     * state rather than the ramp is what was wrong. */
-    const int SKIP=SR/4;
-    double offHi,offLo,onHi,onLo;
-    render(s_off_hi ); offHi=rms_of(L+SKIP,NSMP-SKIP);
-    render(s_off_lo ); offLo=rms_of(L+SKIP,NSMP-SKIP);
-    render(s_comp_hi); onHi =rms_of(L+SKIP,NSMP-SKIP);
-    render(s_comp_lo); onLo =rms_of(L+SKIP,NSMP-SKIP);
-    CK(offHi/offLo>9.0,"bypassed, a 20dB input step is a 20dB output step (x%.1f)",offHi/offLo);
-    CK(onHi/onLo<offHi/offLo*0.7,
-       "  engaged, the SAME input step is much smaller out (x%.1f vs x%.1f) — that is compression",
-       onHi/onLo,offHi/offLo);
+    int tapeSym=1, tubeAsym=0;
+    for(double x=0.05;x<3.0;x+=0.05){
+      float a=ll_shape(LL_DRIVE_TAPE,(float)x), b=ll_shape(LL_DRIVE_TAPE,(float)-x);
+      if(fabsf(a+b)>1e-6f)tapeSym=0;
+      float c=ll_shape(LL_DRIVE_TUBE,(float)x), d=ll_shape(LL_DRIVE_TUBE,(float)-x);
+      if(fabsf(c+d)>1e-3f)tubeAsym=1;
+    }
+    CK(tapeSym,"TAPE's curve is SYMMETRIC (odd harmonics only)");
+    CK(tubeAsym,"TUBE's curve is ASYMMETRIC (which is what makes even harmonics)");
+    CK(fabsf(ll_shape(LL_DRIVE_CLIP,9.f)-1.f)<1e-3f,"CLIP saturates at unity like the other two (%.4f)",ll_shape(LL_DRIVE_CLIP,9.f));
+    CK(fabsf(ll_shape(LL_DRIVE_CLIP,0.2f)-0.2f)<0.002f,"  but is still LINEAR at 0.2 where TAPE has already bent (%.4f vs %.4f)",
+       ll_shape(LL_DRIVE_CLIP,0.2f),ll_shape(LL_DRIVE_TAPE,0.2f));
+    CK(fabsf(ll_shape(LL_DRIVE_TUBE,0.f))<1e-4f,"TUBE's bias is taken back off, so silence stays silent (%.2e)",
+       fabsf(ll_shape(LL_DRIVE_TUBE,0.f)));
   }
 
-  render(s_comp_mk);
-  CK(rms_of(L,NSMP)>cRms,"MAKEUP gives the level back (rms %.4f -> %.4f)",cRms,rms_of(L,NSMP));
-  CK(peak_of(L,NSMP)<=1.0f,"  and the limiter still holds it under 0dBFS (%.3f)",peak_of(L,NSMP));
+  /* ── 2. OFF IS A REAL BYPASS ──────────────────────────────────────────
+   * The flavour is chosen, the amounts are zero, and the output has to be
+   * BIT-IDENTICAL — not merely close. This is the assertion that says an
+   * existing project renders exactly what it always did. */
+  render(s_none);
+  for(int i=0;i<NSMP;i++){ dryL[i]=L[i]; dryR[i]=R[i]; }
+  double dryRms=rms_of(dryL,NSMP); float dryPk=peak_of(dryL,NSMP);
+  CK(finite_of(dryL,dryR,NSMP),"baseline render is finite");
+  CK(dryRms>0.01,"baseline is not silent (rms %.4f, peak %.3f)",dryRms,dryPk);
+  render(s_allset_off);
+  int same=1; for(int i=0;i<NSMP;i++)if(L[i]!=dryL[i]||R[i]!=dryR[i]){same=0;break;}
+  CK(same,"with a flavour chosen and every amount at 0 it is BIT-IDENTICAL to no master bus");
 
-  /* ── 4. everything at once, hard ──────────────────────────────────────── */
-  render(s_comp);
-  ll_set(LL_P_EQ_LOW,12); ll_set(LL_P_EQ_MID,12); ll_set(LL_P_EQ_HIGH,12);
-  ll_set(LL_P_COMP_MAKEUP,12);
-  ll_play(); for(int off=0;off<NSMP;off+=256)ll_render(L+off,R+off,256); ll_stop();
-  CK(finite_of(L,R,NSMP),"comp + every band boosted to the stops is still finite");
-  CK(peak_of(L,NSMP)<=1.0f,"  and still under 0dBFS (%.3f)",peak_of(L,NSMP));
+  /* ── 3. DRIVE MAKES HARMONICS, and the three flavours differ ──────────
+   * A 1kHz tone in. Nothing but a nonlinearity can put anything at 2k or 3k. */
+  double f0=1000;
+  probe(f0,0.5,s_none);   double c1=bin(L,f0), c2=bin(L,2*f0), c3=bin(L,3*f0);
+  CK(finite_of(L,R,NSMP),"clean probe is finite");
+  CK(c2/c1<0.002&&c3/c1<0.002,"clean: the bus adds no harmonics at all (2nd %.1e, 3rd %.1e of the tone)",c2/c1,c3/c1);
+
+  probe(f0,0.5,s_tape);   double t1=bin(L,f0), t2=bin(L,2*f0), t3=bin(L,3*f0);
+  CK(finite_of(L,R,NSMP),"TAPE probe is finite");
+  CK(t3/t1>0.01,"TAPE generates a 3rd harmonic (%.1f%% of the tone)",100*t3/t1);
+  CK(t2<t3*0.5,"  and almost no 2nd — a symmetric curve cannot make even harmonics (2nd %.2f%%, 3rd %.2f%%)",
+     100*t2/t1,100*t3/t1);
+
+  probe(f0,0.5,s_tube);   double u1=bin(L,f0), u2=bin(L,2*f0);
+  CK(finite_of(L,R,NSMP),"TUBE probe is finite");
+  CK(u2/u1>0.02,"TUBE generates a 2nd harmonic (%.1f%% of the tone)",100*u2/u1);
+  CK((u2/u1)>(t2/t1)*5.0,"  and far more of it than TAPE (%.2f%% vs %.2f%%) — that is the whole difference",
+     100*u2/u1,100*t2/t1);
+
+  probe(f0,0.5,s_clip);   double k1=bin(L,f0), k3=bin(L,3*f0);
+  CK(finite_of(L,R,NSMP),"CLIP probe is finite");
+  CK((k3/k1)>(t3/t1)*1.3,"CLIP is harder than TAPE at the same drive (3rd %.1f%% vs %.1f%%)",100*k3/k1,100*t3/t1);
+
+  /* ── 4. DRIVE IS CHARACTER, NOT VOLUME ────────────────────────────────
+   * The whole claim of the trim. Full drive on real music must not simply
+   * arrive louder, or the knob is a fader with extra steps. */
+  {
+    static void(*fl[3])(void)={s_tape,s_tube,s_clip};
+    static const char*nm[3]={"TAPE","TUBE","CLIP"};
+    for(int i=0;i<3;i++){
+      render(fl[i]);
+      double dB=20.0*log10(rms_of(L,NSMP)/dryRms);
+      CK(finite_of(L,R,NSMP),"%s on music is finite",nm[i]);
+      CK(fabs(dB)<4.5,"  %s at 85 changes the SOUND, not the level (%+.1f dB)",nm[i],dB);
+      CK(peak_of(L,NSMP)<=1.0f,"  %s stays under 0dBFS (%.3f)",nm[i],peak_of(L,NSMP));
+    }
+    render(s_full);
+    double dB=20.0*log10(rms_of(L,NSMP)/dryRms);
+    CK(fabs(dB)<4.5,"DRIVE at the stop is still not a volume knob (%+.1f dB)",dB);
+  }
+
+  /* ── 5. THE EXCITER'S THREE BANDS, each measured where it works ───────*/
+  /* THUMP: a 60Hz tone. Rectification is a frequency doubler, so what comes
+   * back is 120Hz and up — the harmonics the ear reads as weight on a phone
+   * that cannot reproduce 60Hz at all. */
+  probe(60,0.5,s_none);  double n60=bin(L,60), n120=bin(L,120);
+  probe(60,0.5,s_thump); double p60=bin(L,60), p120=bin(L,120);
+  CK(finite_of(L,R,NSMP),"THUMP probe is finite");
+  /* Measured against the TONE, not against the clean run's 120Hz bin: that
+   * bin is numerically empty, so a ratio against it is a divide-by-noise
+   * that prints x7e12 and means nothing. */
+  CK(n120/n60<0.01,"clean: nothing at 120Hz to begin with (%.3f%% of the tone)",100*n120/n60);
+  CK(p120/p60>0.15,"THUMP puts harmonics ABOVE the bass (120Hz is %.0f%% of the tone)",100*p120/p60);
+  CK(p60/n60<1.6,"  without just adding more sub (60Hz x%.2f)",p60/n60);
+
+  /* BODY: 1kHz, in the 300..3000 band. Saturation there means a 3rd. */
+  probe(f0,0.35,s_body); double b1=bin(L,f0), b3=bin(L,3*f0);
+  CK(finite_of(L,R,NSMP),"BODY probe is finite");
+  CK(b3/b1>0.01,"BODY thickens the mids with harmonics (3rd %.1f%%)",100*b3/b1);
+
+  /* AIR: 4kHz, above the 3.5k corner. Aphex-style — distort the top and hand
+   * back only what was GENERATED, so the 3rd at 12k is the whole point. */
+  probe(4000,0.35,s_none); double na1=bin(L,4000), na=bin(L,12000);
+  probe(4000,0.35,s_air);  double pa1=bin(L,4000), pa=bin(L,12000);
+  CK(finite_of(L,R,NSMP),"AIR probe is finite");
+  CK(na/na1<0.005,"clean: nothing at 12kHz to begin with (%.3f%% of the tone)",100*na/na1);
+  CK(pa/pa1>0.03,"AIR makes detail that was not there to lift (12kHz is %.1f%% of the tone)",100*pa/pa1);
+
+  /* ── 6. EVERYTHING AT ONCE, HARD ──────────────────────────────────────*/
+  render(s_all);
+  CK(finite_of(L,R,NSMP),"CLIP at 85 with all three exciters at 100 is finite");
+  CK(peak_of(L,NSMP)<=1.0f,"  and the limiter still holds it under 0dBFS (%.3f)",peak_of(L,NSMP));
+  CK(rms_of(L,NSMP)>dryRms*0.4,"  and it has not collapsed into nothing (rms %.4f vs %.4f)",rms_of(L,NSMP),dryRms);
 
   printf("%s\n",fails?"MASTER FAIL":"MASTER PASS"); return fails?1:0;
 }

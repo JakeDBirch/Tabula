@@ -133,15 +133,32 @@ typedef struct {
   float rvSizeFactor;
   ll_dline preD; ll_dline echoL, echoR; ll_bq eHpL, eHpR, eLpL, eLpR; ll_smooth eFb, eHp, eLp; float eTime;
   int fxCoefN;
-  /* master bus: compressor -> EQ -> limiter.
+  /* ── MASTER BUS: drive -> excite -> limiter ────────────────────────────
+   * DRIVE is one knob over a FIXED glue compressor and a saturator, with the
+   * output level-compensated so it reads as character rather than volume.
    * The compressor's detector is STEREO-LINKED (one envelope off the louder
    * channel), because two independent detectors move the image around as the
-   * mix ducks — which is the one thing a bus compressor must not do. Its
-   * coefficients are recomputed only when attack/release actually change. */
-  int compOn; float compThr, compRatio, compAtt, compRel, compMakeup;
-  float compEnv, compGain, compAttK, compRelK;
-  int eqOn; ll_bq eqLoL, eqLoR, eqMidL, eqMidR, eqHiL, eqHiR;
-  float eqLoDb, eqMidDb, eqHiDb, eqMidHz;
+   * mix ducks — the one thing a bus compressor must not do. */
+  int driveOn, driveChar;
+  float driveAmt, drivePre, driveTrim;        /* amt 0..1, pre/trim linear */
+  float glueEnv, glueGain, glueAttK, glueRelK;
+  ll_bq tapeLpL, tapeLpR;                     /* TAPE's HF loss */
+  ll_bq headBumpL, headBumpR;                 /* TAPE's low-end bump */
+  /* 2x oversampling round the saturator. A waveshaper folds harmonics back
+   * off Nyquist as aliasing, and on a MASTER stage that reads as cheap fizz
+   * rather than as character — the one place in here worth paying for. Two
+   * cascaded biquads each way is enough at 2x. */
+  ll_bq osUpL1, osUpL2, osUpR1, osUpR2, osDnL1, osDnL2, osDnR1, osDnR2;
+  /* EXCITE: three generators listening to three bands, each adding harmonics
+   * back in PARALLEL to the dry signal. The bands never sum, so the crossover
+   * is a router rather than a filter bank. */
+  int exOn; float exThump, exBody, exAir;
+  ll_bq exLoL, exLoR;                         /* LP -> thump generator */
+  ll_bq exThHpL, exThHpR;                     /* HP on what thump gives back */
+  ll_bq exMidHpL, exMidHpR, exMidLpL, exMidLpR;
+  ll_bq exHiL, exHiR;                         /* HP -> air generator */
+  ll_bq exAirHpL, exAirHpR;                   /* HP on what air gives back */
+  float exThDcL, exThDcR;                     /* thump's rectifier DC blocker */
   /* master limiter */
   ll_dline limL, limR; float limEnv, limGain;
   /* queues */

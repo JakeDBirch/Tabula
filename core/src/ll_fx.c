@@ -6,21 +6,21 @@
  *     damping compounds per recirculation; slow LFO on each comb's length)
  *     → ×0.6 → master
  *   master = (synth×gain + mono×gain + drums×level×gain + rev + echo) × 0.55
- *          → bus compressor → 3-band EQ → limiter → out
+ *          → DRIVE → EXCITE → limiter → out
  *
- * TWO parts have no exact Web Audio twin, and they are the same part twice.
- * Chromium's DynamicsCompressor is its own algorithm with its own detector
- * and release curve, so neither the LIMITER nor the BUS COMPRESSOR can be
- * matched sample for sample — both are written here with the SAME threshold /
- * ratio / attack / release numbers the JS node is given, and judged by ear.
- * That is the sanctioned difference documented in docs/native-audio.md, now
- * with a second member.
+ * DRIVE and EXCITE are CHARACTER, not correction. Five params, none of them a
+ * unit: an amount and a flavour for the drive, and three amounts for the
+ * exciter. Nothing in here is meant to be dialled to a number.
  *
- * The EQ is not in that category: Web Audio's lowshelf / peaking / highshelf
- * biquads ARE the Audio EQ Cookbook, and so is bq_set, so the two agree to
- * float precision. The corners live in ll.h next to their JS twins, because a
- * master EQ whose shelves sit at different frequencies in the two engines is a
- * project that sounds different depending on which one is running. */
+ * THE LIMITER and the DRIVE's glue compressor have no exact Web Audio twin —
+ * Chromium's DynamicsCompressor is its own algorithm with its own detector and
+ * release curve — so both are written here with the same threshold / ratio /
+ * attack / release numbers the JS node is given, and judged by ear. The
+ * SATURATION CURVES are shared as FORMULAE: each is a closed-form function of
+ * one sample, exported here as ll_shape and written out again in the JS
+ * engine's WaveShaper curve builder from the same three lines of algebra. Two
+ * implementations of one definition rather than two descriptions of an intent,
+ * so they agree to float precision — tanh's last bit aside. */
 #include "ll_engine.h"
 
 #define COMB_LEN   16384      /* ≥ 0.0451s × 2.6 × 96k + modulation */
@@ -35,25 +35,108 @@ static inline float lp_hz(float v){ return ll_round(400.f*ll_pow(50.f,v/100.f));
 static inline float rv_hf_hz(float p){ return 20000.f*ll_pow(1200.f/20000.f,ll_clamp(p,0,100)/100.f); }
 static inline float rv_lf_hz(float p){ return 20.f*ll_pow(800.f/20.f,ll_clamp(p,0,100)/100.f); }
 
-/* Attack and release as one-pole coefficients, recomputed only when those
- * params move — a per-sample ll_exp of two constants is pure waste. */
-static void comp_coef(void){
-  const float sr=G.sr>0.f?G.sr:48000.f;
-  float a=G.compAtt>0.f?G.compAtt:20.f, r=G.compRel>0.f?G.compRel:200.f;
-  G.compAttK=1.f-ll_exp(-1.f/(a*0.001f*sr));
-  G.compRelK=1.f-ll_exp(-1.f/(r*0.001f*sr));
+/* ── THE SATURATION CURVES ───────────────────────────────────────────────
+ * Three flavours, each a closed-form function of ONE sample, because that is
+ * what lets the JS engine share them: the same three lines of algebra build
+ * its WaveShaperNode curve table, so both engines fold on one definition
+ * rather than on two descriptions of an intent.
+ *
+ * TAPE  — symmetric soft compression. Odd harmonics, gentle. The HF loss and
+ *         the low-end head bump that make it read as TAPE rather than as
+ *         "quiet clipping" are filters, and live outside this function.
+ * TUBE  — the same curve with a DC BIAS pushed through it and taken back off.
+ *         An asymmetric transfer curve is what generates EVEN harmonics, and
+ *         even harmonics are what "warm" means; symmetric clipping can only
+ *         ever give you odd ones, which is the sound of a fuzz pedal.
+ * CLIP  — x/(1+x^6)^(1/6). Unity slope at zero like the others, saturating at
+ *         ±1 like the others, but it stays LINEAR until it nearly gets there
+ *         and then slams: a wall rather than a curve. That is what makes it
+ *         the aggressive flavour, and getting it wrong is instructive — the
+ *         first cut was the classic cubic soft clip x - x³/3, which measured
+ *         as barely harder than TAPE (3rd harmonic 4.2% against 3.4%). Of
+ *         course it did: x - x³/3 is the first two terms of tanh's own
+ *         series, so "cubic soft clip" and "tanh" are the same curve wearing
+ *         different names. Three flavours that measure the same are one
+ *         flavour and two lies.
+ */
+static inline float shape_tape(float x){ return ll_tanh(x); }
+static inline float shape_tube(float x){
+  const float B=0.35f;                       /* bias, in the curve's own units */
+  static const float OFF=0.336376f;          /* ll_tanh(0.35), taken back off */
+  return ll_tanh(x+B)-OFF;
 }
-/* The EQ is BYPASSED when all three gains are zero, and that is a real
- * bypass rather than a flat curve: it is what makes adding this stage cost an
- * existing project exactly nothing, in CPU and in sound alike. */
-static void eq_coef(void){
+static inline float shape_clip(float x){
+  float x2=x*x, x6=x2*x2*x2;
+  return x*ll_pow(1.f+x6,-1.f/6.f);
+}
+float ll_shape(int chr,float x){
+  return chr==LL_DRIVE_CLIP?shape_clip(x):chr==LL_DRIVE_TUBE?shape_tube(x):shape_tape(x);
+}
+
+/* DRIVE's derived coefficients. Recomputed only when the knob or the flavour
+ * moves — a per-sample ll_exp of two constants is pure waste.
+ *
+ * `driveTrim` is the whole reason this reads as a character control: the
+ * pre-gain climbs to LL_DRIVE_MAX_DB, and the trim takes most of it straight
+ * back out, so turning DRIVE up changes what the mix SOUNDS like rather than
+ * how loud it is. Most, not all — a saturator genuinely does raise the
+ * average level as it eats the peaks, and compensating that away too would
+ * make the knob feel like it was doing nothing. */
+static void drive_coef(void){
   const float sr=G.sr>0.f?G.sr:48000.f;
-  G.eqOn=(G.eqLoDb!=0.f||G.eqMidDb!=0.f||G.eqHiDb!=0.f);
-  if(!G.eqOn)return;
-  float mhz=G.eqMidHz>0.f?G.eqMidHz:1000.f;
-  bq_set(&G.eqLoL ,BQ_LSH ,LL_EQ_LO_HZ,0,G.eqLoDb ,sr); G.eqLoR =G.eqLoL;
-  bq_set(&G.eqMidL,BQ_PEAK,mhz,LL_EQ_MID_Q,G.eqMidDb,sr); G.eqMidR=G.eqMidL;
-  bq_set(&G.eqHiL ,BQ_HSH ,LL_EQ_HI_HZ,0,G.eqHiDb ,sr); G.eqHiR =G.eqHiL;
+  const float d=ll_clamp(G.driveAmt,0.f,1.f);
+  G.driveOn=(d>0.f);
+  /* Each flavour needs its OWN amount of signal to bite on, because the knee
+   * is in a different place on each curve. CLIP stays linear until nearly
+   * unity by design, and the glue compressor in front of it holds the level
+   * well below that — so with a shared pre-gain the "aggressive" flavour
+   * measured CLEANER than TAPE (3rd harmonic 0.5% against 3.4%). A flavour
+   * you cannot reach is not a flavour.
+   *
+   * The extra gain SCALES WITH THE KNOB rather than being a constant, so at
+   * low DRIVE all three are still gentle and the choice is a colour; it is
+   * only as you push that they separate into three different kinds of loud. */
+  float charIn  = (G.driveChar==LL_DRIVE_CLIP)?1.f+d*1.9f
+                : (G.driveChar==LL_DRIVE_TUBE)?1.f+d*0.25f : 1.f;
+  float charOut = (G.driveChar==LL_DRIVE_CLIP)?1.f/(1.f+d*1.05f)
+                : (G.driveChar==LL_DRIVE_TUBE)?1.f/(1.f+d*0.18f) : 1.f;
+  G.drivePre=ll_db2lin(d*LL_DRIVE_MAX_DB)*charIn;
+  G.driveTrim=ll_db2lin(-d*LL_DRIVE_MAX_DB*0.78f)*charOut;
+  G.glueAttK=1.f-ll_exp(-1.f/(LL_GLUE_ATTACK_MS *0.001f*sr));
+  G.glueRelK=1.f-ll_exp(-1.f/(LL_GLUE_RELEASE_MS*0.001f*sr));
+  /* TAPE's two filters, and they scale WITH the knob — tape loses top and
+   * gains bottom the harder you hit it, which is most of why it is recognised
+   * by ear at all. The other two flavours leave the signal's balance alone. */
+  float lossHz = 20000.f-d*11000.f;           /* 20k clean -> ~9k melted */
+  float bumpDb = (G.driveChar==LL_DRIVE_TAPE)? d*2.6f : 0.f;
+  bq_set(&G.tapeLpL,BQ_LP,(G.driveChar==LL_DRIVE_TAPE)?lossHz:20000.f,0,0,sr);
+  G.tapeLpR=G.tapeLpL;
+  bq_set(&G.headBumpL,BQ_LSH,90.f,0,bumpDb,sr); G.headBumpR=G.headBumpL;
+}
+
+/* 2x oversampling filters: Butterworth-ish pair at just under the ORIGINAL
+ * Nyquist, run at the doubled rate. Same coefficients up and down. */
+static void os_coef(void){
+  const float sr2=(G.sr>0.f?G.sr:48000.f)*2.f, fc=(G.sr>0.f?G.sr:48000.f)*0.45f;
+  bq_set(&G.osUpL1,BQ_LP,fc,-3.f,0,sr2);      /* Q in dB here, per bq_set */
+  bq_set(&G.osUpL2,BQ_LP,fc, 3.f,0,sr2);
+  G.osUpR1=G.osUpL1; G.osUpR2=G.osUpL2;
+  G.osDnL1=G.osUpL1; G.osDnL2=G.osUpL2; G.osDnR1=G.osUpL1; G.osDnR2=G.osUpL2;
+}
+
+/* EXCITE is BYPASSED when all three amounts are zero, and that is a real
+ * bypass rather than a null setting: it is what makes this stage cost an
+ * existing project exactly nothing, in CPU and in sound alike. */
+static void excite_coef(void){
+  const float sr=G.sr>0.f?G.sr:48000.f;
+  G.exOn=(G.exThump>0.f||G.exBody>0.f||G.exAir>0.f);
+  if(!G.exOn)return;
+  bq_set(&G.exLoL   ,BQ_LP,LL_EX_LO_HZ    ,0,0,sr); G.exLoR   =G.exLoL;
+  bq_set(&G.exThHpL ,BQ_HP,LL_EX_LO_HP_HZ ,0,0,sr); G.exThHpR =G.exThHpL;
+  bq_set(&G.exMidHpL,BQ_HP,LL_EX_MID_LO_HZ,0,0,sr); G.exMidHpR=G.exMidHpL;
+  bq_set(&G.exMidLpL,BQ_LP,LL_EX_MID_HI_HZ,0,0,sr); G.exMidLpR=G.exMidLpL;
+  bq_set(&G.exHiL   ,BQ_HP,LL_EX_HI_HZ    ,0,0,sr); G.exHiR   =G.exHiL;
+  bq_set(&G.exAirHpL,BQ_HP,LL_EX_HI_HZ*1.2f,0,0,sr); G.exAirHpR=G.exAirHpL;
 }
 void fx_reset(void){
   const float sr=G.sr;
@@ -73,10 +156,14 @@ void fx_reset(void){
   G.eTime=0.375f*sr;
   bq_set(&G.eHpL,BQ_HP,G.eHp.v,0.5f,0,sr); G.eHpR=G.eHpL; bq_set(&G.eLpL,BQ_LP,G.eLp.v,0.5f,0,sr); G.eLpR=G.eLpL;
   G.limEnv=0.f; G.limGain=1.f; G.fxCoefN=0; G.rvSizeFactor=1.f;
-  G.compEnv=0.f; G.compGain=1.f;
-  comp_coef();
-  bq_reset(&G.eqLoL);bq_reset(&G.eqLoR);bq_reset(&G.eqMidL);bq_reset(&G.eqMidR);bq_reset(&G.eqHiL);bq_reset(&G.eqHiR);
-  eq_coef();
+  G.glueEnv=0.f; G.glueGain=1.f; G.exThDcL=G.exThDcR=0.f;
+  bq_reset(&G.tapeLpL);bq_reset(&G.tapeLpR);bq_reset(&G.headBumpL);bq_reset(&G.headBumpR);
+  bq_reset(&G.osUpL1);bq_reset(&G.osUpL2);bq_reset(&G.osUpR1);bq_reset(&G.osUpR2);
+  bq_reset(&G.osDnL1);bq_reset(&G.osDnL2);bq_reset(&G.osDnR1);bq_reset(&G.osDnR2);
+  bq_reset(&G.exLoL);bq_reset(&G.exLoR);bq_reset(&G.exThHpL);bq_reset(&G.exThHpR);
+  bq_reset(&G.exMidHpL);bq_reset(&G.exMidHpR);bq_reset(&G.exMidLpL);bq_reset(&G.exMidLpR);
+  bq_reset(&G.exHiL);bq_reset(&G.exHiR);bq_reset(&G.exAirHpL);bq_reset(&G.exAirHpR);
+  drive_coef(); os_coef(); excite_coef();
 }
 void fx_param(int id,float v){
   switch(id){
@@ -90,16 +177,11 @@ void fx_param(int id,float v){
     case LL_P_DLY_FB: sm_set(&G.eFb,v); break;
     case LL_P_DLY_HP: sm_set(&G.eHp,hp_hz(v)); break;
     case LL_P_DLY_LP: sm_set(&G.eLp,lp_hz(v)); break;
-    case LL_P_COMP_ON:      G.compOn=v>0.5f?1:0; break;
-    case LL_P_COMP_THRESH:  G.compThr=ll_clamp(v,-60,0); break;
-    case LL_P_COMP_RATIO:   G.compRatio=ll_clamp(v,1,20); break;
-    case LL_P_COMP_ATTACK:  G.compAtt=ll_clamp(v,0.1f,200); comp_coef(); break;
-    case LL_P_COMP_RELEASE: G.compRel=ll_clamp(v,5,2000);   comp_coef(); break;
-    case LL_P_COMP_MAKEUP:  G.compMakeup=ll_clamp(v,0,24); break;
-    case LL_P_EQ_LOW:   G.eqLoDb =ll_clamp(v,-24,24); eq_coef(); break;
-    case LL_P_EQ_MID:   G.eqMidDb=ll_clamp(v,-24,24); eq_coef(); break;
-    case LL_P_EQ_MIDHZ: G.eqMidHz=ll_clamp(v,20,18000); eq_coef(); break;
-    case LL_P_EQ_HIGH:  G.eqHiDb =ll_clamp(v,-24,24); eq_coef(); break;
+    case LL_P_DRIVE:      G.driveAmt=ll_clamp(v,0,100)/100.f; drive_coef(); break;
+    case LL_P_DRIVE_CHAR: G.driveChar=(int)ll_clamp(v,0,2);     drive_coef(); break;
+    case LL_P_EX_THUMP:   G.exThump=ll_clamp(v,0,100)/100.f; excite_coef(); break;
+    case LL_P_EX_BODY:    G.exBody =ll_clamp(v,0,100)/100.f; excite_coef(); break;
+    case LL_P_EX_AIR:     G.exAir  =ll_clamp(v,0,100)/100.f; excite_coef(); break;
     default: break;
   }
 }
@@ -149,35 +231,86 @@ void fx_render(float*outL,float*outR,int n){
     float dLev=sm_tick(&G.drumLevel), mg=sm_tick(&G.masterGain);
     float L=(G.busL[LL_SYNTH][i]*gS+G.busL[LL_LEAD][i]*gM+G.busL[LL_DRUMS][i]*dLev*gD+rvL+retL)*mg;
     float R=(G.busR[LL_SYNTH][i]*gS+G.busR[LL_LEAD][i]*gM+G.busR[LL_DRUMS][i]*dLev*gD+rvR+retR)*mg;
-    /* ── bus compressor ── (off is a real bypass: an untouched project must
-     * render exactly what it rendered before this stage existed) */
-    if(G.compOn){
-      /* Stereo-linked peak detector, attack when rising and release when
-       * falling — the classic feed-forward arrangement, and the same numbers
-       * the JS DynamicsCompressor is handed. */
+    /* ── DRIVE ── one knob: into a FIXED glue compressor, then a saturator,
+     * then a trim that takes most of the pre-gain back out. Off is a real
+     * BYPASS — an untouched project must render exactly what it rendered
+     * before this stage existed, not merely something close to it. */
+    if(G.driveOn){
+      L*=G.drivePre; R*=G.drivePre;
+      /* Stereo-LINKED peak detector: two independent ones move the image
+       * around as the mix ducks, which is the one thing a bus compressor
+       * must not do. Attack when rising, release when falling. */
       float pk=ll_max(ll_fabs(L),ll_fabs(R));
-      G.compEnv+=(pk-G.compEnv)*(pk>G.compEnv?G.compAttK:G.compRelK);
-      float g=1.f;
-      float thrLin=ll_db2lin(G.compThr);
-      if(G.compEnv>thrLin&&G.compEnv>1e-9f){
-        /* over^(1/ratio - 1): the gain that puts `over` dB above threshold
-         * back down to over/ratio dB above it, done in the linear domain so
-         * there is no log/exp pair per sample beyond the one pow. */
-        float over=G.compEnv/thrLin;
-        /* A ratio of 0 is unreachable through fx_param (it clamps to 1..20),
-         * but G is zeroed at init and COMP_ON could in principle arrive first
-         * — and 1/0 here is an inf that would take the whole render with it. */
-        float ratio=G.compRatio>=1.f?G.compRatio:1.f;
-        g=ll_pow(over,1.f/ratio-1.f);
+      G.glueEnv+=(pk-G.glueEnv)*(pk>G.glueEnv?G.glueAttK:G.glueRelK);
+      const float thrLin=ll_db2lin(LL_GLUE_THRESH_DB);
+      if(G.glueEnv>thrLin){
+        /* over^(1/ratio - 1) is the gain that puts `over` dB above threshold
+         * back down to over/ratio above it, in the linear domain so there is
+         * one pow per sample rather than a log/exp pair. */
+        G.glueGain=ll_pow(G.glueEnv/thrLin,1.f/LL_GLUE_RATIO-1.f);
+      }else G.glueGain=1.f;
+      L*=G.glueGain; R*=G.glueGain;
+      /* TAPE's HF loss goes BEFORE the curve — tape loses the top on the way
+       * in, and filtering after the fold would only tidy up the harmonics it
+       * had already made. */
+      if(G.driveChar==LL_DRIVE_TAPE){ L=bq_run(&G.tapeLpL,L); R=bq_run(&G.tapeLpR,R); }
+      /* 2x oversampled saturation. Zero-stuffing doubles the rate and halves
+       * the level, so the interpolator's input is pre-doubled; the decimator
+       * then keeps one sample in two. */
+      {
+        float oL=0.f,oR=0.f;
+        for(int k=0;k<2;k++){
+          float uL=k?0.f:L*2.f, uR=k?0.f:R*2.f;
+          uL=bq_run(&G.osUpL2,bq_run(&G.osUpL1,uL));
+          uR=bq_run(&G.osUpR2,bq_run(&G.osUpR1,uR));
+          uL=ll_shape(G.driveChar,uL);
+          uR=ll_shape(G.driveChar,uR);
+          uL=bq_run(&G.osDnL2,bq_run(&G.osDnL1,uL));
+          uR=bq_run(&G.osDnR2,bq_run(&G.osDnR1,uR));
+          if(k==0){ oL=uL; oR=uR; }
+        }
+        L=oL; R=oR;
       }
-      G.compGain=g;
-      float mk=ll_db2lin(G.compMakeup);
-      L*=G.compGain*mk; R*=G.compGain*mk;
+      if(G.driveChar==LL_DRIVE_TAPE){ L=bq_run(&G.headBumpL,L); R=bq_run(&G.headBumpR,R); }
+      L*=G.driveTrim; R*=G.driveTrim;
     }
-    /* ── master EQ ── (bypassed flat, see eq_coef) */
-    if(G.eqOn){
-      L=bq_run(&G.eqHiL,bq_run(&G.eqMidL,bq_run(&G.eqLoL,L)));
-      R=bq_run(&G.eqHiR,bq_run(&G.eqMidR,bq_run(&G.eqLoR,R)));
+    /* ── EXCITE ── three generators, each listening to one band and adding
+     * its HARMONICS back in parallel with the dry signal. Nothing is re-summed
+     * from the bands, so the crossover is a router and does not have to add
+     * back to unity. Bypassed at zero, really. */
+    if(G.exOn){
+      if(G.exThump>0.f){
+        /* The low band, rectified. A rectifier is a frequency DOUBLER, so
+         * what comes back is the bass's own harmonics an octave up and
+         * beyond — which the ear hears as weight even on a speaker that
+         * cannot reproduce the fundamental at all. That is the whole trick,
+         * and it is why the result is HIGH-PASSED: adding more sub would do
+         * nothing on a phone, which is where this is played. */
+        float bL=bq_run(&G.exLoL,L), bR=bq_run(&G.exLoR,R);
+        float rL=ll_fabs(bL)*2.f-0.5f*ll_fabs(bL), rR=ll_fabs(bR)*2.f-0.5f*ll_fabs(bR);
+        /* DC blocker: a rectifier's output is all positive, and a DC offset
+         * on the master bus eats headroom for nothing. */
+        G.exThDcL+=(rL-G.exThDcL)*0.0005f; G.exThDcR+=(rR-G.exThDcR)*0.0005f;
+        rL-=G.exThDcL; rR-=G.exThDcR;
+        L+=bq_run(&G.exThHpL,ll_tanh(rL))*G.exThump*0.9f;
+        R+=bq_run(&G.exThHpR,ll_tanh(rR))*G.exThump*0.9f;
+      }
+      if(G.exBody>0.f){
+        /* The mids, saturated and blended back — density rather than level. */
+        float mL=bq_run(&G.exMidLpL,bq_run(&G.exMidHpL,L));
+        float mR=bq_run(&G.exMidLpR,bq_run(&G.exMidHpR,R));
+        L+=ll_tanh(mL*2.2f)*G.exBody*0.33f;
+        R+=ll_tanh(mR*2.2f)*G.exBody*0.33f;
+      }
+      if(G.exAir>0.f){
+        /* Aphex-style: take the top, distort it, high-pass what comes out so
+         * only the GENERATED content returns, and add it back. It is not a
+         * shelf — a shelf lifts what is already there, and this makes detail
+         * that was not there to lift. */
+        float hL=bq_run(&G.exHiL,L), hR=bq_run(&G.exHiR,R);
+        L+=bq_run(&G.exAirHpL,ll_tanh(hL*3.f))*G.exAir*0.42f;
+        R+=bq_run(&G.exAirHpR,ll_tanh(hR*3.f))*G.exAir*0.42f;
+      }
     }
     /* ── limiter ── */
     float pk=ll_max(ll_fabs(L),ll_fabs(R));
@@ -190,6 +323,11 @@ void fx_render(float*outL,float*outR,int n){
   }
   for(int k=0;k<8;k++){ bq_undenorm(&G.comb[k].hsh); bq_undenorm(&G.comb[k].lsh); }
   bq_undenorm(&G.eHpL);bq_undenorm(&G.eHpR);bq_undenorm(&G.eLpL);bq_undenorm(&G.eLpR);
-  if(G.eqOn){ bq_undenorm(&G.eqLoL);bq_undenorm(&G.eqLoR);bq_undenorm(&G.eqMidL);
-              bq_undenorm(&G.eqMidR);bq_undenorm(&G.eqHiL);bq_undenorm(&G.eqHiR); }
+  if(G.driveOn){ bq_undenorm(&G.tapeLpL);bq_undenorm(&G.tapeLpR);
+                 bq_undenorm(&G.headBumpL);bq_undenorm(&G.headBumpR);
+                 bq_undenorm(&G.osUpL1);bq_undenorm(&G.osUpL2);bq_undenorm(&G.osUpR1);bq_undenorm(&G.osUpR2);
+                 bq_undenorm(&G.osDnL1);bq_undenorm(&G.osDnL2);bq_undenorm(&G.osDnR1);bq_undenorm(&G.osDnR2); }
+  if(G.exOn){ bq_undenorm(&G.exLoL);bq_undenorm(&G.exLoR);bq_undenorm(&G.exThHpL);bq_undenorm(&G.exThHpR);
+              bq_undenorm(&G.exMidHpL);bq_undenorm(&G.exMidHpR);bq_undenorm(&G.exMidLpL);bq_undenorm(&G.exMidLpR);
+              bq_undenorm(&G.exHiL);bq_undenorm(&G.exHiR);bq_undenorm(&G.exAirHpL);bq_undenorm(&G.exAirHpR); }
 }

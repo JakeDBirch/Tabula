@@ -62,30 +62,49 @@ enum ll_param {
   LL_P_MASTER,       /* master gain, 0.55 default */
   LL_P_MOTION,       /* 0/1 — drum MOTION automation on */
   LL_P_STOP_AFTER,   /* stop the transport at the top of this many cycles (0 = never) — the bounce */
-  /* ── The master bus: a compressor and a three-band EQ, in that order, in
-   * front of the limiter. Appended to the END of this enum on purpose — the
-   * host addresses params by index, so inserting one anywhere else would
-   * silently renumber every param above it. */
-  LL_P_COMP_ON,      /* 0/1 — off is a real BYPASS, not a transparent setting */
-  LL_P_COMP_THRESH,  /* dB, -40..0 */
-  LL_P_COMP_RATIO,   /* :1, 1..12 */
-  LL_P_COMP_ATTACK,  /* ms, 1..100 */
-  LL_P_COMP_RELEASE, /* ms, 20..600 */
-  LL_P_COMP_MAKEUP,  /* dB, 0..12 */
-  LL_P_EQ_LOW,       /* dB, -12..12 — low shelf at LL_EQ_LO_HZ */
-  LL_P_EQ_MID,       /* dB, -12..12 — peaking */
-  LL_P_EQ_MIDHZ,     /* Hz, 200..6000 */
-  LL_P_EQ_HIGH,      /* dB, -12..12 — high shelf at LL_EQ_HI_HZ */
+  /* ── THE MASTER BUS: drive, then excite, then the limiter. Appended to the
+   * END of this enum on purpose — the host addresses params by index, so
+   * inserting one anywhere else would silently renumber every param above it.
+   *
+   * Five params, all 0..100 and none of them a unit. That is the point: this
+   * stage is character, not correction, so there is nothing here to dial to a
+   * number. What was here before — threshold, ratio, attack, release, makeup,
+   * three EQ gains and a frequency — was a mixing desk, and a mixing desk is
+   * the wrong instrument to bolt onto the end of a toy you play with your
+   * thumbs. */
+  LL_P_DRIVE,        /* 0..100 — into a FIXED bus compressor, then a saturator.
+                      * 0 is a real BYPASS. Output is level-compensated, so
+                      * this is a character control and not a volume knob. */
+  LL_P_DRIVE_CHAR,   /* 0 TAPE, 1 TUBE, 2 CLIP */
+  LL_P_EX_THUMP,     /* 0..100 — low-band exciter: harmonics ABOVE the bass */
+  LL_P_EX_BODY,      /* 0..100 — mid-band saturation blended in parallel */
+  LL_P_EX_AIR,       /* 0..100 — high-band exciter, Aphex-style */
   LL_P_COUNT
 };
 
-/* Fixed corners for the two shelves, and the mid bell's Q. The same three
- * numbers are in src/loudlight.jsx — a master EQ whose shelf corners differ
- * between the two engines is a project that sounds different depending on
- * which one is running. */
-#define LL_EQ_LO_HZ  120.f
-#define LL_EQ_HI_HZ  6000.f
-#define LL_EQ_MID_Q  0.9f
+enum { LL_DRIVE_TAPE=0, LL_DRIVE_TUBE=1, LL_DRIVE_CLIP=2 };
+
+/* The fixed bus compressor under the DRIVE knob. Fixed is the whole design:
+ * a real console has one input gain, and turning it up gets you more
+ * compression AND more saturation together, which is what "glue" has always
+ * meant. The same five numbers are in src/loudlight.jsx. */
+#define LL_GLUE_THRESH_DB  (-14.f)
+#define LL_GLUE_RATIO      2.f
+#define LL_GLUE_ATTACK_MS  15.f
+#define LL_GLUE_RELEASE_MS 180.f
+#define LL_DRIVE_MAX_DB    14.f   /* pre-gain at DRIVE 100 */
+
+/* Exciter crossover corners, shared with the JS engine for the same reason
+ * the shelf corners were: a band that sits somewhere else in the other engine
+ * is a project that sounds different depending on which one is running.
+ * The bands do NOT have to sum back to unity — nothing here is re-summed. The
+ * excited content is added in PARALLEL to the dry signal, so the crossover
+ * only has to decide what each generator listens to. */
+#define LL_EX_LO_HZ    160.f   /* thump listens below this */
+#define LL_EX_LO_HP_HZ  90.f   /* ...and only its harmonics above this come back */
+#define LL_EX_MID_LO_HZ 300.f
+#define LL_EX_MID_HI_HZ 3000.f
+#define LL_EX_HI_HZ    3500.f  /* air listens above this */
 
 /* Per-layer synth parameters — ll_set_layer(layer, id, v). Only SYNTH and
  * LEAD have these. Mirrors layerParams[layer]. */
@@ -164,6 +183,13 @@ void  ll_set_layer(int layer, int id, float v);
 void  ll_set_drum(int voice, int id, float v);
 float ll_get(int id);
 
+/* DRIVE's saturation curve, as a pure function of one sample — exported so a
+ * host (or a test) can sample it into a table. `chr` is an LL_DRIVE_* value.
+ * The JS engine holds the SAME closed forms, written out in Bell's curve
+ * builder, so the two fold on one definition rather than on two descriptions
+ * of the same intent; they agree to float precision, tanh's last bit aside. */
+float ll_shape(int chr, float x);
+
 /* Samples. One arena, cleared wholesale (kits load whole; clearing also
  * silences any hit still reading the old ones). kind: 0 single, 1 round-robin,
  * 2 velocity layers (soft→hard). Returns a float buffer of `frames` mono
@@ -210,6 +236,15 @@ int   ll_events(int32_t* out, int cap);
  * dur_frames} int32 quads plus the frequency as float bits in a fifth slot.
  * Compiled in always; costs nothing unless drained. */
 int   ll_debug_attacks(int32_t* out, int cap);
+
+/* Test hook: push a signal through the MASTER BUS alone — drive, excite,
+ * limiter — with the sequencer stopped, the sends silent and every gain
+ * pinned at unity. It exists because the master bus is a CHARACTER stage, and
+ * the only honest way to ask whether a saturator saturated is to feed it one
+ * tone and look at the bins that were empty going in; a mix already has
+ * energy everywhere. */
+void  ll_debug_bus_probe(const float* inL, const float* inR, int n,
+                         float* outL, float* outR);
 
 #ifdef __cplusplus
 }
