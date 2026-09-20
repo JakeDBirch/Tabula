@@ -1820,14 +1820,21 @@ const SESSION_DEFAULTS = Object.freeze({
   // "approximately transparent" is what the VARY disaster was made of. Both
   // engines BYPASS rather than pass through at null, so this is literal.
   // The same five numbers are in core/src/ll_core.c's defaults().
-  // Both stages BYPASSED, with the amounts already somewhere sensible: the
-  // SWITCH is the thing you flip, so flipping it has to do something. An old
-  // save carrying amounts but no switch therefore loads bypassed, which is
-  // the safe direction.
-  driveOn:false, driveAmt:35, driveChar:0,
-  exOn:false, exThump:25, exBody:20, exAir:25,
+  // ONE SWITCH over BOTH stages, and it starts BYPASSED with the amounts
+  // already somewhere sensible: the switch is the thing you flip, so flipping
+  // it has to do something. An old save carrying amounts but no switch
+  // therefore loads bypassed, which is the safe direction.
+  mojoOn:false,
+  driveAmt:35, driveChar:0,
+  exThump:25, exBody:20, exAir:25,
 });
 
+
+// MOJO's switch used to be TWO switches, one per stage. A save from those few
+// days carries `driveOn` / `exOn` and no `mojoOn`, and either of them being on
+// means the character stage was in the path — so either turns the one switch
+// on. This line is the only thing that still reads those two keys.
+const mojoOnOf=o=>o&&o.mojoOn!=null?!!o.mojoOn:!!(o&&(o.driveOn||o.exOn));
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
 const vcfLbl=v=>{const f=vcfHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
@@ -4325,10 +4332,16 @@ export default function LoudLight(){
   // wrong instrument to bolt onto the end of something you play with your
   // thumbs. The glue compressor is still there; it is just UNDER the DRIVE
   // knob, fixed, the way a console's is.
-  const [driveOn,   setDriveOn]   = useState(false); // the stage's own bypass
+  // ONE bypass over the whole stage. It was two — one on DRIVE, one on
+  // EXCITE — and two switches is two decisions for something that is one
+  // effect: you reach for MOJO to hear the mix with character or without it,
+  // not to audition its halves against each other. The ENGINES keep both
+  // switches, because each stage still has to be able to leave the path on
+  // its own (all three EXCITE knobs at zero is still a free bypass), so this
+  // one state drives both setters and the core needs no change at all.
+  const [mojoOn,    setMojoOn]    = useState(false);
   const [driveAmt,  setDriveAmt]  = useState(35); // 0..100
   const [driveChar, setDriveChar] = useState(0);  // 0 TAPE, 1 TUBE, 2 CLIP
-  const [exOn,      setExOn]      = useState(false);
   const [exThump,   setExThump]   = useState(25); // 0..100
   const [exBody,    setExBody]    = useState(20); // 0..100
   const [exAir,     setExAir]     = useState(25); // 0..100
@@ -4692,8 +4705,11 @@ export default function LoudLight(){
   // Master bus. Guarded with && like every other one of these: `bell.current`
   // is a facade when the core is on, and a method with no twin over there is
   // silently absent rather than an error.
-  useEffect(()=>{bell.current.setDriveOn&&bell.current.setDriveOn(driveOn);},[driveOn]);
-  useEffect(()=>{bell.current.setExOn&&bell.current.setExOn(exOn);},[exOn]);
+  // One state, both engine switches — see the mojoOn declaration.
+  useEffect(()=>{
+    bell.current.setDriveOn&&bell.current.setDriveOn(mojoOn);
+    bell.current.setExOn&&bell.current.setExOn(mojoOn);
+  },[mojoOn]);
   useEffect(()=>{bell.current.setDrive&&bell.current.setDrive(driveAmt);},[driveAmt]);
   useEffect(()=>{bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);},[driveChar]);
   useEffect(()=>{bell.current.setExThump&&bell.current.setExThump(exThump);},[exThump]);
@@ -4787,7 +4803,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
+    mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     loopMode,loopBar,loopBars,loopPat,
@@ -4856,8 +4872,12 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
@@ -4945,7 +4965,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,mojoOn,driveAmt,driveChar,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -5064,8 +5084,12 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setLoopBars(s.loopBars!=null?s.loopBars:SESSION_DEFAULTS.loopBars);
@@ -5182,8 +5206,8 @@ export default function LoudLight(){
     // Master bus back to off. (This is inside the long run of setters that a
     // single throw abandons — see the doNew cliff lesson — so it stays with
     // the rest of the sound resets rather than at the end.)
-    setDriveOn(SESSION_DEFAULTS.driveOn);setDriveAmt(SESSION_DEFAULTS.driveAmt);
-    setDriveChar(SESSION_DEFAULTS.driveChar);setExOn(SESSION_DEFAULTS.exOn);
+    setMojoOn(SESSION_DEFAULTS.mojoOn);setDriveAmt(SESSION_DEFAULTS.driveAmt);
+    setDriveChar(SESSION_DEFAULTS.driveChar);
     setExThump(SESSION_DEFAULTS.exThump);setExBody(SESSION_DEFAULTS.exBody);
     setExAir(SESSION_DEFAULTS.exAir);
     // Transient scheduler/UI state — clear so the next play starts fresh.
@@ -6942,7 +6966,7 @@ export default function LoudLight(){
           );
         };
         return(
-          <div style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
+          <div data-mixer="1" style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
             <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MIX</div>
             {/* Strips are capped and left-aligned so three channels read as a
                 mixer rather than three faders stranded across the page. */}
@@ -7951,7 +7975,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
-    driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
+    mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -8010,8 +8034,12 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
-     ["driveOn",setDriveOn],["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exOn",setExOn],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     _adoptSong(s);
 
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
@@ -8519,7 +8547,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,mojoOn,driveAmt,driveChar,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Unsaved-work flag. The autosave deps above minus `playing` and minus the
   // navigation/transport state — see markClean for why those are left out.
   useEffect(()=>{
@@ -8528,7 +8556,7 @@ export default function LoudLight(){
     setDirty(true);
   },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
      dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
-     driveOn,driveAmt,driveChar,exOn,exThump,exBody,exAir,
+     mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
      trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
@@ -9028,11 +9056,11 @@ export default function LoudLight(){
     // amount is what decides whether that curve is in the path at all.
     bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);
     bell.current.setDrive&&bell.current.setDrive(driveAmt);
-    bell.current.setDriveOn&&bell.current.setDriveOn(driveOn);
+    bell.current.setDriveOn&&bell.current.setDriveOn(mojoOn);
     bell.current.setExThump&&bell.current.setExThump(exThump);
     bell.current.setExBody&&bell.current.setExBody(exBody);
     bell.current.setExAir&&bell.current.setExAir(exAir);
-    bell.current.setExOn&&bell.current.setExOn(exOn);
+    bell.current.setExOn&&bell.current.setExOn(mojoOn);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -11624,9 +11652,12 @@ export default function LoudLight(){
   // amount into the reverb/delay buses. Rendered identically on the desktop FX
   // tab and the mobile FX sheet.
   // ── MOJO — DRIVE and EXCITE, over the whole mix ─────────────────────────
-  // On the MIX face, under the layer faders and above GLOBAL FX, because the
-  // page reads down the signal: the channel faders, then what happens to their
-  // sum, then the buses they feed.
+  // On the MIX face, BESIDE the layer faders and above GLOBAL FX. The page
+  // still reads down the signal — the channel faders, then what happens to
+  // their sum, then the buses they feed — but the faders cap their strips at
+  // 84px each and leave the rest of the width unused, which is exactly the
+  // room this needs. It is a WRAP, not a hand-split row, so a phone stacks
+  // them and a desktop does not, and the arithmetic stays the browser's.
   //
   // NOTHING IN HERE SHOWS A NUMBER, and that is the design rather than a
   // shortcut. This stage is character — you turn it until it sounds good and
@@ -11651,11 +11682,14 @@ export default function LoudLight(){
   const W_THUMP=["\u2014","ROUND","FULL","BIG","MASSIVE"];
   const W_BODY =["\u2014","SOLID","THICK","CHEWY","GNARLY"];
   const W_AIR  =["\u2014","OPEN","CRISP","BRIGHT","GLASSY"];
-  // Both stages carry their OWN bypass, and it is a switch rather than "turn
-  // the knob to zero". The whole use of a character stage is A/B — dial it in,
-  // flip it off, flip it back — and winding a knob down to compare loses the
-  // setting you were comparing. It also means the amounts can default to
-  // somewhere sensible, so flipping ON does something on a fresh project.
+  // ONE BYPASS, over the whole stage. It was one per stage, and two switches
+  // is two decisions for something that is one effect — you reach for MOJO to
+  // hear the mix with character or without it, not to audition its halves
+  // against each other. It is a switch rather than "turn the knobs to zero"
+  // because the whole use of a character stage is A/B, and winding a knob down
+  // to compare loses the setting you were comparing. It also means the amounts
+  // can default to somewhere sensible, so flipping ON does something on a
+  // fresh project.
   const mojoSwitch=(on,set,label)=>(
     <button data-mojo-sw={label} aria-pressed={on} aria-label={label+(on?" on":" bypassed")}
       onClick={()=>{pushHistory();set(v=>!v);}}
@@ -11665,66 +11699,77 @@ export default function LoudLight(){
         background:on?C_MASTER+"22":"transparent",
         color:on?C_MASTER:C_MASTER+"77"}}>{on?"ON":"BYPASSED"}</button>
   );
-  const masterBusSections = (<>
-    <SynthSection title="DRIVE" accent={C_MASTER}>
+  // The two halves are still two halves — saturation, then harmonics — so
+  // they keep their names as RULES inside the panel rather than as boxes
+  // around it. A heading with a line through the spare width says "these
+  // belong together" at a fraction of the height two bordered sections cost,
+  // which is what makes the whole stage fit beside the faders.
+  const mojoRule=(label)=>(
+    <div style={{display:"flex",alignItems:"center",gap:7,marginTop:2}}>
+      <span style={{fontSize:8,letterSpacing:1.6,fontWeight:700,color:C_MASTER+"AA"}}>{label}</span>
+      <span style={{flex:1,height:1,background:C_MASTER+"22"}}/>
+    </div>
+  );
+  // data-mojo / data-mixer are the harness's hooks for WHERE these two sit:
+  // beside each other or stacked is the whole layout decision, and a wrap has
+  // no state to read — only positions.
+  const masterBusPanel = (
+    <div data-mojo="1">
+    <SynthSection title="MOJO" accent={C_MASTER}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
-        {mojoSwitch(driveOn,setDriveOn,"DRIVE")}
+        {mojoSwitch(mojoOn,setMojoOn,"MOJO")}
         {/* Everything below the switch dims while the stage is out of the
             path — legible, still adjustable, and saying without a word that
             what you are turning is not currently being heard. */}
-        <div style={{opacity:driveOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
-        {/* The flavour is the first decision and the one you make rarely, so
-            it sits above the knob rather than behind a menu. Three words, and
-            they are three genuinely different curves — see ll_shape. */}
-        <div data-drivechar={driveChar} style={{display:"flex",gap:4}}>
-          {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
-            const on=driveChar===i;
-            return(
-              <button key={lbl} aria-pressed={on}
-                onClick={()=>{if(driveChar!==i){pushHistory();setDriveChar(i);}}}
-                style={{flex:1,minWidth:0,padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
-                  fontSize:9,fontWeight:700,letterSpacing:1.4,
-                  border:"1px solid "+(on?C_MASTER:C_MASTER+"30"),
-                  background:on?C_MASTER+"22":"transparent",
-                  color:on?C_MASTER:C_MASTER+"88"}}>{lbl}</button>
-            );
-          })}
-        </div>
-        {/* One knob over a fixed glue compressor AND a saturator, the way a
-            console's input gain is: it scales the signal INTO the curve and
-            back out, so what changes is where on the curve you are. */}
-        <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={SESSION_DEFAULTS.driveAmt}
-          onChange={setDriveAmt} display={mojoWord(driveAmt,W_DRIVE)} accent={C_MASTER}/>
-        <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
-          {driveChar===0?"Tape: soft, loses a little top, gains a little bottom."
-           :driveChar===1?"Tube: asymmetric, so it makes even harmonics. Warm."
-           :"Clip: clean until it isn't. A wall, not a curve."}
-        </div>
-        </div>
-      </div>
-    </SynthSection>
-    <SynthSection title="EXCITE" accent={C_MASTER}>
-      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
-        {mojoSwitch(exOn,setExOn,"EXCITE")}
-        {/* Three generators, each listening to one band and adding its
-            HARMONICS back. Named for what they do to the sound, not for the
-            frequencies they sit on — a corner in Hz is the wrong answer to
-            "make the bass land on a phone". */}
-        <div style={{opacity:exOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
-        <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={SESSION_DEFAULTS.exThump}
-          onChange={setExThump} display={mojoWord(exThump,W_THUMP)} accent={C_MASTER}/>
-        <KnobSlider label="BODY" value={exBody} min={0} max={100} def={SESSION_DEFAULTS.exBody}
-          onChange={setExBody} display={mojoWord(exBody,W_BODY)} accent={C_MASTER}/>
-        <KnobSlider label="AIR" value={exAir} min={0} max={100} def={SESSION_DEFAULTS.exAir}
-          onChange={setExAir} display={mojoWord(exAir,W_AIR)} accent={C_MASTER}/>
-        <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
-          Harmonics, not tone controls. THUMP makes bass you can hear on a
-          phone; AIR makes detail that was not there to lift.
-        </div>
+        <div style={{opacity:mojoOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
+          {mojoRule("DRIVE")}
+          {/* The flavour is the first decision and the one you make rarely, so
+              it sits above the knob rather than behind a menu. Three words, and
+              they are three genuinely different curves — see ll_shape. */}
+          <div data-drivechar={driveChar} style={{display:"flex",gap:4}}>
+            {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
+              const on=driveChar===i;
+              return(
+                <button key={lbl} aria-pressed={on}
+                  onClick={()=>{if(driveChar!==i){pushHistory();setDriveChar(i);}}}
+                  style={{flex:1,minWidth:0,padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+                    fontSize:9,fontWeight:700,letterSpacing:1.4,
+                    border:"1px solid "+(on?C_MASTER:C_MASTER+"30"),
+                    background:on?C_MASTER+"22":"transparent",
+                    color:on?C_MASTER:C_MASTER+"88"}}>{lbl}</button>
+              );
+            })}
+          </div>
+          {/* One knob over a fixed glue compressor AND a saturator, the way a
+              console's input gain is: it scales the signal INTO the curve and
+              back out, so what changes is where on the curve you are. */}
+          <KnobSlider label="DRIVE" value={driveAmt} min={0} max={100} def={SESSION_DEFAULTS.driveAmt}
+            onChange={setDriveAmt} display={mojoWord(driveAmt,W_DRIVE)} accent={C_MASTER}/>
+          <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
+            {driveChar===0?"Tape: soft, loses a little top, gains a little bottom."
+             :driveChar===1?"Tube: asymmetric, so it makes even harmonics. Warm."
+             :"Clip: clean until it isn't. A wall, not a curve."}
+          </div>
+          {mojoRule("EXCITE")}
+          {/* Three generators, each listening to one band and adding its
+              HARMONICS back. Named for what they do to the sound, not for the
+              frequencies they sit on — a corner in Hz is the wrong answer to
+              "make the bass land on a phone". */}
+          <KnobSlider label="THUMP" value={exThump} min={0} max={100} def={SESSION_DEFAULTS.exThump}
+            onChange={setExThump} display={mojoWord(exThump,W_THUMP)} accent={C_MASTER}/>
+          <KnobSlider label="BODY" value={exBody} min={0} max={100} def={SESSION_DEFAULTS.exBody}
+            onChange={setExBody} display={mojoWord(exBody,W_BODY)} accent={C_MASTER}/>
+          <KnobSlider label="AIR" value={exAir} min={0} max={100} def={SESSION_DEFAULTS.exAir}
+            onChange={setExAir} display={mojoWord(exAir,W_AIR)} accent={C_MASTER}/>
+          <div style={{fontSize:8,letterSpacing:1,lineHeight:1.5,color:"rgba(178,199,219,0.32)"}}>
+            Harmonics, not tone controls. THUMP makes bass you can hear on a
+            phone; AIR makes detail that was not there to lift.
+          </div>
         </div>
       </div>
     </SynthSection>
-  </>);
+    </div>
+  );
 
   const globalFxSections = (<>
     <SynthSection title="DELAY" accent={C_DLY}>
@@ -12808,13 +12853,12 @@ export default function LoudLight(){
                 for every layer (these buses are shared), drums included. */}
             {page==="sound"&&soundTab==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                <div style={{marginBottom:14}}>{mixerBody}</div>
-                {/* MASTER before GLOBAL FX: the page reads down the signal —
-                    the channel faders, then what happens to their sum, then
-                    the buses they feed. */}
-                <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>MOJO</div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start",marginBottom:16}}>
-                  {masterBusSections}
+                {/* The faders and what happens to their sum, on one line.
+                    MOJO is the half that can use spare width, so it is the one
+                    that grows; the mixer caps its strips anyway. */}
+                <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-start",marginBottom:16}}>
+                  <div style={{flex:"0 1 300px",minWidth:0}}>{mixerBody}</div>
+                  <div style={{flex:"1 1 260px",minWidth:0,maxWidth:360}}>{masterBusPanel}</div>
                 </div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
@@ -13578,10 +13622,13 @@ export default function LoudLight(){
                 {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="sound"&&soundTab==="fx"&&(
                   <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
-                    <div style={{marginBottom:16}}>{mixerBody}</div>
-                    <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>MOJO</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-                      {masterBusSections}
+                    {/* Same wrap as desktop. On a phone the two basis widths
+                        cannot both fit, so MOJO lands under the faders — which
+                        is the honest answer: three 84px strips leave ~80px
+                        beside them, and a knob is not a control at 80px. */}
+                    <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-start",marginBottom:16}}>
+                      <div style={{flex:"0 1 300px",minWidth:0}}>{mixerBody}</div>
+                      <div style={{flex:"1 1 260px",minWidth:0,maxWidth:360}}>{masterBusPanel}</div>
                     </div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>

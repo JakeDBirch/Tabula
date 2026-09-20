@@ -1204,10 +1204,25 @@ body, two mounts: don't fork it.
 
 ### MOJO — the master bus: DRIVE and EXCITE
 
-On the MIX face, under the layer faders and above GLOBAL FX, because the page
-reads down the signal: the channel faders, then what happens to their sum, then
-the buses they feed. `master gain → DRIVE → EXCITE → limiter → out`, on **both
-engines**.
+**ONE PANEL, BESIDE THE LAYER FADERS**, above GLOBAL FX. The page still reads
+down the signal — the channel faders, then what happens to their sum, then the
+buses they feed — but the faders cap their strips at 84px each and leave the
+rest of the width unused, which is exactly the room this needs.
+`master gain → DRIVE → EXCITE → limiter → out`, on **both engines**.
+
+- **It is a WRAP, not a hand-split row**, so the arithmetic stays the browser's:
+  the mixer takes `flex:0 1 300px` (it cannot use spare width) and MOJO
+  `flex:1 1 260px` (it can). A desktop puts them on one line; a phone cannot,
+  and stacks them. That stack is the honest answer rather than a failure —
+  three 84px strips leave ~80px beside them on a 390px phone, the fader column
+  alone is ~61px so the mixer cannot give the width back, and a knob is not a
+  control at 80px. `_master.mjs` asserts BOTH arrangements by measured
+  position: to the right on desktop, below on a 15 and an SE.
+- **DRIVE and EXCITE were two `SynthSection`s and are now one.** Inside it they
+  keep their names as **rules** — a heading with a line through the spare width
+  — rather than as boxes, which says "these belong together" at a fraction of
+  the height two bordered sections cost. That height is what makes the whole
+  stage fit beside the faders at all.
 
 **IT IS CHARACTER, NOT CORRECTION, AND NOTHING IN IT SHOWS A NUMBER.** This
 shipped once as a bus compressor with THRESH / RATIO / ATTACK / RELEASE /
@@ -1226,16 +1241,38 @@ is the whole brief and it is the kind of thing that erodes.
 ON or BYPASSED. That is state, not quantity, and it is the control you press
 most: you dial a setting in, flip it off, flip it back, and decide.
 
-- **BOTH STAGES HAVE THEIR OWN BYPASS SWITCH**, and it is a switch rather than
-  "turn the knob to zero". The whole use of a character stage is A/B — dial it
-  in, flip it off, flip it back — and winding a knob down to compare loses the
-  setting you were comparing. It also lets the amounts default to somewhere
-  sensible (DRIVE 35, THUMP 25, BODY 20, AIR 25), so flipping a switch on a
-  fresh project does something rather than nothing. Engaged means *switch on
-  AND something turned up*; all-zero is still the free version of the same
-  bypass. Everything under a switch dims while that stage is out of the path.
-  An old save carrying amounts but no switch loads BYPASSED, which is the safe
-  direction.
+- **ONE BYPASS SWITCH, over the whole stage.** It was one per stage, and two
+  switches is two decisions for something that is one effect: you reach for
+  MOJO to hear the mix with character or without it, not to audition its halves
+  against each other. It is a switch rather than "turn the knobs to zero"
+  because the whole use of a character stage is A/B — dial it in, flip it off,
+  flip it back — and winding a knob down to compare loses the setting you were
+  comparing. It also lets the amounts default to somewhere sensible (DRIVE 35,
+  THUMP 25, BODY 20, AIR 25), so flipping it on a fresh project does something
+  rather than nothing. Everything under it dims while the stage is out of the
+  path.
+  - **THE ENGINES KEEP A SWITCH PER STAGE, and that is not redundancy.** One
+    UI state (`mojoOn`) drives both `setDriveOn` and `setExOn`, because each
+    half still has to be able to leave the path on its own: engaged means
+    *switch on AND something turned up*, so winding all three EXCITE knobs to
+    zero still takes three filters and a shaper out of the signal path of every
+    project. `LL_P_DRIVE_ON` / `LL_P_EX_ON` are unchanged and **the core needed
+    no edit at all**. `_master.mjs` asserts both halves: one flip engages both,
+    and zeroing EXCITE bypasses it alone while DRIVE stays in.
+  - **The two old keys are read in exactly one place.** `mojoOnOf` resolves a
+    save carrying `driveOn`/`exOn` and no `mojoOn` — either of them on means
+    the stage was in the path, so either turns the one switch on. It is
+    deliberately OUT of the `[["key",setter],…]` load arrays at all three
+    sites, because those substitute `SESSION_DEFAULTS` for a missing key and
+    would read a two-switch save as BYPASSED with its settings apparently
+    intact, which is a silent change to what the project sounds like. Tested,
+    with a negative control — both old switches off must still load BYPASSED,
+    or the check is reading a leftover. (The first version of that test clicked
+    a project row by a `data-` attribute that does not exist, so nothing was
+    ever loaded and it passed on a stale ON. A legacy-load test needs a control
+    for precisely that reason.)
+  - An old save carrying amounts but no switch of any kind loads BYPASSED,
+    which is the safe direction.
 - **DRIVE is ONE knob over a FIXED glue compressor and a saturator**, the way a
   console's input gain is: turning it up gets you more compression AND more
   saturation together, which is what "glue" has always meant. The compressor
@@ -1421,8 +1458,11 @@ most: you dial a setting in, flip it off, flip it back, and decide.
   selector failing later. The lesson is the one already in here: **grep every
   removed identifier**, and read `pageerror` in the harness rather than only
   the assertions.
-- `data-knob` / `data-knobval` on every `KnobSlider`, `data-mojo-sw` on each
-  bypass switch, `data-drivechar` on the flavour row, and `window.__LL_SHAPE`
+- `data-knob` / `data-knobval` on every `KnobSlider`, `data-mojo-sw` on the
+  bypass switch, `data-mojo` / `data-mixer` on the two blocks of the MIX row
+  (a wrap has no state to read, only positions, so measuring them is the only
+  way to assert the layout), `data-drivechar` on the flavour row, and
+  `window.__LL_SHAPE`
   (which takes the bias now) are the harnesses' hooks. A knob is a
   ballistic pointer drag with no accessible value of its own, and the curve is
   the one part of this whose "three genuinely different flavours" claim would
