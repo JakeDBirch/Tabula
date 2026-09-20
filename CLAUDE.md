@@ -1276,7 +1276,7 @@ rest of the width unused, which is exactly the room this needs.
   position: to the right on desktop, below on a 15 and an SE.
 - **DRIVE and EXCITE were two `SynthSection`s and are now one.**
 - **THE FOUR AMOUNTS ARE VERTICAL FADERS IN ONE ROW.** Four full-width
-  `KnobSlider`s made the panel 410px tall; the same four upright are **306px**
+  `KnobSlider`s made the panel 410px tall; the same four upright are **247px**
   and no wider, because a fader spends HEIGHT — which this panel has going
   spare beside a 250px mixer — instead of stacking rows it does not. It also
   puts MOJO in the same idiom as the layer faders immediately to its left,
@@ -1286,6 +1286,22 @@ rest of the width unused, which is exactly the room this needs.
   - The two halves are told apart by a **rule between them** — one fader, a
     divider, three faders — rather than by a heading above each, which would
     cost two rows to say what the gap already says.
+  - **THE BYPASS SHARES THE FLAVOUR ROW, IN ITS OWN COLOUR.** Its own row cost
+    ~35px for one word. Four cells on one line, but they are not four of a
+    kind: the three on the right are a RADIO GROUP (which curve) and the one on
+    the left is a SWITCH (in or out of the path) — same shape and same colour
+    at this size would read as "four flavours, one of them called BYPASSED". So
+    it takes the brand amber (`C_MOJO_SW`) rather than `C_MASTER`, it FILLS
+    when it is on rather than only tinting, and a wider gap separates it from
+    the three. It is also smaller and tighter set, because "BYPASSED" is eight
+    characters in the narrowest cell on the face. The switch is the one thing
+    that never dims when the stage is out of the path: it is the way back.
+  - **The tracks are 112px, down from 132.** A fader wants travel, but these
+    are four amounts you set by ear and leave rather than a mix you ride, and
+    112 is still a comfortable thumb drag on the ballistic curve.
+  - `_master.mjs` measures all of it: four upright tracks on one row, the
+    switch on the SAME row as the flavours and a different computed colour from
+    them, and the panel under 265px.
   - **The exciter prose went with the rotation.** THUMP / BODY / AIR are named
     for what they do and each reads its own word, so a paragraph restating that
     is the duplicate readout this app keeps deleting — and it cost four lines

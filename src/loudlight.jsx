@@ -11824,14 +11824,25 @@ export default function LoudLight(){
   // to compare loses the setting you were comparing. It also means the amounts
   // can default to somewhere sensible, so flipping ON does something on a
   // fresh project.
+  // IT SHARES THE FLAVOUR ROW, AND IT IS A DIFFERENT COLOUR ON PURPOSE. Four
+  // cells on one line, but they are not four of a kind: the three on the right
+  // are a radio group (which curve), and this one is a switch (in or out of the
+  // path). Same shape at this size would read as "four flavours, one of them
+  // called BYPASSED". So it takes the brand amber rather than C_MASTER, it
+  // FILLS when it is on rather than just tinting, and a wider gap separates it
+  // from the three. Its own row cost ~35px for one word.
+  const C_MOJO_SW="#e6b872";
   const mojoSwitch=(on,set,label)=>(
     <button data-mojo-sw={label} aria-pressed={on} aria-label={label+(on?" on":" bypassed")}
       onClick={()=>{pushHistory();set(v=>!v);}}
-      style={{width:"100%",padding:"7px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
-        fontSize:9,fontWeight:700,letterSpacing:1.6,
-        border:"1px solid "+(on?C_MASTER:C_MASTER+"33"),
-        background:on?C_MASTER+"22":"transparent",
-        color:on?C_MASTER:C_MASTER+"77"}}>{on?"ON":"BYPASSED"}</button>
+      style={{flex:"1.3 1 0",minWidth:0,padding:"6px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+        // Smaller and tighter than the flavours: "BYPASSED" is eight characters
+        // and this cell is the narrowest it gets on a 260px panel. The state is
+        // carried by the fill and the colour as much as by the word.
+        fontSize:8,fontWeight:700,letterSpacing:1.2,
+        border:"1px solid "+(on?C_MOJO_SW:C_MOJO_SW+"3a"),
+        background:on?C_MOJO_SW+"33":"transparent",
+        color:on?C_MOJO_SW:C_MOJO_SW+"70"}}>{on?"ON":"BYPASSED"}</button>
   );
   // The two halves are still two halves — saturation, then harmonics — but
   // upright they are told apart by a RULE BETWEEN THEM rather than by two
@@ -11852,10 +11863,13 @@ export default function LoudLight(){
   // with no-ops and undo looks dead for several presses).
   const mojoFader=(label,value,onChange,words,def)=>(
     <div key={label} data-knob={label} data-knobval={value} data-knobword={mojoWord(value,words)}
-      style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+      style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
       <span style={{fontSize:8,letterSpacing:1.2,fontWeight:700,color:C_MASTER+"BB"}}>{label}</span>
+      {/* 112px, down from 132. A fader wants travel, but these are four
+          amounts you set by ear and leave — not a mix you ride — and 112 is
+          still 16 steps of a comfortable thumb drag on the ballistic curve. */}
       <div data-knobtrack={label}
-        style={{width:16,height:132,background:"rgba(186,208,230,0.07)",borderRadius:8,
+        style={{width:16,height:112,background:"rgba(186,208,230,0.07)",borderRadius:8,
           position:"relative",cursor:"ns-resize",touchAction:"none"}}
         onPointerDown={e=>{
           e.stopPropagation();
@@ -11898,16 +11912,18 @@ export default function LoudLight(){
   const masterBusPanel = (
     <div data-mojo="1">
     <SynthSection title="MOJO" accent={C_MASTER}>
-      <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:7}}>
-        {mojoSwitch(mojoOn,setMojoOn,"MOJO")}
-        {/* Everything below the switch dims while the stage is out of the
-            path — legible, still adjustable, and saying without a word that
-            what you are turning is not currently being heard. */}
-        <div style={{opacity:mojoOn?1:0.45,display:"flex",flexDirection:"column",gap:7}}>
+      <div style={{padding:"4px 12px 9px",display:"flex",flexDirection:"column",gap:6}}>
+        {/* ONE ROW: the bypass, then the flavour. Everything the switch governs
+            dims while the stage is out of the path — legible, still adjustable,
+            and saying without a word that what you are turning is not currently
+            being heard. The switch itself never dims: it is the way back. */}
+        <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
+          {mojoSwitch(mojoOn,setMojoOn,"MOJO")}
           {/* The flavour is the first decision and the one you make rarely, so
-              it sits above the faders rather than behind a menu. Three words,
-              and they are three genuinely different curves — see ll_shape. */}
-          <div data-drivechar={driveChar} style={{display:"flex",gap:4}}>
+              it is on the face rather than behind a menu. Three words, and they
+              are three genuinely different curves — see ll_shape. */}
+          <div data-drivechar={driveChar}
+            style={{flex:"3 1 0",minWidth:0,display:"flex",gap:4,opacity:mojoOn?1:0.45}}>
             {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
               const on=driveChar===i;
               return(
@@ -11921,13 +11937,15 @@ export default function LoudLight(){
               );
             })}
           </div>
+        </div>
+        <div style={{opacity:mojoOn?1:0.45,display:"flex",flexDirection:"column",gap:6}}>
           {/* DRIVE is one knob over a fixed glue compressor AND a saturator,
               the way a console's input gain is; THUMP / BODY / AIR are three
               generators each listening to one band and adding its harmonics
               back. The rules name the two halves without boxing them. */}
-          <div style={{display:"flex",alignItems:"flex-end",gap:6,paddingTop:2}}>
+          <div style={{display:"flex",alignItems:"flex-end",gap:6,paddingTop:1}}>
             {mojoFader("DRIVE",driveAmt,setDriveAmt,W_DRIVE,SESSION_DEFAULTS.driveAmt)}
-            <div style={{width:1,alignSelf:"stretch",background:C_MASTER+"22",margin:"14px 2px 18px"}}/>
+            <div style={{width:1,alignSelf:"stretch",background:C_MASTER+"22",margin:"13px 2px 16px"}}/>
             {mojoFader("THUMP",exThump,setExThump,W_THUMP,SESSION_DEFAULTS.exThump)}
             {mojoFader("BODY", exBody, setExBody, W_BODY, SESSION_DEFAULTS.exBody)}
             {mojoFader("AIR",  exAir,  setExAir,  W_AIR,  SESSION_DEFAULTS.exAir)}
