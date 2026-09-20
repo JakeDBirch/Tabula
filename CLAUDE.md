@@ -1217,6 +1217,36 @@ contract for all three mounts.
   what the control is called. Harnesses that used to find these by their text
   now match `aria-label`; `data-layer-box` stays on the layer buttons as their
   stable id.
+- **RELEASE IS ITS OWN CONTROL, not a copy of the decay.** Both engines used
+  to compute `rel = ms(decay)`, so the default patch put a 400ms tail on every
+  note however short the note was. Measured on the MONO layer across the DUR
+  lane: the GATE moved 11× (23ms → 250ms) while the audible LENGTH moved 1.5×
+  (423ms → 650ms), and when the next note was within ~500ms the mono choke cut
+  every note at the same place anyway — so note length was nearly inaudible.
+  Reported as "duration doesn't respond on MONO — the envelope almost seems
+  like a triggered one shot instead of being tied to the actual note duration",
+  which is exactly what that arithmetic produces. With `release` at its 120ms
+  default the same three notes measure 143 / 245 / 370ms: **2.6× end to end**.
+  - It is a layer param on both sides — `release` in `layerParams`,
+    `LL_L_RELEASE` in the core (**appended** to `enum ll_lparam`, so every
+    existing index keeps its value), a `pushLayer` twin in `core/host.js`, and
+    a REL knob beside SUS in both SOUND mounts.
+  - **A patch saved before it existed sounds UNCHANGED.** Its absence means
+    "what this project has always sounded like", which was release = decay, so
+    `_withRel` backfills it from the patch's OWN decay rather than from the new
+    default — and `0` means the same thing on the core side. Only new patches
+    get the responsive default. The same shape as `GLIDE_LEGACY_PCT`, and it is
+    what keeps this from being a silent re-render of every existing project.
+  - **What is NOT a fault: a short note is LOUDER at its gate.** Gating earlier
+    in the decay releases from a higher level, which is what every ADSR does.
+    A first version of `_monodur.mjs` asserted the opposite and was wrong — it
+    only read as a fault while the 400ms tail swamped the difference.
+  - `_monodur.mjs` measures the real VCA automation (it wraps `createGain` for
+    the duration of one `Bell.play` call and records what the gain param is
+    told), asserts the total length is monotonic in DUR and more than 2× across
+    it, and asserts the legacy backfill against the patch the engine is
+    actually handed. The oracle has a long-release scenario so the two engines
+    have to agree about the new number.
 - **KnobSlider**: ballistic *relative* drag (dragging the full width moves ~half the range; Ctrl/Cmd = ultra-fine). **Double-tap / double-click = reset to `def`** (or 0 for bipolar, else min). No jump-to-position.
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).

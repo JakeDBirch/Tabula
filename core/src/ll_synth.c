@@ -50,7 +50,10 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   float layerOct=p[LL_L_OCTAVE];
   float playFreq=freq*ll_exp2(stepOct+layerOct);
   float durMod=sp?(float)sp->dur/100.f:0.f;
-  float atk=ms_(p[LL_L_ATTACK]), dec=ms_(p[LL_L_DECAY])*decayScale, sus=ll_max(0.001f,p[LL_L_SUSTAIN]/100.f), rel=ms_(p[LL_L_DECAY])*decayScale;
+  float atk=ms_(p[LL_L_ATTACK]), dec=ms_(p[LL_L_DECAY])*decayScale, sus=ll_max(0.001f,p[LL_L_SUSTAIN]/100.f);
+  /* The RELEASE is its own time. 0 means the patch predates the control, and
+   * then it is the decay — exactly what it used to be. JS twin: Bell.play. */
+  float rel=ms_(p[LL_L_RELEASE]>0.f?p[LL_L_RELEASE]:p[LL_L_DECAY])*decayScale;
   float rawDur=(float)(noteDurF/sr);
   float modDur=rawDur*(1.f+durMod);
   float dur=ll_max(atk+0.015f,modDur);

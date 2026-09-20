@@ -3152,7 +3152,11 @@ class Bell{
     // Apply decay velocity scaling to both decay (dec) and release (rel) so
     // the whole back half of the envelope shortens together — matches the
     // "low-vel notes feel shorter" mental model the user described.
-    const atk=ms(p.attack),dec=ms(p.decay)*decayScale,sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay)*decayScale;
+    // rel is the RELEASE, not a second copy of the decay. Absent on a patch
+    // saved before the control existed it reads as the decay, which is exactly
+    // what it used to be — see _withRel. The C twin is ll_synth.c.
+    const atk=ms(p.attack),dec=ms(p.decay)*decayScale,sus=Math.max(0.001,p.sustain/100),
+          rel=ms(p.release!=null?p.release:p.decay)*decayScale;
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
     const modDur=rawDur*(1+durMod);
     const dur=Math.max(atk+0.015, modDur);
@@ -4254,6 +4258,15 @@ export default function LoudLight(){
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
   const DEFAULT_LP = (octave)=>({
     waveform:"sawtooth", detune:8, attack:8, decay:400, sustain:40,
+    // RELEASE, in ms, and it is its own control rather than a copy of DECAY.
+    // It used to BE the decay (`rel = ms(p.decay)`) in both engines, which
+    // meant the default patch put a 400ms tail on every note however short the
+    // note was — so the gate moved 11x across the DUR lane (23ms to 250ms) and
+    // the audible length moved 1.5x (423ms to 650ms). Worse, a SHORTER note
+    // came out LOUDER, because gating earlier in the decay releases from a
+    // higher level. Reported as "duration doesn't respond on MONO — the
+    // envelope almost seems like a triggered one shot".
+    release:120,
     vcfCutoff:80, vcfRes:15, filterEnvAmt:0,
     octave: octave,    // -2..+2; lead defaults +1, bass -1, synth 0
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
@@ -4290,9 +4303,20 @@ export default function LoudLight(){
   // legacy "bass" slot is dropped from the output (bass params discarded;
   // bass pats are merged into lead pats by the load paths separately).
   // Lead always gets monoSingle:true forced — older saves predate the rule.
+  // A patch saved before RELEASE existed has none, and the honest reading of
+  // its absence is "what this project has always sounded like" — which was
+  // release = decay. So it is backfilled from the patch's OWN decay rather
+  // than from the new default: an existing project renders exactly as it did,
+  // and only new patches get the responsive default. The same argument (and
+  // the same shape) as GLIDE_LEGACY_PCT.
+  const _withRel=(base,saved)=>{
+    const o={...base,...saved};
+    if(saved&&saved.release==null)o.release=(saved.decay!=null?saved.decay:base.decay);
+    return o;
+  };
   const fillLayerParams=(lp)=>({
-    synth:{...DEFAULT_LP(0), ...(lp&&lp.synth?lp.synth:{})},
-    lead: {...DEFAULT_LP_MONO(0), ...(lp&&lp.lead ?lp.lead :{}), monoSingle:true}
+    synth:_withRel(DEFAULT_LP(0), lp&&lp.synth),
+    lead: {..._withRel(DEFAULT_LP_MONO(0), lp&&lp.lead), monoSingle:true}
   });
   const [layerParams, setLayerParams] = useState({
     synth: DEFAULT_LP(0),
@@ -4322,6 +4346,7 @@ export default function LoudLight(){
   const attack = _lp.attack,             setAttack = _setLP("attack");
   const decay = _lp.decay,               setDecay = _setLP("decay");
   const sustain = _lp.sustain,           setSustain = _setLP("sustain");
+  const release = _lp.release??_lp.decay, setRelease = _setLP("release");
   const vcfCutoff = _lp.vcfCutoff,       setVcfCutoff = _setLP("vcfCutoff");
   const vcfRes = _lp.vcfRes,             setVcfRes = _setLP("vcfRes");
   const filterEnvAmt = _lp.filterEnvAmt, setFilterEnvAmt = _setLP("filterEnvAmt");
@@ -13011,6 +13036,7 @@ export default function LoudLight(){
                         <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                         <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                         <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
                         {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
                           <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
@@ -13779,6 +13805,7 @@ export default function LoudLight(){
                               <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                               <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                               <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
                               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                                 <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>

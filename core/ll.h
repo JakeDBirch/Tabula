@@ -168,6 +168,10 @@ enum ll_lparam {
   LL_L_VELFLT, LL_L_VELFLT_INV,
   LL_L_VELENV, LL_L_VELENV_INV,
   LL_L_AUDIBLE,      /* 0/1 — mute/solo outcome */
+  /* Appended, so every index above keeps its value. 0 means "no release of
+   * its own" and the decay is used instead — which is what release WAS in
+   * both engines, so a patch saved before this existed sounds unchanged. */
+  LL_L_RELEASE,      /* ms; 0 = follow LL_L_DECAY */
   LL_L_COUNT
 };
 
