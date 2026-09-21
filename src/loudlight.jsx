@@ -2492,7 +2492,14 @@ function LLIcon({name,size}){
     //     to carry the whole distinction at 22px in daylight.
     //   · the beater is the centre dot, which also stops the ring reading as a
     //     letter O.
-    // The cymbal is tilted a few degrees because a level one is a saucepan lid.
+    // THE CYMBAL IS LEVEL. It was tilted a few degrees at first, on the theory
+    // that a level one would read as a saucepan lid — which did not survive
+    // being looked at: a rotated ellipse is symmetric about its own centre but
+    // NOT about the mark's vertical axis, so one end lifts and the whole glyph
+    // reads as lopsided, which is how it was reported. Sitting thin and clear
+    // of the ring is what stops it being a lid, not the angle. It is a little
+    // WIDER than the kick for the same reason — a cymbal narrower than the
+    // drum sits on it like a hat.
     //
     // Everything is FILL or a HEAVY stroke, never a hairline. The version this
     // replaced was a 1.5-1.9 lane on the centre line: it used a fifth of the
@@ -2500,9 +2507,9 @@ function LLIcon({name,size}){
     // as not reading at phone size. A mark does not have to survive alone — it
     // has to survive NEXT TO THE TWO IT SITS BESIDE.
     <svg {...common} aria-hidden="true">
-      <ellipse cx="12" cy="5.2" rx="7" ry="1.7" transform="rotate(-7 12 5.2)" fill="currentColor" stroke="none"/>
-      <circle cx="12" cy="15" r="5.7" strokeWidth="2.4"/>
-      <circle cx="12" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+      <ellipse cx="12" cy="5.1" rx="7.4" ry="1.6" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="15.1" r="5.7" strokeWidth="2.4"/>
+      <circle cx="12" cy="15.1" r="1.5" fill="currentColor" stroke="none"/>
     </svg>
   );
 
