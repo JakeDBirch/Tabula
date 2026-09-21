@@ -222,7 +222,7 @@ const C_VARY="#e6b872";
 // accents themselves, because a mid-alpha colour on this navy reads as mud —
 // the same trap the note fill's alpha floor was raised for. Amber stays as the
 // fallback, and it is still what an inactive note and the brand furniture use.
-const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
+const LAYER_NOTE_RGB={synth:"176,224,152",lead:"154,140,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
 // 0..1 → the two hex digits an 8-digit colour string wants. The palette is
 // written as "#rrggbb"+"aa" all over this file, so this is the missing half.
@@ -5851,7 +5851,7 @@ export default function LoudLight(){
   // has no single note colour and falls through to the brand amber. Which made
   // the drums page the one layer whose tint was not its own: it read as "lit",
   // not as "drums". Its accent is the rose the DRUMS button already wears.
-  const layerTint="rgba("+(activeLayer==="drums"?"196,114,122":noteRgb(activeLayer))+",0.045)";
+  const layerTint="rgba("+(activeLayer==="drums"?"224,112,96":noteRgb(activeLayer))+",0.045)";
   // Drums have no per-column params, so a spill cannot survive the trip there.
   useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
   // Tapping anywhere that is not the spilled lane or the row of buttons puts it
@@ -5933,7 +5933,7 @@ export default function LoudLight(){
     "aria-label":"Loop",
     onClick:(e)=>{e.stopPropagation();tapLoop();},
   };
-  const loopBtnStyle=loopMode===2?Object.assign({},S.loopOn,{boxShadow:"inset 0 0 0 3px rgba(159,180,199,0.22)"}):(loopMode?S.loopOn:{});
+  const loopBtnStyle=loopMode===2?Object.assign({},S.toggleOn,{boxShadow:"inset 0 0 0 3px rgba(255,214,150,0.22), 0 0 7px rgba(255,214,150,0.4)"}):(loopMode?S.toggleOn:{});
   // (The LOOP scope MENU is gone. The button has no second function now: each
   //  tap steps the loop outward and then off — see tapLoop above.)
   // Switching to a different pattern while LOOP is on moves the loop with you —
@@ -6467,7 +6467,7 @@ export default function LoudLight(){
   const layerOpsMenu=!layerMenu?null:(()=>{
     const lm=layerMenu, isDrum=lm.layer==="drums";
     const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
-    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#79b8f2":"#c4727a";
+    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#8279e0":"#e07060";
     const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
     const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
@@ -6524,7 +6524,7 @@ export default function LoudLight(){
           The accessible NAME is the noun; the hint goes in `title`. A whole
           sentence as a name is read out on every focus and is not what the
           control is called. */}
-      {[["synth","poly","Poly","#a8c5a0"],["lead","mono","Mono","#79b8f2"],["drums","drums","Drums","#c4727a"],["fx","mix","Mix",C_SAT]].map(([k,icon,name,col])=>{
+      {[["synth","poly","Poly","#a8c5a0"],["lead","mono","Mono","#8279e0"],["drums","drums","Drums","#e07060"],["fx","mix","Mix",C_SAT]].map(([k,icon,name,col])=>{
         const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
         return(
           <button key={k} data-soundtab={k} aria-pressed={on} aria-label={name}
@@ -7222,8 +7222,8 @@ export default function LoudLight(){
                 mixer rather than three faders stranded across the page. */}
             <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?176:236}}>
               {strip("Poly","poly",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
-              {strip("Mono","mono",monoMix,"#79b8f2",setLeadMix,"lead",monoFx,setLeadFx)}
-              {strip("Drums","drums",drumLevel,"#c4727a",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
+              {strip("Mono","mono",monoMix,"#8279e0",setLeadMix,"lead",monoFx,setLeadFx)}
+              {strip("Drums","drums",drumLevel,"#e07060",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
             </div>
           </div>
         );
@@ -7513,7 +7513,7 @@ export default function LoudLight(){
       <button title="Loop — tap again to grow the loop, then off"
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={Math.round(sz*0.5)}/></button>
       <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-        style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+        style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?S.toggleOn:{})}
         onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={Math.round(sz*0.5)}/></button>
     </div>
   );
@@ -12839,7 +12839,7 @@ export default function LoudLight(){
                 {stopBtn({width:38,height:38},18)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                  style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                  style={Object.assign({},S.iconBtn,followSeq?S.toggleOn:{})}
                   onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={18}/></button>
               </div>
             </div>
@@ -13273,7 +13273,7 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE LEFT RAIL — layer + pattern selection ══ */}
           {isLandscape&&(
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#8279e0","rgba(130,121,224,"],["drums","DRUMS","#e07060","rgba(224,112,96,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
                   style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
@@ -13416,9 +13416,9 @@ export default function LoudLight(){
                 gap between them lands where it always did. */}
             <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
               <div style={{flex:"3 1 0",display:"flex",alignItems:"center",gap:5}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#8279e0","rgba(130,121,224,"],["drums","DRUMS","#e07060","rgba(224,112,96,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
@@ -13433,7 +13433,7 @@ export default function LoudLight(){
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={22}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},followSeq?S.toggleOn:{})}
                 onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={22}/></button>
               </div>
             </div>
@@ -13689,7 +13689,7 @@ export default function LoudLight(){
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?S.toggleOn:{})}
                 onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={17}/></button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
                 <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={14}/></button>
@@ -13786,7 +13786,7 @@ export default function LoudLight(){
                   <div style={{paddingBottom:8}}>
                     {(()=>{
                       const isDrum=activeLayer==="drums";
-                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#79b8f2":"#c4727a";
+                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#8279e0":"#e07060";
                       const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(121,184,242,":"rgba(196,114,122,";
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
@@ -14119,7 +14119,22 @@ const S={
   bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(178,199,219,0.4)",marginTop:6},
   bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:1},
   loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(178,199,219,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
-  loopOn:    {border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"},
+  // THE ENGAGED AMBER, for the two TOGGLES — LOOP and FOLLOW. It was steel for
+  // one and green for the other, which is two rules to learn for one idea, and
+  // neither colour carried any information the toggle's own on/off didn't.
+  //
+  // THE TRANSPORT IS DELIBERATELY NOT IN THIS SCHEME. S.playOn stays white with
+  // its big glow and S.playHeld stays its own amber: "is it running" is the one
+  // state you read from across a room, and the white is what makes it carry.
+  // Held-vs-running would survive the merge (the glyph already differs, and
+  // stopped-vs-held is ring or no ring) — this is about the running cue being
+  // worth more as its own colour, not about ambiguity.
+  //
+  // boxShadow rather than a drop-shadow FILTER, which is what the design sheet
+  // uses: it is the idiom S.playOn already spends its glow in, and it composes
+  // with the inset ring the grown loop draws. A filter would also make these
+  // two the only stacking contexts in the row for no gain.
+  toggleOn:  {border:"1px solid rgba(255,214,150,0.5)",color:"#ffd696",background:"rgba(255,214,150,0.12)",boxShadow:"0 0 7px rgba(255,214,150,0.4)"},
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
