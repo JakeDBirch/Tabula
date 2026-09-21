@@ -2414,70 +2414,183 @@ function RangeSlider({label,accent,lo,hi}){
 // One component with a switch rather than five, so size, stroke and alignment
 // cannot drift apart between them. `currentColor` throughout, so a button tints
 // its icon by setting `color` — the same way the text labels behaved.
+// The icon set. Fourteen marks on ONE 24-unit grid, round caps and joins, and
+// a single vocabulary: a circle, a lane, a right angle.
+//
+// WEIGHT VARIES INSIDE EACH MARK — 2.0 on whatever leads, easing to 1.5 on what
+// trails, 1.75 neutral. That is the set's whole signature: every glyph gets a
+// direction and an attack without gaining a single extra shape, which is how a
+// 22px mark says something at a glance.
+//
+// ONE RULE MAKES OR BREAKS IT: change weight only where the path TURNS, or
+// across a GAP between elements that do not touch. A round cap centred on a
+// tangent joint draws a disc wider than either stroke, so two widths meeting
+// mid-contour produce a visible BEAD rather than a transition. Marks with
+// nowhere to turn therefore stay uniform — `stop` is one weight, and `loop`
+// holds one weight all the way round its circuit and puts the cadence in the
+// arrowhead. Both were drawn the other way first and beaded at every tangent.
+//
+// A function DECLARATION, not `const LLIcon = () => <svg/>` — see the CJS
+// audit lesson in CLAUDE.md. (And do not name the bogus identifier that audit
+// greps for anywhere in this file: it is a plain substring search over Babel's
+// CJS output, and COMMENTS SURVIVE INTO IT, so writing the word in prose fails
+// the build exactly as a real module-level arrow would.)
 function LLIcon({name,size}){
-  const S=size||16, sw=1.6;
+  const S=size||22;
+  // No shared strokeWidth: every stroked element below states its own, because
+  // the weight IS the design. The neutral 1.75 is here only so a path added
+  // later without one inherits the set's middle rather than the SVG default of
+  // 1, which would read as a hairline against everything beside it.
   const common={width:S,height:S,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",
-    strokeWidth:sw,strokeLinecap:"round",strokeLinejoin:"round",
+    strokeWidth:1.75,strokeLinecap:"round",strokeLinejoin:"round",
     style:{display:"block",flexShrink:0,overflow:"visible"}};
-  if(name==="poly")return(
-    // Several notes at once, INTERSPERSED rather than stacked: a chord is a
-    // handful of voices that are not in a line. Solid and equal weight — the
-    // first cut faded them to 45% opacity and the icon read as dusty rather
-    // than as three of something.
+
+  // ---- Layers ------------------------------------------------------------
+  // Told apart by COUNT, not by metaphor: one circle, three circles, a lane.
+  if(name==="mono")return(
+    // One voice, one circle — visibly bigger than any of POLY's three. The size
+    // contrast is the whole message. Uniform by nature: nothing to grade.
     <svg {...common} aria-hidden="true">
-      <circle cx="8.4"  cy="8.6"  r="3.5" fill="currentColor" stroke="none"/>
-      <circle cx="16.2" cy="11.4" r="3.2" fill="currentColor" stroke="none"/>
-      <circle cx="10.8" cy="16.8" r="3.0" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="12" r="5.2" fill="currentColor" stroke="none"/>
     </svg>
   );
-  if(name==="mono")return(
-    // One voice, and visibly BIGGER than any of POLY's three — the contrast is
-    // the whole message.
+  if(name==="poly")return(
+    // Three circles, INTERSPERSED rather than stacked — a chord is voices that
+    // do not line up. Graded by voice order (3 / 2.75 / 2.5): the first voice
+    // leads. Do NOT fade them: an early cut at 45% opacity read as dust rather
+    // than as three of something. Equal-opacity solids only.
     <svg {...common} aria-hidden="true">
-      <circle cx="12" cy="12" r="5.6" fill="currentColor" stroke="none"/>
+      <circle cx="7"    cy="7.5" r="3"    fill="currentColor" stroke="none"/>
+      <circle cx="15.5" cy="12"  r="2.75" fill="currentColor" stroke="none"/>
+      <circle cx="10"   cy="17"  r="2.5"  fill="currentColor" stroke="none"/>
     </svg>
   );
   if(name==="drums")return(
-    // A kick seen face-on, with the beater about to strike it. The beater is
-    // HORIZONTAL and at the drum's centre height on purpose: the first cut ran
-    // it out of the lower-left at 45°, which is a magnifying glass, and that is
-    // exactly what it looked like.
-    <svg {...common} aria-hidden="true">
-      <circle cx="15" cy="12" r="6.4" strokeWidth="2"/>
-      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none"/>
-      <path d="M0.9 12 h2.9" strokeWidth="1.8"/>
-      <circle cx="5.9" cy="12" r="2.1" fill="currentColor" stroke="none"/>
-    </svg>
-  );
-  if(name==="loop")return(
-    // A loop: round the track and back to the start.
-    <svg {...common} aria-hidden="true">
-      <path d="M6.4 8.6 h11.2 a3.4 3.4 0 0 1 0 6.8 H6.4 a3.4 3.4 0 0 1 0 -6.8"/>
-      <path d="M8.8 6.2 L6.2 8.6 L8.8 11"/>
-    </svg>
-  );
-  if(name==="mix")return(
-    // The MIX face of the SOUND screen: three faders at three heights. It was
-    // the word FX, which named the buses and not the page — that face carries
-    // the layer mixer, the master bus and the sends all at once, and "the
-    // whole mix" is the only thing true of all three. A fader is what the page
-    // looks like, so the glyph is what it looks like.
+    // A lane cut into steps with the downbeat accented. It names a PATTERN,
+    // not an instrument, which is what the layer actually holds — the voices
+    // in it are whatever the kit says they are. It also keeps all three layer
+    // marks on one logic (count and cut) instead of two abstractions and one
+    // picture.
     //
-    // Caps at different heights on purpose: three at the same height reads as
-    // a grille or a bar chart at rest, and the whole point of a mixer is that
-    // the faders DISAGREE.
+    // This REPLACES the kick-and-beater glyph, which was itself the fix for an
+    // earlier cut whose 45° beater read as a magnifying glass. Worth knowing
+    // before reaching for the drum again: the argument against it is not that
+    // it was drawn badly, it is that it draws one voice for a layer that holds
+    // any of them.
+    //
+    // The steps decay 1.9 / 1.7 / 1.5 across GAPS, so there is no join to bead.
     <svg {...common} aria-hidden="true">
-      <path d="M6 4.6 v14.8"/><path d="M12 4.6 v14.8"/><path d="M18 4.6 v14.8"/>
-      <rect x="3.2"  y="8.2"  width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
-      <rect x="9.2"  y="14"   width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
-      <rect x="15.2" y="10.6" width="5.6" height="2.6" rx="1.1" fill="currentColor" stroke="none"/>
+      <rect x="2" y="9.6" width="3.5" height="4.8" rx="1" fill="currentColor" stroke="none"/>
+      <path d="M7.5 12h3.5"  strokeWidth="1.9"/>
+      <path d="M13 12h3.5"   strokeWidth="1.7"/>
+      <path d="M18.5 12h3.5" strokeWidth="1.5"/>
+    </svg>
+  );
+
+  // ---- Transport ---------------------------------------------------------
+  // STROKED, in the 24-unit box, like everything else. They were filled shapes
+  // in an 11-unit box, which made the transport a separate visual family from
+  // the tools sitting next to it in the same row.
+  if(name==="play")return(
+    // Three edges stepping down around the triangle: leading edge 2.0, bottom
+    // 1.75, back 1.5. Every change is AT a vertex, so the corner absorbs it.
+    <svg {...common} aria-hidden="true">
+      <path d="M8.5 5.5 18.5 12"  strokeWidth="2"/>
+      <path d="M18.5 12 8.5 18.5" strokeWidth="1.75"/>
+      <path d="M8.5 18.5V5.5"     strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="pause")return(
+    // Detached bars, so the weight change needs no join at all.
+    <svg {...common} aria-hidden="true">
+      <path d="M9 6v12"  strokeWidth="2"/>
+      <path d="M15 6v12" strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="stop")return(
+    // UNIFORM on purpose. A rounded square is a smooth contour with no corner
+    // to absorb a weight change, and nothing here is moving, so it carries no
+    // cadence to express. Do not "fix" this by grading the sides: that was
+    // tried and it beads at all four tangents.
+    <svg {...common} aria-hidden="true">
+      <rect x="6.75" y="6.75" width="10.5" height="10.5" rx="1.5" strokeWidth="1.75"/>
+    </svg>
+  );
+
+  // ---- History -----------------------------------------------------------
+  if(name==="undo")return(
+    // Head 2.0, tail one continuous 1.6. The single weight change sits at the
+    // chevron vertex (3, 9.5), which is a real direction change.
+    <svg {...common} aria-hidden="true">
+      <path d="M7.5 5 3 9.5 7.5 14"         strokeWidth="2"/>
+      <path d="M3 9.5h10a6 6 0 0 1 0 12h-3" strokeWidth="1.6"/>
+    </svg>
+  );
+  if(name==="redo")return(
+    <svg {...common} aria-hidden="true">
+      <path d="M16.5 5 21 9.5 16.5 14"      strokeWidth="2"/>
+      <path d="M21 9.5H11a6 6 0 0 0 0 12h3" strokeWidth="1.6"/>
+    </svg>
+  );
+
+  // ---- Tools -------------------------------------------------------------
+  if(name==="loop")return(
+    // The circuit holds ONE weight; the cadence lives in the arrowhead.
+    // Grading the four racetrack segments was tried and produced four beads.
+    <svg {...common} aria-hidden="true">
+      <path d="M8 6.5h8a5.5 5.5 0 0 1 0 11H8a5.5 5.5 0 0 1 0-11z" strokeWidth="1.6"/>
+      <path d="M10.5 4 8 6.5 10.5 9" strokeWidth="2"/>
     </svg>
   );
   if(name==="follow")return(
-    // Forward: keep up with what is playing.
+    // Chevron 2.0 at the vertex, lead-out 1.75, and a detached playhead line at
+    // 1.5 — the thing being kept up WITH, which is what FOLLOW means.
     <svg {...common} aria-hidden="true">
-      <path d="M4 12 h14"/>
-      <path d="M13.4 7.4 L18 12 L13.4 16.6"/>
+      <path d="M5 3.5v17"               strokeWidth="1.5"/>
+      <path d="M11 7.5 16.5 12 11 16.5" strokeWidth="2"/>
+      <path d="M16.5 12H21"             strokeWidth="1.75"/>
+    </svg>
+  );
+  if(name==="mix")return(
+    // Three faders at three heights — what the MIX face actually looks like.
+    // Caps at different heights on purpose: three at one height reads as a
+    // grille or a bar chart at rest, and the whole point of a mixer is that the
+    // faders DISAGREE. The lanes recede to 1.5 so the caps carry.
+    <svg {...common} aria-hidden="true">
+      <path d="M6 3.5v6.5M6 14v6.5M12 3.5v10.5M12 18v2.5M18 3.5v3M18 10.5v10" strokeWidth="1.5"/>
+      <rect x="3.25"  y="10"  width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+      <rect x="9.25"  y="14"  width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+      <rect x="15.25" y="6.5" width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="project")return(
+    // A pattern matrix with one cell lit, not a folder — the app's own subject
+    // rather than a filing metaphor. The frame is context, so it recedes
+    // uniformly to 1.5 and the filled cell carries.
+    <svg {...common} aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2.5" strokeWidth="1.5"/>
+      <path d="M12 3v18M3 12h18" strokeWidth="1.5"/>
+      <rect x="5" y="5" width="5" height="5" rx="1" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="sound")return(
+    // A source and two wavefronts decaying outward: solid dot, 1.75, 1.5. The
+    // arcs are detached, so the decay needs no join.
+    <svg {...common} aria-hidden="true">
+      <circle cx="5.5" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+      <path d="M11 7.5a7 7 0 0 1 0 9"      strokeWidth="1.75"/>
+      <path d="M15.5 4.5a11 11 0 0 1 0 15" strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="save")return(
+    // Commit to the line: a stem, a chevron, a baseline. No floppy disk — the
+    // disk is a picture of hardware nobody under forty has handled. The chevron
+    // is the committing stroke, so it is the heavy one, and the weight change
+    // sits at its vertex (12, 13.5).
+    <svg {...common} aria-hidden="true">
+      <path d="M12 3v10.5"            strokeWidth="1.75"/>
+      <path d="M8 9.5 12 13.5 16 9.5" strokeWidth="2"/>
+      <path d="M3.5 17.5h17"          strokeWidth="1.5"/>
     </svg>
   );
   return null;
