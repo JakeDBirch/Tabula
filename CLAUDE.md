@@ -459,12 +459,56 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     the travel and bar N the top, the way a fader has ends. It wrapped for a
     day and that was wrong: a scrub with no ends has no position you can feel,
     and overshooting recycles you past the bar you were aiming for instead of
-    parking you at it. Whole bars are consumed out of the delta and the anchor
-    moves with them (18px a bar), so a second swipe carries on from the first;
-    holding past either edge of the tile keeps stepping at one bar per 110ms and
-    stops itself at the end. Between them the control has travel a thumb can
-    actually use — the original complaint was never the wrap, it was that an
-    upward swipe runs out of phone.
+    parking you at it. Holding past either edge of the tile keeps stepping at
+    one bar per 110ms and stops itself at the end — which is the travel a thumb
+    can actually use, since the original complaint was never the wrap, it was
+    that an upward swipe runs out of phone.
+  - **AND IT IS BALLISTIC, on the sliders' own speed curve.** It was a flat
+    18px a bar, and a flat gearing cannot serve both of the things this control
+    is for: reported as "way too sensitive for moving just a single bar", with
+    the obvious fix rejected in the same breath — "I could see it being really
+    annoying if we slowed it down and I had to move 16". So the gearing is a
+    function of SPEED, the `DRAG_SLOW → cap` shape `ballisticDelta` and
+    `ballisticNudge` already share. Measured: a 4px-a-frame crawl costs 21px a
+    bar, a 2px crawl 40px, a flick 6.5px — so one bar is a deliberate ~45px
+    nudge and 31 bars is a ~200px swipe. `BAR_FAST` is its own constant rather
+    than `NUDGE_FAST` because the dynamic range wanted here is wider than a
+    tempo readout's: this control has to express both ends of a 32-bar part.
+  - **Three things the flat gearing was hiding**, all of which only bite once a
+    move can carry more than one bar:
+    - **The gesture carries its OWN cursor** (`g.bar`), seeded at pointerdown,
+      instead of re-reading `barPageR` every move. That ref is written by an
+      EFFECT, so it lands a commit after the `goToBar` that changed it — the
+      TEMPO readout's trap again. At ±1 a move it could never bite; at three
+      bars a move, two pointermoves inside one frame (a 120Hz pointer, a
+      coalesced event) would both read the same stale value and the second
+      would OVERWRITE the first. `_spinTo` returns whether it moved, which is
+      how the drag and the edge timer both find the end of the travel.
+    - **A move is capped at `BAR_MAX_PER_MOVE`=6 bars**, whatever distance it
+      claims. A pointermove is normally a frame of travel, but a stalled main
+      thread — which this app has a long history of — delivers the whole stall
+      coalesced into ONE event, and at the flick ratio that is tens of bars
+      from a gesture the hand never made. Six is above anything a real flick
+      produces at 60Hz (~39px a frame).
+    - **A release is a tap only under `BAR_TAP_PX`=8 of raw travel.** "Did a bar
+      change" was a good enough proxy while 18px was a bar; a careful 40px drag
+      can now legitimately change nothing, and that must not open the bar's ops
+      menu.
+    - At either end the leftover accumulation is DROPPED rather than banked
+      against the clamp, or dragging back does nothing until the overshoot has
+      unwound.
+  - `_barspin.mjs` asserts the property rather than the constants — the same
+    distance must cost more than twice the pixels per bar when crawled as when
+    flicked, which a flat gearing of ANY value fails by construction. Plus: one
+    bar lands on a ~45px nudge, a 4px wobble is still a tap, a 30px scrub is not
+    one even when it changes no bar, the edge hold still steps at its own rate,
+    and the clamp banks nothing. `data-barmenu` (the bar index) is its hook for
+    the ops menu. Two traps in writing it, both the house kind: the moves must
+    be paced ONE PER FRAME — a burst dispatched in one synchronous block never
+    lets React commit, so every move reads the same stale page and the last one
+    wins — and a drag long enough to linger past the tile's edge collects
+    edge-hold ticks too, which favours the SLOW run and muddles what is being
+    measured.
   - **TAP OPENS THE BAR'S OPS**, promoted from the long press when STEP stopped
     being a place for the tap to point at.
   - **LOOP expands it.** Three bars cannot draw a four-bar window, and the strip

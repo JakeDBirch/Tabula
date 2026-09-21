@@ -6451,7 +6451,7 @@ export default function LoudLight(){
       <div style={{position:"fixed",inset:0,zIndex:500}}
         onPointerDown={()=>{if(Date.now()-barMenuAtR.current>400)close();}}
         onClick={()=>{if(Date.now()-barMenuAtR.current>400)close();}}>
-        <div style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
+        <div data-barmenu={bm.bar} style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
           background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
           borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
           boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"auto",pointerEvents:"all"}}
@@ -7438,22 +7438,53 @@ export default function LoudLight(){
   // only a number that keeps changing, and overshooting recycles you past the
   // bar you were aiming for instead of parking you at the end. Bar 1 is the
   // bottom of the travel and bar N is the top, the way a fader has ends.
-  const _spinStep=(n)=>{
-    if(!n)return;
-    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,barPageR.current+n));
-    if(want!==barPageR.current)goToBar(want);
+  // THE GESTURE CARRIES ITS OWN CURSOR (`g.bar`), seeded at pointerdown, rather
+  // than re-reading `barPageR` every move. That ref is written by an EFFECT, so
+  // it lands a commit after the `goToBar` that changed it — the same trap the
+  // TEMPO readout has. Under the old flat gearing it could never bite, because
+  // a move asked for exactly ±1; a ballistic flick asks for three bars at a
+  // time, so two pointermoves inside one frame (a 120Hz pointer, a coalesced
+  // event) would both read the same stale value and the second would OVERWRITE
+  // the first instead of adding to it. Returns whether it actually moved, which
+  // is how both callers know they have hit an end.
+  const _spinTo=(g,n)=>{
+    if(!n)return false;
+    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,g.bar+n));
+    if(want===g.bar)return false;
+    g.bar=want;goToBar(want);return true;
   };
-  // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
-  // was never broken; the TRAVEL was. The tile sits high on the screen, so an
-  // upward swipe runs out of phone long before it runs out of bars, and on an
-  // 8-bar part a full swipe lands you on the last one every time — which is
-  // exactly "swiping up impossibly high just takes me to the last bar".
-  // Re-anchoring makes the gesture incremental rather than absolute, so a
-  // second swipe carries on from where the first ended, and the edge
-  // acceleration below means one swipe held at the top keeps going. Between
-  // them the control has no reachable end, which is what wrapping was for.
-  const BAR_PX_PER_BAR=18;
+  // BALLISTIC, like every other drag in here. A FLAT px-per-bar cannot serve
+  // both of the things this control is for: 18px a bar made one bar almost
+  // impossible to land on, and the obvious fix — slow it down — would have made
+  // thirty-two bars a swipe you cannot perform. So the gearing is a function of
+  // SPEED, on the sliders' own curve (`ballisticDelta` / `ballisticNudge`):
+  // a careful crawl costs ~40-70px a bar, a flick costs ~7. Measured against
+  // the curve at DRAG_FASTPX=14: dy 2px/frame → 40px a bar, dy 6 → 15, a flick
+  // → 6.5, so 31 bars is a ~200px swipe and one bar is a deliberate nudge.
+  //   BAR_FAST is its own constant rather than NUDGE_FAST, because the dynamic
+  // range wanted here is wider than a tempo readout's: this control has to be
+  // able to express BOTH ends of a 32-bar part.
+  const BAR_PX_PER_BAR=26;   // px per bar at 1:1, before the speed curve
+  const BAR_FAST=4.0;        // the ratio a flick reaches (cf. NUDGE_FAST)
+  const BAR_TAP_PX=8;        // raw travel past which a release is a scrub, not a tap
   const BAR_EDGE_MS=110;     // one bar per tick while the finger is past the edge
+  // ONE MOVE MAY NOT CARRY MORE THAN THIS, whatever distance it claims. A
+  // pointermove is normally a frame of travel, but a stalled main thread — which
+  // this app has a long history of — delivers the whole stall COALESCED into one
+  // event, and at the flick ratio that is tens of bars from a gesture the hand
+  // never made. Six is above anything a real flick produces on a 60Hz pointer
+  // (~39px a frame), so it bounds the pathological case without costing the
+  // expressive one.
+  const BAR_MAX_PER_MOVE=6;
+  // The accumulator is what makes a ballistic gearing possible at all: the gain
+  // belongs to ONE pointermove, so bars have to be consumed out of a running
+  // total rather than measured from an anchor. The fraction carries between
+  // moves, which is what keeps a slow drag smooth instead of stalling.
+  const _barSpinDelta=(dy)=>{
+    const speed=Math.min(1,Math.abs(dy)/DRAG_FASTPX);
+    const bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;
+    return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));
+  };
   const barTile=(extra)=>{
     const isPlaying=curBar===playingBar;
     const isLoop=loopMode===2?true:!!loopMode&&(()=>{
@@ -7473,17 +7504,29 @@ export default function LoudLight(){
         e.stopPropagation();e.preventDefault();
         try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
         const r=e.currentTarget.getBoundingClientRect();
-        _spinR.current={y:e.clientY,start:curBar,moved:false,tmr:0,edge:0,top:r.top,bot:r.bottom};
+        _spinR.current={y:e.clientY,bar:curBar,start:curBar,moved:false,acc:0,trav:0,tmr:0,edge:0,top:r.top,bot:r.bottom};
       }}
       onPointerMove={e=>{
         if(!e.buttons)return;e.stopPropagation();
         const g=_spinR.current;
         // Up is forward, the way every other vertical control in here reads.
-        // Whole bars are CONSUMED out of the delta and the anchor moves with
-        // them, so the gesture never accumulates an absolute distance it cannot
-        // travel — see BAR_PX_PER_BAR.
-        const d=Math.trunc((g.y-e.clientY)/BAR_PX_PER_BAR);
-        if(d){g.moved=true;g.y-=d*BAR_PX_PER_BAR;_spinStep(d);}
+        // The anchor moves EVERY event now, because the gain is per-move: this
+        // is an incremental gesture rather than an absolute one, so a second
+        // swipe carries on from where the first ended and the control never
+        // runs out of phone.
+        const dy=g.y-e.clientY; g.y=e.clientY;
+        g.trav+=Math.abs(dy);
+        // A release is a TAP only if the finger barely moved. Under a flat
+        // gearing "did a bar change" was a good enough proxy; with a ballistic
+        // one a careful 40px drag can legitimately change nothing, and that
+        // must not open the bar's ops menu.
+        if(g.trav>BAR_TAP_PX)g.moved=true;
+        g.acc+=_barSpinDelta(dy);
+        const d=Math.trunc(g.acc);
+        // At either end, drop what is left rather than banking travel against
+        // the clamp — otherwise dragging back up does nothing until the
+        // overshoot has been unwound.
+        if(d){g.acc-=d;if(!_spinTo(g,d))g.acc=0;}
         // Past either edge of the tile, keep going for as long as you hold it
         // there. The same answer the song lane and the bar strip already use
         // when a drag needs somewhere off-screen.
@@ -7493,9 +7536,7 @@ export default function LoudLight(){
           // The timer stops itself at the end of the travel — without that it
           // would sit there ticking against a clamp for as long as you held it.
           if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>{
-            const at=barPageR.current;
-            _spinStep(dir);
-            if(barPageR.current===at)_spinEdgeStop();
+            if(!_spinTo(g,dir))_spinEdgeStop();
           },BAR_EDGE_MS);}
         }
       }}
