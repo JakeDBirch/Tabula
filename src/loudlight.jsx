@@ -3115,28 +3115,29 @@ class Bell{
     }
     const velRaw   = sp ? (sp.vel/127) : 1;
     // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
-    // filter coupling. Each section has its own velSensitivity (0..100) and
-    // invert flag in the layer params, dialed by the user in the sound panel.
+    // filter coupling. Each section has its own sensitivity (0..100) in the
+    // layer params, dialed by the user in the sound panel.
     //
-    //   velMix(val, inv) = 1 - (val/100) * (1 - velFactor)
-    //
-    //   where velFactor = inv ? (1 - velRaw) : velRaw.
+    //   velMix(val) = 1 - (val/100) * (1 - velRaw)
     //
     // At val=0: result is 1 regardless of velocity (no effect).
-    // At val=100, normal: result = velRaw → low-vel scales down to 0.
-    // At val=100, inverted: result = 1 - velRaw → high-vel scales down to 0.
-    const velMix = (val, inv)=>{
+    // At val=100: result = velRaw — low-vel scales down to 0.
+    //
+    // There used to be an INVERT flag per section (high velocity scaling DOWN
+    // instead of up). It is deleted rather than parked: the flag was saved in
+    // layerParams, so leaving the three buttons out while the engine still
+    // read them would have left an inverted patch inverted for ever with no
+    // control anywhere — which is precisely the VARY disaster's shape.
+    const velMix = (val)=>{
       const k = Math.max(0,Math.min(100,val??0))/100;
-      const vf = inv ? (1 - velRaw) : velRaw;
-      return 1 - k * (1 - vf);
+      return 1 - k * (1 - velRaw);
     };
-    const velMulAmp = velMix(p.velAmp??100, p.velAmpInv);
-    const velMulFlt = velMix(p.velFlt??100, p.velFltInv);
+    const velMulAmp = velMix(p.velAmp??100);
+    const velMulFlt = velMix(p.velFlt??100);
     // Decay scaling: at velEnv=100, low-vel notes shrink dec/rel down to 30%
-    // of nominal (clamp so things don't reach zero). Invert → high-vel notes
-    // become the short ones, low-vel notes become long.
+    // of nominal (clamp so things don't reach zero).
     const decayK = Math.max(0,Math.min(100,p.velEnv??0))/100;
-    const decayVF = (p.velEnvInv) ? velRaw : (1 - velRaw);
+    const decayVF = 1 - velRaw;
     const decayScale = 1 - decayK * decayVF * 0.7; // 0.7 = max 70% shorter
     const fltDev  = sp ? (((sp.flt??50)-50)/50) : 0; // -1..+1
     const cutOff   = fltDev * 0.3 * 40;               // 30% → ±12 semitone cutoff offset
@@ -4281,9 +4282,9 @@ export default function LoudLight(){
     // section; 100 = full sensitivity (low-vel notes fully attenuated /
     // shortened / un-filtered, depending on which section). Each section
     // has its own invert flag so users can flip the polarity.
-    velAmp: 100,   velAmpInv: false,   // VCA peak responds to velocity (matches old behaviour)
-    velFlt: 100,   velFltInv: false,   // Filter env amount responds to velocity (matches old behaviour)
-    velEnv: 0,     velEnvInv: false,   // Decay time responds to velocity (NEW — off by default)
+    velAmp: 100,   // VCA peak responds to velocity
+    velFlt: 100,   // Filter env amount responds to velocity
+    velEnv: 0,     // Decay/release time responds to velocity (off by default)
   });
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
   // tells Bell.play to skip the o2 stack even if a saved project had detune
@@ -4312,6 +4313,11 @@ export default function LoudLight(){
   const _withRel=(base,saved)=>{
     const o={...base,...saved};
     if(saved&&saved.release==null)o.release=(saved.decay!=null?saved.decay:base.decay);
+    // The velocity INVERT flags are gone. Dropped on LOAD rather than merely
+    // left unread, so they stop travelling in every later save as data nothing
+    // can act on — a field no code reads is the one that gets read again by
+    // accident later.
+    delete o.velAmpInv; delete o.velFltInv; delete o.velEnvInv;
     return o;
   };
   const fillLayerParams=(lp)=>({
@@ -4328,7 +4334,7 @@ export default function LoudLight(){
   const _lpKey = activeLayer==="drums" ? "synth" : activeLayer;
   const _lp = layerParams[_lpKey];
   const _setLP = (key)=>(val)=>setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
-  // The DISCRETE per-layer controls — waveform, the octave buttons, the INV
+  // The DISCRETE per-layer controls — waveform and the octave buttons
   // toggles — push a history entry outright. The continuous ones don't come
   // through here: they are KnobSliders, and those mark themselves on the first
   // move of a drag, so routing them through this would push on every
@@ -4357,11 +4363,8 @@ export default function LoudLight(){
   const subLvl  = _lp.subLevel??0,       setSubLvl  = _setLP("subLevel");
   const spread  = _lp.spread??0,         setSpread  = _setLP("spread");
   const velAmp     = _lp.velAmp??100,    setVelAmp    = _setLP("velAmp");
-  const velAmpInv  = !!_lp.velAmpInv,    setVelAmpInv = _setLPStep("velAmpInv");
   const velFlt     = _lp.velFlt??100,    setVelFlt    = _setLP("velFlt");
-  const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLPStep("velFltInv");
   const velEnv     = _lp.velEnv??0,      setVelEnv    = _setLP("velEnv");
-  const velEnvInv  = !!_lp.velEnvInv,    setVelEnvInv = _setLP("velEnvInv");
   const glideLP    = _lp.glide??0,       setGlideLP   = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
@@ -13005,10 +13008,7 @@ export default function LoudLight(){
                           <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                         )}
                         {/* OSC velocity knob = global VCA velocity sensitivity. */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                          <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
@@ -13038,10 +13038,7 @@ export default function LoudLight(){
                         <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
                         <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
                         {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                          <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                       </div>
                     </SynthSection>
                     <SynthSection title="FILTER" accent={C_FILT}>
@@ -13050,10 +13047,7 @@ export default function LoudLight(){
                         <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                         <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                         {/* FILTER velocity = scales filter envelope amount with velocity. */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                          <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                       </div>
                     </SynthSection>
                     {/* Per-layer FX is just the SEND into the shared reverb/delay
@@ -13777,10 +13771,7 @@ export default function LoudLight(){
                               {activeLayer==="lead"&&(
                                 <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                               )}
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                                <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
                                   <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
@@ -13805,11 +13796,8 @@ export default function LoudLight(){
                               <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                               <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                               <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
-                        <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                                <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
+                              <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                             </div>
                           </SynthSection>
                           <SynthSection title="FILTER" accent={C_FILT}>
@@ -13817,10 +13805,7 @@ export default function LoudLight(){
                               <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} def={80} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
                               <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                               <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                                <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                             </div>
                           </SynthSection>
                           {/* Per-layer FX = SEND only; design lives on the FX sheet. */}

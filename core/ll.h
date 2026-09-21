@@ -164,9 +164,9 @@ enum ll_lparam {
   LL_L_SPREAD,       /* 0..100 */
   LL_L_GLIDE,        /* 0..100 */
   LL_L_MONO,         /* 0/1 monoSingle */
-  LL_L_VELAMP, LL_L_VELAMP_INV,
-  LL_L_VELFLT, LL_L_VELFLT_INV,
-  LL_L_VELENV, LL_L_VELENV_INV,
+  LL_L_VELAMP,
+  LL_L_VELFLT,
+  LL_L_VELENV,
   LL_L_AUDIBLE,      /* 0/1 — mute/solo outcome */
   /* Appended, so every index above keeps its value. 0 means "no release of
    * its own" and the decay is used instead — which is what release WAS in

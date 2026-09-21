@@ -330,7 +330,7 @@ self.onmessage=(e)=>{
       s("RELEASE",lp.release??0);
       s("CUTOFF",lp.vcfCutoff??80);s("RES",lp.vcfRes??15);s("FENV",lp.filterEnvAmt??0);s("OCTAVE",lp.octave??0);s("DLYSEND",lp.dlySend??50);s("RVSEND",lp.rvSend??30);
       s("MIX",lp.mix??85);s("FXTRIM",lp.fxTrim??100);s("SUB",lp.subLevel??0);s("SPREAD",lp.spread??50);s("GLIDE",lp.glide??0);s("MONO",lp.monoSingle?1:0);
-      s("VELAMP",lp.velAmp??100);s("VELAMP_INV",lp.velAmpInv?1:0);s("VELFLT",lp.velFlt??100);s("VELFLT_INV",lp.velFltInv?1:0);s("VELENV",lp.velEnv??0);s("VELENV_INV",lp.velEnvInv?1:0);
+      s("VELAMP",lp.velAmp??100);s("VELFLT",lp.velFlt??100);s("VELENV",lp.velEnv??0);
     }
     pushDrumMix(voice,mix){
       const D=P.D;

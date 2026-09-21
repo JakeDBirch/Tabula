@@ -90,7 +90,7 @@ static void defaults(void){
     q[LL_L_WAVE]=WV_SAW; q[LL_L_DETUNE]=l?0:8; q[LL_L_ATTACK]=8; q[LL_L_DECAY]=400; q[LL_L_SUSTAIN]=40; q[LL_L_RELEASE]=120;
     q[LL_L_CUTOFF]=80; q[LL_L_RES]=15; q[LL_L_FENV]=0; q[LL_L_OCTAVE]=0; q[LL_L_DLYSEND]=50; q[LL_L_RVSEND]=30;
     q[LL_L_MIX]=85; q[LL_L_FXTRIM]=100; q[LL_L_SUB]=l?50:0; q[LL_L_SPREAD]=50; q[LL_L_GLIDE]=0; q[LL_L_MONO]=l?1:0;
-    q[LL_L_VELAMP]=100; q[LL_L_VELAMP_INV]=0; q[LL_L_VELFLT]=100; q[LL_L_VELFLT_INV]=0; q[LL_L_VELENV]=0; q[LL_L_VELENV_INV]=0;
+    q[LL_L_VELAMP]=100; q[LL_L_VELFLT]=100; q[LL_L_VELENV]=0;
     q[LL_L_AUDIBLE]=1;
   }
   for(int v=0;v<LL_DRUM_ROWS;v++){

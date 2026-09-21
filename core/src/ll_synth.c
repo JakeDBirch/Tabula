@@ -34,11 +34,11 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
     G.monoVoice=-1;
   }
   float velRaw=sp?(float)sp->vel/127.f:1.f;
-  #define VELMIX(val,inv) (1.f-(ll_clamp((val),0,100)/100.f)*(1.f-((inv)>0.5f?(1.f-velRaw):velRaw)))
-  float velMulAmp=VELMIX(p[LL_L_VELAMP],p[LL_L_VELAMP_INV]);
-  float velMulFlt=VELMIX(p[LL_L_VELFLT],p[LL_L_VELFLT_INV]);
+  #define VELMIX(val) (1.f-(ll_clamp((val),0,100)/100.f)*(1.f-velRaw))
+  float velMulAmp=VELMIX(p[LL_L_VELAMP]);
+  float velMulFlt=VELMIX(p[LL_L_VELFLT]);
   float decayK=ll_clamp(p[LL_L_VELENV],0,100)/100.f;
-  float decayVF=p[LL_L_VELENV_INV]>0.5f?velRaw:(1.f-velRaw);
+  float decayVF=1.f-velRaw;
   float decayScale=1.f-decayK*decayVF*0.7f;
   float fltDev=sp?(((float)sp->flt-50.f)/50.f):0.f;
   float cutOff=fltDev*0.3f*40.f;

@@ -1247,6 +1247,35 @@ contract for all three mounts.
     it, and asserts the legacy backfill against the patch the engine is
     actually handed. The oracle has a long-release scenario so the two engines
     have to agree about the new number.
+- **THE VELOCITY `INV` TOGGLES ARE DELETED, flag and all.** Each VEL amount —
+  VCA, filter envelope, decay/release time — carried a little `INV` button that
+  flipped which end of the velocity range it responded to. Six buttons across
+  two mounts, for something nobody reaches for: you want a quiet note quieter,
+  and the amount already says how much. `velMix` takes one argument now and
+  `decayVF` is simply `1 - velRaw`.
+  - **The buttons alone would have been the VARY disaster's shape.**
+    `velAmpInv` / `velFltInv` / `velEnvInv` lived in `layerParams`, were
+    PERSISTED, and were read by BOTH engines — so deleting only the UI would
+    leave an inverted patch inverted for ever with no control anywhere to see
+    it or undo it. Gate every read of parked state, or delete the state. The
+    state is deleted.
+  - **A saved patch that had one set now sounds different**, and that is the
+    fact rather than the blocker: it stops inverting. Nothing can be inferred
+    from the flag's absence (an old `false` and a never-set field are the same
+    thing), so there is no `GLIDE_LEGACY_PCT`-shaped backfill to write — this
+    is a feature that went, not a default that moved.
+  - `_withRel` **deletes the three keys** on the way in, so they stop
+    travelling in every later save rather than sitting in the file waiting for
+    the next reader to trip over them.
+  - `_velinv.mjs` tests the thing that outlives the UI: a project whose SAVE
+    still asks for inversion must play STRAIGHT. It measures the real VCA
+    automation for a vel-20 and a vel-127 note (the `createGain` wrap
+    `_monodur.mjs` uses) and asserts loud is louder and — at velEnv 100 —
+    longer, which is exactly the comparison inversion flips. Two controls, so
+    neither half is vacuous: at velAmp 0 the two velocities must measure the
+    SAME (the instrument is reading velocity and not something else), and the
+    next save must carry none of the three keys while keeping all three
+    amounts.
 - **KnobSlider**: ballistic *relative* drag (dragging the full width moves ~half the range; Ctrl/Cmd = ultra-fine). **Double-tap / double-click = reset to `def`** (or 0 for bipolar, else min). No jump-to-position.
 - **RangeSlider** (dual-thumb, used for delay HP/LP "FILTER" and reverb LF/HF "DAMP"): both thumbs live on a shared **log-frequency axis** (20 Hz–20 kHz); the fill between is the passband. Grab a thumb → move that corner; grab the **line between** → move both together keeping the gap; grab outside → nearer thumb. Each thumb clamps to its own param's frequency span; a gap stops them crossing. `toFreq`/`fromFreq` per thumb convert axis ⇄ param.
 - **Per-step popup** (right-click / long-press a note): edits `params[c]` for that column. Rendered as a slider list (`PARAM_ARMS`) with an alternative radial long-press drag. A `sliderDragR` flag stops the radial angle-picker from also firing during a slider drag (that caused cross-param "ghost" moves).
@@ -1919,6 +1948,24 @@ the step plan: **`docs/native-audio.md`**. Read it before touching either side.
 - **Deterministic by construction**: no libm, `-ffp-contract=off`, wasm and
   native render bit-identically (`core/test/wasm.mjs` asserts it). A test
   that passes on Linux says what the phone will play.
+- **THE LAYER/PARAM WIRE IS `(layer, INDEX, value)`, so RENUMBERING `enum
+  ll_lparam` IS ONLY SAFE IF THE PAGE AND THE WASM ARE REBUILT TOGETHER.**
+  Appending is free (that is why `LL_L_RELEASE` was appended); removing from
+  the middle shifts everything after it, and the page and the core each carry
+  their own copy of the map — `core/ll_params.js` is generated from `ll.h` by
+  `npm run test:core` and **inlined into `index.html` by `npm run build`**, so
+  the two only agree if both commands have run. Deleting the three `_INV`
+  entries and then running the oracle against a **stale served copy** (I forgot
+  `./_serve.sh`) had the old page sending `VELFLT_INV` at index 20 — which is
+  `LL_L_AUDIBLE` in the renumbered core. It wrote `AUDIBLE = 0` on the synth
+  layer, the layer went silent, and every one of the nine scenarios failed with
+  the drums matching perfectly and every synth attack missing. The symptom
+  reads exactly like an engine regression and is nothing of the kind. Two
+  things to take from it: **`./_serve.sh` after every `npm run build`, before
+  any headless test** (the harness copy is a separate file and a stale one is
+  invisible), and when an index shifts, an out-of-range id is *rejected* while
+  an in-range one is *silently accepted as a different parameter* — so the
+  failure is always a wrong value somewhere else, never an error.
 - **RUN THE ORACLE.** It is not in the `_*.mjs` harness sweep, and it went unrun for a day while two of its scenarios were red — one of them a genuine JS/core split (see the dependency-array lesson) and one a stale fixture. `npm test` does not cover it; run `node core/test/oracle.mjs` after anything that touches either scheduler, and read the scenario lines rather than the exit code.
 - **The oracle's fixture has to express intent through DATA, not flags.** It used to write `songMode:false` beside a populated song; `songMode` is derived from the song now, so the flag was ignored and every scenario quietly ran in song mode. "Free-running" means an EMPTY song. And no backticks in `buildFixture` — the whole thing is a template literal, exactly like the CSS block.
 - **The oracle is the test that matters** (`core/test/oracle.mjs`): the same
@@ -1953,7 +2000,7 @@ When you add saved state, add it to EVERY site or saves/undo silently lose it (`
 
 **A snapshot is not an undo STEP.** `captureSnapshotR` / `applySnapshot` have carried `bpm`, `scale`, `userMask`/`userRoot`, `transpose`, `swing`, `speedMult`, `layerParams`, the global FX and the mixer for a long time — and nothing ever called `pushHistory` when any of them changed, so the value was in every snapshot and there was no step to go back to. Changing the tempo and pressing undo did nothing. Adding state to the snapshot is therefore only half the job: **something has to take a snapshot when it changes.**
 
-The rule for continuous controls is *mark on the first real change of a gesture, never on the press*: `pushHistory` does not dedupe, so a snapshot per pointerdown fills the ring with no-ops and undo appears dead for several presses. `KnobSlider` and `RangeSlider` live at module scope and cannot see `pushHistory`, so they call **`HIST.mark`** — one mutable module-level hook the component fills in each render (the empty-deps closure trap applies to it as much as to `pushHistoryR`). That single hook is why every knob in the app — sound page, global FX, VARY tuning, the mixer faders and FX trims — got undo from one change rather than fifty. `histOnce(d)` is the same idea for the bespoke scrubbers (bpm / ST / SWG in the sidebar and the drawer, the TEMPO chip's hold-drag, the sticky right-click scrub, the drum mixer). Discrete edits — the scale dropdown, a key note, the tonic, the MAJ/MIN/PENT/ALL fills, waveform, the octave buttons, the INV toggles, M/S — push outright, but only when the value actually differs, so a tap that changes nothing costs no step.
+The rule for continuous controls is *mark on the first real change of a gesture, never on the press*: `pushHistory` does not dedupe, so a snapshot per pointerdown fills the ring with no-ops and undo appears dead for several presses. `KnobSlider` and `RangeSlider` live at module scope and cannot see `pushHistory`, so they call **`HIST.mark`** — one mutable module-level hook the component fills in each render (the empty-deps closure trap applies to it as much as to `pushHistoryR`). That single hook is why every knob in the app — sound page, global FX, VARY tuning, the mixer faders and FX trims — got undo from one change rather than fifty. `histOnce(d)` is the same idea for the bespoke scrubbers (bpm / ST / SWG in the sidebar and the drawer, the TEMPO chip's hold-drag, the sticky right-click scrub, the drum mixer). Discrete edits — the scale dropdown, a key note, the tonic, the MAJ/MIN/PENT/ALL fills, waveform, the octave buttons, M/S — push outright, but only when the value actually differs, so a tap that changes nothing costs no step.
 
 **Sparse codec (required, not an optimization).** `packProject` / `unpackProject` (built on `packPat` / `unpackPat`) store only the cells that are ON and the values that differ from default. Dense JSON costs ~3.3KB per bar per pattern, so a 32-bar project serializes to ~2.4MB — which breaks share links (whole project base64'd into the URL) and blows the ~5MB localStorage quota autosave lives in, and would put 50 dense undo snapshots in phone memory. Packed, that same project is ~244KB, and an ordinary project is ~4× smaller than the old dense 1-bar encoding. Applied at all four persistence sites; `packPat` also serves as the undo deep copy (it returns fresh arrays for every heavy lane, so no JSON round-trip is needed first). Decoding is tolerant — anything without the `_pk` marker is a pre-codec dense save and passes straight through, so old projects still load.
 
