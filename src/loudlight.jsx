@@ -12852,7 +12852,7 @@ export default function LoudLight(){
             <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:8,marginTop:4}}>
               <button style={{width:"100%",padding:"9px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:6,border:"1px solid "+(menuOpen?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),borderRadius:7,background:menuOpen?"rgba(232,220,205,0.1)":"transparent",color:menuOpen?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.55)",fontSize:winW>650?10:8,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>setMenuOpen(o=>!o)}>
-                <span style={{fontSize:11,lineHeight:1}}>☰</span>{winW>650&&<span>PROJECT</span>}
+                <span style={{lineHeight:0}}><LLIcon name="project" size={14}/></span>{winW>650&&<span>PROJECT</span>}
               </button>
             </div>
           )}
@@ -13326,7 +13326,7 @@ export default function LoudLight(){
           <div style={{flexShrink:0}}>
             <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
               {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+              <button style={{flex:1,minWidth:0,height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
                 aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
                 data-tempochip={tempoField} {...tempoChipProps}>
                 <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
@@ -13345,10 +13345,10 @@ export default function LoudLight(){
                   and the other half was hidden behind tapping a layer button
                   you were already on — a door nobody would find, on a control
                   whose real job is switching layers. */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button aria-label="Sound" title="Sound — each layer's voice and the global FX"
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}
                 onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.4)"}}>SOUND</span>
+                <LLIcon name="sound" size={22}/>
               </button>
               {/* SAVE — one tap onto the project you last loaded or saved. The
                    cue for unsaved work is the CHIP going amber, the same "lit"
@@ -13358,19 +13358,19 @@ export default function LoudLight(){
               <button data-save="1" data-dirty={dirty?"1":"0"}
                 aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
                 title={saveTitle}
-                style={{flex:1,height:42,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
+                style={{flexShrink:0,width:44,height:44,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",
                   border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.12)"),borderRadius:9,
-                  background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                  background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,
+                  color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}
                 onClick={quickSave}>
-                <span style={{fontSize:15,lineHeight:1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.4)"}}>SAVE</span>
-                {dirty&&<span style={{position:"absolute",top:6,right:8,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
+                <LLIcon name="save" size={22}/>
+                {dirty&&<span style={{position:"absolute",top:5,right:5,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button aria-label="Project" title="Projects, export and the library"
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:"rgba(178,199,219,0.5)"}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
+                <LLIcon name="project" size={22}/>
               </button>
               {/* ↶ ↷ live UP HERE now, not in the transport row. They are not
                   transport — they are what you press when you have just done
@@ -13381,8 +13381,8 @@ export default function LoudLight(){
                   bought a whole row below. They stay ADJACENT, because they are
                   a pair you press in runs. */}
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:44,height:44,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:44,height:44,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
               </div>
             </div>
           </div>
@@ -13708,7 +13708,7 @@ export default function LoudLight(){
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                  <span style={{lineHeight:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}><LLIcon name="sound" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
                 <button data-save="1" data-dirty={dirty?"1":"0"}
@@ -13718,12 +13718,12 @@ export default function LoudLight(){
                     border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,
                     background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                   onClick={quickSave}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
+                  <span style={{lineHeight:0,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}><LLIcon name="save" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.35)"}}>SAVE</span>
                   {dirty&&<span style={{position:"absolute",top:4,right:6,width:4,height:4,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:"rgba(178,199,219,0.45)"}}>⋯</span>
+                  <span style={{lineHeight:0,color:"rgba(178,199,219,0.45)"}}><LLIcon name="project" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>PROJECT</span>
                 </button>
               </div>
