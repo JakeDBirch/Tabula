@@ -219,7 +219,8 @@ overwrite, and `libTab` and `nameDraft` come from it too.
 - **Read SYNCHRONOUSLY** out of localStorage in the `useState` initializers,
   not through the async `storageGet`: that lands a frame late, and the chip
   would spend that frame saying it was about to make a new project.
-- The chip is a 42px square with one glyph, so the destination cannot be on its
+- The chip is a 44px square with one glyph (it carried the word SAVE under the
+  glyph until the icon set took it off), so the destination cannot be on its
   face — but `title` and the accessible name carry it ("Save — Dusty Ribbon"),
   because "SAVE" with no object is exactly the ambiguity that let the old one
   file a cloud project onto the device unnoticed.
@@ -534,7 +535,9 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   it running*, the other says *put it back*.
   - **The held state is the ring, not the glyph.** `▶` means the same thing
     stopped and held — press this and you get sound — so the readout is the
-    amber ring (`S.playHeld`, the same amber the old separate pause button lit
+    amber ring (`S.playHeld`, the same amber the old separate pause button lit —
+    and deliberately NOT the `#ffd696` the LOOP/FOLLOW toggles went to with the
+    icon set, so there are two ambers in that row on purpose
     with) plus the STOP button beside it being live rather than dimmed. Making
     the glyph carry it instead would need a third symbol on a control a thumb
     covers.
@@ -1232,35 +1235,110 @@ contract for all three mounts.
     above either, Babel's `var` hoisting gives `undefined`, the square falls
     back to `80%` of a parent that is itself shrink-wrapping to the square, and
     you get 36px of grid with no error at all.
-- **The buttons that are shapes are drawn as shapes** (`LLIcon`, and `S.iconBtn`
-  for the square 38px button they sit in). UNDO / REDO went first — `↶` and `↷`
-  are unambiguous — and POLY / MONO / DRUMS / LOOP / FOLLOW followed. The
-  glyphs: POLY is three circles **interspersed**, not stacked (a chord is
-  several voices that are not in a line); MONO is one circle, visibly bigger
-  than any of POLY's three, which is the whole message; DRUMS is a kick seen
-  face-on with its beater; LOOP is a loop; FOLLOW is an arrow pointing forward.
-  Two were redrawn after a first cut read wrong and are worth not repeating: a
-  beater running out of the lower-left at 45° **is a magnifying glass**, so it
-  is horizontal and at the drum's centre height; and POLY's three circles faded
-  to 45% opacity read as *dust* rather than as three of something, so all three
-  are solid.
+- **THE ICON SET IS FOURTEEN MARKS ON ONE 24-UNIT GRID** (`LLIcon`, and
+  `S.iconBtn` for the square 38px button most of them sit in). Landed
+  2026-09-21 from a design handoff; it replaced six hand-drawn glyphs and took
+  the last text characters out of the chrome. The marks: POLY / MONO / DRUMS,
+  PLAY / PAUSE / STOP, UNDO / REDO, LOOP / FOLLOW / MIX, PROJECT / SOUND / SAVE.
   `LLIcon` is a **function declaration**, not `const LLIcon = () => <svg/>` —
   see the CJS audit lesson below.
-  What the compaction bought, which is the point of it: **phone portrait went
-  from three rows of buttons to two.** The layer bar was a full-width row of its
-  own at the top of the screen; as icons the three of them are 114px, so they
-  moved down beside the transport (`justifyContent:"space-between"`, two groups
-  rather than one run of eight, so "what am I editing" and "what is it doing"
-  stay tellable apart) — which is also where your thumb is. On desktop the
-  sidebar's three stacked full-width layer boxes became one row of three, and
-  its transport went from three rows to two. Verified at 390×844 and 375×667 by
-  `_icons.mjs`: two button rows below the grid, every glyph an `<svg>` with no
-  text in a button ≤44px, and no overflow.
-  The **accessible name is the noun** (`aria-label="Loop"`), with the hint in
-  `title` — a whole sentence as a name is read out on every focus and is not
-  what the control is called. Harnesses that used to find these by their text
-  now match `aria-label`; `data-layer-box` stays on the layer buttons as their
-  stable id.
+  - **WEIGHT VARIES INSIDE EACH MARK** — 2.0 on whatever leads, easing to 1.5
+    on what trails, 1.75 neutral — so every glyph has a direction and an attack
+    without gaining a shape. **The rule that makes it work: change weight only
+    where the path TURNS, or across a GAP between elements that do not touch.**
+    A round cap centred on a tangent joint draws a disc wider than either
+    stroke, so two widths meeting mid-contour leave a visible BEAD rather than
+    a transition. Marks with nowhere to turn stay uniform: `stop` is one
+    weight, and `loop` holds one weight round its circuit and puts the cadence
+    in the arrowhead. Both were drawn the other way first and beaded.
+  - **The layer trio is told apart by COUNT**: MONO is one disc, POLY is three
+    interspersed discs (not stacked — a chord is voices that are not in a
+    line), and DRUMS is the kit below. POLY's three are solid at equal
+    opacity; an early cut faded them to 45% and read as *dust* rather than as
+    three of something.
+  - **DRUMS IS A KIT SEEN FROM THE FRONT — a wide flat cymbal over a ring kick
+    with its beater — AND EVERY OTHER WAY OF DRAWING ONE FAILED AT 22px.** The
+    failures are the useful part, because they are all the same failure: **a
+    22px glyph has room for a SILHOUETTE, not an inventory.** Five circles
+    arranged as a top-down kit (two toms, kick, snare, cymbal) is a **PAW
+    PRINT** and only resolves into a kit around 64px; four is a flower. A big
+    disc with a small cymbal off one shoulder is a **FRYING PAN** — the same
+    failure already recorded here for the original beater reading as a
+    magnifying glass. A kick with two toms above it is a **FACE**. All of them
+    were drawn and looked at side by side at 16, 22 and 64 before this one was
+    picked. Three things make the survivor work: the cymbal is **wide, flat and
+    centred**, because a horizontal bar cannot be read as a handle; the kick is
+    a **RING, not a disc**, because MONO is a disc and POLY is three, so a
+    drums mark made of discs makes all three layer marks the same picture in
+    three colours and leaves COLOUR to carry the whole distinction at 22px in
+    daylight; and the beater dot stops the ring reading as a letter O.
+  - **A MARK DOES NOT HAVE TO SURVIVE ALONE — IT HAS TO SURVIVE NEXT TO THE TWO
+    IT SITS BESIDE.** The handoff's drums mark was a stepped lane drawn as
+    1.5–1.9 hairlines on the centre line. It used a fifth of the box's height
+    while its neighbours are solid discs that fill theirs, and it was reported
+    as not reading at phone size — correctly: at 22px it was a hyphen and at 16
+    it was nothing. **When the neighbours are solid, a hairline is not a
+    lighter member of the set, it is an absent one.** Everything in this mark
+    is a fill or a heavy stroke.
+  - **The transport is STROKED in the same 24-unit box**, not filled in an
+    11-unit one, so it reads as one family with the tools beside it. **The play
+    button keeps its CIRCLE** — the design sheet draws three matching squares,
+    but the round play button is the one control a thumb finds without looking.
+    Glyph sizes roughly DOUBLED when they moved: the old filled glyph spanned
+    82% of its box and these span ~43% of theirs, so 11 → 22 is the same number
+    of pixels of actual triangle. Each mount passes the same size as the LOOP
+    and FOLLOW next to it.
+  - **ONE ENGAGED AMBER, FOR THE TWO TOGGLES ONLY.** LOOP and FOLLOW were steel
+    and green — two rules for one idea — and share `S.toggleOn` now: one object,
+    because FOLLOW's style was inlined at four mounts. The grown loop keeps its
+    second tier as an inset ring in the same amber (`boxShadow` REPLACES rather
+    than adds, so the outer glow has to be restated). **The transport is
+    deliberately out of it.** `S.playOn` keeps its white ring and 28px glow and
+    `S.playHeld` its own amber: the merge would have been safe (running and
+    held already differ by glyph, held and stopped by ring or no ring) but "is
+    it running" is the state you read from across a room and the white is what
+    makes it carry. Note this means **two different ambers are in play** —
+    `#ffd696` for the toggles, `#e6b872` for a held transport.
+  - **PROJECT / SOUND / SAVE are 44×44 icon buttons with no words.** They were
+    characters with a label under them in a 42px chip. **Removing the word is
+    why they needed `aria-label`** — the visible word WAS the accessible name,
+    so two of the three would have been left unnamed. SAVE keeps its
+    destination in its name ("Save — Dusty Ribbon"), which is the whole reason
+    that name exists. TEMPO beside them keeps its text and took the freed width
+    (68 → 118px on a 15): it is a READOUT, not an icon button. The **landscape
+    rail gets the same marks but KEEPS its words** — it is a vertical stack of
+    five identically-sized boxes where the label is the only differentiator,
+    where portrait is a row of 44px buttons each a different shape. Different
+    surface, different answer; the glyph is shared so the two cannot drift.
+  - **HIT TARGETS: `S.iconBtn` STAYS AT 38, AND RESIZING IT WOULD HAVE BEEN
+    INERT.** The handoff proposed 38 → 44 for the HIG minimum. Measured, the
+    portrait transport row overrides `S.iconBtn` with
+    `flex:1 1 0; aspectRatio:1; maxWidth:56`, so those seven buttons are fluid
+    and land at 43–56px and the style being edited is *discarded before it
+    reaches the screen*. **If a size comes out of a flex share, editing the
+    base style changes nothing — measure the element, not the stylesheet.** The
+    genuinely-under-44 controls were UNDO and REDO at 34×42, now 44×44, and the
+    three chips above. `S.iconBtn`'s 38 governs desktop (a mouse) and the
+    landscape rail (74px wide), where 44 buys nothing.
+    One exemption, measured and left: **on a 375pt SE the transport trio is
+    43×43**, because the play button sits at its `maxWidth:56` cap and
+    Stop/Loop/Follow split the 129px left in a 200px group. Closing that 1px
+    costs the primary control 4px. The harness pins it at ≥43 so the row cannot
+    quietly get tighter.
+  - The **accessible name is the noun** (`aria-label="Loop"`), with the hint in
+    `title` — a whole sentence as a name is read out on every focus and is not
+    what the control is called. Harnesses find these by `aria-label`;
+    `data-layer-box` and `data-playbtn` are the stable ids.
+  - What the compaction bought, which is still the point of it: **phone
+    portrait went from three rows of buttons to two.** The layer bar was a
+    full-width row of its own; as icons the three are 114px, so they moved down
+    beside the transport (`justifyContent:"space-between"`, two groups rather
+    than one run of eight, so "what am I editing" and "what is it doing" stay
+    tellable apart) — which is also where your thumb is. On desktop the
+    sidebar's three stacked full-width layer boxes became one row of three.
+    **The icon work cost the grid nothing**: measured 370×370 on a 15 and
+    355×355 on an SE before and after, because portrait is width-bound and the
+    rows above the grid spend height it could never have used.
 - **RELEASE IS ITS OWN CONTROL, not a copy of the decay.** Both engines used
   to compute `rel = ms(decay)`, so the default patch put a 400ms tail on every
   note however short the note was. Measured on the MONO layer across the DUR
@@ -2059,7 +2137,7 @@ User samples serialize as base64 in saves (`serializeSamples`); kits load via `l
 The palette is the app icon: a **deep navy ground** (`#0e1c2b`) with **cool blue-grey** furniture, and **warm amber** (`rgba(255,214,150,…)`) for anything lit — a note, the current bar chip, the brand wordmark. That's the icon's lightbulb: dark glass, glowing filament. A note isn't a filled rectangle any more, it's an emissive one — every lit note carries a soft glow, brighter under the playhead, with velocity driving the ramp between.
 
 **The grid's GROUND takes the part's colour too**, faintly (`layerTint`, 0.045
-alpha): POLY green, MONO blue, DRUMS the rose its own button wears — `noteRgb`
+alpha): POLY green, MONO indigo, DRUMS the coral its own button wears — `noteRgb`
 only knows the two synth layers, so drums has to be named explicitly or it falls
 through to the brand amber and reads as "lit" rather than as itself. The alpha is
 deliberately under the quarter-beat column shading: it must read as a tint and
@@ -2068,13 +2146,13 @@ the same picture, on a phone where you switch layer far more often than you have
 notes down to tell them apart by.
 
 **A lit note takes its PART's colour, not the one amber** (`LAYER_NOTE_RGB` /
-`noteRgb`): POLY green `176,224,152`, MONO blue `132,200,255`, and amber as the
+`noteRgb`): POLY green `176,224,152`, MONO indigo `154,140,255`, and amber as the
 fallback for anything else and for the brand furniture. Both synth layers used
 to glow the same amber, so switching layer changed nothing you could see on the
 grid — the drum grid has been colouring per voice all along. Now the grid, the
 layer button and the mixer strip agree, which is also why the layer buttons
 could lose their words. The values are **brighter and more saturated than the
-accents themselves** (`#a8c5a0` / `#79b8f2`) on purpose: a mid-alpha warm or
+accents themselves** (`#a8c5a0` / `#8279e0`) on purpose: a mid-alpha warm or
 muted colour on this navy desaturates to mud, the same trap the note fill's
 alpha floor was raised for. Asserted by `_icons.mjs`, which paints a note on
 each layer and reads the rect's computed background back.
@@ -2083,13 +2161,39 @@ The app mark sits immediately right of the title in both header mounts — **`ic
 
 The wordmark is a `.wordmark` class: **solid amber `#ffc46a` with `text-shadow`**, breathed by a slow, shallow `filament` keyframe and disabled under `prefers-reduced-motion`. It was a `background-clip:text` gradient with a `drop-shadow` filter first, and that was wrong — on a clipped-background element Chromium takes drop-shadow's alpha from the element BOX, so it smeared a rectangle of haze across the whole header instead of following the letters. `text-shadow` does follow glyphs, but only on text that is actually painted, so the gradient had to go. Note `S.brand` still carries the gradient and a transparent fill; the mounts override both inline, because an inline style beats the class.
 
-The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO blue, DRUMS rose) stay semantic; MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground.
+The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO indigo, DRUMS coral) stay semantic. MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground, and then to **`#8279e0`** with the icon set, because against POLY's green the blue was too close to read at a glance in a row of three; DRUMS went from the rose `#c4727a` to **`#e07060`** at the same time. Six of the nine `#79b8f2` and six of the eight `#c4727a` moved — **the rest are those colours by COINCIDENCE and must not follow**: `PAT_COLORS` is the pattern-chip palette, the OCT step param is blue twice over, and MOTION/REC/CLR in the drum mixer are a local escalating scale. Note `#e07060` was already the REC colour there, so the DRUMS accent now matches it. The grid's ground tint names the drums colour separately (`layerTint`), because `noteRgb` knows only the two synth layers and drums would otherwise fall through to the brand amber and read as "lit" rather than as itself.
 
 One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The note fill originally kept its old `0.35 + vel*0.65` alpha ramp and looked muddy; it needed a higher floor (`0.55 + vel*0.45`) plus the glow to read as lit. Expect the same wherever a warm accent sits at low alpha.
 
 ## Critical lessons (don't relearn)
 
 - **`return_react2`**: module-level arrow functions returning JSX broke the old artifact viewer's CJS transform. Inline JSX; never extract to a top-level `const X = () => <jsx>`. The build audit guards this — keep it.
+  - **AND THE AUDIT IS A SUBSTRING GREP OVER BABEL'S OUTPUT, WHICH KEEPS
+    COMMENTS.** Writing the name of the identifier it looks for in a *comment*
+    fails the build exactly as a real module-level arrow would — the build says
+    there is a module-level arrow returning JSX and there is not one. Cost one
+    confused build while landing the icon set. Describe the trap without naming
+    the token, which is what the comment in `LLIcon` now does.
+- **TWO COPIES OF A THING DRIFT, AND THE SECOND ONE ROTS QUIETLY.** The two
+  layer-button rows build their active border from the same pieces, and one of
+  them had `c+"99)"` where the other had `c+"99"`. The stray paren makes the
+  whole declaration invalid, so **the active layer button in phone portrait
+  drew no border at all** — for as long as nobody measured it. It surfaced only
+  because a harness read `borderColor` back and got `rgb(0, 0, 0)` where it
+  expected sage. Two lessons, both already in this file in other words: a
+  string built by concatenation has no syntax checking at all, and **a colour
+  or size you have not measured from the DOM is a colour or size you are
+  guessing at.** The same argument as `data-patrow` on the landscape rail.
+- **A GLYPH IS JUDGED NEXT TO ITS NEIGHBOURS, AND AT THE SIZE IT SHIPS AT.**
+  Two separate failures in one session, both invisible in isolation. A drums
+  mark drawn as hairlines read as a hyphen beside two solid discs — fine on its
+  own, absent in the row. And every "draw the whole kit" arrangement resolved
+  only around 64px: at 22 they were a paw print, a frying pan and a face. **A
+  22px mark has room for a silhouette, not an inventory.** The method that
+  settled both: render the candidates side by side at 16 / 22 / 64, in the real
+  colours on the real ground, with the two neighbours beside them, and LOOK —
+  `_shot.mjs` plus a scratch HTML sheet is twenty lines and it beats any amount
+  of reasoning about what a shape will read as.
 - **A FLAG MAY PARK A UI. IT MAY NOT PARK SOMETHING THAT DECIDES WHAT SAVED WORK SOUNDS LIKE.** (VARY is deleted now — this is why.) `VARY_ON=false` gated the pages, the openers and the scheduler's per-bar re-roll — but not the effect that fills the varied-grid caches, and not the two playback reads that prefer a cached variation over `pat.grid`. `varyMode` is persisted, so a parked build generated a random variation of every VARY project **once, on load**, and then played it for ever, because the thing that would have re-rolled it was the one part that *was* gated. Notes dropped, ghost notes added where the author never put them, identical every bar, no control anywhere, nothing on the grid to say so. It shipped for four days and surfaced as "my projects don't sound the same" plus "the material looks changed" — both true. Two rules: **gate every read of parked state, not the obvious one** (the ghost overlay taught this and these reads still missed it), and **if a feature's surface is the problem, shrink the surface — do not park the feature.** The end of it: the feature was deleted rather than re-parked, because a deleted feature has no flag to get half-applied. `_vary.mjs` guards the part that outlives the code — a project whose SAVE still asks for VARY must play the grid exactly as written.
 - **A dependency array is evaluated DURING RENDER, so an effect must not sit above the value it depends on.** `songMode` moved from a `useState` near the top of the body to a derived `const` 130 lines further down. The effect that mirrors it into `songModeR` stayed where it was — above the new declaration — and `[songMode]` then read a Babel-hoisted `var` that had not been assigned yet. The dep was `[undefined]` on every render: the effect ran once on mount and never again, and `songModeR` froze at the first render's value — `false`, because the project restore had not landed yet. **The JS scheduler played the active pattern instead of the song, for every project with a song.** The core was unaffected: its mirror effect happens to sit below the declaration, so its dep was real. Rule: **a ref that shadows a DERIVED value is assigned where it is derived** (`songModeR.current=songMode;` on the next line), not by an effect that can drift above it. Same family as the undefined-ref trap below, but it fails silently in a dependency array rather than in a JSX value.
   - It is also the clearest case yet for the oracle: only the core was right, so the two engines disagreed and `core/test/oracle.mjs` found it in one run. A behavioural test would not have — the transport looked like it was playing, because it was. The guard that WOULD have caught it is `core/test/songplay.mjs` (`npm run test:play`), which asserts the song's playhead visits more than one slot; it is the shape to reach for when both engines could be wrong together.

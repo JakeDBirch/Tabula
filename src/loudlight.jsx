@@ -2466,24 +2466,43 @@ function LLIcon({name,size}){
     </svg>
   );
   if(name==="drums")return(
-    // A lane cut into steps with the downbeat accented. It names a PATTERN,
-    // not an instrument, which is what the layer actually holds — the voices
-    // in it are whatever the kit says they are. It also keeps all three layer
-    // marks on one logic (count and cut) instead of two abstractions and one
-    // picture.
+    // A KIT, SEEN FROM THE FRONT: a cymbal over a kick with its beater. Jake
+    // asked for a drum set and this is the only arrangement of one that
+    // survives the size — see below, because the failures are the useful part.
     //
-    // This REPLACES the kick-and-beater glyph, which was itself the fix for an
-    // earlier cut whose 45° beater read as a magnifying glass. Worth knowing
-    // before reaching for the drum again: the argument against it is not that
-    // it was drawn badly, it is that it draws one voice for a layer that holds
-    // any of them.
+    // THE RULE THIS MARK IS BUILT ON: a 22px glyph has room for a SILHOUETTE,
+    // not for an inventory. Every version that tried to show a whole kit died
+    // the same way — five circles arranged top-down (two toms, kick, snare,
+    // cymbal) reads as a PAW PRINT at 22px and only resolves into a kit around
+    // 64; four circles is worse, being a flower. A big disc with a small
+    // cymbal off one shoulder is a FRYING PAN, which is the same failure
+    // already recorded here for the original 45-degree beater reading as a
+    // magnifying glass. A kick with two toms above it is a FACE. All of them
+    // were drawn and looked at side by side at 16, 22 and 64 before this one
+    // was picked; none of it is a guess.
     //
-    // The steps decay 1.9 / 1.7 / 1.5 across GAPS, so there is no join to bead.
+    // So the kit is TWO PIECES and a hit, and each is doing a different job:
+    //   · the cymbal is WIDE, FLAT and CENTRED above — a horizontal bar cannot
+    //     be read as a handle, which is what killed every off-shoulder cymbal.
+    //     Nothing else in the set is a flat ellipse, so the silhouette is the
+    //     mark's alone.
+    //   · the kick is a RING, not a disc, and that is load-bearing: MONO is a
+    //     disc and POLY is three discs, so a drums mark made of discs makes all
+    //     three layer marks the same picture in three colours, leaving colour
+    //     to carry the whole distinction at 22px in daylight.
+    //   · the beater is the centre dot, which also stops the ring reading as a
+    //     letter O.
+    // The cymbal is tilted a few degrees because a level one is a saucepan lid.
+    //
+    // Everything is FILL or a HEAVY stroke, never a hairline. The version this
+    // replaced was a 1.5-1.9 lane on the centre line: it used a fifth of the
+    // box's height next to two neighbours that fill theirs, and it was reported
+    // as not reading at phone size. A mark does not have to survive alone — it
+    // has to survive NEXT TO THE TWO IT SITS BESIDE.
     <svg {...common} aria-hidden="true">
-      <rect x="2" y="9.6" width="3.5" height="4.8" rx="1" fill="currentColor" stroke="none"/>
-      <path d="M7.5 12h3.5"  strokeWidth="1.9"/>
-      <path d="M13 12h3.5"   strokeWidth="1.7"/>
-      <path d="M18.5 12h3.5" strokeWidth="1.5"/>
+      <ellipse cx="12" cy="5.2" rx="7" ry="1.7" transform="rotate(-7 12 5.2)" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="15" r="5.7" strokeWidth="2.4"/>
+      <circle cx="12" cy="15" r="1.5" fill="currentColor" stroke="none"/>
     </svg>
   );
 
@@ -14139,8 +14158,10 @@ const S={
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
   // HELD. The play/pause button shows a ▶ when stopped and when held, so the
-  // ring is what tells the two apart — amber, the way every engaged toggle in
-  // here is drawn, and the same amber the old separate pause button lit with.
+  // ring is what tells the two apart — the same amber the old separate pause
+  // button lit with. NOTE this is NOT the toggles' amber: LOOP and FOLLOW went
+  // to #ffd696 with the icon set and the transport deliberately stayed out of
+  // that scheme, so there are two ambers in the row and it is on purpose.
   // (The other half of the readout is the STOP button beside it, which is
   // dimmed only when there is genuinely nothing to rewind.)
   playHeld:  {border:"2px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"},
