@@ -7484,9 +7484,7 @@ export default function LoudLight(){
       disabled={!playing&&!paused}
       onClick={()=>{ if(playing||paused)stopTransport(); }}
       style={Object.assign({},S.iconBtn,extra,(playing||paused)?{}:{opacity:0.35})}>
-      <svg width={glyph} height={glyph} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
-        <rect x="1" y="1" width="9" height="9" rx="1.5"/>
-      </svg>
+      <LLIcon name="stop" size={glyph}/>
     </button>
   );
   // The combined PLAY/PAUSE glyph, so the three mounts cannot drift: it shows
@@ -7494,13 +7492,22 @@ export default function LoudLight(){
   // held transport therefore offers a ▶ that carries on from where you are;
   // rewinding is the button next door, which is the whole point of splitting
   // them.
-  const playGlyph=(sz)=>(
-    <svg width={sz} height={sz} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
-      {playing
-        ?<Fragment><rect x="1.4" y="1" width="3" height="9" rx="1"/><rect x="6.6" y="1" width="3" height="9" rx="1"/></Fragment>
-        :<polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/>}
-    </svg>
-  );
+  // STROKED now, in the same 24-unit box as everything else in the row, so the
+  // transport and the tools beside it read as one family instead of two. It
+  // still shows what the next press DOES — the pause mark while running, the
+  // play mark when stopped OR held — so a held transport offers a play that
+  // carries on from where you are, and rewinding is the button next door.
+  //
+  // The BUTTON keeps its circle. Only the glyph inside it changed: the round
+  // play button is the one control on the row your thumb finds without looking,
+  // and its shape is half of how it does that.
+  //
+  // Sizes roughly DOUBLED at the call sites, which keeps the apparent mark the
+  // same size rather than shrinking it: the old filled glyph spanned 82% of an
+  // 11-unit box, these span ~43% of a 24-unit one. Each mount now passes the
+  // same size as the LOOP and FOLLOW beside it, which is the point of the
+  // change — a row of marks that are all the same weight at the same scale.
+  const playGlyph=(sz)=><LLIcon name={playing?"pause":"play"} size={sz}/>;
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
       <button title="Loop — tap again to grow the loop, then off"
@@ -12826,10 +12833,10 @@ export default function LoudLight(){
                   button between them would make redo a longer trip every
                   time. */}
               <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",justifyContent:"center"}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>{playGlyph(11)}</button>
-                {stopBtn({width:38,height:38},11)}
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
+                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>{playGlyph(20)}</button>
+                {stopBtn({width:38,height:38},18)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                   style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
@@ -13374,8 +13381,8 @@ export default function LoudLight(){
                   bought a whole row below. They stay ADJACENT, because they are
                   a pair you press in runs. */}
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
               </div>
             </div>
           </div>
@@ -13417,9 +13424,9 @@ export default function LoudLight(){
               </div>
               <div style={{flex:"4 1 0",display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
               <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
-                {playGlyph(11)}
+                {playGlyph(24)}
               </button>
-              {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},13)}
+              {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},22)}
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
@@ -13676,17 +13683,17 @@ export default function LoudLight(){
           {isLandscape&&(
             <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
               <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
-                {playGlyph(13)}
+                {playGlyph(22)}
               </button>
-              {stopBtn({width:"100%",height:32,flexShrink:0},13)}
+              {stopBtn({width:"100%",height:32,flexShrink:0},17)}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
                 onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={17}/></button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={14}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={14}/></button>
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
@@ -14132,7 +14139,7 @@ const S={
   // word-width: the arrows are unambiguous and the row has better uses for
   // the ~80px they were spending on two labels. Same height as the rest of
   // the transport, so the row still reads as one row.
-  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
+  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
   tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
