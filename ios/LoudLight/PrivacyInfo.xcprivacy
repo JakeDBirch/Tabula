@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Privacy manifest. Apple requires one for any app that uses a "required
+  reason" API or collects data, and it is checked at upload: a missing or
+  incomplete manifest comes back as an email from App Store Connect after the
+  build has already been accepted, which is a slow way to find out.
+
+  It is picked up automatically — project.yml declares `sources: - path:
+  LoudLight`, so everything in this directory that is not compiled is copied in
+  as a bundle resource. There is nothing to add to the target.
+
+  WHAT IS ACTUALLY IN HERE WAS AUDITED, NOT GUESSED. The Swift was grepped for
+  every required-reason category: file timestamps, disk space, system boot
+  time, active keyboard — none are used. UserDefaults is the only one, and it
+  holds one thing (the audio-route preference).
+
+  THE TWO COLLECTED TYPES ARE TRUE ONLY WITH CLOUD SYNC SWITCHED ON. With
+  CLOUD_URL blank the app makes no network requests at all and collects
+  nothing — but the beta ships with it on, so they are declared. If the cloud
+  is ever taken back out, these two entries come out with it: declaring
+  collection that does not happen is its own kind of wrong, and App Store
+  Connect's App Privacy answers have to agree with this file.
+-->
+<plist version="1.0">
+<dict>
+	<!-- No tracking, no ad networks, no third-party SDKs of any kind. The app
+	     has two script tags and talks to one host (Supabase) as the user's own
+	     backing store. There is nothing to track with and nobody to share it
+	     with, so App Tracking Transparency does not apply. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- The email address you sign in with. It is the account identifier,
+		     so it is linked to the user by definition; it is never used to
+		     track, never leaves Supabase, and the app has no other use for it
+		     than sending the one-time code and owning the rows. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<!-- The projects themselves — patterns, songs, sounds and any samples
+		     you recorded — stored against the account so they survive a lost
+		     phone. "Other user content" is the right bucket: it is not audio
+		     the app recorded of its own accord, it is the work you made in it. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- UserDefaults, for the audio-route preference and nothing else.
+		     CA92.1 is the reason for reading and writing values that are only
+		     accessible to the app itself, which is exactly what this is — it is
+		     not shared with an app group, an extension or anything else. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

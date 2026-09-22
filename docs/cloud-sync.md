@@ -58,6 +58,36 @@ create policy "own rows only" on public.projects
 -- every request the app makes carries a signed-in user's JWT, so `anon` never
 -- needs to touch this table.
 grant select, insert, update, delete on public.projects to authenticated;
+
+-- ACCOUNT DELETION. App Store guideline 5.1.1(v): an app that can create an
+-- account must be able to delete one from inside itself. The row that matters
+-- is in auth.users, which no client may touch directly — the service-role key
+-- that could is the one thing that must never be in a static file — so this is
+-- a function that runs with the rights to do it and can only ever do it to
+-- whoever called it.
+--
+-- SECURITY DEFINER runs as the owner, so `where id = auth.uid()` is the whole
+-- of the confinement: it is the caller's own id out of their own JWT, and there
+-- is no argument to pass a different one in. `set search_path = ''` is the
+-- hardening that goes with DEFINER — every name below is schema-qualified, so
+-- nothing can be shadowed by a table planted on a search path.
+--
+-- The projects need no separate delete: projects.user_id references
+-- auth.users(id) ON DELETE CASCADE, so they go with the row.
+create or replace function public.delete_account()
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  delete from auth.users where id = auth.uid();
+$$;
+
+-- Signed-in users only. `anon` must never reach it: an unauthenticated caller
+-- has no auth.uid(), so the delete would match nothing — but revoking says so
+-- rather than relying on that.
+revoke all on function public.delete_account() from public, anon;
+grant execute on function public.delete_account() to authenticated;
 ```
 
 Grants and RLS are two separate gates: the `grant` decides whether the

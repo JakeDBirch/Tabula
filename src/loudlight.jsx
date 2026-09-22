@@ -2175,6 +2175,17 @@ const cloudGetSlot=async(sess,slot)=>{const rows=await cloudRest(sess,"projects?
 // target, so it's sent explicitly.
 const cloudPutSlot=(sess,slot,name,data)=>cloudRest(sess,"projects?on_conflict=user_id,slot",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({user_id:sess.uid,slot,name,data,updated_at:new Date().toISOString()})});
 const cloudDelSlot=(sess,slot)=>cloudRest(sess,"projects?slot=eq."+encodeURIComponent(slot),{method:"DELETE",headers:{Prefer:"return=minimal"}});
+// ACCOUNT DELETION, WHICH IS NOT OPTIONAL: App Store guideline 5.1.1(v) says an
+// app that can create an account must be able to delete one from inside itself.
+// It is also just correct — an account you can make and not unmake is a trap.
+//
+// It goes through an RPC rather than a DELETE on a table because the row that
+// matters is in `auth.users`, which no client may touch: the service-role key
+// that could is the one thing that must never be in a static file. The SQL in
+// docs/cloud-sync.md defines `delete_account()` as SECURITY DEFINER with a
+// `where id = auth.uid()`, so it runs with the rights to do it and can only
+// ever do it to the caller. The projects go with it on the FK cascade.
+const cloudDeleteAccount=sess=>cloudRest(sess,"rpc/delete_account",{method:"POST",headers:{Prefer:"return=minimal"},body:"{}"});
 // "NOW" / "20m" / "4h" / "3d" — a slot caption has room for three characters,
 // not a date.
 const cloudAgo=iso=>{
@@ -5597,6 +5608,7 @@ export default function LoudLight(){
     else if(confirmAction.type==="csave")doCloudSave(confirmAction.id,confirmAction.name);
     else if(confirmAction.type==="cload")doCloudLoad(confirmAction.id);
     else if(confirmAction.type==="cclear")doCloudClear(confirmAction.id);
+    else if(confirmAction.type==="cdelacct")doCloudDeleteAccount();
     setConfirmAction(null);
   };
   const confirmNo=()=>setConfirmAction(null);
@@ -8580,10 +8592,29 @@ export default function LoudLight(){
     setCloudStage("email");setCloudCode("");
     showFlash("SIGNED IN");
   };
+  // Deleting the account signs this device out as a CONSEQUENCE rather than as
+  // a separate step: the session it held is for a user that no longer exists,
+  // so keeping it would leave the app holding a token every later request would
+  // bounce. The stored refresh token goes with it, or the next launch would try
+  // to trade a dead one and show a broken account rather than a signed-out app.
+  const doCloudDeleteAccount=async()=>{
+    const [ok]=await cloudRun("DELETING",async()=>cloudDeleteAccount(await cloudTokenR.current()));
+    if(!ok)return;
+    await cloudSignOut();
+    showFlash("ACCOUNT DELETED");
+  };
   const cloudSignOut=async()=>{
     const cur=cloudSessR.current;
     setCloudSess(null);cloudSessR.current=null;
-    setCloudRows({});setCloudSlotActive(null);
+    // The LIST is not cleared here on purpose: the effect over
+    // `cloudSess && cloudSess.uid` already empties cloudLib and the selection
+    // when the session goes, and that effect is the one place the list is kept
+    // in step with the account. This line used to call setCloudRows /
+    // setCloudSlotActive — dead names from the slot-based cloud — and the
+    // ReferenceError took out EVERY LINE BELOW IT: the stored refresh token
+    // was never cleared, so the next launch traded it and signed you straight
+    // back in. SIGN OUT did not sign you out. The long-run-of-setters cliff,
+    // for the second time in this file.
     setCloudStage("email");setCloudCode("");
     storageSet("cloud","");
     // Best-effort server-side revoke — this device is signed out either way.
@@ -12554,6 +12585,13 @@ export default function LoudLight(){
                 <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
                   <span style={{flex:1,minWidth:0,fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</span>
                   <button style={{padding:"3px 8px",border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,background:"transparent",color:"rgba(168,190,212,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
+                  {/* Guideline 5.1.1(v). It sits next to SIGN OUT because that
+                      is where you look for "get me out of this account", and it
+                      is drawn in the warning colour rather than the furniture
+                      grey so the two are not one tap apart and identical. */}
+                  <button data-delacct="1"
+                    style={{padding:"3px 8px",border:"1px solid rgba(214,166,90,0.35)",borderRadius:4,background:"transparent",color:"rgba(214,166,90,0.75)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}
+                    onClick={()=>setConfirmAction({type:"cdelacct",label:"DELETE ACCOUNT AND EVERY CLOUD PROJECT? CANNOT BE UNDONE"})}>DELETE ACCOUNT</button>
                 </div>
               )}
               {/* The list. Scrolls once it outgrows the box rather than pushing
