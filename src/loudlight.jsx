@@ -2569,12 +2569,21 @@ function LLIcon({name,size}){
     </svg>
   );
   if(name==="follow")return(
-    // Chevron 2.0 at the vertex, lead-out 1.75, and a detached playhead line at
-    // 1.5 — the thing being kept up WITH, which is what FOLLOW means.
+    // Forward: keep up with what is playing. A PLAIN ARROW, which is what this
+    // was before the icon set and what it is again — the set's version added a
+    // vertical playhead line for the thing being followed, and the two together
+    // read as "|>", a bar and a chevron, rather than as an arrow. Reported that
+    // way and correct: the extra element bought meaning nobody could see and
+    // cost the one shape everybody already knows.
+    //
+    // The head LEADS at 2.0 over a 1.6 shaft. The two meet at the arrow's point
+    // rather than across a gap, which normally risks a bead — it does not here
+    // because the join that lands there is the HEAVIER of the two, so it
+    // swallows the lighter cap instead of leaving one sticking out. Checked at
+    // 56px, not assumed.
     <svg {...common} aria-hidden="true">
-      <path d="M5 3.5v17"               strokeWidth="1.5"/>
-      <path d="M11 7.5 16.5 12 11 16.5" strokeWidth="2"/>
-      <path d="M16.5 12H21"             strokeWidth="1.75"/>
+      <path d="M4 12h14"                strokeWidth="1.6"/>
+      <path d="M13.4 7.4 18 12 13.4 16.6" strokeWidth="2"/>
     </svg>
   );
   if(name==="mix")return(
@@ -2590,13 +2599,24 @@ function LLIcon({name,size}){
     </svg>
   );
   if(name==="project")return(
-    // A pattern matrix with one cell lit, not a folder — the app's own subject
-    // rather than a filing metaphor. The frame is context, so it recedes
-    // uniformly to 1.5 and the filled cell carries.
+    // Three lines: the menu, which is what this button opens. It was a pattern
+    // matrix with one cell lit — the app's own subject rather than a filing
+    // metaphor, which reads well as an argument and did not land as a picture:
+    // at 22px it is a small grid, and a small grid on a screen full of grids
+    // says nothing about what pressing it does.
+    //
+    // UNIFORM, and that is a deliberate exception to the set's graded weight.
+    // Three lines that do not touch are exactly the case the rule permits
+    // grading across — but a hamburger is a strong enough convention that
+    // uneven lines read as a MISTAKE rather than as a design, which was clear
+    // the moment 2.0/1.75/1.5 was drawn next to this. Same licence `stop` and
+    // `loop` take, for the same reason: nothing here leads.
+    //
+    // 1.9 rather than the neutral 1.75, because a uniform mark picks the weight
+    // it needs to read — `loop`'s circuit takes 1.6 — and at 1.75 this measured
+    // thin beside the SOUND, SAVE and MIX marks it sits with.
     <svg {...common} aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="2.5" strokeWidth="1.5"/>
-      <path d="M12 3v18M3 12h18" strokeWidth="1.5"/>
-      <rect x="5" y="5" width="5" height="5" rx="1" fill="currentColor" stroke="none"/>
+      <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17" strokeWidth="1.9"/>
     </svg>
   );
   if(name==="sound")return(
@@ -8464,6 +8484,11 @@ export default function LoudLight(){
     setSelCloudId(pid);setSelDevId(null);setNameDraft(nm);
     setSaveTarget({store:"cloud",id:pid,name:nm});
     showFlash("SAVED "+nm+" TO CLOUD");
+    // The work is filed, so the unsaved-work cue has to go out — doSave's twin
+    // had this and this one did not, so a project whose home is the CLOUD saved
+    // perfectly well and left the SAVE chip amber for ever. Two copies of one
+    // path, and the second one rotted quietly.
+    markClean();
     cloudLoadRows();
   };
   const doCloudLoad=async id=>{

@@ -535,10 +535,10 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   it running*, the other says *put it back*.
   - **The held state is the ring, not the glyph.** `▶` means the same thing
     stopped and held — press this and you get sound — so the readout is the
-    amber ring (`S.playHeld`, the same amber the old separate pause button lit —
-    and deliberately NOT the `#ffd696` the LOOP/FOLLOW toggles went to with the
-    icon set, so there are two ambers in that row on purpose
-    with) plus the STOP button beside it being live rather than dimmed. Making
+    amber ring (`S.playHeld`, the same amber the old separate pause button lit
+    with — and deliberately NOT the `#ffd696` the LOOP/FOLLOW toggles went to
+    with the icon set, so there are two ambers in that row on purpose) plus the
+    STOP button beside it being live rather than dimmed. Making
     the glyph carry it instead would need a third symbol on a control a thumb
     covers.
   - **STOP is dimmed, never hidden, with the transport already stopped.** It is
