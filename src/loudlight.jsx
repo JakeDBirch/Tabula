@@ -12776,7 +12776,19 @@ export default function LoudLight(){
         style={Object.assign({},mBtn,{padding:"10px 0",fontSize:10,letterSpacing:1.5,
           color:"rgba(199,216,232,0.75)",borderColor:"rgba(168,190,212,0.22)"})}>HOW IT WORKS</button>
 
-      <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
+      {/* The privacy policy has to be reachable from INSIDE the app, not only
+          from the App Store listing — guideline 5.1.1(i) asks for both, and
+          this menu is where everything that is not playing or editing lives.
+          It shares the BUILD line rather than taking a row: it is a reference,
+          like the build stamp, not a control. In the iOS shell an https link
+          is cancelled by decidePolicyFor and handed to Safari, so it opens
+          outside the app rather than stranding you in a chromeless web view. */}
+      <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>
+        BUILD {BUILD_ID}
+        <span style={{opacity:0.5}}>{"  ·  "}</span>
+        <a href="https://jakedbirch.github.io/Tabula/privacy.html" target="_blank" rel="noopener noreferrer"
+          data-privacy="1" style={{color:"rgba(178,199,219,0.45)",textDecoration:"none",letterSpacing:1}}>PRIVACY</a>
+      </div>
     </div>
   );
 

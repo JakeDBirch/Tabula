@@ -22,6 +22,16 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- The drum sampler records from the mic (REC on a voice in the drum
+	     mixer: getUserMedia + MediaRecorder, armed on the first transient).
+	     WITHOUT THIS KEY iOS TERMINATES THE APP at the moment of the request —
+	     it is not a prompt that fails, it is the process going away — so it is
+	     required the moment the code CAN reach getUserMedia, whether or not a
+	     tester ever taps REC. Nothing else here uses capture: the WKUIDelegate
+	     denies camera outright, so no camera prompt can ever appear and there
+	     is deliberately no NSCameraUsageDescription to go with it. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Loud Light records short samples from the microphone when you tap REC on a drum voice. Recordings stay in the project on your device, and are uploaded only if you save that project to your Loud Light account.</string>
 	<!-- The UIScene lifecycle, which iOS 26 warns about and the iOS 27 SDK turns
 	     into a launch-time assert. Single scene deliberately: multiple windows
 	     would mean two schedulers writing the same localStorage key. Adopting

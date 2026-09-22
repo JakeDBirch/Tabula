@@ -290,6 +290,34 @@ extension WebAppViewController: WKNavigationDelegate, WKUIDelegate {
         return nil
     }
 
+    /// The drum sampler's REC calls `getUserMedia`. Without this method WebKit
+    /// puts up its OWN permission sheet first, naming the origin — which here
+    /// is the bundle scheme, `loudlight://app`, and being asked by a URL you
+    /// have never seen to use the microphone is not a question a user of a
+    /// drum machine can answer. So the web layer's ask is answered here and
+    /// the system alert (the real consent gate, and the one the user
+    /// recognises) is the only one they see.
+    ///
+    /// Granting the microphone is safe because the request can only come from
+    /// the app's own payload — `decidePolicyFor` above cancels every
+    /// navigation that is not the bundle scheme, so there is no third-party
+    /// page in here to ask. The CAMERA is denied outright rather than left to
+    /// prompt: nothing in the app uses it, so a camera sheet could only ever
+    /// be a bug, and denying it is why there is no `NSCameraUsageDescription`
+    /// in Info.plist to explain away at review.
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        switch type {
+        case .microphone:
+            decisionHandler(.grant)
+        default:
+            decisionHandler(.deny)
+        }
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         showFailure(error.localizedDescription)
     }

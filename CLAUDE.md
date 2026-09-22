@@ -2057,6 +2057,50 @@ changed in Xcode's project or target inspector is destroyed by the next
 *reference*, not a group: as a group Xcode flattens every file into the bundle
 root and every sample 404s.
 
+**THE PUBLIC BETA'S PAPERWORK IS THREE FILES THAT MUST AGREE**, and the copy to
+paste into App Store Connect is `docs/app-store-connect.md`. The three are
+`ios/LoudLight/PrivacyInfo.xcprivacy` (machine-checked at upload), `privacy.html`
+(the URL a reviewer reads) and the App Privacy questionnaire. They are three
+descriptions of one set of facts; a mismatch is what review bounces on. Change
+one, change all three.
+
+- **THE MICROPHONE IS WHAT THE FIRST AUDIT MISSED, AND THE REASON IS THE LESSON:
+  THE SHELL IS A WEB APP, SO EVERYTHING THE PAGE CAN DO, THE APP DOES.** The
+  Swift was grepped for required-reason APIs and came back with UserDefaults
+  alone — correct, and beside the point, because the drum sampler's REC calls
+  `getUserMedia` from the *page*. Three consequences, all now landed: without
+  `NSMicrophoneUsageDescription` **iOS terminates the app at the moment of the
+  request** (not a prompt that fails — the process goes away), so the key is
+  required the moment the code CAN reach the API, whoever calls it; recorded
+  audio is a COLLECTED type, because `getShareState(true)` base64s samples into
+  the project and that is what a cloud save uploads (a device save transmits
+  nothing); and the `WKUIDelegate` now answers the capture ask itself, granting
+  the mic and denying the camera outright — WebKit's own sheet would otherwise
+  ask the user's permission on behalf of an origin called `loudlight://app`,
+  which is not a question a drum machine's user can answer. Denying the camera
+  is also why there is no `NSCameraUsageDescription` to explain at review.
+  **Whether `getUserMedia` is exposed at all under the custom scheme is
+  untested** — if it is not, `navigator.mediaDevices` is simply absent and the
+  page shows `MIC UNSUPPORTED`, which is a feature that does not work rather
+  than a crash.
+- **`privacy.html` is a page, not a screen**, served by Pages from `main` at
+  `…/Tabula/privacy.html`. The reviewer, the listing and the TestFlight invite
+  all need a URL, and a screen behind three taps is not one. `sw.js` leaves it
+  alone (only `/` and `/index.html` are the cached shell), so an edit is live on
+  the next push with nothing to invalidate. Guideline 5.1.1(i) wants the policy
+  in the metadata field **and** inside the app, so the PROJECT menu's build
+  stamp carries a `PRIVACY` link beside it (`data-privacy`) — a reference, like
+  the stamp, not a control. In the shell an `https` link is cancelled by
+  `decidePolicyFor` and handed to Safari, so it opens outside the app.
+- **The contact address on it is a placeholder** (`privacy@loudlight.co`) and is
+  Jake's to make real before submission.
+- **`ITSAppUsesNonExemptEncryption` is already `false`**, so the upload never
+  asks about export compliance — the only cryptography is TLS to Supabase.
+- **The sample kits' provenance is unknown to me** and is flagged in the ASC
+  doc: App Store Connect asks about third-party content, and "for use in your
+  music, not for resale as sounds" is the common licence shape that would bite a
+  paid app.
+
 **Built and running, on device and in CI.** The app runs on Jake's iPhone and
 iPad from Xcode, and the TestFlight workflow went green on its first run
 (2026-09-08): payload built on Linux, then archive, sign and upload to App Store
@@ -2496,6 +2540,17 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   Still to do: the on-device checklist in `docs/ios-testflight.md` — project
   survives a force-quit is the one that matters, since `localStorage` is the
   whole project library.
+- **Public beta (external TestFlight)**: the paperwork is written and the app
+  side is done — privacy manifest, `NSMicrophoneUsageDescription`, the capture
+  delegate, in-app account deletion, `privacy.html` and the link to it. The copy
+  to paste into App Store Connect, the App Privacy answers and the order of
+  operations are `docs/app-store-connect.md`. **Four things are Jake's and none
+  of them are code**: re-run the SQL in `docs/cloud-sync.md` so `delete_account()`
+  exists; a real contact address on `privacy.html`; the sample kits' licence;
+  and the device checks — which are the critical path, because everything the
+  beta description claims about sound, timing and background playback is a
+  claim from a test suite rather than from a phone. Then the metadata, then
+  Actions ▸ iOS TestFlight, then internal group, then submit for Beta App Review.
 - **The oracle is back in the loop.** It sat unrun for a day and went red twice
   over — one stale fixture and one genuine JS/core split that broke song
   playback on the default engine (see the dependency-array lesson). It is now

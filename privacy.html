@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Loud Light — Privacy</title>
+<link rel="icon" href="icon.png">
+<!--
+  The Privacy Policy URL that App Store Connect asks for, and the one the app
+  links to from PROJECT (guideline 5.1.1(i) wants both: the metadata field AND
+  a link inside the app).
+
+  It is a separate page rather than a screen in the app on purpose — the
+  reviewer, the App Store listing and the TestFlight invite all need a URL, and
+  a screen behind three taps is not one. GitHub Pages serves it from main at
+  https://jakedbirch.github.io/Tabula/privacy.html; sw.js leaves it alone
+  (only "/" and "/index.html" are the cached shell), so an edit here is live on
+  the next push with nothing to invalidate.
+
+  CONTACT ADDRESS: privacy@loudlight.co is a placeholder. Point it somewhere
+  real, or swap in an address you are happy to have on a public page, BEFORE
+  submitting for Beta App Review — a policy with no working contact is a
+  reasonable thing for a reviewer to fail.
+
+  KEEP IT TRUE. Every claim below was read off the source: the cloud payload is
+  getShareState(true), which carries recorded samples; the only host contacted
+  is the Supabase project in CLOUD_URL; there is no analytics of any kind. If
+  the app gains a network call, this page and PrivacyInfo.xcprivacy and the App
+  Privacy answers in App Store Connect all change together.
+-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+  :root{ color-scheme: dark; }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0; padding:48px 20px 72px;
+    background:#0e1c2b; color:rgba(226,236,247,0.82);
+    font-family:'DM Sans',system-ui,-apple-system,sans-serif;
+    font-weight:300; font-size:16px; line-height:1.62;
+  }
+  main{ max-width:640px; margin:0 auto; }
+  h1{
+    font-size:22px; font-weight:400; letter-spacing:3px; text-transform:uppercase;
+    color:#ffc46a; text-shadow:0 0 18px rgba(255,196,106,0.35); margin:0 0 4px;
+  }
+  .sub{ font-size:11px; letter-spacing:2px; text-transform:uppercase;
+        color:rgba(178,199,219,0.45); margin:0 0 40px; }
+  h2{ font-size:12px; font-weight:500; letter-spacing:2px; text-transform:uppercase;
+      color:rgba(255,214,150,0.8); margin:38px 0 10px; }
+  p,li{ color:rgba(226,236,247,0.78); }
+  ul{ padding-left:20px; }
+  li{ margin:7px 0; }
+  strong{ font-weight:500; color:rgba(240,247,255,0.95); }
+  a{ color:#ffc46a; }
+  hr{ border:0; border-top:1px solid rgba(168,190,212,0.18); margin:44px 0 20px; }
+  footer{ font-size:12px; color:rgba(178,199,219,0.4); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Loud Light</h1>
+<p class="sub">Privacy policy · last updated 22 September 2026</p>
+
+<p>Loud Light is a grid sequencer. It is made by one person, it has no
+advertising, no analytics and no third-party tracking of any kind, and it does
+not sell or share anything about you with anybody.</p>
+
+<p>This policy covers the iOS app and the web app at
+<a href="https://jakedbirch.github.io/Tabula">jakedbirch.github.io/Tabula</a>.</p>
+
+<h2>What stays on your device</h2>
+
+<p>By default, <strong>everything</strong>. Your projects — patterns, songs,
+sounds, kits and any samples you record — are stored on the device in the app's
+own storage. Nothing is sent anywhere unless you sign in and choose to save to
+the cloud. The app works completely offline.</p>
+
+<h2>What is sent, and only if you sign in</h2>
+
+<p>Signing in is optional. The app is fully usable without an account, and
+without one it makes no network requests at all. If you do sign in:</p>
+
+<ul>
+  <li><strong>Your email address.</strong> Used to send you a one-time sign-in
+      code and to own your projects. There is no password. We do not email you
+      anything else — no newsletters, no marketing.</li>
+  <li><strong>Projects you choose to save to the cloud.</strong> A project is
+      your musical work: patterns, arrangement, sound settings, and any samples
+      you recorded with the microphone, all in one file. Only projects you
+      explicitly save with the CLOUD tab are uploaded. Saving to DEVICE sends
+      nothing.</li>
+</ul>
+
+<p>That data is held in a <a href="https://supabase.com/privacy">Supabase</a>
+database acting as the app's backing store, readable only by your own account.
+It is not used for anything except giving your projects back to you.</p>
+
+<h2>The microphone</h2>
+
+<p>The drum sampler can record a short sample from the microphone when you tap
+REC on a drum voice. iOS asks your permission the first time, and you can refuse
+or revoke it in Settings; the rest of the app works either way. A recording is
+stored in your project like any other sound, and leaves your device only if you
+save that project to the cloud.</p>
+
+<h2>What is never collected</h2>
+
+<ul>
+  <li>No analytics, telemetry, crash reporting or usage statistics.</li>
+  <li>No advertising, no advertising identifier, no tracking across apps or
+      websites.</li>
+  <li>No location, no contacts, no photos, no health data, no camera.</li>
+  <li>No third-party SDKs. The app talks to exactly one host, and only when you
+      are signed in.</li>
+</ul>
+
+<h2>Keeping it, and deleting it</h2>
+
+<p>Cloud projects are kept until you delete them. You can delete any one of them
+from the CLOUD list inside the app.</p>
+
+<p>You can also <strong>delete your whole account from inside the app</strong> —
+PROJECT ▸ CLOUD ▸ DELETE ACCOUNT. That removes the account and every project
+stored under it, immediately and permanently. It cannot be undone, and it does
+not touch anything saved on your device.</p>
+
+<h2>Children</h2>
+
+<p>Loud Light is not directed at children and collects nothing that identifies a
+person beyond the email address used to sign in.</p>
+
+<h2>Changes</h2>
+
+<p>If this policy changes, the date at the top changes with it. The app is open
+source, so the history of this page is public at
+<a href="https://github.com/JakeDBirch/Tabula">github.com/JakeDBirch/Tabula</a>.</p>
+
+<h2>Contact</h2>
+
+<p>Questions, or a request about your data:
+<a href="mailto:privacy@loudlight.co">privacy@loudlight.co</a>.</p>
+
+<hr>
+<footer>Loud Light is a sequencer, not a service. If any of the above stops being
+true, this page changes before the app does.</footer>
+
+</main>
+</body>
+</html>
