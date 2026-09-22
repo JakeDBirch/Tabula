@@ -453,6 +453,26 @@ const glidePctOf=(sp)=>{
   if(sp.glideT!=null&&sp.glideT>0)return Math.max(0,Math.min(100,sp.glideT));
   return sp.glide?GLIDE_LEGACY_PCT:0;
 };
+// STEP PARAMS BELONG TO THE COLUMN'S NOTES. `params` is per COLUMN, not per
+// cell, so when the last note in a column goes its edits are orphans: nothing
+// sounds there, but the value still travels in every save and still lights the
+// step button as the playhead goes past. Deleting the note takes them with it.
+//
+// It only clears when the column is EMPTY, which is what makes it safe under
+// POLY: the params are shared by every note in that column, so removing one of
+// a stack must leave them alone for the ones still there.
+//
+// This completes a thought the add path already had — putting a note into an
+// empty column RESETS that column's params (`colWasEmpty`), so the codebase
+// already treated an empty column's params as meaningless. Only the delete side
+// was missing.
+const clearColParams=(p,col)=>{
+  if(!p||!p.params||!p.grid)return p;
+  if(p.grid.some(row=>row[col]))return p;          // a poly stack still stands
+  const np=p.params.map(sp=>({...sp}));
+  np[col]=defaultStepParams(1)[0];
+  return Object.assign({},p,{params:np});
+};
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,bars:1,speedMult:1});
 // Cull a pattern down to monophonic — at most one active note per column.
 // Used when copying a POLY (multi-row-per-col) pattern onto the MONO layer:
@@ -4813,7 +4833,11 @@ export default function LoudLight(){
       }
       // Set head's dur = how many cells it covers (1 + extension).
       newDurs[g.durStartRow][g.durStartCol] = (targetCol - g.durStartCol) + 1;
-      return Object.assign({},p,{grid:newGrid,durs:newDurs});
+      // A swallowed note can leave its column empty, and an empty column's step
+      // params are orphans exactly as they are after an ordinary erase.
+      let out=Object.assign({},p,{grid:newGrid,durs:newDurs});
+      for(let i=g.durStartCol+1;i<=targetCol;i++)out=clearColParams(out,i);
+      return out;
     }));
   };
 
@@ -7886,6 +7910,13 @@ export default function LoudLight(){
     if(!playing||playId!==activeId||step<0||!activePat)return out;
     const sp=(activePat.params||null)&&activePat.params[step];
     if(!sp)return out;
+    // A LIT BUTTON MEANS "THE STEP YOU ARE HEARING CARRIES AN EDIT". With no
+    // note in this column nothing is sounding, so a light there is reporting a
+    // value that cannot be heard — which is the duplicate-readout sin wearing a
+    // different hat. Deleting a note now clears the column's params, so this
+    // catches the other way in: the SPILL and the lane RAND write a curve
+    // across the whole bar, empty columns included.
+    if(!activePat.grid||!activePat.grid.some(row=>row[step]))return out;
     for(const l of HOT_LANES){
       const v=sp[l.key]!=null?sp[l.key]:l.def;
       if(v===l.def)continue;
@@ -10367,7 +10398,7 @@ export default function LoudLight(){
               setPats(ps=>ps.map(p=>{
                 if(p.id!==activeIdR.current)return p;
                 const ng=p.grid.map(r=>[...r]);ng[sc.r][sc.c]=false;
-                return Object.assign({},p,{grid:ng});
+                return clearColParams(Object.assign({},p,{grid:ng}),sc.c);
               }));
             } else {
               const isExisting=g.existingAtStart.has(key);
@@ -10407,7 +10438,7 @@ export default function LoudLight(){
         setPats(ps=>ps.map(p=>{
           if(p.id!==activeIdR.current)return p;
           const ng=p.grid.map(r=>[...r]);ng[cr][cc]=false;
-          return Object.assign({},p,{grid:ng});
+          return clearColParams(Object.assign({},p,{grid:ng}),cc);
         }));
       } else {
         // Right drag: tie existing notes, create new ones in empty cells
@@ -10586,7 +10617,12 @@ export default function LoudLight(){
           // A tap that turns a cell ON in a bar past the part's end extends the
           // part to cover that bar; turning one off never shortens it.
           const _out=Object.assign({},p,{grid:newGrid,durs:newDurs,params:np});
-          return wasOn?_out:growLenTo(_out,c);
+          // A tap that REMOVED a note takes the column's step params with it
+          // once nothing is left standing there — the mirror of the reset three
+          // lines up, which has always cleared them when the first note ARRIVES
+          // in an empty column. This is the path a plain tap-to-delete takes;
+          // the two paint-erase branches are the other two.
+          return wasOn?clearColParams(_out,c):growLenTo(_out,c);
         }));
       }
     }
