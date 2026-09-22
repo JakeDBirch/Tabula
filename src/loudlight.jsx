@@ -1988,6 +1988,96 @@ const isDoubleTap=(e,key=null)=>{
 // the same reason: it has never carried the `tnori-` prefix, and moving it in
 // the shipping build would show the install hint again to everyone who had
 // already dismissed it.
+// ── HOW IT WORKS ───────────────────────────────────────────────────────────
+// Almost everything this app can do is a GESTURE WITH NO AFFORDANCE: about
+// eight holds, tap-again on a chip, drag-a-chip-into-the-song, the two-finger
+// shift, the loop-end band, the bar tile's scrub, the step spill and LOOP's
+// cycle. None of it is on screen, and a first-timer sees a grid and three
+// buttons. That gap has already been reported once as not being able to find a
+// function at all, having tripped over it by accident.
+//
+// DATA, not markup, and at module scope: a table cannot drift into a layout,
+// adding a gesture is one line, and the same rows can feed both the reference
+// screen and the one-time hints. (It must stay data for another reason too —
+// see the CJS audit lesson: a module-level arrow returning JSX is the one thing
+// that cannot live out here.)
+const HELP_GROUPS=Object.freeze([
+  {t:"THE GRID",r:[
+    ["tap","place or remove a note"],
+    ["drag \u2190","erase as you go"],
+    ["drag \u2192 from a note","make it longer"],
+    ["drag \u2195 from a note","move it to another row"],
+    ["two fingers","shift the bar, wrapping inside it"],
+    ["the right-hand edge","drag to set this bar's length"],
+    ["hold a note","that step's own parameters"],
+  ]},
+  {t:"STEP BUTTONS",s:"under the grid \u00b7 POLY and MONO",r:[
+    ["tap","spill that lane onto the grid \u2014 the columns become faders"],
+    ["tap again","back to the notes"],
+    ["hold","RAND and RESET for that lane"],
+    ["drag across","draw a curve"],
+    ["drag \u2195","fine-tune one step"],
+    ["double-tap a step","back to default"],
+  ]},
+  {t:"BARS",r:[
+    ["drag the 3/8 tile \u2195","move through the bars \u2014 further the faster you drag"],
+    ["tap the tile","this bar's ops"],
+    ["hold past its edge","keep stepping"],
+    ["tap a SPEED","set this bar"],
+    ["hold a SPEED","set every bar in the part"],
+  ]},
+  {t:"PATTERNS",r:[
+    ["tap a chip","select it"],
+    ["tap it again","its ops"],
+    ["hold","the same ops \u2014 \u00d72, DUP, DEL, master, tempo"],
+    ["drag onto a song slot","place it in the song"],
+    ["tap +","a new empty pattern"],
+    ["hold +","SONG \u2192 PATTERN \u2014 the whole song flattened into one"],
+  ]},
+  {t:"THE SONG",r:[
+    ["tap an empty slot","drop the selected pattern in"],
+    ["drag between slots","move it"],
+    ["drag off the lane","clear the slot"],
+    ["hold a filled slot","how many times it repeats, 1 to 4"],
+    ["drop on a seam","insert, sliding the rest right"],
+  ]},
+  {t:"TRANSPORT",r:[
+    ["\u25b6 / \u275a\u275a","draws what the next press does"],
+    ["\u25a0","stop and rewind \u2014 dimmed when there is nothing to rewind"],
+    ["LOOP","loop this bar; tap again within 2s to grow it, then the whole pattern, then off"],
+    ["FOLLOW","keep the editor on what is playing"],
+    ["space \u00b7 esc","play or pause \u00b7 stop"],
+  ]},
+  {t:"LAYERS",r:[
+    ["tap","switch part"],
+    ["hold","RAND and CLEAR for that part"],
+  ]},
+  {t:"TEMPO AND KEY",r:[
+    ["tap the tempo chip","the tempo drawer"],
+    ["hold it","scrub the value where it stands"],
+    ["tap a note in USER key","in or out of the key"],
+    ["hold a note","make it the tonic"],
+  ]},
+  {t:"SAVE",r:[
+    ["tap","save to wherever this project already lives"],
+    ["amber, with a dot","there are unsaved changes"],
+  ]},
+]);
+// ONE-TIME HINTS. The reference above is complete and durable, but nobody
+// reads a manual — so these teach the four biggest hidden surfaces at the
+// moment they are in front of you, and each is dismissed for ever once seen.
+// The two halves solve each other: a hint is the nudge, and the reference is
+// where you go when you dismissed one and want it back.
+//
+// ONE PER LAUNCH, deliberately. Showing four at once is a wall, and a queue
+// that advances as you dismiss it is a carousel; one nudge per session teaches
+// the set over the first few sittings and is never in the way.
+const HINTS=Object.freeze([
+  {k:"bars",   t:"Hold a bar chip for its ops \u2014 RAND, DUP, SPEED, DELETE"},
+  {k:"pats",   t:"Hold a pattern chip for its ops, or drag it into the song lane"},
+  {k:"step",   t:"Tap a step button to spill that lane onto the grid"},
+  {k:"layers", t:"Hold a layer button for that part's RAND and CLEAR"},
+]);
 const LS_NS=(typeof window!=="undefined"&&window.__LL_NS)||"tnori-";
 const KEY_NS=LS_NS==="tnori-"?"":LS_NS;
 const storageSet=async(k,v)=>{try{await window.storage.set(KEY_NS+k,v);return true;}catch(e){}try{localStorage.setItem(LS_NS+k,v);return true;}catch(e){}return false;};
@@ -12304,7 +12394,78 @@ export default function LoudLight(){
       {when&&<span style={{flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.3)"}}>{when}</span>}
     </div>
   );
-  const projectMenuBody=(
+  // HOW IT WORKS. `helpOpen` swaps the PROJECT menu's contents for the gesture
+  // reference, which is why it needs no sheet plumbing of its own: that body
+  // already has two mounts (the desktop modal and the mobile sheet) and this
+  // rides both for free. One body, two mounts, never a fork.
+  const [helpOpen,setHelpOpen]=useState(false);
+  // The hint for THIS launch, picked once at mount and never re-picked: a hint
+  // that changed under you mid-session would be a carousel. Read synchronously
+  // — an async read lands a frame late and it would pop in after the app has
+  // already settled, which reads as a glitch rather than a nudge.
+  const [hint,setHint]=useState(null);
+  const seenHintsR=useRef((()=>{try{return new Set((localStorage.getItem(LS_NS+"seen-hints")||"").split(",").filter(Boolean));}catch(e){return null;}})());
+  const dismissHint=()=>{
+    const h=hint; setHint(null);
+    if(!h||!seenHintsR.current)return;
+    seenHintsR.current.add(h.k);
+    try{localStorage.setItem(LS_NS+"seen-hints",[...seenHintsR.current].join(","));}catch(e){}
+  };
+  const seenHelpR=useRef((()=>{try{return localStorage.getItem(LS_NS+"seen-help")==="1";}catch(e){return true;}})());
+  const dismissHelp=()=>{
+    setHelpOpen(false);
+    if(!seenHelpR.current){seenHelpR.current=true;try{localStorage.setItem(LS_NS+"seen-help","1");}catch(e){}}
+  };
+  // A GENUINELY first launch opens it once, and only a genuinely first one: the
+  // marker is its own key rather than "is the library empty", so clearing your
+  // projects does not put the tutorial back in front of you.
+  useEffect(()=>{
+    if(seenHelpR.current)return;
+    const t=setTimeout(()=>{setHelpOpen(true);setActiveSheet("project");setMenuOpen(true);},700);
+    return ()=>clearTimeout(t);
+  },[]);
+  // A hint only from the SECOND launch onwards: the first one already gets the
+  // whole reference, and a nudge on top of it would be two tutorials at once.
+  // `seenHelpR` is read as it was AT MOUNT, so dismissing the reference does
+  // not immediately hand you a hint in the same sitting.
+  useEffect(()=>{
+    if(!seenHelpR.current||!seenHintsR.current)return;
+    const next=HINTS.find(h=>!seenHintsR.current.has(h.k));
+    if(!next)return;
+    const t=setTimeout(()=>setHint(next),1600);
+    return ()=>clearTimeout(t);
+  },[]);
+  const helpBody=(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>HOW IT WORKS</div>
+        <button onClick={dismissHelp}
+          style={{padding:"6px 12px",border:"1px solid rgba(168,190,212,0.25)",borderRadius:6,background:"transparent",
+            color:"rgba(178,199,219,0.7)",fontSize:9,letterSpacing:1.5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>DONE</button>
+      </div>
+      <div style={{fontSize:11,lineHeight:1.5,color:"rgba(178,199,219,0.55)"}}>
+        Most of what Loud Light can do is a gesture rather than a button. This is
+        all of them; it lives in this menu, so it is here whenever you want it.
+      </div>
+      {HELP_GROUPS.map(g=>(
+        <div key={g.t}>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+            <span style={{fontSize:9,letterSpacing:2,color:"rgba(255,214,150,0.75)",fontWeight:700}}>{g.t}</span>
+            {g.s&&<span style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.35)"}}>{g.s}</span>}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {g.r.map(([k,v],i)=>(
+              <div key={i} style={{display:"flex",gap:10,alignItems:"baseline"}}>
+                <span style={{flex:"0 0 40%",maxWidth:150,fontSize:10,letterSpacing:0.5,color:"rgba(199,216,232,0.92)",fontWeight:600}}>{k}</span>
+                <span style={{flex:1,minWidth:0,fontSize:10.5,lineHeight:1.45,color:"rgba(178,199,219,0.6)"}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+  const projectMenuBody=(helpOpen?helpBody:
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {confirmAction&&(
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6}}>
@@ -12488,6 +12649,14 @@ export default function LoudLight(){
         </div>
       </div>
 
+      {/* The way back INTO the reference. Everything that is not playing or
+          editing lives behind this menu, and "how does this work" is exactly
+          that kind of thing — it does not want a chip of its own on a phone
+          screen whose whole job is the grid. */}
+      <button onClick={()=>setHelpOpen(true)}
+        style={Object.assign({},mBtn,{padding:"10px 0",fontSize:10,letterSpacing:1.5,
+          color:"rgba(199,216,232,0.75)",borderColor:"rgba(168,190,212,0.22)"})}>HOW IT WORKS</button>
+
       <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
     </div>
   );
@@ -12572,6 +12741,26 @@ export default function LoudLight(){
           one is the same as no message at all (reported exactly that way, of a
           SONG → PATTERN refusal). The interrupted-audio banner a few lines up
           already had the inset; this is the same sum. */}
+      {/* THE ONE-TIME HINT. Top-centre, the same sum the toast and the
+          interrupted-audio banner already use so it clears the notch — these
+          are the two places this app puts a message and a third would be a
+          third thing to look for. It sits BELOW the toast's z-index so a real
+          message is never hidden behind a nudge, and it is the only overlay in
+          here you dismiss by tapping the message itself: there is nothing else
+          to press, and a ✕ at this size is a smaller target than the bar. */}
+      {hint&&!helpOpen&&(
+        <div style={{position:"fixed",top:"calc(env(safe-area-inset-top, 0px) + 10px)",left:8,right:8,zIndex:9500,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div onClick={dismissHint} role="button" tabIndex={0} data-hint={hint.k}
+            onKeyDown={e=>{if(e.key==="Enter"||e.key===" "||e.key==="Escape")dismissHint();}}
+            style={{maxWidth:"min(92vw,420px)",padding:"9px 14px",borderRadius:8,cursor:"pointer",pointerEvents:"auto",
+              background:"rgba(10,20,32,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",
+              border:"1px solid rgba(255,214,150,0.4)",color:"rgba(255,214,150,0.92)",
+              fontSize:10,letterSpacing:0.8,lineHeight:1.5,fontWeight:600,textAlign:"center",fontFamily:"inherit"}}>
+            {hint.t}
+            <span style={{display:"block",marginTop:4,fontSize:8,letterSpacing:1,opacity:0.5,fontWeight:500}}>TAP TO DISMISS · ALL OF THEM UNDER PROJECT</span>
+          </div>
+        </div>
+      )}
       {flash&&(
         <div style={{position:"fixed",top:"calc(env(safe-area-inset-top, 0px) + 10px)",left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get

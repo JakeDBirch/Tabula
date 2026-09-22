@@ -1744,6 +1744,63 @@ most: you dial a setting in, flip it off, flip it back, and decide.
 
 Everything that isn't playing or editing — NEW PROJECT, the project library, MIDI / MP3 — lives behind **one menu**, `projectMenuBody`. It used to be a permanently-open column pinned to the bottom of the desktop sidebar; none of it is wanted mid-take. Desktop opens it as a modal (a `☰ PROJECT` button where the panel was; ESC or a backdrop tap closes, and the keydown handler hands the keyboard to the modal while it's open so space types a space instead of starting playback). Mobile keeps the existing PROJECT bottom sheet, which now renders MIX and then the same body. **One body, two mounts** — don't fork it, or the platforms drift.
 
+### HOW IT WORKS — the reference, and the one-time hints
+
+**Almost everything this app can do is a GESTURE WITH NO AFFORDANCE**: about
+eight holds, tap-again on a chip, drag-a-chip-into-the-song, the two-finger
+shift, the loop-end band, the bar tile's scrub, the step spill and LOOP's
+cycle. A first-timer sees a grid and three buttons. That gap had already been
+reported once as not being able to find a function at all, having tripped over
+it by accident — this is the answer to it, added 2026-09-22.
+
+**Two halves, and they solve each other.** A reference nobody reads is no use,
+and a hint you dismissed is gone for ever — so the hints are the nudge and the
+reference is where you go when you want one back.
+
+- **The reference is DATA** (`HELP_GROUPS`, frozen, module scope): nine groups,
+  ~36 rows of `[gesture, what it does]`. A table cannot drift into a layout,
+  adding a gesture is one line, and it has to stay data anyway because a
+  module-level arrow returning JSX is the one thing that cannot live out there
+  (the CJS audit).
+- **It rides the PROJECT menu rather than being its own sheet.** `helpOpen`
+  swaps `projectMenuBody`'s contents, and that body already has two mounts —
+  the desktop modal and the mobile sheet — so both come free with no new sheet
+  plumbing. One body, two mounts, never a fork. It is also the right home on
+  merit: everything that is not playing or editing lives behind that menu, and
+  "how does this work" is exactly that kind of thing. It does NOT get a chip of
+  its own on a phone screen whose whole job is the grid.
+- **A genuinely first launch opens it once.** The marker is its own key
+  (`seen-help`, through `LS_NS`) rather than "is the library empty", so clearing
+  your projects does not put the tutorial back in front of you — the same
+  argument the LAB build's seed marker makes. Read SYNCHRONOUSLY in the
+  initializer (an async read lands a frame late and it would flash open on every
+  launch) and **written only when it is actually dismissed**: persist a CHOICE,
+  not a state, or "hasn't decided" silently becomes "decided" for everyone and a
+  later change of default reaches nobody. The row-keys lesson again.
+- **ONE HINT PER LAUNCH, from the SECOND launch onwards.** Four nudges covering
+  the biggest hidden surfaces (bar chips, pattern chips, the step buttons, the
+  layer holds), each dismissed for ever once seen. Four at once is a wall and a
+  queue that advances as you dismiss it is a carousel; one a session teaches the
+  set over the first few sittings and is never in the way. The launch that shows
+  the whole reference shows no hint on top of it, and `seenHelpR` is read AS IT
+  WAS AT MOUNT so dismissing the reference does not immediately hand you one in
+  the same sitting.
+- The hint draws top-centre on `calc(env(safe-area-inset-top,0px) + 10px)` — the
+  same sum the toast and the interrupted-audio banner already use, because these
+  are the two places this app puts a message and a third would be a third thing
+  to look for. It sits **below** the toast's z-index so a real message is never
+  hidden behind a nudge, and you dismiss it by tapping the message itself: there
+  is nothing else to press and a ✕ at that size is a smaller target than the bar.
+
+**THE FIRST-LAUNCH OPEN CHANGES WHAT EVERY FRESH PROFILE DOES, INCLUDING EVERY
+HARNESS.** Playwright contexts start with empty storage, so the reference opened
+over the app and swallowed the clicks in four suites at once. The harnesses that
+test the APP rather than the onboarding now `addInitScript` the two seen-keys
+before load; `_help.mjs` and `_hints.mjs` are the two that deliberately do not.
+Worth knowing before adding any other first-run behaviour: a fresh profile is
+not the same thing as a fresh app any more. `_help.mjs` also had to take a
+precise PROJECT selector, because the hint's own sub-label contains the word.
+
 ### The project library
 
 **Named projects in a list, not fixed slots.** A project is `{id,name,updated,data}`: `id` is opaque and permanent and is what SAVE / LOAD / DELETE address; `name` is only ever a label. Picking a row highlights it and fills the name field, and **one** row of buttons acts on the pick — three buttons per slot × four slots was the old shape and it forced a filing decision on every save. SAVE with a row picked overwrites it under whatever the name field now says, so **renaming is just editing the name and saving**; with nothing picked SAVE creates a new project. Tapping the picked row again, or DESELECT, gets you back to creating.
