@@ -246,9 +246,62 @@ and layer switches do not light it.
 
 **The song lane is on the PART PAGES too, above the grid** (`SONG_STRIP`, portrait only) — and in the desktop **sidebar**, where the `▦ SONG` button used to be. The space is free in exactly those two places: the grid is width-bound in portrait (370px of a 390px phone) so vertical room the interface gives back cannot become grid, and the sidebar had a `flex:1` spacer holding PROJECT down. Mobile landscape is the one layout that can't carry it — the grid is height-bound there, so a line above it costs ~23% of the grid, and the ~150px of width going spare beside it would make a horizontal line of eight slots 14px a cell. So landscape keeps the song PAGE, and it is the only place that page still exists. (Worth knowing if that ever needs fixing: a single line is a line whichever way it runs, and eight slots stacked VERTICALLY down the spare width is 344px tall and ~50px wide — it fits beside the grid on every phone in landscape and costs the grid nothing. It would need `_songHit`'s seam test and the track to learn an axis, which is why it wasn't done on spec.) **The bar chips move BELOW the grid wherever the lane displaced them**, and stay above where it didn't (`_barStripRow`, one row and two positions, never two copies). That is not a return of "nothing lives under the grid": that rule is about duplicate READOUTS — the step bar and the length track, which said what the grid already said — and a relocated live control is not one. On a phone the bottom is also where your thumb is, and the chips are dragged constantly.
 
-**It is ONE LINE that scrolls sideways, not a wrapped grid.** Eight slots on screen (`SONG_COLS` means "slots across the visible width" now, not columns of a grid), the rest off the end, and it **grows by one slot as you fill the last** so there is always exactly one empty slot after the song — a linear control for a linear thing. It wrapped into rows and grew to fill whatever height was going for about an hour, and that was the wrong shape twice over: rows implied a structure the song does not have, and its height was a function of the layout while the layout was a function of its height. As one line its height is a CONSTANT — one cell, a 4px gap and a 6px track — which is what makes the rest of the column budgetable (`_laneBlockCss`, subtracted in `gridSizeCss`).
+**IN PORTRAIT A SONG SLOT IS A NOTE CELL: `SONG_COLS` IS SIXTEEN, THE GRID'S
+OWN COLUMN COUNT, AND THE LANE RUNS AT THE GRID'S PITCH.** It was eight big
+squares flooded with their pattern's colour, and that made the arrangement the
+loudest band on the screen — brighter than the grid, which is the thing you are
+actually working in. It is a MAP: you read it far more often than you touch it,
+so it was spending the most ink on the least work. At the grid's own size and
+gap (`LANE_GAP` is `CELL_GAP` in the tight layout, and the row takes the grid
+box's 10px padding rather than 12) the slots line up column-for-column with the
+cells below whenever portrait is width-bound, which is every tall phone — so
+the lane reads as the top of the instrument rather than as a panel parked above
+it, and it shows twice as much of the song.
+- **Only phone portrait.** The desktop sidebar is ~220px wide, where sixteen
+  slots is 13px a cell under a mouse, and the landscape song PAGE is a page
+  rather than a strip. Both keep the eight they had. `_laneTight` is the switch
+  everything inside the cell branches on, and it is derived from `SONG_COLS`
+  rather than from the viewport: it is a question about how much room a CELL
+  has, not about which layout you are in.
+- **THE FLOOR IS ITS OWN CONSTANT NOW** (`SONG_MIN`=8). It used to be
+  `SONG_COLS`, which was the same number while the line was eight wide; tying
+  them at sixteen would draw a fresh project sixteen empty outlines, which is
+  more objects on screen and the exact opposite of what shrinking the cells was
+  for.
+- **DIM AT REST, AND WHAT IS SOUNDING KEEPS EXACTLY WHAT IT HAD.** A resting
+  filled slot is its colour at `24`-ish alpha with the glyph in that colour; the
+  sounding one is the full flood with the white glowing glyph it always wore, so
+  it is the only solid block in the row and needs no ring to say so. The colour
+  still carries the pattern's identity — that is what you recognise it by — it
+  just carries it as a tint and a lit glyph instead of as a flood.
+- **NO OUTLINE ON A FILLED SLOT: IT IS A TIMELINE, NOT A ROW OF BUTTONS.** Once
+  the slots came down to the grid's pitch, the lane and the pattern chips below
+  it were two rows of the same picture at two sizes — a coloured glyph in a
+  coloured outline, twice. They are not the same kind of thing (the chips are a
+  palette you pick from; the lane is the shape of the song), so the lane gives up
+  its outlines and reads as blocks of material laid end to end. That is also how
+  a run of the same pattern shows itself now that the `×N` badge is gone.
+  **The border stays declared as a transparent 1px** — under border-box a flex
+  item's base size is floored at its own border, so actually dropping it makes a
+  filled cell 2px narrower and, with `aspect-ratio:1`, 2px shorter. That lesson
+  is already in here and it still applies.
+- **A grid-sized cell has room for a SILHOUETTE, not an inventory** — the icon
+  set's 22px rule, one layout down. The `×N` run badge is drawn only on the wide
+  mounts (a 9px "x4" over an 11px glyph is two numbers in one 21px box), and the
+  BAR DOTS only on the sounding slot, which is the only place they ever did their
+  real job: the current bar's dot swells on every quarter note, so they carry the
+  tempo. On the other fifteen they were a bar COUNT, which at 21px across is
+  eight sub-pixel smudges. The repeat PIPS stay at every size — a repeat is
+  structure, and dots along an edge is exactly the kind of mark that survives
+  being shrunk, unlike a number you have to read.
+- **The scroll track is HIDDEN when the lane does not overflow**, not faded to
+  0.25 and left there. On a short song that was a full-width bar under half a row
+  of slots, saying "there is more over there" when there is not — and with no
+  overflow it has nothing to pan either.
 
-Three things about it are worth knowing before touching it. The cells take a fixed `flex-basis` of `calc((100% - gaps)/SONG_COLS)`, and **a percentage inside a horizontally overflowing flex row resolves against the SCROLLPORT**, so eight fit exactly however long the song is. The slots keep `touch-action:none` — a drag on one moves a pattern in 2D — so **a touch starting on a slot can never scroll the lane**: the **track underneath** is what you grab instead, and it doubles as the position readout (the old `paddingRight` gutter made the same trade without saying so). And because a drop can need a slot that is off screen, dragging toward either end pans the lane (`_laneEdgeScroll`), **re-measuring the cached hit rects** each time it actually moves — `_songHit` works off rects cached at drag start, which until now could not move mid-drag. The sounding slot is scrolled into view while FOLLOW is on, for the same reason the bar strip pages with the playhead.
+**It is ONE LINE that scrolls sideways, not a wrapped grid.** The rest of the song runs off the end, and it **grows by one slot as you fill the last** so there is always exactly one empty slot after the song — a linear control for a linear thing. It wrapped into rows and grew to fill whatever height was going for about an hour, and that was the wrong shape twice over: rows implied a structure the song does not have, and its height was a function of the layout while the layout was a function of its height. As one line its height is a CONSTANT — one cell, the gap and the track — which is what makes the rest of the column budgetable.
+
+Three things about it are worth knowing before touching it. The cells take a fixed `flex-basis` of `calc((100% - gaps)/SONG_COLS)`, and **a percentage inside a horizontally overflowing flex row resolves against the SCROLLPORT**, so `SONG_COLS` of them fit exactly however long the song is. The slots keep `touch-action:none` — a drag on one moves a pattern in 2D — so **a touch starting on a slot can never scroll the lane**: the **track underneath** is what you grab instead, and it doubles as the position readout (the old `paddingRight` gutter made the same trade without saying so). And because a drop can need a slot that is off screen, dragging toward either end pans the lane (`_laneEdgeScroll`), **re-measuring the cached hit rects** each time it actually moves — `_songHit` works off rects cached at drag start, which until now could not move mid-drag. The sounding slot is scrolled into view while FOLLOW is on, for the same reason the bar strip pages with the playhead.
 
 **The cost, stated plainly:** a fixed one-line lane gives back the height it used to absorb, and on a tall phone the grid cannot use it — the grid is width-bound in portrait. An iPhone 15 has ~160px spare above and below the block as a result. That is the trade the linear form buys: a predictable layout instead of a self-sizing one.
 
@@ -449,6 +502,12 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
   `barOff = curBar*COLS`. The control is a single 58px tile reading `3/8`, and it
   rides the **pattern chip row** — it is navigation, like the chips, and that row
   had spare width at its right-hand end.
+  - **IT IS OUTLINED, NOT FLOODED.** It was a solid block of amber, and once the
+    song lane came down to a tint it became the loudest object on the page — for
+    a readout that says which of four bars you are looking at. The NUMBER is what
+    you read, so the number keeps the colour and the fill goes. It still reads as
+    the one amber thing in a row of pattern chips, which is what tells you it is
+    a different KIND of control from the chips it sits with.
   - **It was eight chips, then three, then one**, and both reductions were the
     same argument. Thirty-two chips 2px apart is a readout nobody reads chip by
     chip at a size nothing can be tapped at. Three — previous, current, next —
@@ -1288,6 +1347,34 @@ contract for all three mounts.
     82% of its box and these span ~43% of theirs, so 11 → 22 is the same number
     of pixels of actual triangle. Each mount passes the same size as the LOOP
     and FOLLOW next to it.
+  - **AND THE BOX AT REST IS GONE, WHICH IS THE WHOLE POINT OF HAVING DRAWN
+    THEM.** Every one of these carried a 1px outline, inherited from back when
+    they carried WORDS and a word needs a container to be a button. Thirteen
+    outlined rectangles across the two rows above the grid, and **the eye counts
+    rectangles before it reads anything inside them** — so the chrome was
+    out-shouting the instrument with pure furniture, on a screen whose entire job
+    is the grid. A row of glyphs on this navy reads as a toolbar without any
+    help. The rule now is **no box at rest, a box when engaged**: `S.iconBtn` and
+    `S.histBtn` keep a 1px *transparent* border (so the box model, and therefore
+    every measured size in here, is untouched), the globals row's SOUND /
+    PROJECT / SAVE do the same inline, and the border comes back in colour the
+    moment the control is on — which is what makes "engaged" a thing you see at a
+    glance instead of a shade of grey you have to compare against its neighbour.
+    - **NOTHING GOT SMALLER.** All the 44×44 hit targets are still 44×44; this
+      is a change of paint, not of geometry. It is the honest answer to "make
+      the top line shorter now that it's all symbols": the row cannot lose much
+      HEIGHT without going under the HIG minimum the icon work deliberately
+      raised it to, but it can stop looking like a row of boxes, which is what
+      was actually being read as length. What genuinely came off is padding —
+      the globals row 9/5 → 4/3 and the transport's bottom 10 → 7.
+    - **The three that keep a frame keep it for a reason.** TEMPO is a READOUT,
+      not a glyph, and a number floating with no frame beside five symbols reads
+      as a caption rather than as something you can press. The landscape rail
+      keeps its boxes because its buttons carry WORDS. And the play button keeps
+      its circle and its white ring, per the rule below.
+    - The **layer buttons** lose the box at rest but keep their own COLOUR at
+      low alpha, because which of three you are looking at is information the
+      box was never carrying.
   - **ONE ENGAGED AMBER, FOR THE TWO TOGGLES ONLY.** LOOP and FOLLOW were steel
     and green — two rules for one idea — and share `S.toggleOn` now: one object,
     because FOLLOW's style was inlined at four mounts. The grown loop keeps its
@@ -1793,7 +1880,14 @@ reference is where you go when you want one back.
   is nothing else to press and a ✕ at that size is a smaller target than the bar.
 
 **THE FIRST-LAUNCH OPEN CHANGES WHAT EVERY FRESH PROFILE DOES, INCLUDING EVERY
-HARNESS.** Playwright contexts start with empty storage, so the reference opened
+HARNESS** — AND IT HAD `core/test/songplay.mjs` RED ON `main`, unnoticed, for
+however long. That one is COMMITTED, precisely because the bug it guards broke
+playback on the live site, so it was the one that could least afford to be
+broken: the reference opened over the page, swallowed its first slot click, and
+it reported "two patterns placed in the song (1)" on BOTH engines — which reads
+exactly like a real regression in the lane. It seeds the two keys now, like the
+rest. **When a committed test goes red, check it against `main` before assuming
+it is yours.** Playwright contexts start with empty storage, so the reference opened
 over the app and swallowed the clicks in four suites at once. The harnesses that
 test the APP rather than the onboarding now `addInitScript` the two seen-keys
 before load; `_help.mjs` and `_hints.mjs` are the two that deliberately do not.
@@ -2219,6 +2313,53 @@ The app mark sits immediately right of the title in both header mounts — **`ic
 The wordmark is a `.wordmark` class: **solid amber `#ffc46a` with `text-shadow`**, breathed by a slow, shallow `filament` keyframe and disabled under `prefers-reduced-motion`. It was a `background-clip:text` gradient with a `drop-shadow` filter first, and that was wrong — on a clipped-background element Chromium takes drop-shadow's alpha from the element BOX, so it smeared a rectangle of haze across the whole header instead of following the letters. `text-shadow` does follow glyphs, but only on text that is actually painted, so the gradient had to go. Note `S.brand` still carries the gradient and a transparent fill; the mounts override both inline, because an inline style beats the class.
 
 The whole surface came off a warm brown/cream scheme in one mechanical pass: five `rgba()` stems (`200,185,165` / `210,195,175` / `220,200,180` / `230,215,195` / `232,224,213`) remapped to cool equivalents at identical alphas, so relative contrast survived untouched. If you add UI, use those stems rather than inventing a new grey. The layer accents (POLY sage, MONO indigo, DRUMS coral) stay semantic. MONO was lifted to `#79b8f2` because the old blue sat too close to the new ground, and then to **`#8279e0`** with the icon set, because against POLY's green the blue was too close to read at a glance in a row of three; DRUMS went from the rose `#c4727a` to **`#e07060`** at the same time. Six of the nine `#79b8f2` and six of the eight `#c4727a` moved — **the rest are those colours by COINCIDENCE and must not follow**: `PAT_COLORS` is the pattern-chip palette, the OCT step param is blue twice over, and MOTION/REC/CLR in the drum mixer are a local escalating scale. Note `#e07060` was already the REC colour there, so the DRUMS accent now matches it. The grid's ground tint names the drums colour separately (`layerTint`), because `noteRgb` knows only the two synth layers and drums would otherwise fall through to the brand amber and read as "lit" rather than as itself.
+
+### VISUAL HIERARCHY — what is allowed to be loud
+
+Reported as "teetering on information overload — hard with a quick visual glance
+to discern what's important", and the diagnosis was that the ranking was
+**inverted**: the song lane, which you read, was the brightest band on the
+screen, and the grid, which you work in, was the dimmest. Everything below was
+one pass at putting the order back, and it is all RELATIVE — the fix was never
+"make this darker", it was "make this darker THAN that".
+
+The order, loudest first, and it is worth keeping:
+
+1. **The instrument.** Lit notes on the grid, and the playhead. Untouched by any
+   of this — the hierarchy was built by pushing everything else DOWN, not by
+   raising the grid, because the grid was already at the right level and raising
+   it would only have added noise.
+2. **What is running.** The play button's white ring and 28px glow, and the one
+   sounding song slot at full flood.
+3. **What you are editing.** The selected pattern chip's halo, the active
+   layer's coloured box, an engaged toggle's amber.
+4. **Live controls at rest.** Pattern chips, the bar tile, the step buttons.
+5. **Chrome and reference.** The globals row, the song lane at rest, the scroll
+   track — which is hidden outright when there is nothing to scroll.
+
+Three levers did all of it, and they are the ones to reach for next time:
+**a box is louder than what is in it** (thirteen resting outlines came off the
+chrome and nothing got smaller), **a flood is louder than a tint** (the song
+lane and the bar tile both went from fill to tint, keeping their colour), and
+**size is a statement about how much work something is** (a song slot is a note
+cell now, because arranging is not editing).
+
+**`_hierarchy.mjs` is the guard, and it asserts the RANKING rather than the
+numbers** — a later tweak to any single alpha is fine, a re-inversion is not. It
+measures the composited luminance of the real computed styles (alpha is the
+whole subject, so it cannot be ignored), and checks: a song slot is a grid cell
+on a 15 and an SE and starts on the grid's own left edge; the grid did not pay
+for any of it (still 370 and 355); the sounding slot is at least twice the
+luminance of the BRIGHTEST resting one (not one picked at random, or a lane where
+only one other slot had been dimmed would pass); a filled slot has no outline;
+six named chrome controls draw no box at rest and DO when engaged; and the
+desktop sidebar keeps a mouse-sized slot.
+- One harness trap it cost, worth knowing for any future one: **never tap the
+  pattern chip that is already selected.** Tap-again is its second function, so
+  it opens the pattern ops menu — and that menu's backdrop ignores dismissals
+  for ~400ms, so the slot tap right after it is swallowed and nothing gets
+  placed. It fails as "the song only has one entry", which reads like a bug in
+  the lane.
 
 One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The note fill originally kept its old `0.35 + vel*0.65` alpha ramp and looked muddy; it needed a higher floor (`0.55 + vel*0.45`) plus the glow to read as lit. Expect the same wherever a warm accent sits at low alpha.
 

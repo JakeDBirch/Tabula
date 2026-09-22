@@ -13,6 +13,15 @@ let fail=0; const ck=(o,m)=>{if(!o)fail++;console.log((o?'ok   ':'FAIL ')+m);};
 
 for(const core of [0,1]){
   const ctx=await b.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+  // A FRESH PROFILE IS NOT A FRESH APP. Playwright contexts start with empty
+  // storage, and a genuinely first launch opens the HOW IT WORKS reference over
+  // the page — which swallowed this test's first click, so slot 0 was never
+  // filled and the playhead never had two entries to visit. It went red on main
+  // for exactly the reason already recorded for the uncommitted harnesses; this
+  // one is committed precisely because the bug it guards broke the live site, so
+  // it has to be able to run. Seed the two "seen" keys, as they do.
+  await ctx.addInitScript(()=>{try{localStorage.setItem('tnori-seen-help','1');
+    localStorage.setItem('tnori-seen-hints','bars,pats,step,layers');}catch(e){}});
   const p=await ctx.newPage(); const errs=[];
   p.on('pageerror',e=>errs.push(e.message));
   p.on('console',m=>{if(m.type()==='error'&&!/Failed to load resource|404/.test(m.text()))errs.push(m.text());});

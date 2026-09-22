@@ -5790,7 +5790,12 @@ export default function LoudLight(){
     const pos=sw>cw?el.scrollLeft/(sw-cw):0;
     th.style.width=(frac*100).toFixed(2)+"%";
     th.style.left=((1-frac)*pos*100).toFixed(2)+"%";
-    if(trackElR.current)trackElR.current.style.opacity=cw>=sw-1?"0.25":"1";
+    // NOTHING TO SCROLL, NOTHING TO DRAW. It used to fade to 0.25 and stay,
+    // which on a short song is a full-width bar sitting under half a row of
+    // slots — it reads as "there is more over there" when there is not. It is
+    // also the lane's only pan handle, so with no overflow there is nothing for
+    // it to do either.
+    if(trackElR.current)trackElR.current.style.opacity=cw>=sw-1?"0":"1";
   };
   // Drag the track to pan. The slots set touch-action:none so a drag on one can
   // move a pattern in 2D, which means a touch starting on a slot can never
@@ -6386,18 +6391,40 @@ export default function LoudLight(){
     }
     return -1;
   })();
-  // Eight slots across. The grid shows two rows until the song outgrows them,
-  // then one more row than it needs — so there is always somewhere to drop the
-  // next pattern without the page being mostly empty squares.
-  const SONG_COLS=8;
+  // SLOTS ACROSS THE VISIBLE WIDTH — AND IN PORTRAIT THAT IS THE GRID'S OWN
+  // COLUMN COUNT, so a song slot is exactly the size of a note cell. It was
+  // eight big squares, and eight big saturated squares is the loudest band on
+  // the screen: the arrangement is a MAP, not a workbench — you read it far
+  // more often than you touch it — so it was spending the most ink on the
+  // least work. At sixteen the lane is a strip of tiles the same pitch as the
+  // grid below it, which also lets it read as part of the same instrument
+  // rather than as a separate panel of buttons, and it shows twice as much of
+  // the song.
+  //
+  // Only in phone portrait. The desktop sidebar is ~220px wide (sixteen slots
+  // there is 13px a cell, under a mouse) and the landscape song PAGE is a page
+  // rather than a strip, so both keep the eight they had.
+  const SONG_COLS=SONG_STRIP?16:8;
+  // Cells this narrow have room for a silhouette, not an inventory — the same
+  // rule the icon set learned at 22px. `_laneTight` is what the contents below
+  // branch on: it is a question about how much room a CELL has, not about which
+  // layout we are in, so it follows SONG_COLS rather than the viewport.
+  const _laneTight=SONG_COLS>=12;
   // How many slots to draw: enough for the song plus ONE empty one to place
-  // into, and never fewer than fill the visible line. Growing by a slot as you
-  // fill the last one is the whole point of the linear form — there is no grid
-  // shape to round up to, so the control is exactly as long as the song.
+  // into, and never fewer than SONG_MIN. Growing by a slot as you fill the last
+  // one is the whole point of the linear form — there is no grid shape to round
+  // up to, so the control is exactly as long as the song.
+  //
+  // The FLOOR is deliberately not SONG_COLS any more. Those were the same
+  // number while the line was eight slots wide; at sixteen, tying them would
+  // draw a fresh project sixteen empty outlines — more objects on screen, which
+  // is the opposite of what shrinking the cells was for. Eight is enough to
+  // read as "here is the song, and room to add".
+  const SONG_MIN=8;
   const _songCells=(()=>{
     let last=-1;
     for(let i=0;i<64;i++)if(song[i]!=null)last=i;
-    return Math.max(SONG_COLS,Math.min(64,last+2));
+    return Math.max(SONG_MIN,Math.min(64,last+2));
   })();
   useEffect(()=>{ if(delArm==null)return; const t=setTimeout(()=>setDelArm(null),4000); return ()=>clearTimeout(t); },[delArm]);
   useEffect(()=>{ setDelArm(null); },[activePatternId]);
@@ -7077,7 +7104,11 @@ export default function LoudLight(){
   //
   // linear in the viewport width, so it lands exactly as `<k>vw - <c>px`.
   // Returned without the `calc(` so it can be embedded in a larger one.
-  const LANE_GAP=4, LANE_TRACK=6;
+  // The gap is the GRID'S gap in the tight layout, because the whole point of
+  // the tight layout is that a song slot and a note cell are the same size at
+  // the same pitch — a gap of its own would put the two rows half a cell out of
+  // step with each other all the way along.
+  const LANE_GAP=_laneTight?CELL_GAP:4, LANE_TRACK=_laneTight?4:6;
   const _laneCellCss=(pad)=>"calc((100% - "+((SONG_COLS-1)*LANE_GAP)+"px) / "+SONG_COLS+")";
   const _laneBlockCss=(pad)=>{
     const k=(100/SONG_COLS).toFixed(4);
@@ -7119,9 +7150,20 @@ export default function LoudLight(){
             const seamR=!!(_ov&&_ov.seam===idx+1&&idx===_songCells-1);
             return(
               <div key={idx} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
-                style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:5,position:"relative",
+                style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:_laneTight?3:5,position:"relative",
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
+                  // THE LANE IS DIM AT REST AND THE SOUNDING SLOT IS NOT.
+                  // Every filled slot used to be a solid block of its own
+                  // colour, so a six-bar song was the brightest thing on the
+                  // screen — brighter than the grid, which is the thing you are
+                  // actually working in. It is a map: you read it, you do not
+                  // edit it, so it gets a map's share of the light.
+                  // The colour still carries the pattern's identity, because
+                  // that is what you recognise it by; it just carries it as a
+                  // TINT and a lit glyph rather than as a flood fill. What is
+                  // SOUNDING keeps exactly the fill it always had, which is now
+                  // the only solid block in the row and needs no ring to say so.
+                  background:pat?(isCursor?col0:col0+"2b"):(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.035)"),
                   // The border is always THERE and only changes colour. Under
                   // border-box a flex item's base size is floored at its own
                   // border, so dropping the border on a filled cell made it 2px
@@ -7129,7 +7171,20 @@ export default function LoudLight(){
                   // that came back as 2px of height too — a filled slot knocked
                   // the whole line out of alignment. It also skewed the rects
                   // _songMeasure caches for drops.
-                  border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
+                  // NO OUTLINE ON A FILLED SLOT — it is a TIMELINE, not a row of
+                  // buttons. Once the slots came down to the grid's pitch the
+                  // lane and the pattern chips below it were two rows of the
+                  // same picture at two sizes: a coloured glyph in a coloured
+                  // outline, twice. They are not the same kind of thing — the
+                  // chips are a palette you PICK from and the lane is the shape
+                  // of the song — so the lane gives up its outlines and reads as
+                  // blocks of material laid end to end, which is also how a run
+                  // of the same pattern now shows itself without a count.
+                  // The border stays declared as a transparent 1px: under
+                  // border-box a flex item's base size is floored at its own
+                  // border, so DROPPING it makes a filled cell 2px narrower than
+                  // an empty one and, with aspect-ratio:1, 2px shorter as well.
+                  border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.07)"),
                   boxSizing:"border-box",minWidth:0,
                   // NO HALO ON THE SOUNDING SLOT. A ring around the cell says
                   // "this cell", which you can already see — and the lane is a
@@ -7143,9 +7198,9 @@ export default function LoudLight(){
                   // different question and only exists mid-drag.
                   outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",
                   outlineOffset:"-1px",
-                  color:pat?(isCursor?"#fff":"#0e1c2b"):"transparent",
+                  color:pat?(isCursor?"#fff":col0):"transparent",
                   textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",
-                  fontSize:17,fontWeight:700,
+                  fontSize:_laneTight?11:17,fontWeight:700,
                   touchAction:"none",cursor:"pointer",userSelect:"none",
                   transition:"background .08s, outline .08s"}}
                 onPointerDown={(e)=>{
@@ -7228,13 +7283,19 @@ export default function LoudLight(){
                 onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
                 {pat?pat.name:""}
                 {(seamL||seamR)&&(
-                  <div style={{position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2,
-                    [seamL?"left":"right"]:-3.5,background:"rgba(232,220,205,0.95)",
+                  <div style={{position:"absolute",top:-2,bottom:-2,width:_laneTight?2:3,borderRadius:2,
+                    [seamL?"left":"right"]:_laneTight?-2.5:-3.5,background:"rgba(232,220,205,0.95)",
                     boxShadow:"0 0 6px rgba(232,220,205,0.6)",pointerEvents:"none",zIndex:2}}/>
                 )}
-                {runStart&&run>1&&(
+                {/* The run badge needs a corner, and a grid-sized cell has not
+                    got one — a 9px "x4" over an 11px glyph is two numbers in
+                    the same 21px box. It stays on the wider mounts. What it was
+                    telling you survives in the lane itself: at sixteen slots
+                    across you can see the whole run at once, which is what the
+                    badge was compensating for when only eight fitted. */}
+                {!_laneTight&&runStart&&run>1&&(
                   <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
-                    color:"rgba(10,20,32,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                    color:isCursor?"rgba(10,20,32,0.6)":col0+"aa",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
                 )}
                 {/* Bar dots — one per bar of the pattern, above the symbol,
                     mirroring the repeat pips below it. On the playing cell
@@ -7243,8 +7304,15 @@ export default function LoudLight(){
                     dots up to 8 bars, and past that they close into a
                     segmented bar where the lit one still reads as it moves
                     (32 countable dots don't fit in a phone-sized cell). */}
-                {pat&&(pbars>1||isCursor)&&(
-                  <div style={{position:"absolute",left:4,right:4,top:3,display:"flex",
+                {/* In a grid-sized cell the dots are drawn on the SOUNDING slot
+                    alone. Their real job is carrying the tempo — the current
+                    bar's dot swells on every quarter note — and that only
+                    happens on the playing cell anyway; on the other fifteen
+                    they were a bar COUNT, which at 21px across is eight
+                    sub-pixel smudges rather than a number you can read. A
+                    silhouette, not an inventory. */}
+                {pat&&(_laneTight?isCursor:(pbars>1||isCursor))&&(
+                  <div style={{position:"absolute",left:_laneTight?2:4,right:_laneTight?2:4,top:_laneTight?2:3,display:"flex",
                     alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,
                     pointerEvents:"none"}}>
                     {Array.from({length:pbars},(_,k)=>{
@@ -7253,8 +7321,8 @@ export default function LoudLight(){
                         <div key={lit?"p"+k+"-"+songPulse:k}
                           className={lit?"barpulse":undefined}
                           style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
-                            height:3,borderRadius:pbars<=8?2:0,
-                            background:lit?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.4)"}}/>
+                            height:_laneTight?2:3,borderRadius:pbars<=8?2:0,
+                            background:lit?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.4)":col0+"55")}}/>
                       );
                     })}
                   </div>
@@ -7262,13 +7330,19 @@ export default function LoudLight(){
                 {/* Repeat pips — one per play, along the bottom edge. The
                     one that's sounding lights up, so a x4 cell reads as
                     progress rather than a static count. */}
+                {/* The pips stay at every size. A repeat is STRUCTURE — how long
+                    this slot holds for — and four dots along an edge is exactly
+                    the kind of mark that survives being shrunk, unlike a count
+                    you have to read. */}
                 {pat&&rep>1&&(
-                  <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
-                    justifyContent:"center",gap:2,pointerEvents:"none"}}>
-                    {Array.from({length:rep},(_,k)=>(
-                      <div key={k} style={{width:4,height:4,borderRadius:2,
-                        background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.45)"}}/>
-                    ))}
+                  <div style={{position:"absolute",left:0,right:0,bottom:_laneTight?1.5:3,display:"flex",
+                    justifyContent:"center",gap:_laneTight?1.5:2,pointerEvents:"none"}}>
+                    {Array.from({length:rep},(_,k)=>{
+                      const sz=_laneTight?2.5:4;
+                      return(
+                      <div key={k} style={{width:sz,height:sz,borderRadius:sz/2,
+                        background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.45)":col0+"66")}}/>
+                    );})}
                   </div>
                 )}
               </div>
@@ -7279,10 +7353,10 @@ export default function LoudLight(){
           one part a finger can pan it by — and the readout of where you are in
           a song longer than the eight slots on screen. */}
       <div ref={trackRef} onPointerDown={_lanePanStart} aria-hidden="true"
-        style={{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,
-          background:"rgba(186,208,230,0.06)",touchAction:"none",cursor:"pointer"}}>
+        style={{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,opacity:0,
+          background:"rgba(186,208,230,0.025)",touchAction:"none",cursor:"pointer",transition:"opacity .12s"}}>
         <div ref={thumbRef} style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
-          borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
+          borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.13)"}}/>
       </div>
     </div>
   );
@@ -7789,7 +7863,14 @@ export default function LoudLight(){
       style={Object.assign({flex:"0 0 auto",width:64,height:"100%",
         position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",
         touchAction:"none",cursor:"ns-resize",userSelect:"none",
-        background:"rgba(255,206,130,0.62)",color:"rgba(10,20,32,0.85)",
+        // OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
+        // song lane brought down it became the loudest object on the page —
+        // for a readout that says which of four bars you are looking at. The
+        // number is the thing you read, so the number keeps the colour and the
+        // fill goes. It still reads as the one amber thing in a row of pattern
+        // chips, which is what tells you it is a different KIND of control.
+        background:"rgba(255,206,130,0.08)",color:"#ffce82",
+        border:"1px solid rgba(255,206,130,0.22)",
         boxShadow:isPlaying?"inset 0 0 0 2px "+C_VARY:"none",
         fontSize:15,fontWeight:700,lineHeight:1},extra||{})}
       onPointerDown={e=>{
@@ -7843,7 +7924,7 @@ export default function LoudLight(){
       onPointerCancel={()=>{_spinEnd();_spinR.current.moved=false;}}
       onContextMenu={e=>{e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY,120);}}>
       <span>{curBar+1}</span>
-      <span style={{fontSize:10,fontWeight:600,opacity:0.55,marginLeft:1}}>{"/"+barCount}</span>
+      <span style={{fontSize:10,fontWeight:600,opacity:0.5,marginLeft:1}}>{"/"+barCount}</span>
       {/* LOOP's steel underline, the one state the tile can still show on its
           own. How WIDE the loop is is what the expansion is for. */}
       {isLoop?<div style={{position:"absolute",left:3,right:3,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
@@ -8039,9 +8120,9 @@ export default function LoudLight(){
             title={lane.label+" — tap to spill it onto the grid, hold for RAND / RESET"}
             {...paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key))}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
-              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"33"),
-              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.04)",
-              color:on||hot?lane.color:lane.color+"99",
+              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"1f"),
+              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.03)",
+              color:on||hot?lane.color:lane.color+"8c",
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
               touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",
               boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
@@ -8143,8 +8224,8 @@ export default function LoudLight(){
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
             fontSize:IS_MOBILE?15:13,fontWeight:600,touchAction:"none",
-            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
-            color:"rgba(178,199,219,0.45)"})}>+</div>
+            border:"1px solid rgba(168,190,212,0.14)",background:"transparent",
+            color:"rgba(178,199,219,0.38)"})}>+</div>
       )}
       {/* The bar tile lives HERE in portrait, at the right-hand end. It is
           navigation — which pattern, which bar — so it belongs with the other
@@ -8176,8 +8257,8 @@ export default function LoudLight(){
         <div role="button" {...addChipProps}
           style={Object.assign({},_patChipBase,{
             padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,touchAction:"none",
-            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
-            color:"rgba(178,199,219,0.45)"})}>+</div>
+            border:"1px solid rgba(168,190,212,0.14)",background:"transparent",
+            color:"rgba(178,199,219,0.38)"})}>+</div>
       )}
     </div>
   );
@@ -13638,13 +13719,17 @@ export default function LoudLight(){
           {/* 2. Globals — TEMPO / FX / PROJECT. */}
           {!isLandscape&&(
           <div style={{flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
-              {/* TEMPO chip */}
-              <button style={{flex:1,minWidth:0,height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+            <div style={{display:"flex",alignItems:"stretch",padding:"4px 10px 3px",gap:4}}>
+              {/* TEMPO chip. It keeps a box — it is the one thing in this row
+                  that is a READOUT rather than a glyph, and a number floating
+                  with no frame beside five symbols reads as a caption rather
+                  than as something you can press. The frame is fainter than it
+                  was, because it is holding a number, not competing with one. */}
+              <button style={{flex:1,minWidth:0,height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.08)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
                 aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
                 data-tempochip={tempoField} {...tempoChipProps}>
-                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
+                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>{tempoFld.unit}</span>
               </button>
               {/* The ▦ SONG chip is GONE. The song lane is two rows above the
                    grid on this very page: a chip that navigates to a copy of
@@ -13660,7 +13745,7 @@ export default function LoudLight(){
                   you were already on — a door nobody would find, on a control
                   whose real job is switching layers. */}
               <button aria-label="Sound" title="Sound — each layer's voice and the global FX"
-                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"transparent"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.44)"}}
                 onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
                 <LLIcon name="sound" size={22}/>
               </button>
@@ -13673,16 +13758,16 @@ export default function LoudLight(){
                 aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
                 title={saveTitle}
                 style={{flexShrink:0,width:44,height:44,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",
-                  border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.12)"),borderRadius:9,
+                  border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"transparent"),borderRadius:9,
                   background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,
-                  color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}
+                  color:dirty?"#ffd28a":"rgba(178,199,219,0.44)"}}
                 onClick={quickSave}>
                 <LLIcon name="save" size={22}/>
                 {dirty&&<span style={{position:"absolute",top:5,right:5,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
               </button>
               {/* PROJECT chip */}
               <button aria-label="Project" title="Projects, export and the library"
-                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:"rgba(178,199,219,0.5)"}}
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"transparent"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="project"?"rgba(178,199,219,0.8)":"rgba(178,199,219,0.44)"}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
                 <LLIcon name="project" size={22}/>
               </button>
@@ -13728,11 +13813,11 @@ export default function LoudLight(){
                 gets a sensible row rather than seven dinner plates. The two
                 groups split it 3:4, which is exactly the button count, so the
                 gap between them lands where it always did. */}
-            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
+            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 7px",gap:5}}>
               <div style={{flex:"3 1 0",display:"flex",alignItems:"center",gap:5}}>
               {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#8279e0","rgba(130,121,224,"],["drums","DRUMS","#e07060","rgba(224,112,96,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99":"transparent"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.38)"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
@@ -13757,7 +13842,12 @@ export default function LoudLight(){
                  measured content area — which is why gridSizeCss no longer
                  subtracts the lane: `--ch` has already had it taken out. */}
           {SONG_STRIP&&!songPageOn&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0,display:"flex",flexDirection:"column"}}>
+          // 10px, the grid box's own horizontal padding, not 12. At the grid's
+          // pitch the slots line up column-for-column with the cells below
+          // whenever portrait is width-bound (every tall phone), which is what
+          // makes the lane read as the top of the instrument rather than as a
+          // strip parked above it.
+          <div style={{padding:"0 10px 5px",flexShrink:0,display:"flex",flexDirection:"column"}}>
             {songLane()}
           </div>
           )}
@@ -14462,15 +14552,26 @@ const S={
   playHeld:  {border:"2px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"},
   // A square button whose content is a glyph rather than a word. Same height as
   // the transport's round play button so the row reads as one row.
+  //
+  // NO BOX AT REST, AND THAT IS THE WHOLE POINT OF HAVING DRAWN THE ICONS.
+  // These carried a 1px outline from back when they carried WORDS and a word
+  // needs a container to be a button. Thirteen of them across the two rows
+  // above the grid, and the eye counts rectangles before it reads anything
+  // inside them — so the chrome was out-shouting the instrument with pure
+  // furniture. A row of glyphs on this navy reads as a toolbar without any
+  // help; the border is kept as a transparent 1px so the box model, and
+  // therefore every measured size in here, is untouched, and it comes BACK the
+  // moment a control is engaged, which is what makes "engaged" a thing you can
+  // see at a glance instead of a shade of grey you have to compare.
   iconBtn:   {width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",padding:0,
-              borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",
-              color:"rgba(168,190,212,0.5)",cursor:"pointer",flexShrink:0,transition:"all .12s",fontFamily:"inherit"},
+              borderRadius:10,border:"1px solid transparent",background:"transparent",
+              color:"rgba(168,190,212,0.46)",cursor:"pointer",flexShrink:0,transition:"all .12s",fontFamily:"inherit"},
   loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
   // UNDO / REDO carry a glyph and no word, so they are square rather than
   // word-width: the arrows are unambiguous and the row has better uses for
   // the ~80px they were spending on two labels. Same height as the rest of
   // the transport, so the row still reads as one row.
-  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
+  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,border:"1px solid transparent",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
   tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
