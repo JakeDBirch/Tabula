@@ -6391,25 +6391,29 @@ export default function LoudLight(){
     }
     return -1;
   })();
-  // SLOTS ACROSS THE VISIBLE WIDTH — AND IN PORTRAIT THAT IS THE GRID'S OWN
-  // COLUMN COUNT, so a song slot is exactly the size of a note cell. It was
-  // eight big squares, and eight big saturated squares is the loudest band on
-  // the screen: the arrangement is a MAP, not a workbench — you read it far
-  // more often than you touch it — so it was spending the most ink on the
-  // least work. At sixteen the lane is a strip of tiles the same pitch as the
-  // grid below it, which also lets it read as part of the same instrument
-  // rather than as a separate panel of buttons, and it shows twice as much of
-  // the song.
+  // SLOTS ACROSS THE VISIBLE WIDTH. Ten in phone portrait, where it was eight.
   //
-  // Only in phone portrait. The desktop sidebar is ~220px wide (sixteen slots
-  // there is 13px a cell, under a mouse) and the landscape song PAGE is a page
-  // rather than a strip, so both keep the eight they had.
-  const SONG_COLS=SONG_STRIP?16:8;
-  // Cells this narrow have room for a silhouette, not an inventory — the same
-  // rule the icon set learned at 22px. `_laneTight` is what the contents below
-  // branch on: it is a question about how much room a CELL has, not about which
-  // layout we are in, so it follows SONG_COLS rather than the viewport.
-  const _laneTight=SONG_COLS>=12;
+  // IT WENT TO SIXTEEN FIRST — the grid's own column count, so a slot was
+  // exactly a note cell and the two rows lined up column for column. That was
+  // an OVER-STEER, and the reason is worth keeping: **a slot is sized by what
+  // your finger has to DO to it, not by what it sits above.** A note cell takes
+  // one gesture, a tap. A song slot takes four — tap to place or select, HOLD
+  // for the repeat picker, DRAG to move a pattern out of it, and it is also the
+  // DROP TARGET a chip is dragged onto, with the outer 22% of its width reading
+  // as the insert SEAM. At 21px that seam is 4.7px wide, which is not a thing
+  // you can aim at.
+  //
+  // Ten is ~34px on a 15 and ~33 on an SE. Above the 30px the pattern CHIPS
+  // already prove for exactly this tap/hold/drag set, seam back up to 7px, and
+  // still a quarter more song on screen than the eight it started at.
+  //
+  // There is NO middle that keeps the grid alignment, which is what settles it:
+  // one cell is 21px and two cells plus a gap is 44px, i.e. the size it already
+  // was. Alignment was never what did the work anyway — the DIMMING below is.
+  //
+  // Only phone portrait. The desktop sidebar is ~220px wide and the landscape
+  // song PAGE is a page rather than a strip, so both keep the eight they had.
+  const SONG_COLS=SONG_STRIP?10:8;
   // How many slots to draw: enough for the song plus ONE empty one to place
   // into, and never fewer than SONG_MIN. Growing by a slot as you fill the last
   // one is the whole point of the linear form — there is no grid shape to round
@@ -7104,11 +7108,7 @@ export default function LoudLight(){
   //
   // linear in the viewport width, so it lands exactly as `<k>vw - <c>px`.
   // Returned without the `calc(` so it can be embedded in a larger one.
-  // The gap is the GRID'S gap in the tight layout, because the whole point of
-  // the tight layout is that a song slot and a note cell are the same size at
-  // the same pitch — a gap of its own would put the two rows half a cell out of
-  // step with each other all the way along.
-  const LANE_GAP=_laneTight?CELL_GAP:4, LANE_TRACK=_laneTight?4:6;
+  const LANE_GAP=3, LANE_TRACK=5;
   const _laneCellCss=(pad)=>"calc((100% - "+((SONG_COLS-1)*LANE_GAP)+"px) / "+SONG_COLS+")";
   const _laneBlockCss=(pad)=>{
     const k=(100/SONG_COLS).toFixed(4);
@@ -7150,7 +7150,7 @@ export default function LoudLight(){
             const seamR=!!(_ov&&_ov.seam===idx+1&&idx===_songCells-1);
             return(
               <div key={idx} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
-                style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:_laneTight?3:5,position:"relative",
+                style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:5,position:"relative",
                   display:"flex",alignItems:"center",justifyContent:"center",
                   // THE LANE IS DIM AT REST AND THE SOUNDING SLOT IS NOT.
                   // Every filled slot used to be a solid block of its own
@@ -7200,7 +7200,7 @@ export default function LoudLight(){
                   outlineOffset:"-1px",
                   color:pat?(isCursor?"#fff":col0):"transparent",
                   textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",
-                  fontSize:_laneTight?11:17,fontWeight:700,
+                  fontSize:16,fontWeight:700,
                   touchAction:"none",cursor:"pointer",userSelect:"none",
                   transition:"background .08s, outline .08s"}}
                 onPointerDown={(e)=>{
@@ -7283,17 +7283,11 @@ export default function LoudLight(){
                 onContextMenu={id==null?undefined:(e)=>{e.preventDefault();e.stopPropagation();setRepPopup({idx,x:e.clientX,y:e.clientY});}}>
                 {pat?pat.name:""}
                 {(seamL||seamR)&&(
-                  <div style={{position:"absolute",top:-2,bottom:-2,width:_laneTight?2:3,borderRadius:2,
-                    [seamL?"left":"right"]:_laneTight?-2.5:-3.5,background:"rgba(232,220,205,0.95)",
+                  <div style={{position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2,
+                    [seamL?"left":"right"]:-3.5,background:"rgba(232,220,205,0.95)",
                     boxShadow:"0 0 6px rgba(232,220,205,0.6)",pointerEvents:"none",zIndex:2}}/>
                 )}
-                {/* The run badge needs a corner, and a grid-sized cell has not
-                    got one — a 9px "x4" over an 11px glyph is two numbers in
-                    the same 21px box. It stays on the wider mounts. What it was
-                    telling you survives in the lane itself: at sixteen slots
-                    across you can see the whole run at once, which is what the
-                    badge was compensating for when only eight fitted. */}
-                {!_laneTight&&runStart&&run>1&&(
+                {runStart&&run>1&&(
                   <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
                     color:isCursor?"rgba(10,20,32,0.6)":col0+"aa",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
                 )}
@@ -7304,15 +7298,8 @@ export default function LoudLight(){
                     dots up to 8 bars, and past that they close into a
                     segmented bar where the lit one still reads as it moves
                     (32 countable dots don't fit in a phone-sized cell). */}
-                {/* In a grid-sized cell the dots are drawn on the SOUNDING slot
-                    alone. Their real job is carrying the tempo — the current
-                    bar's dot swells on every quarter note — and that only
-                    happens on the playing cell anyway; on the other fifteen
-                    they were a bar COUNT, which at 21px across is eight
-                    sub-pixel smudges rather than a number you can read. A
-                    silhouette, not an inventory. */}
-                {pat&&(_laneTight?isCursor:(pbars>1||isCursor))&&(
-                  <div style={{position:"absolute",left:_laneTight?2:4,right:_laneTight?2:4,top:_laneTight?2:3,display:"flex",
+                {pat&&(pbars>1||isCursor)&&(
+                  <div style={{position:"absolute",left:4,right:4,top:3,display:"flex",
                     alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,
                     pointerEvents:"none"}}>
                     {Array.from({length:pbars},(_,k)=>{
@@ -7321,7 +7308,7 @@ export default function LoudLight(){
                         <div key={lit?"p"+k+"-"+songPulse:k}
                           className={lit?"barpulse":undefined}
                           style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
-                            height:_laneTight?2:3,borderRadius:pbars<=8?2:0,
+                            height:3,borderRadius:pbars<=8?2:0,
                             background:lit?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.4)":col0+"55")}}/>
                       );
                     })}
@@ -7330,15 +7317,11 @@ export default function LoudLight(){
                 {/* Repeat pips — one per play, along the bottom edge. The
                     one that's sounding lights up, so a x4 cell reads as
                     progress rather than a static count. */}
-                {/* The pips stay at every size. A repeat is STRUCTURE — how long
-                    this slot holds for — and four dots along an edge is exactly
-                    the kind of mark that survives being shrunk, unlike a count
-                    you have to read. */}
                 {pat&&rep>1&&(
-                  <div style={{position:"absolute",left:0,right:0,bottom:_laneTight?1.5:3,display:"flex",
-                    justifyContent:"center",gap:_laneTight?1.5:2,pointerEvents:"none"}}>
+                  <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
+                    justifyContent:"center",gap:2,pointerEvents:"none"}}>
                     {Array.from({length:rep},(_,k)=>{
-                      const sz=_laneTight?2.5:4;
+                      const sz=4;
                       return(
                       <div key={k} style={{width:sz,height:sz,borderRadius:sz/2,
                         background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.45)":col0+"66")}}/>

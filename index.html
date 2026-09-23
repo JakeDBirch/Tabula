@@ -1409,7 +1409,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-09-22 19:28Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-09-23 01:02Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -3135,24 +3135,29 @@ var _barViewR=useRef(-1);useEffect(function(){if(_barViewR.current===curBar)retu
 // bar strip's page-follow makes if you let it.
 useEffect(function(){if(!playing||!songMode||!followSeq)return;var el=laneElR.current;if(!el)return;var cell=el.querySelector('[data-song-bar="'+_songPlayingSlot+'"]');if(!cell)return;var cr=cell.getBoundingClientRect(),er=el.getBoundingClientRect();if(cr.left<er.left)el.scrollLeft-=er.left-cr.left+LANE_GAP;else if(cr.right>er.right)el.scrollLeft+=cr.right-er.right+LANE_GAP;},[_songPlayingSlot,playing,songMode,followSeq]);// Which pass through a repeated slot is playing (0-based), for lighting the
 // pips one at a time.
-var _songPlayingPass=function(){if(_songPlayingSlot<0)return-1;var n=0;for(var i=0;i<64;i++){if(song[i]==null)continue;if(i===_songPlayingSlot)return songBar-n;n+=_rep(i);}return-1;}();// SLOTS ACROSS THE VISIBLE WIDTH — AND IN PORTRAIT THAT IS THE GRID'S OWN
-// COLUMN COUNT, so a song slot is exactly the size of a note cell. It was
-// eight big squares, and eight big saturated squares is the loudest band on
-// the screen: the arrangement is a MAP, not a workbench — you read it far
-// more often than you touch it — so it was spending the most ink on the
-// least work. At sixteen the lane is a strip of tiles the same pitch as the
-// grid below it, which also lets it read as part of the same instrument
-// rather than as a separate panel of buttons, and it shows twice as much of
-// the song.
+var _songPlayingPass=function(){if(_songPlayingSlot<0)return-1;var n=0;for(var i=0;i<64;i++){if(song[i]==null)continue;if(i===_songPlayingSlot)return songBar-n;n+=_rep(i);}return-1;}();// SLOTS ACROSS THE VISIBLE WIDTH. Ten in phone portrait, where it was eight.
 //
-// Only in phone portrait. The desktop sidebar is ~220px wide (sixteen slots
-// there is 13px a cell, under a mouse) and the landscape song PAGE is a page
-// rather than a strip, so both keep the eight they had.
-var SONG_COLS=SONG_STRIP?16:8;// Cells this narrow have room for a silhouette, not an inventory — the same
-// rule the icon set learned at 22px. `_laneTight` is what the contents below
-// branch on: it is a question about how much room a CELL has, not about which
-// layout we are in, so it follows SONG_COLS rather than the viewport.
-var _laneTight=SONG_COLS>=12;// How many slots to draw: enough for the song plus ONE empty one to place
+// IT WENT TO SIXTEEN FIRST — the grid's own column count, so a slot was
+// exactly a note cell and the two rows lined up column for column. That was
+// an OVER-STEER, and the reason is worth keeping: **a slot is sized by what
+// your finger has to DO to it, not by what it sits above.** A note cell takes
+// one gesture, a tap. A song slot takes four — tap to place or select, HOLD
+// for the repeat picker, DRAG to move a pattern out of it, and it is also the
+// DROP TARGET a chip is dragged onto, with the outer 22% of its width reading
+// as the insert SEAM. At 21px that seam is 4.7px wide, which is not a thing
+// you can aim at.
+//
+// Ten is ~34px on a 15 and ~33 on an SE. Above the 30px the pattern CHIPS
+// already prove for exactly this tap/hold/drag set, seam back up to 7px, and
+// still a quarter more song on screen than the eight it started at.
+//
+// There is NO middle that keeps the grid alignment, which is what settles it:
+// one cell is 21px and two cells plus a gap is 44px, i.e. the size it already
+// was. Alignment was never what did the work anyway — the DIMMING below is.
+//
+// Only phone portrait. The desktop sidebar is ~220px wide and the landscape
+// song PAGE is a page rather than a strip, so both keep the eight they had.
+var SONG_COLS=SONG_STRIP?10:8;// How many slots to draw: enough for the song plus ONE empty one to place
 // into, and never fewer than SONG_MIN. Growing by a slot as you fill the last
 // one is the whole point of the linear form — there is no grid shape to round
 // up to, so the control is exactly as long as the song.
@@ -3320,11 +3325,7 @@ var patBarsBadge=function patBarsBadge(p){return null;};// ── THE SONG LANE 
 //
 // linear in the viewport width, so it lands exactly as `<k>vw - <c>px`.
 // Returned without the `calc(` so it can be embedded in a larger one.
-// The gap is the GRID'S gap in the tight layout, because the whole point of
-// the tight layout is that a song slot and a note cell are the same size at
-// the same pitch — a gap of its own would put the two rows half a cell out of
-// step with each other all the way along.
-var LANE_GAP=_laneTight?CELL_GAP:4,LANE_TRACK=_laneTight?4:6;var _laneCellCss=function _laneCellCss(pad){return"calc((100% - "+(SONG_COLS-1)*LANE_GAP+"px) / "+SONG_COLS+")";};var _laneBlockCss=function _laneBlockCss(pad){var k=(100/SONG_COLS).toFixed(4);var c=((2*pad+(SONG_COLS-1)*LANE_GAP)/SONG_COLS-LANE_GAP-LANE_TRACK).toFixed(4);return k+"vw - "+c+"px";};var songLane=function songLane(){return/*#__PURE__*/React.createElement("div",{style:{width:"100%",flexShrink:0,display:"flex",flexDirection:"column",gap:LANE_GAP}},/*#__PURE__*/React.createElement("div",{ref:laneRef,className:"songscroll",onScroll:function onScroll(){return _syncLaneTrack();},style:{width:"100%",overflowX:"auto",overflowY:"hidden",overscrollBehavior:"contain",display:"flex",gap:LANE_GAP,flexShrink:0}},Array.from({length:_songCells},function(_,idx){var id=song[idx];var pat=id!=null?patterns.find(function(p){return p.id===id;}):null;var isCursor=idx===_songPlayingSlot;var col0=id!=null?_patColorOf(id):null;// Run length, drawn on the first slot of a repeat so a long
+var LANE_GAP=3,LANE_TRACK=5;var _laneCellCss=function _laneCellCss(pad){return"calc((100% - "+(SONG_COLS-1)*LANE_GAP+"px) / "+SONG_COLS+")";};var _laneBlockCss=function _laneBlockCss(pad){var k=(100/SONG_COLS).toFixed(4);var c=((2*pad+(SONG_COLS-1)*LANE_GAP)/SONG_COLS-LANE_GAP-LANE_TRACK).toFixed(4);return k+"vw - "+c+"px";};var songLane=function songLane(){return/*#__PURE__*/React.createElement("div",{style:{width:"100%",flexShrink:0,display:"flex",flexDirection:"column",gap:LANE_GAP}},/*#__PURE__*/React.createElement("div",{ref:laneRef,className:"songscroll",onScroll:function onScroll(){return _syncLaneTrack();},style:{width:"100%",overflowX:"auto",overflowY:"hidden",overscrollBehavior:"contain",display:"flex",gap:LANE_GAP,flexShrink:0}},Array.from({length:_songCells},function(_,idx){var id=song[idx];var pat=id!=null?patterns.find(function(p){return p.id===id;}):null;var isCursor=idx===_songPlayingSlot;var col0=id!=null?_patColorOf(id):null;// Run length, drawn on the first slot of a repeat so a long
 // stretch of the same pattern reads as "x4" without collapsing
 // the individually tappable cells.
 var rep=_rep(idx);// Bars the entry SOUNDS for, not bars it was allocated — the
@@ -3338,7 +3339,7 @@ var pbars=pat?cycleBars(pat):1;// A run's badge counts PLAYS, not cells, so it a
 var runStart=id!=null&&(idx===0||song[idx-1]!==id);var run=0,plays=0;if(runStart){var j=idx;while(j<64&&song[j]===id){run++;plays+=_rep(j);j++;}}var _ov=patternDrag&&patternDrag.overSongCell;var isHover=!!(_ov&&_ov.cell===idx);// Seam k draws as a caret on cell k's LEFT edge. The seam past the
 // last slot has no cell to its right, so it draws on that cell's
 // right edge instead.
-var seamL=!!(_ov&&_ov.seam===idx);var seamR=!!(_ov&&_ov.seam===idx+1&&idx===_songCells-1);return/*#__PURE__*/React.createElement("div",{key:idx,"data-song-cell":"1","data-song-bar":idx,"data-song-cursor":isCursor?"1":undefined,style:{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:_laneTight?3:5,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",// THE LANE IS DIM AT REST AND THE SOUNDING SLOT IS NOT.
+var seamL=!!(_ov&&_ov.seam===idx);var seamR=!!(_ov&&_ov.seam===idx+1&&idx===_songCells-1);return/*#__PURE__*/React.createElement("div",{key:idx,"data-song-cell":"1","data-song-bar":idx,"data-song-cursor":isCursor?"1":undefined,style:{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:5,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",// THE LANE IS DIM AT REST AND THE SOUNDING SLOT IS NOT.
 // Every filled slot used to be a solid block of its own
 // colour, so a six-bar song was the brightest thing on the
 // screen — brighter than the grid, which is the thing you are
@@ -3379,7 +3380,7 @@ border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.07)"),boxSizing:"bord
 // the halo means "editing".
 // The hover outline stays: that is a drop target, which is a
 // different question and only exists mid-drag.
-outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",outlineOffset:"-1px",color:pat?isCursor?"#fff":col0:"transparent",textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",fontSize:_laneTight?11:17,fontWeight:700,touchAction:"none",cursor:"pointer",userSelect:"none",transition:"background .08s, outline .08s"},onPointerDown:function onPointerDown(e){e.stopPropagation();var pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;var dragging=false,held=false;// Press and hold a filled slot to set its repeat count —
+outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",outlineOffset:"-1px",color:pat?isCursor?"#fff":col0:"transparent",textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",fontSize:16,fontWeight:700,touchAction:"none",cursor:"pointer",userSelect:"none",transition:"background .08s, outline .08s"},onPointerDown:function onPointerDown(e){e.stopPropagation();var pointerId=e.pointerId,startX=e.clientX,startY=e.clientY;var dragging=false,held=false;// Press and hold a filled slot to set its repeat count —
 // the same gesture that opens a step's params. Movement
 // past the drag threshold cancels it, so holding never
 // steals a drag.
@@ -3397,7 +3398,7 @@ _songMove(idx,t.seam);}else if(t){if(t.cell!==idx){setSong(function(sg){var r=_t
 // so it travels with them.
 setSongRep(function(rp){var r=_toConsumableArray(rp);r[t.cell]=r[idx];r[idx]=1;return r;});}}else{// Dragged off the grid: the slot empties. The pattern
 // itself stays in the palette.
-setSong(function(sg){var r=_toConsumableArray(sg);r[idx]=null;return r;});setSongRep(function(rp){var r=_toConsumableArray(rp);r[idx]=1;return r;});}setPatternDrag(null);};document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",_onUp);document.addEventListener("pointercancel",_onUp);},onContextMenu:id==null?undefined:function(e){e.preventDefault();e.stopPropagation();setRepPopup({idx:idx,x:e.clientX,y:e.clientY});}},pat?pat.name:"",(seamL||seamR)&&/*#__PURE__*/React.createElement("div",{style:_defineProperty(_defineProperty(_defineProperty(_defineProperty(_defineProperty({position:"absolute",top:-2,bottom:-2,width:_laneTight?2:3,borderRadius:2},seamL?"left":"right",_laneTight?-2.5:-3.5),"background","rgba(232,220,205,0.95)"),"boxShadow","0 0 6px rgba(232,220,205,0.6)"),"pointerEvents","none"),"zIndex",2)}),!_laneTight&&runStart&&run>1&&/*#__PURE__*/React.createElement("span",{style:{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,color:isCursor?"rgba(10,20,32,0.6)":col0+"aa",pointerEvents:"none",lineHeight:1}},"\xD7",plays),pat&&(_laneTight?isCursor:pbars>1||isCursor)&&/*#__PURE__*/React.createElement("div",{style:{position:"absolute",left:_laneTight?2:4,right:_laneTight?2:4,top:_laneTight?2:3,display:"flex",alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,pointerEvents:"none"}},Array.from({length:pbars},function(_,k){var lit=isCursor&&k===_pulseBar;return/*#__PURE__*/React.createElement("div",{key:lit?"p"+k+"-"+songPulse:k,className:lit?"barpulse":undefined,style:{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,height:_laneTight?2:3,borderRadius:pbars<=8?2:0,background:lit?"rgba(255,255,255,0.95)":isCursor?"rgba(10,20,32,0.4)":col0+"55"}});})),pat&&rep>1&&/*#__PURE__*/React.createElement("div",{style:{position:"absolute",left:0,right:0,bottom:_laneTight?1.5:3,display:"flex",justifyContent:"center",gap:_laneTight?1.5:2,pointerEvents:"none"}},Array.from({length:rep},function(_,k){var sz=_laneTight?2.5:4;return/*#__PURE__*/React.createElement("div",{key:k,style:{width:sz,height:sz,borderRadius:sz/2,background:isCursor&&k===_songPlayingPass?"rgba(255,255,255,0.95)":isCursor?"rgba(10,20,32,0.45)":col0+"66"}});})));})),/*#__PURE__*/React.createElement("div",{ref:trackRef,onPointerDown:_lanePanStart,"aria-hidden":"true",style:{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,opacity:0,background:"rgba(186,208,230,0.025)",touchAction:"none",cursor:"pointer",transition:"opacity .12s"}},/*#__PURE__*/React.createElement("div",{ref:thumbRef,style:{position:"absolute",top:0,bottom:0,left:0,width:"100%",borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.13)"}})));};// ── MIX — vertical faders ────────────────────────────────────────────────
+setSong(function(sg){var r=_toConsumableArray(sg);r[idx]=null;return r;});setSongRep(function(rp){var r=_toConsumableArray(rp);r[idx]=1;return r;});}setPatternDrag(null);};document.addEventListener("pointermove",onMove);document.addEventListener("pointerup",_onUp);document.addEventListener("pointercancel",_onUp);},onContextMenu:id==null?undefined:function(e){e.preventDefault();e.stopPropagation();setRepPopup({idx:idx,x:e.clientX,y:e.clientY});}},pat?pat.name:"",(seamL||seamR)&&/*#__PURE__*/React.createElement("div",{style:_defineProperty(_defineProperty(_defineProperty(_defineProperty(_defineProperty({position:"absolute",top:-2,bottom:-2,width:3,borderRadius:2},seamL?"left":"right",-3.5),"background","rgba(232,220,205,0.95)"),"boxShadow","0 0 6px rgba(232,220,205,0.6)"),"pointerEvents","none"),"zIndex",2)}),runStart&&run>1&&/*#__PURE__*/React.createElement("span",{style:{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,color:isCursor?"rgba(10,20,32,0.6)":col0+"aa",pointerEvents:"none",lineHeight:1}},"\xD7",plays),pat&&(pbars>1||isCursor)&&/*#__PURE__*/React.createElement("div",{style:{position:"absolute",left:4,right:4,top:3,display:"flex",alignItems:"center",justifyContent:"center",gap:pbars<=8?1.5:0,pointerEvents:"none"}},Array.from({length:pbars},function(_,k){var lit=isCursor&&k===_pulseBar;return/*#__PURE__*/React.createElement("div",{key:lit?"p"+k+"-"+songPulse:k,className:lit?"barpulse":undefined,style:{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,height:3,borderRadius:pbars<=8?2:0,background:lit?"rgba(255,255,255,0.95)":isCursor?"rgba(10,20,32,0.4)":col0+"55"}});})),pat&&rep>1&&/*#__PURE__*/React.createElement("div",{style:{position:"absolute",left:0,right:0,bottom:3,display:"flex",justifyContent:"center",gap:2,pointerEvents:"none"}},Array.from({length:rep},function(_,k){var sz=4;return/*#__PURE__*/React.createElement("div",{key:k,style:{width:sz,height:sz,borderRadius:sz/2,background:isCursor&&k===_songPlayingPass?"rgba(255,255,255,0.95)":isCursor?"rgba(10,20,32,0.45)":col0+"66"}});})));})),/*#__PURE__*/React.createElement("div",{ref:trackRef,onPointerDown:_lanePanStart,"aria-hidden":"true",style:{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,opacity:0,background:"rgba(186,208,230,0.025)",touchAction:"none",cursor:"pointer",transition:"opacity .12s"}},/*#__PURE__*/React.createElement("div",{ref:thumbRef,style:{position:"absolute",top:0,bottom:0,left:0,width:"100%",borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.13)"}})));};// ── MIX — vertical faders ────────────────────────────────────────────────
 // Lives at the top of the FX sheet (mobile) and the FX page (desktop). It was
 // on the SONG page, and the SONG page is gone; FX is the right inheritor
 // rather than a consolation, because the per-channel trim beside each fader

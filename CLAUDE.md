@@ -246,28 +246,39 @@ and layer switches do not light it.
 
 **The song lane is on the PART PAGES too, above the grid** (`SONG_STRIP`, portrait only) — and in the desktop **sidebar**, where the `▦ SONG` button used to be. The space is free in exactly those two places: the grid is width-bound in portrait (370px of a 390px phone) so vertical room the interface gives back cannot become grid, and the sidebar had a `flex:1` spacer holding PROJECT down. Mobile landscape is the one layout that can't carry it — the grid is height-bound there, so a line above it costs ~23% of the grid, and the ~150px of width going spare beside it would make a horizontal line of eight slots 14px a cell. So landscape keeps the song PAGE, and it is the only place that page still exists. (Worth knowing if that ever needs fixing: a single line is a line whichever way it runs, and eight slots stacked VERTICALLY down the spare width is 344px tall and ~50px wide — it fits beside the grid on every phone in landscape and costs the grid nothing. It would need `_songHit`'s seam test and the track to learn an axis, which is why it wasn't done on spec.) **The bar chips move BELOW the grid wherever the lane displaced them**, and stay above where it didn't (`_barStripRow`, one row and two positions, never two copies). That is not a return of "nothing lives under the grid": that rule is about duplicate READOUTS — the step bar and the length track, which said what the grid already said — and a relocated live control is not one. On a phone the bottom is also where your thumb is, and the chips are dragged constantly.
 
-**IN PORTRAIT A SONG SLOT IS A NOTE CELL: `SONG_COLS` IS SIXTEEN, THE GRID'S
-OWN COLUMN COUNT, AND THE LANE RUNS AT THE GRID'S PITCH.** It was eight big
-squares flooded with their pattern's colour, and that made the arrangement the
-loudest band on the screen — brighter than the grid, which is the thing you are
-actually working in. It is a MAP: you read it far more often than you touch it,
-so it was spending the most ink on the least work. At the grid's own size and
-gap (`LANE_GAP` is `CELL_GAP` in the tight layout, and the row takes the grid
-box's 10px padding rather than 12) the slots line up column-for-column with the
-cells below whenever portrait is width-bound, which is every tall phone — so
-the lane reads as the top of the instrument rather than as a panel parked above
-it, and it shows twice as much of the song.
-- **Only phone portrait.** The desktop sidebar is ~220px wide, where sixteen
-  slots is 13px a cell under a mouse, and the landscape song PAGE is a page
-  rather than a strip. Both keep the eight they had. `_laneTight` is the switch
-  everything inside the cell branches on, and it is derived from `SONG_COLS`
-  rather than from the viewport: it is a question about how much room a CELL
-  has, not about which layout you are in.
-- **THE FLOOR IS ITS OWN CONSTANT NOW** (`SONG_MIN`=8). It used to be
-  `SONG_COLS`, which was the same number while the line was eight wide; tying
-  them at sixteen would draw a fresh project sixteen empty outlines, which is
-  more objects on screen and the exact opposite of what shrinking the cells was
-  for.
+**A SONG SLOT IS SIZED BY WHAT YOUR FINGER DOES TO IT, NOT BY WHAT IT SITS
+ABOVE.** `SONG_COLS` is TEN in phone portrait, where it was eight — ~34px on a
+15 and ~33 on an SE. The arrangement is a MAP: you read it far more often than
+you touch it, and as eight big squares flooded with their pattern's colour it
+was the loudest band on the screen, brighter than the grid you actually work
+in. So it comes down — but only so far.
+- **IT WENT TO SIXTEEN FIRST — the grid's own column count, so a slot was
+  exactly a note cell and the two rows lined up column for column — AND THAT
+  WAS AN OVER-STEER**, reported as "too small… they're functioning differently
+  since there's dragging and different kinds of interactions". Exactly right,
+  and the general rule is the one in the heading. A note cell takes ONE
+  gesture, a tap. A song slot takes FOUR: tap to place or select, HOLD for the
+  repeat picker, DRAG the pattern out of it, and it is also the DROP TARGET a
+  chip is dragged onto, with the outer 22% of its width reading as the insert
+  SEAM. At 21px that seam is 4.7px, which is not a thing you can aim at.
+- **Ten is the floor made of precedent**: it is above the 30px the pattern
+  CHIPS already prove for exactly this tap/hold/drag set, the seam is back to
+  ~7px, and it still shows a quarter more song than the eight it started at.
+- **There is NO middle that keeps the grid alignment**, which is what settles
+  the question rather than taste: one cell is 21px and two cells plus a gap is
+  44px — i.e. the size it already was. Alignment was never what did the work
+  anyway; **the DIMMING is.** The lane still starts on the grid's left edge
+  (the row takes the grid box's 10px padding rather than 12), which is the part
+  of "reads as one instrument" that survives a change of pitch.
+- **`_laneTight` is GONE, and so are the sizes that branched on it.** At 21px
+  the cell had room for a silhouette and not an inventory, so the `×N` run
+  badge came off and the bar dots were cut to the sounding slot alone. At 33–38
+  everything fits again exactly as it did at 42, so the branches were reverted
+  rather than left behind — a branch nothing takes is a branch that rots.
+- **THE FLOOR ON HOW MANY SLOTS ARE DRAWN IS ITS OWN CONSTANT** (`SONG_MIN`=8).
+  It used to be `SONG_COLS`, which was the same number while the line was eight
+  wide; tying them together draws a fresh project a full line of empty
+  outlines, which is more objects on screen and the opposite of the point.
 - **DIM AT REST, AND WHAT IS SOUNDING KEEPS EXACTLY WHAT IT HAD.** A resting
   filled slot is its colour at `24`-ish alpha with the glyph in that colour; the
   sounding one is the full flood with the white glowing glyph it always wore, so
@@ -285,15 +296,6 @@ it, and it shows twice as much of the song.
   item's base size is floored at its own border, so actually dropping it makes a
   filled cell 2px narrower and, with `aspect-ratio:1`, 2px shorter. That lesson
   is already in here and it still applies.
-- **A grid-sized cell has room for a SILHOUETTE, not an inventory** — the icon
-  set's 22px rule, one layout down. The `×N` run badge is drawn only on the wide
-  mounts (a 9px "x4" over an 11px glyph is two numbers in one 21px box), and the
-  BAR DOTS only on the sounding slot, which is the only place they ever did their
-  real job: the current bar's dot swells on every quarter note, so they carry the
-  tempo. On the other fifteen they were a bar COUNT, which at 21px across is
-  eight sub-pixel smudges. The repeat PIPS stay at every size — a repeat is
-  structure, and dots along an edge is exactly the kind of mark that survives
-  being shrunk, unlike a number you have to read.
 - **The scroll track is HIDDEN when the lane does not overflow**, not faded to
   0.25 and left there. On a short song that was a full-width bar under half a row
   of slots, saying "there is more over there" when there is not — and with no
@@ -2385,14 +2387,21 @@ Three levers did all of it, and they are the ones to reach for next time:
 **a box is louder than what is in it** (thirteen resting outlines came off the
 chrome and nothing got smaller), **a flood is louder than a tint** (the song
 lane and the bar tile both went from fill to tint, keeping their colour), and
-**size is a statement about how much work something is** (a song slot is a note
-cell now, because arranging is not editing).
+**size is a statement about how much work something is** (the song lane came
+down a size, because arranging is not editing). That third lever is the one
+that over-steers: it was taken all the way to a note cell first and had to come
+back, because **size is also what your finger needs**, and a control's gesture
+COUNT is the floor under it — see the song lane above.
 
 **`_hierarchy.mjs` is the guard, and it asserts the RANKING rather than the
 numbers** — a later tweak to any single alpha is fine, a re-inversion is not. It
 measures the composited luminance of the real computed styles (alpha is the
-whole subject, so it cannot be ignored), and checks: a song slot is a grid cell
-on a 15 and an SE and starts on the grid's own left edge; the grid did not pay
+whole subject, so it cannot be ignored), and checks: a song slot is at least a
+PATTERN CHIP (the control that already proves the same tap/hold/drag set at the
+smallest size anyone has liked), clearly bigger than a note cell, still smaller
+than the eight it started at, with an aimable insert seam, starting on the
+grid's own left edge — a floor and a ceiling rather than a number, since the
+number is the thing that got over-steered once already; the grid did not pay
 for any of it (still 370 and 355); the sounding slot is at least twice the
 luminance of the BRIGHTEST resting one (not one picked at random, or a lane where
 only one other slot had been dimmed would pass); a filled slot has no outline;
