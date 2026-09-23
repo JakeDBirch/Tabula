@@ -357,12 +357,31 @@ ${nativeJs}
   const stray = [];
   for (const [f, body] of [["index.html", nativeHtml]]) {
     for (const m of body.matchAll(/https?:\/\/[^"'\s)]+/g)) {
-      // Three knowingly-inert cases. Supabase is the cloud-sync backend —
-      // network by design, and only after the user signs in. The w3.org SVG
-      // namespace is an identifier, never fetched. The babel/babel link is a
-      // license pointer Babel injects as a comment into its own helpers.
+      // FOUR knowingly-inert cases, and the test that admits one is "does the
+      // PAGE LOAD IT". Supabase is the cloud-sync backend — network by design,
+      // and only after the user signs in. The w3.org SVG namespace is an
+      // identifier, never fetched. The babel/babel link is a license pointer
+      // Babel injects as a comment into its own helpers. And the PRIVACY link
+      // in the PROJECT menu is an <a href> a person TAPS: the page never
+      // fetches it, and in the shell `decidePolicyFor` cancels it and hands it
+      // to Safari, so offline it fails in Safari rather than in the app.
       // Everything else is a bug.
+      //
+      // It is pinned to the whole URL rather than the host, so a real CDN
+      // reference that happened to sit on the same Pages origin — a
+      // <script src> pointing at github.io — would still fail the build.
+      //
+      // Two other fixes were considered and are worse. Bundling privacy.html
+      // and linking to it RELATIVELY removes the URL, but a `loudlight://app`
+      // link opens inside the chromeless web view with no way back, which is
+      // the thing handing it to Safari was chosen to avoid. And narrowing this
+      // scan to LOAD positions only (src=, @import, <link href>) is the
+      // correct-sounding fix that would quietly rot: the bundle is compacted,
+      // so telling an <a href> from a <link href> by regex is exactly the kind
+      // of cleverness that starts missing real CDN references. A blunt scan
+      // with a named allowlist is worth more than a clever one.
       if (/supabase\.co|www\.w3\.org|github\.com\/babel\/babel\//.test(m[0])) continue;
+      if (m[0] === "https://jakedbirch.github.io/Tabula/privacy.html") continue;
       stray.push(`${f}: ${m[0]}`);
     }
   }
