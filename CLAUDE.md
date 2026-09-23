@@ -1950,7 +1950,33 @@ Setup, the App Store Connect click-path and the on-device checklist are in
 two runtime CDN references — the Google Fonts `@import` and the on-demand lamejs
 `<script src>` — to local files, and **fails the build** if either substitution
 misses or if any remote URL survives into the output (Supabase, the SVG
-namespace and Babel's own license comment are the three documented exemptions).
+namespace and Babel's own license comment are three of the four documented
+exemptions).
+
+**THE TEST THAT ADMITS AN EXEMPTION IS "DOES THE PAGE LOAD IT."** The fourth is
+the PROJECT menu's `PRIVACY` link, and it broke the build the moment it landed:
+`build:ios` went red on `cee3f99` and stayed red for two pushes, because the
+scan flags ANY remote URL and that commit added one. It is inert for the same
+reason Supabase is — an `<a href>` a person TAPS, never fetched by the page, and
+in the shell `decidePolicyFor` hands it to Safari, so offline it fails in Safari
+rather than in the app, which is not the failure this audit exists to prevent.
+- **Pinned to the WHOLE URL, not the host**, so a real CDN reference that
+  happened to sit on the same Pages origin still fails. There is a negative
+  control for exactly that: inject a same-origin `evil.js` and the build must
+  still break.
+- **Two other fixes are worse and the reasons are in the comment**, so they do
+  not get rediscovered. Bundling `privacy.html` and linking RELATIVELY removes
+  the URL but opens it inside the chromeless web view with no way back — the
+  thing handing it to Safari was chosen to avoid. And narrowing the scan to LOAD
+  positions only (`src=`, `@import`, `<link href>`) is the correct-sounding fix
+  that would quietly rot: the bundle is compacted, so telling an `<a href>` from
+  a `<link href>` by regex is exactly the cleverness that starts missing real
+  CDN references. **A blunt scan with a named allowlist is worth more than a
+  clever one.**
+- Worth knowing for the next red build: **the `payload` job runs on every push,
+  so it goes red on the NEXT commit too, whoever wrote it.** Check which run
+  first failed before assuming it is yours — `#132` passed, `#133` (the privacy
+  commit) failed, `#134` merely inherited it.
 Same spirit as the `return_react2` audit: a TestFlight build that white-screens
 without signal is the failure this exists to prevent, and it would only ever
 show up on a device you can't attach a debugger to. If you add a CDN dependency
