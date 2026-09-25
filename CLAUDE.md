@@ -929,6 +929,71 @@ adjust, double-tap resets the step), at sixteen times the size.
   long, +100 twice. Ratcheted notes keep their span — that box is divided into
   sub-hits and stretching it would say something untrue about them.
 
+**SCALE AND TRIM RIDE ABOVE THE SPILLED LANE.** Two steppers — `▼ SCALE ▲` and
+`▼ TRIM ▲` — in a row at the top of the overlay. TRIM adds or subtracts a set
+amount on every live step at once; SCALE widens or narrows the ratio between
+the bar's lowest and highest value. They are the two things you want over a
+whole lane rather than a step at a time: a curve you drew is the right SHAPE at
+the wrong LEVEL, or the right shape without enough RANGE, and fixing either by
+redrawing sixteen faders loses the shape you were keeping.
+
+- **SCALE PIVOTS ON THE BAR'S MEAN, not on the midpoint of the axis.** That is
+  what makes it an expander rather than a stretch: a mostly-flat lane with one
+  spike keeps its body where it is and pushes the outlier out, instead of the
+  whole mass sliding toward the middle of the range. `k` is 1.25 up, 0.8 down,
+  so up-then-down comes back to within a rounding step.
+- **TRIM's step is a TWENTIETH OF THE LANE'S OWN RANGE, never a constant.**
+  These lanes run 0..127 (VEL), 1..4 (RTCH) and −100..100 (DUR), so any one
+  number is a nudge on one lane and the whole travel on another. Twenty taps
+  crosses any of them: VEL moves 6 a tap, DUR 10, RTCH and OCT 1.
+- **THEY LIVE INSIDE THE OVERLAY, WHICH IS WHAT MAKES THE ROW FREE.** A row of
+  its own, appearing only while a lane is open, would jog the grid's top edge on
+  every tap of a step button — the exact thing `_gridtop.mjs` exists to forbid.
+  Inside, it costs the faders `SPILL_HDR_H` out of ~370px (10%) and the layout
+  nothing at all, it arrives and leaves with the lane it shapes, and it is the
+  only answer that also works in mobile landscape, where the grid is
+  height-bound and there is no spare row above it to have taken.
+- **34px is under the 44 the persistent chrome holds to, deliberately.** It is
+  spent out of the travel of the very fader it is shaping, each button is ~60px
+  WIDE on a phone, and the row only exists while a lane is open. Height is the
+  scarce axis here and width is not, so the target is bought in width.
+- **A REFUSAL IS DRAWN ON THE CONTROL, with its reason in the name.** A flat
+  lane has no ratio to widen, so SCALE dims both ways and says so; a lane
+  already at its rail dims the TRIM that would do nothing; a bar with no notes
+  dims all four. It is computed by RUNNING the transform and comparing, never
+  by a second guess at what it would refuse — the same rule the SONG → PATTERN
+  menu's blockers follow. That also makes a no-op tap cost no undo step, which
+  matters because `pushHistory` does not dedupe and a dimmed button you keep
+  pressing would otherwise make undo look dead.
+- **Bar-scoped AND note-scoped**, like everything else on this surface: the
+  visible bar only, and only the columns a finger could drag. A locked column
+  refuses a drag, so a button must not write one behind your back either.
+  `spillEditCols` is ONE body for that scan, because the overlay draws those
+  columns and the buttons write them — two copies of a note scan would drift the
+  moment either changed. (It still tests a key called `glide`, which is the
+  lane's OLD name — it has been `glideT` for a while, so GLIDE has always fallen
+  through to the note-start rule. Left exactly as it was on purpose: a glide
+  TIME is read at the attack, so the behaviour is right even though the string
+  is stale, and "fixing" it would make dead cells editable.)
+- **The two steppers are spaced apart from each other and tight within
+  themselves.** Four identical boxes evenly spread read as four of a kind with
+  two words wedged in; the wide gap between the pairs is the whole of what makes
+  them two controls. The MOJO bypass switch's argument again. And the ARROW is
+  brighter than the WORD, because the arrow is the thing you press.
+- `data-spillshape`, `data-shape` (`scaleup` / `scaledn` / `trimup` / `trimdn`),
+  `data-spillcols` and `data-spillv` are the hooks. `data-spillcols` exists
+  because the overlay is two rows now and "the second child" is exactly the
+  DOM-shape selector that broke `_master.mjs` once already. `_spillshape.mjs`
+  asserts the BEHAVIOUR rather than the buttons — TRIM moves every live step by
+  the SAME amount (that is what separates it from a scale), SCALE widens the
+  lowest-to-highest spread and narrows it back, neither touches an empty column
+  or a second bar, each tap is one undo step and a refused tap is none — across
+  portrait, an SE and desktop.
+  - One harness note: **a tap on anything outside the overlay puts the lane
+    away**, by the capture-phase listener that is the spill's backdrop. So the
+    UNDO button closes it, and a test that reads values after an undo has to
+    re-open the lane first.
+
 The old step sheet and step page are still in the source, unreachable, so the
 two can be compared. Delete them once this has been lived with.
 

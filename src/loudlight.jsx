@@ -2821,6 +2821,70 @@ const fmtStepVal=(lane,v)=>{
   return ""+v;
 };
 
+// ── SCALE and TRIM: the two shapes you want over a WHOLE lane ─────────
+// TRIM slides every step by a set amount; SCALE expands or compresses the
+// spread about the bar's MEAN. The mean is the pivot rather than the midpoint
+// of the range because that is what an expander does: a mostly-flat lane with
+// one spike keeps its body where it is and pushes the outlier out, instead of
+// the whole mass sliding toward the middle of the axis.
+//
+// The step is a TWENTIETH OF THE LANE'S OWN RANGE, never an absolute number:
+// these lanes run 0..127 (VEL), 1..4 (RTCH) and -100..100 (DUR), so any one
+// constant is a nudge on one and the whole travel on another. Twenty taps
+// crosses any lane.
+const SPILL_SCALE_K=1.25;
+const spillTrimStep=(lane)=>Math.max(1,Math.round((lane.max-lane.min)/20));
+// The height the SCALE/TRIM row takes out of the top of the spill. Under the
+// 44px the persistent chrome holds to, deliberately: it is spent out of the
+// fader travel of the thing it is shaping, it is wide (~60px a button on a
+// phone) and it only exists while a lane is open. 34 is what a thumb can hit
+// without the lane losing a tenth of its height.
+const SPILL_HDR_H=IS_MOBILE?34:28;
+// Returns the transformed values, or NULL when the transform changes nothing —
+// which is what disables the button AND what keeps a no-op tap from costing an
+// undo step. A FLAT lane has no ratio to widen, so SCALE reports null in both
+// directions and dims itself rather than reading as a dead control.
+const spillShape=(lane,vals,mode,dir)=>{
+  if(!vals.length)return null;
+  let out;
+  if(mode==="trim"){
+    const d=spillTrimStep(lane)*(dir>0?1:-1);
+    out=vals.map(v=>v+d);
+  }else{
+    const k=dir>0?SPILL_SCALE_K:1/SPILL_SCALE_K;
+    const piv=vals.reduce((a,b)=>a+b,0)/vals.length;
+    out=vals.map(v=>piv+(v-piv)*k);
+  }
+  out=out.map(v=>Math.max(lane.min,Math.min(lane.max,Math.round(v))));
+  return out.some((v,i)=>v!==vals[i])?out:null;
+};
+// Which of the visible bar's columns a spill may write. FLT and OCT animate
+// mid-note, so they stay live across a tied note's extension cells; everything
+// else is locked at note-start and is dead on a column with no attack. ONE
+// body, because the overlay draws these and the SCALE/TRIM buttons write them
+// — two copies of a note scan would drift the moment either changed.
+// (The third key tested is `glide`, the lane's OLD name — it is `glideT` now,
+// so GLIDE has always fallen through to the note-start rule. Left exactly as
+// it was: a glide TIME is read at the attack, so the behaviour is right even
+// though the string is stale, and "fixing" it would make dead cells editable.)
+const spillEditCols=(pat,off,laneKey)=>{
+  const isMidNote=laneKey==="flt"||laneKey==="oct"||laneKey==="glide";
+  return Array.from({length:COLS},(_,vc)=>{
+    const c=off+vc;
+    if(!isMidNote){
+      for(let r=0;r<ROWS;r++) if(pat.grid[r]&&pat.grid[r][c])return true;
+      return false;
+    }
+    for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
+      if(pat.grid[r]&&pat.grid[r][c2]){
+        const span=Math.max(1,(pat.durs&&pat.durs[r]&&pat.durs[r][c2])||1);
+        if(c<c2+span)return true;
+      }
+    }
+    return false;
+  });
+};
+
 function StepLane({lane,values,activeStep,onChange,onDragStart,tall,colHasNote,onResetCol}){
   const ref=useRef(null);
   const drag=useRef({active:false});
@@ -11481,6 +11545,29 @@ export default function LoudLight(){
     }));
   };
   resetStepLaneR.current=resetStepLane;
+  // SCALE / TRIM over the visible bar's lane. Bar-scoped like every other lane
+  // op, and NOTE-scoped like the spill's own drag: a locked column refuses a
+  // finger, so a button must not write one behind your back either. Nothing is
+  // pushed to history unless the transform actually moves a value — `pushHistory`
+  // does not dedupe, and a dimmed button you keep tapping would otherwise fill
+  // the ring with no-ops and make undo look dead.
+  const shapeStepLane=(key,mode,dir)=>{
+    const lane=LANES.find(l=>l.key===key); if(!lane||!activePat)return;
+    const pat=activePat, off=barOffIn(pat);
+    const ok=spillEditCols(pat,off,key);
+    const all=pat.params||defaultStepParams(patW(pat));
+    const cols=[]; for(let vc=0;vc<COLS;vc++) if(ok[vc])cols.push(off+vc);
+    const cur=cols.map(c=>{const sp=all[c];return (sp&&sp[key]!=null)?sp[key]:lane.def;});
+    const next=spillShape(lane,cur,mode,dir);
+    if(!next)return;
+    pushHistory(); setFollowSeq(false);
+    setPats(ps=>ps.map(p=>{
+      if(p.id!==activeId)return p;
+      const params=(p.params||defaultStepParams(patW(p))).slice();
+      cols.forEach((c,i)=>{if(params[c])params[c]=Object.assign({},params[c],{[key]:next[i]});});
+      return Object.assign({},p,{params});
+    }));
+  };
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
@@ -11522,26 +11609,10 @@ export default function LoudLight(){
     if(!lane||activeLayer==="drums"||!activePat)return null;
     const pat=activePat;
     const allParams=pat.params||defaultStepParams(patW(pat));
-    // FLT / OCT / GLIDE are the only lanes that animate mid-note, so they stay
-    // live across a tied note's extension cells; everything else is locked at
-    // note-start and is dead on a column with no attack. Same rule the lanes
-    // always had — it is about when the engine reads the value, not about which
-    // surface is drawing it.
-    const isMidNote=lane.key==="flt"||lane.key==="oct"||lane.key==="glide";
-    const colHasNote=Array.from({length:COLS},(_,vc)=>{
-      const c=barOff+vc;
-      if(!isMidNote){
-        for(let r=0;r<ROWS;r++) if(pat.grid[r]&&pat.grid[r][c])return true;
-        return false;
-      }
-      for(let r=0;r<ROWS;r++)for(let c2=0;c2<=c;c2++){
-        if(pat.grid[r]&&pat.grid[r][c2]){
-          const span=Math.max(1,(pat.durs&&pat.durs[r]&&pat.durs[r][c2])||1);
-          if(c<c2+span)return true;
-        }
-      }
-      return false;
-    });
+    // Which columns are live — the same scan the SCALE/TRIM buttons write
+    // through, so what a finger may reach and what a button may write cannot
+    // drift apart. See `spillEditCols`.
+    const colHasNote=spillEditCols(pat,barOff,lane.key);
     const valAt=(vc)=>{const sp=allParams[barOff+vc];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;};
     const colAt=(clientX,el)=>{
       const rect=el.getBoundingClientRect();
@@ -11557,81 +11628,143 @@ export default function LoudLight(){
       setStepParam(barOff+vc,lane.key,Math.max(lane.min,Math.min(lane.max,Math.round(v))));
     };
     const playCol=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1;
+    // The values SCALE and TRIM work on: this bar's live steps, in order.
+    const shapeVals=[];
+    for(let vc=0;vc<COLS;vc++) if(colHasNote[vc])shapeVals.push(valAt(vc));
+    const noSteps=shapeVals.length===0;
+    // ── SCALE / TRIM, drawn ABOVE the lane they shape ──────────────────
+    // Inside the overlay rather than in a row of its own, so the controls
+    // arrive and leave with the lane and THE GRID'S TOP EDGE NEVER MOVES —
+    // a row that appeared only while a lane was open would jog the whole
+    // instrument on every tap of a step button (`_gridtop`). It costs the
+    // faders this row's height out of ~370px of travel and nothing else,
+    // and in mobile landscape — the one height-bound layout — there is no
+    // spare row above the grid to have used instead.
+    // The gap BETWEEN the two groups is wider than the gap inside one. Four
+    // identical boxes evenly spaced read as four of a kind with two words
+    // wedged in; spaced like this they read as two steppers, which is what they
+    // are — the same argument the MOJO bypass switch is set apart by.
+    const shapeRow=(
+      <div data-spillshape={lane.key} style={{display:"flex",gap:CELL_GAP*4,height:SPILL_HDR_H,flexShrink:0,marginBottom:2}}>
+        {[["scale","SCALE"],["trim","TRIM"]].map(([mode,label])=>(
+          <div key={mode} style={{flex:1,minWidth:0,display:"flex",gap:CELL_GAP,alignItems:"stretch"}}>
+            {[[-1,"▼"],[0,null],[1,"▲"]].map(([dir,glyph])=>{
+              if(glyph===null)return(
+                <span key="lbl" style={{flex:1,minWidth:0,display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:9,fontWeight:700,letterSpacing:0.5,color:lane.color+"5c",
+                  pointerEvents:"none",userSelect:"none",WebkitUserSelect:"none"}}>{label}</span>
+              );
+              const live=!noSteps&&!!spillShape(lane,shapeVals,mode,dir);
+              // The refusal says WHY, on the control, rather than leaving a
+              // dead-looking button: a flat lane has no ratio to widen, and a
+              // lane already at its rail has nothing left to add.
+              const why=noSteps?"no notes in this bar"
+                :mode==="scale"?"this bar's "+lane.label+" is flat — no spread to "+(dir>0?"widen":"narrow")
+                :"every step is already at the "+(dir>0?"top":"bottom");
+              const does=mode==="scale"
+                ?(dir>0?"widen":"narrow")+" the spread between this bar's lowest and highest "+lane.label
+                :(dir>0?"add ":"subtract ")+spillTrimStep(lane)+" on every step in this bar";
+              return(
+                <button key={dir} data-shape={mode+(dir>0?"up":"dn")} disabled={!live}
+                  aria-label={label+(dir>0?" up":" down")}
+                  title={label+" — "+(live?does:why)}
+                  onPointerDown={e=>e.stopPropagation()}
+                  onClick={e=>{e.stopPropagation();shapeStepLane(lane.key,mode,dir);}}
+                  style={{flex:1,minWidth:0,borderRadius:4,padding:0,fontFamily:"inherit",
+                    border:"1px solid "+lane.color+(live?"1f":"10"),
+                    background:live?"rgba(186,208,230,0.03)":"rgba(186,208,230,0.015)",
+                    color:lane.color+(live?"b8":"30"),
+                    fontSize:11,lineHeight:1,cursor:live?"pointer":"default",
+                    touchAction:"manipulation",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}>{glyph}</button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    );
     return(
       <div data-spill={lane.key}
-        style={{position:"absolute",inset:0,zIndex:3,display:"flex",gap:CELL_GAP,
-          touchAction:"none",cursor:"ns-resize"}}
-        onPointerDown={e=>{
-          e.stopPropagation();e.preventDefault();
-          try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
-          const el=e.currentTarget, vc=colAt(e.clientX,el);
-          // A bool lane is a toggle, not a fader: no height to read.
-          if(lane.bool){
-            if(!colHasNote[vc]){_spillR.current={active:false};return;}
-            pushHistory();write(vc,valAt(vc)?0:1);_spillR.current={active:false};return;
-          }
-          // Double-tap a step resets EVERY lane on it, exactly as it did in the
-          // lanes. Keyed by column so taps on adjacent steps don't pair.
-          if(colHasNote[vc]&&isDoubleTap(e,vc)){_spillR.current={active:false};resetStepCol(barOff+vc);return;}
-          _spillR.current={active:true,mode:null,col:vc,el,
-            startLocked:!colHasNote[vc],cur:valAt(vc),
-            ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false,
-            hgt:el.getBoundingClientRect().height};
-        }}
-        onPointerMove={e=>{
-          const d=_spillR.current; if(!d||!d.active)return; e.stopPropagation();
-          // The same gesture split the lanes had: a horizontal-dominant drag
-          // DRAWS a curve across steps, a vertical one is a fine ballistic
-          // adjust of the step you started on. The grid is bigger, so the curve
-          // is the gesture that got better — you draw it with your whole hand.
-          if(d.mode===null){
-            const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
-            if(d.startLocked){ if(Math.abs(dx)>6||Math.abs(dy)>6)d.mode="draw"; else return; }
-            else if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6)d.mode="draw";
-            else if(Math.abs(dy)>4)d.mode="fine";
-            else return;
-            if(!d.didStart){pushHistory();d.didStart=true;}
-          }
-          if(d.mode==="draw")write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
-          else{
-            const pd=d.ly-e.clientY; d.ly=e.clientY;
-            d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,d.hgt,lane.max-lane.min)));
-            write(d.col,d.cur);
-          }
-        }}
-        onPointerUp={e=>{
-          const d=_spillR.current;
-          if(d&&d.active&&d.mode===null&&!d.startLocked&&e.type==="pointerup"){
-            pushHistory();write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
-          }
-          _spillR.current={active:false};
-        }}
-        onPointerCancel={()=>{_spillR.current={active:false};}}>
-        {Array.from({length:COLS},(_,vc)=>{
-          const v=valAt(vc), locked=!colHasNote[vc], isAct=vc===playCol, isQ=vc%4===0;
-          const isRhy=lane.key==="rhy";
-          const pct=lane.bool?(v?1:0)
-            :isRhy?Math.max(0.12,(Math.round(v)-1)/3)
-            :(v-lane.min)/(lane.max-lane.min);
-          const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
-          return(
-            <div key={vc} style={{flex:1,minWidth:0,position:"relative",borderRadius:2,
-              background:isQ?"rgba(10,20,32,0.30)":"rgba(10,20,32,0.22)",
-              opacity:locked?0.25:1,overflow:"hidden"}}>
-              {lane.center!=null&&<div style={{position:"absolute",left:0,right:0,bottom:(cp*100)+"%",height:1,background:lane.color+"33"}}/>}
-              <div style={{position:"absolute",left:0,right:0,bottom:0,height:(pct*100)+"%",
-                background:isAct?lane.color:lane.color+"66",
-                boxShadow:isAct?"0 0 8px "+lane.color:"none",transition:"height .04s"}}/>
-              {/* The value, on steps that carry one. The lanes could only afford
-                  7px here; a full-height column can say it properly. */}
-              {!locked&&(isAct||v!==lane.def)&&(
-                <span style={{position:"absolute",top:2,left:0,right:0,textAlign:"center",
-                  fontSize:9,fontWeight:700,lineHeight:1.2,color:"rgba(245,240,232,0.95)",
-                  textShadow:"0 0 3px #000,0 1px 2px #000",pointerEvents:"none"}}>{fmtStepVal(lane,v)}</span>
-              )}
-            </div>
-          );
-        })}
+        style={{position:"absolute",inset:0,zIndex:3,display:"flex",flexDirection:"column",gap:CELL_GAP}}>
+        {shapeRow}
+      {/* `data-spillcols` is the harnesses' hook for the faders themselves —
+          the overlay is two rows now, and "the second child" is exactly the
+          DOM-shape selector that broke `_master.mjs` once already. */}
+        <div data-spillcols="1"
+          style={{flex:1,minHeight:0,display:"flex",gap:CELL_GAP,
+            touchAction:"none",cursor:"ns-resize"}}
+          onPointerDown={e=>{
+            e.stopPropagation();e.preventDefault();
+            try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+            const el=e.currentTarget, vc=colAt(e.clientX,el);
+            // A bool lane is a toggle, not a fader: no height to read.
+            if(lane.bool){
+              if(!colHasNote[vc]){_spillR.current={active:false};return;}
+              pushHistory();write(vc,valAt(vc)?0:1);_spillR.current={active:false};return;
+            }
+            // Double-tap a step resets EVERY lane on it, exactly as it did in the
+            // lanes. Keyed by column so taps on adjacent steps don't pair.
+            if(colHasNote[vc]&&isDoubleTap(e,vc)){_spillR.current={active:false};resetStepCol(barOff+vc);return;}
+            _spillR.current={active:true,mode:null,col:vc,el,
+              startLocked:!colHasNote[vc],cur:valAt(vc),
+              ly:e.clientY,sx:e.clientX,sy:e.clientY,didStart:false,
+              hgt:el.getBoundingClientRect().height};
+          }}
+          onPointerMove={e=>{
+            const d=_spillR.current; if(!d||!d.active)return; e.stopPropagation();
+            // The same gesture split the lanes had: a horizontal-dominant drag
+            // DRAWS a curve across steps, a vertical one is a fine ballistic
+            // adjust of the step you started on. The grid is bigger, so the curve
+            // is the gesture that got better — you draw it with your whole hand.
+            if(d.mode===null){
+              const dx=e.clientX-d.sx, dy=e.clientY-d.sy;
+              if(d.startLocked){ if(Math.abs(dx)>6||Math.abs(dy)>6)d.mode="draw"; else return; }
+              else if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>6)d.mode="draw";
+              else if(Math.abs(dy)>4)d.mode="fine";
+              else return;
+              if(!d.didStart){pushHistory();d.didStart=true;}
+            }
+            if(d.mode==="draw")write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+            else{
+              const pd=d.ly-e.clientY; d.ly=e.clientY;
+              d.cur=Math.max(lane.min,Math.min(lane.max,d.cur+ballisticDelta(pd,d.hgt,lane.max-lane.min)));
+              write(d.col,d.cur);
+            }
+          }}
+          onPointerUp={e=>{
+            const d=_spillR.current;
+            if(d&&d.active&&d.mode===null&&!d.startLocked&&e.type==="pointerup"){
+              pushHistory();write(colAt(e.clientX,d.el),valFromY(e.clientY,d.el));
+            }
+            _spillR.current={active:false};
+          }}
+          onPointerCancel={()=>{_spillR.current={active:false};}}>
+          {Array.from({length:COLS},(_,vc)=>{
+            const v=valAt(vc), locked=!colHasNote[vc], isAct=vc===playCol, isQ=vc%4===0;
+            const isRhy=lane.key==="rhy";
+            const pct=lane.bool?(v?1:0)
+              :isRhy?Math.max(0.12,(Math.round(v)-1)/3)
+              :(v-lane.min)/(lane.max-lane.min);
+            const cp=lane.center!=null?(lane.center-lane.min)/(lane.max-lane.min):0;
+            return(
+              <div key={vc} data-spillv={v} data-spilllive={locked?undefined:"1"}
+                style={{flex:1,minWidth:0,position:"relative",borderRadius:2,
+                background:isQ?"rgba(10,20,32,0.30)":"rgba(10,20,32,0.22)",
+                opacity:locked?0.25:1,overflow:"hidden"}}>
+                {lane.center!=null&&<div style={{position:"absolute",left:0,right:0,bottom:(cp*100)+"%",height:1,background:lane.color+"33"}}/>}
+                <div style={{position:"absolute",left:0,right:0,bottom:0,height:(pct*100)+"%",
+                  background:isAct?lane.color:lane.color+"66",
+                  boxShadow:isAct?"0 0 8px "+lane.color:"none",transition:"height .04s"}}/>
+                {/* The value, on steps that carry one. The lanes could only afford
+                    7px here; a full-height column can say it properly. */}
+                {!locked&&(isAct||v!==lane.def)&&(
+                  <span style={{position:"absolute",top:2,left:0,right:0,textAlign:"center",
+                    fontSize:9,fontWeight:700,lineHeight:1.2,color:"rgba(245,240,232,0.95)",
+                    textShadow:"0 0 3px #000,0 1px 2px #000",pointerEvents:"none"}}>{fmtStepVal(lane,v)}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
