@@ -2414,12 +2414,24 @@ const genVariation=(grid,vp={},c0=0,w=null)=>{
 // no-ops and undo would look broken for several presses. A gesture that moved
 // nothing leaves no trace.
 const HIST={mark:()=>{}};
+// ── WHICH FIELDS THIS NOTE OVERRIDES ─────────────────────────────────────
+// `KnobSlider` lives at module scope and cannot see the component's state, so
+// it reads the override set through one mutable hook the component fills each
+// render — the same shape as `HIST.mark`, for the same reason.
+//
+// It is keyed off the SETTER, not the label: the labels collide (two SENDs,
+// three VELs), and every control on this screen already receives
+// `onChange={_setLP("someKey")}`, so the key can simply ride on the function.
+// That is what makes ~18 controls mark themselves with no edit at any call site.
+const NOTE_OVR={keys:null,col:"#e6b872"};
+const noteOvr=(fn)=>!!(NOTE_OVR.keys&&fn&&fn.__lpKey&&NOTE_OVR.keys.has(fn.__lpKey));
 
 // ─── KnobSlider with accent color ─────────────────────────────────────────────
 function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const ref=useRef(null);
   const drag=useRef(null);
-  const col=accent||"rgba(255,255,255,0.6)";
+  const _ovr=noteOvr(onChange);
+  const col=_ovr?NOTE_OVR.col:(accent||"rgba(255,255,255,0.6)");
   const pct=((value-min)/(max-min))*100;
   // Drag is RELATIVE at ~0.5x by default: dragging the full length of the control
   // moves the value half its range — finer than tracking the pointer 1:1, and no
@@ -2455,9 +2467,9 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const onUp=useCallback(()=>{drag.current=null;},[]); // end the drag on release so it can't linger
   if(vertical){
     return(
-      <div data-knob={label} data-knobval={String(value)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
+      <div data-knob={label} data-knobval={String(value)} data-knobovr={_ovr?"1":undefined} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
         <div style={{fontSize:10,letterSpacing:1,fontWeight:500,color:col+"bb",textAlign:"center",lineHeight:1.4}}>
-          <div>{label}</div>
+          <div>{_ovr&&<span style={{display:"inline-block",width:5,height:5,borderRadius:3,background:NOTE_OVR.col,marginRight:4,verticalAlign:"middle",boxShadow:"0 0 4px "+NOTE_OVR.col}}/>}{label}</div>
           <div style={{color:col,letterSpacing:0}}>{display}</div>
         </div>
         <div ref={ref} style={{position:"relative",width:28,flex:1,minHeight:80,cursor:"ns-resize",touchAction:"none",display:"flex",justifyContent:"center"}}
@@ -2477,9 +2489,9 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   // no way to ask a headless run what one is set to — and gestures are exactly
   // what headless tests are worst at, so the ones that CAN be read should be.
   return(
-    <div data-knob={label} data-knobval={String(value)} style={S.knobWrap}>
+    <div data-knob={label} data-knobval={String(value)} data-knobovr={_ovr?"1":undefined} style={S.knobWrap}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-        <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
+        <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{_ovr&&<span style={{display:"inline-block",width:5,height:5,borderRadius:3,background:NOTE_OVR.col,marginRight:4,verticalAlign:"middle",boxShadow:"0 0 4px "+NOTE_OVR.col}}/>}{label}</div>
         <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
       </div>
       <div ref={ref} style={S.knobTrackWrap}
@@ -4701,6 +4713,16 @@ export default function LoudLight(){
   // override you cannot see is the VARY mistake in miniature: state that
   // decides what saved work sounds like, with nothing on screen to say so.
   const _npKeys = _npOn ? Object.keys(_npCur) : [];
+  // Assigned HERE rather than by an effect: an effect runs after the render that
+  // needs it, so every control would draw one commit behind the edit.
+  NOTE_OVR.keys = _npOn ? new Set(_npKeys) : null;
+  // The octave row is buttons rather than a KnobSlider, so it takes the gold by
+  // hand. It reads `_npKeys` DIRECTLY rather than the hook above it — the first
+  // version read the hook one line before it was published and so drew a commit
+  // behind, which is the same off-by-one-render trap as a dep array above its
+  // value. Declared above both mounts, because a `const` read from JSX that sits
+  // earlier in the body binds `undefined`.
+  const _octCol = _npKeys.indexOf("octave")>=0 ? NOTE_OVR.col : C_OSC;
   const _setNotePatch=(key,val)=>{
     if(NOTE_PATCH_DENY[key])return;
     const col=notePatchAt&&notePatchAt.col; if(col==null)return;
@@ -4724,19 +4746,21 @@ export default function LoudLight(){
       return Object.assign({},pp,{notePatch:lane});
     }));
   };
-  const _setLP = (key)=>(val)=>{ if(_npOn){_setNotePatch(key,val);return;}
-    setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}})); };
+  const _setLP = (key)=>{ const f=(val)=>{ if(_npOn){_setNotePatch(key,val);return;}
+      setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}})); };
+    f.__lpKey=key; return f; };
   // The DISCRETE per-layer controls — waveform and the octave buttons
   // toggles — push a history entry outright. The continuous ones don't come
   // through here: they are KnobSliders, and those mark themselves on the first
   // move of a drag, so routing them through this would push on every
   // pointermove. (pushHistory is declared further down; Babel lowers const to
   // var, so call it from inside the closure rather than capturing it here.)
-  const _setLPStep = (key)=>(val)=>{
-    if(_npOn){ if(_lp[key]!==val)pushHistory(); _setNotePatch(key,val); return; }
-    if(layerParams[_lpKey][key]!==val)pushHistory();
-    setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
-  };
+  const _setLPStep = (key)=>{ const f=(val)=>{
+      if(_npOn){ if(_lp[key]!==val)pushHistory(); _setNotePatch(key,val); return; }
+      if(layerParams[_lpKey][key]!==val)pushHistory();
+      setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
+    };
+    f.__lpKey=key; return f; };
 
   // Existing UI references {waveform, setWaveform, ...} continue to work; they now
   // read/write the active layer's slot in layerParams.
@@ -6842,6 +6866,10 @@ export default function LoudLight(){
   // The banner. It is the whole state display for the mode: which note, what it
   // overrides, and the way out. One body, so both mounts carry it.
   const notePatchBar=(compact)=>{
+    void compact;
+    return null;   // merged into noteHeader — it was the badge-above-the-page shape
+  };
+  const _notePatchBarOld=(compact)=>{
     if(!_npOn)return null;
     const n=_npKeys.length;
     return(
@@ -6868,7 +6896,68 @@ export default function LoudLight(){
       </div>
     );
   };
-  const soundTabs=(compact)=>(
+  // ── PER-NOTE MODE LOOKS DIFFERENT, NOT JUST LABELLED DIFFERENTLY ─────────
+  // The first cut put a banner ABOVE the unchanged screen, and a banner is a
+  // badge: the two modes were the same picture with a caption, which was
+  // reported as hard to tell apart. Three changes, and the first is the one
+  // that does the work:
+  //
+  //  1. THE FOUR-FACE SELECTOR IS GONE, replaced by this header. That row is
+  //     the most recognisable thing at the top of the SOUND screen, so swapping
+  //     it changes the screen's SILHOUETTE — which is what a glance reads,
+  //     before any colour or text. It is also honest: DRUMS and MIX have no
+  //     per-note meaning and picking any face drops the scope anyway, so the
+  //     tabs were four controls that all meant "leave". One way out, named.
+  //  2. The panel takes a GOLD FRAME and a gold wash (below), so the surface
+  //     itself is a different colour of room.
+  //  3. Every OVERRIDDEN control goes gold (see NOTE_OVR), so the face also
+  //     says WHICH fields this note has taken over.
+  //
+  // Gold is `C_VARY`, the same gold as the ring on the patched note in the
+  // grid — so the grid and this screen agree about what "this one note" looks
+  // like. It is a third use of that amber (the held transport and the toggles
+  // have their own), and the collision is accepted deliberately: those never
+  // share a surface with this, and agreeing with the grid is worth more.
+  const noteHeader=(compact)=>{
+    const n=_npKeys.length;
+    const lyr=activeLayer==="lead"?"MONO":"POLY";
+    const _f=(curFreqs&&curFreqs[notePatchAt.row])||0;
+    const nm=_f?noteNameOf(_f*stR(transpose)):null;
+    return(
+      <div data-notepatch="1" data-noteheader="1" style={{flexShrink:0,display:"flex",alignItems:"center",gap:compact?5:7,
+        marginBottom:compact?6:10,padding:compact?"0 0 6px":"0 0 8px",
+        borderBottom:"1px solid "+C_VARY+"44"}}>
+        <button data-notepatch-exit="1" onClick={_closeNoteSound} aria-label="Back to the layer's sound"
+          title={"Back to the whole "+lyr+" sound"}
+          style={{flexShrink:0,height:compact?28:32,padding:"0 9px",borderRadius:7,cursor:"pointer",
+            fontFamily:"inherit",fontSize:compact?9:10,letterSpacing:1,
+            border:"1px solid rgba(168,190,212,0.22)",background:"transparent",
+            color:"rgba(178,199,219,0.6)"}}>{"\u25c2 "+lyr}</button>
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <span style={{width:7,height:7,borderRadius:2,background:C_VARY,flexShrink:0,
+              boxShadow:"0 0 5px "+C_VARY+"aa"}}/>
+            <span style={{fontSize:compact?10:11,letterSpacing:1.6,color:C_VARY,whiteSpace:"nowrap"}}>ONE NOTE</span>
+          </div>
+          <div data-notepatch-step="1" style={{fontSize:compact?8:9,letterSpacing:1,
+            color:"rgba(232,240,248,0.6)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {"BAR "+(Math.floor(notePatchAt.col/COLS)+1)+" \u00b7 STEP "+(notePatchAt.col%COLS+1)+(nm?" \u00b7 "+nm:"")}
+          </div>
+        </div>
+        <div data-notepatch-n={n} style={{flexShrink:0,textAlign:"right",fontSize:compact?8:9,letterSpacing:0.6,
+          color:n?C_VARY:"rgba(178,199,219,0.38)",whiteSpace:"nowrap"}}>
+          {n?(n+" OF ITS OWN"):"all inherited"}
+        </div>
+        {n>0&&(
+          <button data-notepatch-reset="1" onClick={_clearNotePatch} title="Drop this note's overrides"
+            style={{flexShrink:0,height:compact?26:28,padding:"0 8px",borderRadius:6,cursor:"pointer",
+              fontFamily:"inherit",fontSize:compact?8:9,letterSpacing:1,
+              border:"1px solid "+C_VARY+"66",background:"transparent",color:C_VARY}}>RESET</button>
+        )}
+      </div>
+    );
+  };
+  const soundTabs=(compact)=>_npOn?noteHeader(compact):(
     <div data-soundtabs="1" style={{display:"flex",gap:4,flexShrink:0,marginBottom:compact?6:10}}>
       {compact&&(
         <button data-soundclose="1" aria-label="Close sound" title="Close"
@@ -13730,7 +13819,8 @@ export default function LoudLight(){
               <div style={{position:"absolute",top:8,left:12,right:12,zIndex:6}}>{soundTabs(false)}{notePatchBar(false)}</div>
             )}
             {soundTab==="layer"&&activeLayer!=="drums"&&page==="sound"&&(
-              <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
+              <div data-noteroom={_npOn?"1":undefined} style={Object.assign({height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"},
+                _npOn?{background:C_VARY+"16",boxShadow:"inset 0 0 0 1px "+C_VARY+"77"}:{})}>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,alignItems:"start"}}>
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
                       <div style={{display:"flex",gap:10,padding:"8px 10px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
@@ -13752,7 +13842,7 @@ export default function LoudLight(){
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
-                            <button key={w} data-wf={w} aria-pressed={waveform===w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                            <button key={w} data-wf={w} aria-pressed={waveform===w} data-knobovr={noteOvr(setWaveform)?"1":undefined} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+(waveform===w?"":"22"),color:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC):"rgba(178,199,219,0.35)",background:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+"14":"transparent"})} onClick={()=>setWaveform(w)}>
                               {WF_LABELS[i]}
                             </button>
                           ))}
@@ -13764,7 +13854,7 @@ export default function LoudLight(){
                         <div style={{flex:1,display:"flex",gap:3}}>
                           {[-2,-1,0,1,2].map(o=>(
                             <button key={o} onClick={()=>setOctaveLP(o)}
-                              style={{flex:1,height:26,padding:0,fontSize:11,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                              data-knobovr={noteOvr(setOctaveLP)?"1":undefined} style={{flex:1,height:26,padding:0,fontSize:11,fontWeight:600,border:"1px solid "+_octCol+(octaveLP===o?"":"22"),background:octaveLP===o?_octCol+"14":"transparent",color:octaveLP===o?_octCol:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
                               {o>0?"+"+o:o}
                             </button>
                           ))}
@@ -14495,9 +14585,12 @@ export default function LoudLight(){
                      the mixer's `flex:1` against nothing. That is the same
                      mistake as the sheet's own `maxHeight`, one level down — a
                      chain of flex is only as good as its weakest link. */
-                  <div style={soundTab==="fx"
-                    ?{flexShrink:0,display:"flex",flexDirection:"column"}
-                    :{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+                  <div data-noteroom={_npOn?"1":undefined} style={Object.assign(
+                    soundTab==="fx"
+                      ?{flexShrink:0,display:"flex",flexDirection:"column"}
+                      :{flex:1,minHeight:0,display:"flex",flexDirection:"column"},
+                    _npOn?{background:C_VARY+"16",boxShadow:"inset 0 0 0 1px "+C_VARY+"77",
+                           borderRadius:10,padding:"7px 8px 0",margin:"-2px -2px 0"}:{})}>
                     {soundTabs(true)}
                     {notePatchBar(true)}
                     {soundTab==="layer"&&activeLayer!=="drums"&&(
@@ -14524,7 +14617,7 @@ export default function LoudLight(){
                               <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
-                                  <button key={w} data-wf={w} aria-pressed={waveform===w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
+                                  <button key={w} data-wf={w} aria-pressed={waveform===w} data-knobovr={noteOvr(setWaveform)?"1":undefined} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+(waveform===w?"":"22"),color:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC):"rgba(178,199,219,0.35)",background:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
                                 ))}
                               </div>
                             </div>
@@ -14534,7 +14627,7 @@ export default function LoudLight(){
                               <div style={{flex:1,display:"flex",gap:2}}>
                                 {[-2,-1,0,1,2].map(o=>(
                                   <button key={o} onClick={()=>setOctaveLP(o)}
-                                    style={{flex:1,height:22,padding:0,fontSize:10,fontWeight:600,border:"1px solid "+C_OSC+(octaveLP===o?"":"22"),background:octaveLP===o?C_OSC+"14":"transparent",color:octaveLP===o?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                                    data-knobovr={noteOvr(setOctaveLP)?"1":undefined} style={{flex:1,height:22,padding:0,fontSize:10,fontWeight:600,border:"1px solid "+_octCol+(octaveLP===o?"":"22"),background:octaveLP===o?_octCol+"14":"transparent",color:octaveLP===o?_octCol:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
                                     {o>0?"+"+o:o}
                                   </button>
                                 ))}
