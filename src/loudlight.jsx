@@ -2861,12 +2861,18 @@ const spillSpan=(lane,mode)=>mode==="trim"?(lane.max-lane.min):SPILL_SCALE_SPAN;
 const spillShapeWord=(mode,amt)=>mode==="trim"
   ?(amt>0?"+":"")+Math.round(amt)
   :"\u00d7"+Math.pow(2,amt).toFixed(2);
-// The height of the handle row, taken out of the top of the spill. Under the
-// 44px the persistent chrome holds to, deliberately: it is spent out of the
-// fader travel of the very thing it is shaping, each handle is ~170px WIDE on
-// a phone, and it is a GRIP — once your finger is down the pointer is captured
-// and the travel is the whole screen, not these 34 pixels.
-const SPILL_HDR_H=IS_MOBILE?34:28;
+// THE HANDLE ROW IS A WHOLE NUMBER OF GRID ROWS, not a pixel height. It is
+// drawn over the grid, so anything else lands mid-cell and reads as a panel
+// dropped on top; two rows tall, it IS the top two rows, the faders start
+// exactly on a row line, and the whole overlay is one object with the
+// instrument under it. The cost is stated rather than hidden: the faders have
+// fourteen rows of travel instead of sixteen.
+//
+// It also sizes itself, which the pixel constant could not: two rows is 46px
+// on a 15 and 44 on an SE — over the 44 the chrome holds to, where the old 34
+// was under it — and it scales with the grid on every phone and iPad.
+const SPILL_HDR_ROWS=2;
+const SPILL_HDR_PCT=(SPILL_HDR_ROWS/ROWS*100)+"%";
 // Which of the visible bar's columns a spill may write. FLT and OCT animate
 // mid-note, so they stay live across a tied note's extension cells; everything
 // else is locked at note-start and is dead on a column with no attack. ONE
@@ -11688,7 +11694,7 @@ export default function LoudLight(){
     };
     const shapeEnd=()=>{_shapeDragR.current=null;setShapeDrag(null);};
     const shapeRow=(
-      <div data-spillshape={lane.key} style={{display:"flex",gap:CELL_GAP*4,height:SPILL_HDR_H,flexShrink:0,marginBottom:2}}>
+      <div data-spillshape={lane.key} style={{display:"flex",gap:CELL_GAP*4,height:SPILL_HDR_PCT,flexShrink:0}}>
         {[["scale","SCALE"],["trim","TRIM"]].map(([mode,label])=>{
           // A flat lane has no ratio to widen, so SCALE has nothing to do with
           // it; with no notes in the bar neither has. The refusal is drawn on
@@ -11705,7 +11711,7 @@ export default function LoudLight(){
           // The grip: three rules, the mark every draggable thing wears. They
           // run ACROSS the drag, which is what says which way it moves.
           const grip=(k)=>(
-            <span key={k} style={{width:11,alignSelf:"center",height:9,borderRadius:1,
+            <span key={k} style={{width:13,alignSelf:"center",height:13,borderRadius:1,
               background:"repeating-linear-gradient(to bottom,"+lane.color+(live?"66":"22")+" 0 1px,transparent 1px 4px)"}}/>
           );
           return(
@@ -11720,7 +11726,7 @@ export default function LoudLight(){
                 border:"1px solid "+lane.color+(held?"4d":live?"1f":"10"),
                 background:held?lane.color+"1c":live?"rgba(186,208,230,0.03)":"rgba(186,208,230,0.015)",
                 color:lane.color+(held?"e6":live?"8c":"33"),
-                fontSize:held?11:9,fontWeight:700,letterSpacing:held?0:0.5,
+                fontSize:held?15:11,fontWeight:700,letterSpacing:held?0:0.5,
                 fontVariantNumeric:"tabular-nums",
                 cursor:live?"ns-resize":"default",touchAction:"none",
                 userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}>
@@ -11734,7 +11740,7 @@ export default function LoudLight(){
     );
     return(
       <div data-spill={lane.key}
-        style={{position:"absolute",inset:0,zIndex:3,display:"flex",flexDirection:"column",gap:CELL_GAP}}>
+        style={{position:"absolute",inset:0,zIndex:3,display:"flex",flexDirection:"column"}}>
         {shapeRow}
       {/* `data-spillcols` is the harnesses' hook for the faders themselves —
           the overlay is two rows now, and "the second child" is exactly the

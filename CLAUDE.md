@@ -967,9 +967,13 @@ loses the shape you were keeping.
   0..127 (VEL), 1..4 (RTCH) and −100..100 (DUR). SCALE spans 2 exponents, so
   the full height is ×4 one way and a quarter the other — more than anyone
   wants in one go, which leaves the slow end of the curve doing the real work.
-  Measured: a deliberate 60px pull is about ×1.15 or 13 velocity units, and a
-  10px crawl in one-pixel moves resolves a SINGLE unit — so you can land on any
-  value, which is the thing a stepper was supposed to be good at.
+  Measured on a phone: a deliberate 60px pull is about ×1.15 or 13 velocity
+  units, and a 30px crawl in one-pixel moves resolves 3 — single units rather
+  than skipped ones, which is the thing a stepper was supposed to be good at.
+  **A crawl is FINER on a bigger control, by design** (`range/dim`), so the
+  same 30px is 1 unit on desktop — which is why the harness asserts a RANGE of
+  units rather than a number, after a phone-shaped "10px resolves a unit"
+  claim went red the moment the fader column changed height.
 - **THE GRIP SAYS WHAT IT IS DOING WHILE YOU HOLD IT** — the word is replaced
   by `+13` or `×1.15` under your finger, and the faders move live behind it. A
   continuous control with no readout is a guess. It is the one thing the STATE
@@ -977,14 +981,38 @@ loses the shape you were keeping.
 - **THEY LIVE INSIDE THE OVERLAY, WHICH IS WHAT MAKES THE ROW FREE.** A row of
   its own, appearing only while a lane is open, would jog the grid's top edge on
   every tap of a step button — the exact thing `_gridtop.mjs` exists to forbid.
-  Inside, it costs the faders `SPILL_HDR_H` out of ~370px (10%) and the layout
-  nothing at all, it arrives and leaves with the lane it shapes, and it is the
-  only answer that also works in mobile landscape, where the grid is
-  height-bound and there is no spare row above it to have taken.
-- **34px is under the 44 the persistent chrome holds to, and that is fine for a
-  GRIP.** It is only where you GRAB it — the pointer is captured, so the travel
-  is the whole screen — each handle is ~180px WIDE on a phone, and the row only
-  exists while a lane is open. Height is the scarce axis here; width is not.
+  Inside, it costs the faders height and the layout nothing at all, it arrives
+  and leaves with the lane it shapes, and it is the only answer that also works
+  in mobile landscape, where the grid is height-bound and there is no spare row
+  above it to have taken.
+- **AND THE ROW IS A WHOLE NUMBER OF GRID ROWS, NOT A PIXEL HEIGHT**
+  (`SPILL_HDR_ROWS`=2, expressed as a percentage so it needs no measuring).
+  Asked for directly — "keep the whole thing bound to the grid, so we'd lose
+  about two rows of adjustment range" — after the first version took an
+  arbitrary 34px off the top. The point is that the overlay is drawn OVER the
+  grid: any other height lands mid-cell and reads as a panel dropped on top,
+  whereas two rows tall it IS the top two rows, the faders start exactly on a
+  row line, and the grid's own rows show through behind the grips. One object
+  with the instrument under it.
+  - **The cost is stated rather than hidden: fourteen rows of fader travel
+    instead of sixteen.** That is the trade, and it was accepted before it was
+    built rather than discovered after.
+  - **It also sizes ITSELF, which the constant could not.** Two rows measures
+    46.3px on a 15, 44.4 on an SE, 43.5 in landscape and 99.5 on desktop — so
+    the phone targets went from UNDER the 44 the chrome holds to, to over it,
+    for free, and an iPad gets a proportionally identical control rather than
+    the same 34px it would have inherited. Landscape's 43.5 is the same
+    measured exemption the SE's transport trio already carries.
+  - **Desktop's 99.5px band was looked at rather than reasoned about**, and it
+    is kept: it is the same picture as the phone at the grid's own scale, on a
+    796px square with the room, and a platform branch here would be two rules
+    for one idea. The word and the grip marks grew with the box (9→11 at rest,
+    11→15 held) — the type was sized for a 34px control and read as lost in a
+    46px one.
+  - **No gap and no padding between the grips and the faders.** The boundary is
+    the grid's own row line, so anything there is a NEAR MISS, which looks like
+    a bug rather than a margin; the grip's own border is the separation. It
+    also bought the SE back the 2px that put it under 44.
 - **A REFUSAL IS DRAWN ON THE GRIP, with its reason in the name.** A flat lane
   has no ratio to scale, so SCALE loses its `ns-resize` cursor, dims, and says
   why; a bar with no notes refuses both. The handler is not installed at all
@@ -1013,7 +1041,10 @@ loses the shape you were keeping.
   separates it from a scale), SCALE widens the spread on an up-drag and narrows
   it on a down-drag, a drag out and back restores the lane exactly, a clamped
   step comes back off the rail, neither touches an empty column or a second
-  bar — across portrait, an SE, mobile landscape and desktop.
+  bar — across portrait, an SE, mobile landscape and desktop. It asserts the
+  row binding as a PROPERTY too (the handle row is exactly two grid rows, the
+  faders start on a row line and keep fourteen), which holds at any grid size
+  and is what a pixel assertion could not say.
   - Two harness notes. **The moves must be paced ONE PER FRAME** and at a
     realistic speed: the curve is speed-sensitive, so a synchronous burst tests
     nothing and a 12px-a-frame move tests only the flick end. And **a tap on
