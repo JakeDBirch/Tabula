@@ -204,6 +204,11 @@ const WAVEFORMS=["sawtooth","square","triangle","sine"];
 const WF_LABELS=["SAW","SQ","TRI","SIN"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
+// MOJO — the master bus. A colour of its own, deliberately not one of the
+// layer accents: this stage is over ALL of them, and borrowing POLY's green
+// would say it belonged to a part. Warm sand, because everything it does is
+// some flavour of heat.
+const C_MASTER="#c9b78f";
 const C_SAT="#d8a050"; // FX-page accent color (reverb / delay)
 // VARY page accent — a single neutral gold used across all VARY sections so
 // the page doesn't borrow (and visually conflict with) the layer colors.
@@ -217,7 +222,7 @@ const C_VARY="#e6b872";
 // accents themselves, because a mid-alpha colour on this navy reads as mud —
 // the same trap the note fill's alpha floor was raised for. Amber stays as the
 // fallback, and it is still what an inactive note and the brand furniture use.
-const LAYER_NOTE_RGB={synth:"176,224,152",lead:"132,200,255"};
+const LAYER_NOTE_RGB={synth:"176,224,152",lead:"154,140,255"};
 const noteRgb=(layer)=>LAYER_NOTE_RGB[layer]||"255,214,150";
 // 0..1 → the two hex digits an 8-digit colour string wants. The palette is
 // written as "#rrggbb"+"aa" all over this file, so this is the missing half.
@@ -270,7 +275,8 @@ const ROWKEYS_ON=false;
 //    plays IMMEDIATELY. A handful of those in one tick is a pile-up, and it is
 //    reachable whenever `t` is negative or not finite.
 const DIAG=(typeof location!=="undefined")&&/[?&]diag=1\b/.test(location.search);
-const DG={ticks:0,hits:0,late:0,minHead:9,flam:0,now:0,ctxs:0,last:{},t0:0,notes:[]};
+const DG={ticks:0,hits:0,late:0,minHead:9,flam:0,now:0,ctxs:0,last:{},t0:0,notes:[],
+  gaps:0,worstGap:0,resync:0,lastTick:0};
 if(DIAG&&typeof window!=="undefined"){
   for(const k of ["AudioContext","webkitAudioContext"]){
     const C=window[k]; if(!C)continue;
@@ -295,6 +301,25 @@ const dgNote=(m)=>{if(!DIAG)return;DG.notes.push(new Date().toISOString().slice(
 // and move every clock forward together instead.
 const SCHED_LATE=0.025;
 const SCHED_RESYNC=0.25;
+// ── THE TICK COMES FROM A WORKER, NOT FROM setInterval ON THE PAGE ────────
+// iOS throttles a hidden page's timers to roughly 1Hz. Measured on the device
+// at 989–1011ms against an expected 25, with the catch-up guard above then
+// resyncing bodily on EVERY tick — so a backgrounded transport sounds one step
+// a second and skips everything between, which is what "the beat continues but
+// like one step every couple of seconds" is. The scheduler was never at fault;
+// its clock was.
+//
+// A dedicated Worker keeps its own timer and is not throttled with the page,
+// which is the standard remedy for this and the reason every web sequencer
+// drives its lookahead from one. It does NOT make Web Audio survive an iOS
+// app switch — WebKit suspends the context regardless (see the background-audio
+// note) — it makes the audio that DOES survive keep its cadence instead of
+// stuttering. The core, being sample-driven, never had the problem at all.
+//
+// Falls back to setInterval if a Worker cannot be made (blocked blob: URL, an
+// exotic embedding), because a throttled tick still beats no tick.
+const TICK_SRC="var t=0;onmessage=function(e){clearInterval(t);t=0;"
+  +"if(e.data==='stop')return;t=setInterval(function(){postMessage(0);},e.data||25);};";
 const CORE_DEFAULT=false;
 // Inside the iOS shell the core is what the shell hosts (AVAudioEngine, and
 // the only audio that survives the screen locking), so there it is always on.
@@ -427,6 +452,26 @@ const glidePctOf=(sp)=>{
   if(!sp)return 0;
   if(sp.glideT!=null&&sp.glideT>0)return Math.max(0,Math.min(100,sp.glideT));
   return sp.glide?GLIDE_LEGACY_PCT:0;
+};
+// STEP PARAMS BELONG TO THE COLUMN'S NOTES. `params` is per COLUMN, not per
+// cell, so when the last note in a column goes its edits are orphans: nothing
+// sounds there, but the value still travels in every save and still lights the
+// step button as the playhead goes past. Deleting the note takes them with it.
+//
+// It only clears when the column is EMPTY, which is what makes it safe under
+// POLY: the params are shared by every note in that column, so removing one of
+// a stack must leave them alone for the ones still there.
+//
+// This completes a thought the add path already had — putting a note into an
+// empty column RESETS that column's params (`colWasEmpty`), so the codebase
+// already treated an empty column's params as meaningless. Only the delete side
+// was missing.
+const clearColParams=(p,col)=>{
+  if(!p||!p.params||!p.grid)return p;
+  if(p.grid.some(row=>row[col]))return p;          // a poly stack still stands
+  const np=p.params.map(sp=>({...sp}));
+  np[col]=defaultStepParams(1)[0];
+  return Object.assign({},p,{params:np});
 };
 const mkPat=name=>({id:++_id,name,grid:mkGrid(),durs:mkDurs(),params:defaultStepParams(),gridLen:16,bars:1,speedMult:1});
 // Cull a pattern down to monophonic — at most one active note per column.
@@ -628,6 +673,7 @@ const packPat=(p)=>{
   o.grid=_packBool(p.grid,W);
   if(p.durs)  o.durs  =_packNum(p.durs,W,1);
   if(p.params)o.params=_packParams(p.params,W);
+  {const np=packPatchLane(p.notePatch,W); if(np)o.notePatch=np; else delete o.notePatch;}
   if(p.vel)   o.vel   =_packNum(Array.isArray(p.vel[0])?p.vel:toDrumVel2D(p.vel,W),W,100);
   if(p.rat)   o.rat   =_packNum(Array.isArray(p.rat[0])?p.rat:toDrumRat2D(p.rat,W),W,1);
   if(Array.isArray(p.mix))o.mix=p.mix.map(m=>Object.assign({},m));
@@ -649,6 +695,7 @@ const unpackPat=(p)=>{
   o.grid=_unpackBool(p.grid,H,W);
   if(p.durs!==undefined)  o.durs  =_unpackNum(p.durs,H,W,1);
   if(p.params!==undefined)o.params=_unpackParams(p.params,W);
+  if(p.notePatch!==undefined)o.notePatch=unpackPatchLane(p.notePatch,W);
   if(p.vel!==undefined)   o.vel   =_unpackNum(p.vel,H,W,100);
   if(p.rat!==undefined)   o.rat   =_unpackNum(p.rat,H,W,1);
   if(p.motion&&typeof p.motion==="object"){
@@ -728,6 +775,21 @@ const partBars=part=>Math.max(1,Math.min(MAX_BARS,Math.round(partWidth(part)/COL
 // The pattern's own `bars` is the LONGEST part — it's what the master clock
 // uses for the cycle everything re-synchronises on, and what the song page
 // draws as a slot's length. Re-derive it after any part changes shape.
+// ── A PATTERN MAY CARRY ITS OWN TEMPO ────────────────────────────────────
+// `pat.bpm` absent (or <=1) means INHERIT the global, which is what every
+// pattern ever saved means, so this is additive by construction. A number
+// overrides it for as long as that pattern is the one playing — in a song the
+// tempo therefore changes with the arrangement, entry by entry.
+//
+// Resolved in ONE place, and the core has the twin (`c->bpm` in ll_seq.c).
+// Nothing reads `pat.bpm` directly.
+const BPM_MIN=30, BPM_MAX=300;
+const patBpm=(pat,glob)=>{
+  const v=pat&&pat.bpm;
+  return (typeof v==="number"&&v>1)?Math.max(BPM_MIN,Math.min(BPM_MAX,v)):glob;
+};
+const hasOwnBpm=(pat)=>typeof (pat&&pat.bpm)==="number"&&pat.bpm>1;
+
 const syncPatBars=(p)=>{
   if(!p||!p.parts)return p;
   let b=1;
@@ -1026,6 +1088,20 @@ const collapseBlockers=(entries,patternCount)=>{
   // There is deliberately no speed refusal here any more. Mixed speeds are
   // representable — see collapseEntries — and refusing them meant the button
   // only worked on songs simple enough not to need it.
+  //
+  // MIXED TEMPOS are a different matter, and this one IS a real limit. Speed
+  // is per bar, so a stretched copy expresses it exactly; TEMPO is one number
+  // for a whole pattern, and the flattened result is ONE pattern — so a song
+  // whose entries run at different tempos cannot be written onto a single grid
+  // without changing what it sounds like. Refusing is the honest answer;
+  // flattening it quietly would break the one promise this button makes.
+  // Compared as the RAW field (absent = follows the global), which is exactly
+  // the right test: two entries that both follow the global agree whatever the
+  // global happens to be.
+  {
+    const tempos=[...new Set(entries.map(e=>hasOwnBpm(e)?Math.round(e.bpm):0))];
+    if(tempos.length>1)bad.push("THE SONG USES "+tempos.length+" DIFFERENT TEMPOS");
+  }
   return Object.assign({blockers:bad},plan);
 };
 // Flatten the arrangement onto ONE grid.
@@ -1161,6 +1237,10 @@ const collapseEntries=(entries,name)=>{
     dst.barLens=Array.from({length:totalBars},(_,i)=>Math.max(0,Math.min(COLS,totalCols-i*COLS)));
     dst.speedMult=dm;
   }
+  // Every entry agrees on the tempo (collapseBlockers refuses otherwise), so
+  // the flattened copy inherits it — including "follows the global", which is
+  // the absence of the field.
+  if(entries[0]&&hasOwnBpm(entries[0]))out.bpm=entries[0].bpm;
   // The drum bus settings aren't per-column, so they come from the first entry.
   const first=entries[0];
   if(first&&first.parts.drums){
@@ -1348,6 +1428,51 @@ const spliceFlat=(dst,src,dstOff,srcOff=0,w=COLS,mk=()=>defaultStepParams(1)[0])
   return o;
 };
 
+// ── PER-NOTE PATCHES ─────────────────────────────────────────────────────
+// A note can carry its own VOICE, not only its own step params. `part.notePatch`
+// is a FLAT PER-COLUMN LANE exactly like `params` — one entry per column, `null`
+// or a sparse object holding only the layer-patch fields this column overrides.
+//
+// Per COLUMN rather than per CELL, and that is the one real compromise in here.
+// It is the shape `params` (VEL/FLT/DLY/REV/RTCH/DUR/OCT/GLIDE) has always had,
+// so on MONO — one note per column by construction — it IS per note, and on POLY
+// a chord shares one voice, which is what a chord usually wants anyway. The
+// payoff is that it is a LANE: `sliceFlat`/`spliceFlat`/`openBarGapFlat` already
+// carry it, so RAND/CLR/CPY/PST, ⧉ DUP, ×2, DELETE BAR and the two-finger shift
+// needed one line each instead of a bespoke remap of position keys. A per-cell
+// map would have had to be re-keyed correctly at every one of those sites, and
+// the first one forgotten is a patch that silently belongs to the wrong note.
+//
+// Sparse by nature: a pattern with no patches carries the lane as all-null and
+// the codec drops it entirely, so this costs an ordinary project nothing.
+const notePatchAtCol=(part,c)=>{
+  const q=part&&part.notePatch&&part.notePatch[c];
+  return (q&&typeof q==="object"&&Object.keys(q).length)?q:null;
+};
+// `monoSingle` is structural — it decides whether the layer HAS a second
+// oscillator stack — so it is not a per-note thing and is refused rather than
+// silently carried.
+const NOTE_PATCH_DENY={monoSingle:1};
+const packPatchLane=(lane,W)=>{
+  if(!Array.isArray(lane))return undefined;
+  const o=[];
+  for(let c=0;c<W;c++){const q=lane[c];if(q&&typeof q==="object"&&Object.keys(q).length)o.push([c,Object.assign({},q)]);}
+  return o.length?o:undefined;      // nothing patched = nothing stored
+};
+const unpackPatchLane=(packed,W)=>{
+  if(!Array.isArray(packed))return undefined;
+  const lane=new Array(W).fill(null);
+  for(const e of packed){ if(!Array.isArray(e))continue; const c=e[0]|0;
+    if(c>=0&&c<W&&e[1]&&typeof e[1]==="object")lane[c]=Object.assign({},e[1]); }
+  return lane;
+};
+const resizePatchLane=(lane,W)=>{
+  if(!Array.isArray(lane))return undefined;
+  const o=new Array(W).fill(null);
+  for(let c=0;c<Math.min(W,lane.length);c++)o[c]=lane[c]?Object.assign({},lane[c]):null;
+  return o;
+};
+
 // ── Bar resizing ─────────────────────────────────────────────────────────
 // Patterns are 1..MAX_BARS bars long. Every per-column structure (grid, durs,
 // params, drum vel/rat, drum motion lanes) is bars*COLS wide and has to grow
@@ -1374,6 +1499,9 @@ const resizePatBars=(p,bars)=>{
     for(let i=0;i<w;i++)np[i]=p.params[i]?Object.assign({},p.params[i]):defaultStepParams(1)[0];
     out.params=np;
   }
+  // Shrinking DROPS the patches of the columns that no longer exist, rather
+  // than leaving them to be adopted by whatever later lands on those indices.
+  if(p.notePatch)out.notePatch=resizePatchLane(p.notePatch,w);
   if(p.vel) out.vel=_resizeRows(Array.isArray(p.vel[0])?p.vel:toDrumVel2D(p.vel,oldW),w,()=>100);
   if(p.rat) out.rat=_resizeRows(Array.isArray(p.rat[0])?p.rat:toDrumRat2D(p.rat,oldW),w,()=>1);
   if(p.motion&&typeof p.motion==="object"){
@@ -1634,6 +1762,136 @@ const filtCutHz=(v)=>20*Math.pow(1000,Math.max(0,Math.min(100,v))/100);
 const RV_DAMP_DB=-7;  // per-pass shelf cut; compounds over recirculations. Gentler
                       // than the old -12 so the damping eases in around the corner
                       // instead of clamping hard just past it.
+// ── THE MASTER BUS: DRIVE and EXCITE ────────────────────────────────────
+// Every number here has a twin in core/ll.h, because a character stage that
+// sits somewhere else in the other engine is a project that sounds different
+// depending on which one is running — the one thing the core exists not to be.
+//
+// The glue compressor under DRIVE is FIXED, and that is the design rather
+// than a shortcut: a console has one input gain, and turning it up gets you
+// more compression AND more saturation together. That is what "glue" has
+// always meant, and it is one knob instead of five.
+const GLUE_THRESH_DB=-6, GLUE_RATIO=1.8, GLUE_ATTACK_MS=25, GLUE_RELEASE_MS=200;
+// ── WHERE ON THE CURVE THE SIGNAL SITS — this is the whole of DRIVE ──────
+// The saturator is scaled INTO and back OUT of: y = shape(x*k)/k. At small k
+// the signal sits near the origin, where every one of these curves is a
+// straight line, so the stage is clean however loud the mix is; as k rises
+// the same signal climbs into the bend. k IS the drive.
+//
+// The first version had no k: a pre-GAIN starting at unity, so the shaper
+// always saw the mix at full level — and this bus peaks around 0.45, which is
+// already well into tanh's curve. DRIVE at its FIRST NOTCH put 1.3% third
+// harmonic on a 1kHz tone and there was no clean end to the travel at all.
+// Measured, not guessed (core/test's sweep): 0.22% at the same notch now.
+const DRIVE_IN_MIN=0.22, DRIVE_IN_MAX=2.40, DRIVE_CURVE=1.9;
+const DRIVE_CHARS=["tape","tube","clip"]; // index === LL_DRIVE_* in the core
+// Exciter crossover corners. The bands are never re-summed — each generator
+// adds its harmonics in PARALLEL to the dry signal — so the crossover is a
+// router, not a filter bank, and does not have to add back to unity.
+const EX_LO_HZ=160, EX_LO_HP_HZ=90, EX_MID_LO_HZ=300, EX_MID_HI_HZ=3000, EX_HI_HZ=3500;
+
+// ── The saturation curves, and they are the SAME ALGEBRA as ll_shape ─────
+// Three lines of maths written out in two languages rather than two
+// descriptions of one intent. Keep them in step with core/src/ll_fx.c.
+//
+//   TAPE  tanh — symmetric, so odd harmonics only. Gentle.
+//   TUBE  tanh with a DC bias pushed through and taken back off. An
+//         ASYMMETRIC transfer curve is the only thing that makes EVEN
+//         harmonics, and even harmonics are what "warm" means; a symmetric
+//         curve can only ever give you the odd ones, which is a fuzz pedal.
+//   CLIP  x/(1+x^6)^(1/6) — unity slope at zero and saturating at ±1 like the
+//         others, but LINEAR until it nearly gets there and then a wall.
+// TUBE's bias SCALES WITH THE KNOB. A constant bias is asymmetric at every
+// signal level, so TUBE at the first notch was as lopsided as TUBE at the
+// stop — the flavour arrived fully formed and the knob only made it louder.
+// Scaled, DRIVE means the same thing on all three: how much.
+const TUBE_BIAS=0.30;
+const llShape=(chr,x,bias)=>
+  chr===2 ? x*Math.pow(1+Math.pow(x*x,3),-1/6)
+: chr===1 ? Math.tanh(x+(bias||0))-Math.tanh(bias||0)
+:           Math.tanh(x);
+// A WaveShaperNode takes a table, so each curve is sampled once at module
+// scope. 4096 points over ±4 is far finer than the ear can resolve on a
+// curve this smooth, and the node interpolates between them.
+//
+// ⚠ A WaveShaperNode CLAMPS ITS INPUT TO ±1 AND MAPS THAT ACROSS THE WHOLE
+// TABLE, whatever domain the table was generated over. So a table sampled
+// over ±4 is a node that computes shape(x*4), not shape(x) — the signal has
+// to be scaled by 1/SHAPER_RANGE on the way IN and nothing on the way out.
+// Missing that scaling is exactly how the shipped web build came out ~12dB
+// loud and crunchy at the first notch of DRIVE while the core measured
+// correct: the core calls ll_shape() directly and has no table to mis-index.
+// Anything that changes SHAPER_RANGE has to change the gain with it — which
+// is why SHAPER_IN_GAIN is derived here rather than written as a number.
+const SHAPER_N=4096, SHAPER_RANGE=4, SHAPER_IN_GAIN=1/SHAPER_RANGE;
+const makeShaperCurve=(chr,bias)=>{
+  const c=new Float32Array(SHAPER_N);
+  for(let i=0;i<SHAPER_N;i++)c[i]=llShape(chr,(i/(SHAPER_N-1)*2-1)*SHAPER_RANGE,bias);
+  return c;
+};
+// A DynamicsCompressorNode applies a MAKEUP GAIN of its own, derived from its
+// threshold/knee/ratio, AT EVERY LEVEL — including levels far below the
+// threshold, where it is not compressing at all. Measured in Chromium: the
+// glue comp is +0.83dB with the tone 10dB under its knee, and level-INDEPENDENT
+// (identical at -40, -26 and -14dBFS).
+//
+// The master LIMITER has the same makeup (+0.57dB) and it is left alone on
+// purpose: it is in the path of every project ever made, so its gain is simply
+// part of how the app has always sounded, and taking it out now would change
+// the loudness of all of them. The glue comp is the opposite case — it is only
+// in the path when DRIVE is on — so its makeup is a LEVEL JUMP on the bypass
+// switch, and A/B is the entire use of a character stage. It is also a level
+// jump INTO the curve, which is why it made the web build measure a third more
+// distortion than the core at the same setting.
+//
+// It cannot be a constant: the number belongs to the browser, and the phone
+// this is played on is WebKit rather than Chromium. So it is MEASURED where it
+// is running, once, on a tone 20dB under the knee — where the compressor is
+// provably doing nothing, so whatever gain comes out is the makeup and nothing
+// else. Anything that fails (no OfflineAudioContext, a render that never
+// resolves) leaves it at 1, which is the uncompensated build.
+let _glueMakeup=null;
+const measureGlueMakeup=async()=>{
+  if(_glueMakeup!=null)return _glueMakeup;
+  _glueMakeup=1;
+  try{
+    const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+    if(!OAC)return _glueMakeup;
+    // 0.6s rendered, the last HALF measured. The window is not arbitrary: the
+    // node's gain takes ~0.2s to settle from silence (measured: -1.52dB over
+    // the first 100ms, +0.64dB over the second, +0.831dB and flat from 200ms
+    // on). A 0.2s window read 1.076 instead of 1.100 and left a fifth of a dB
+    // on the table — measure the steady state, not the settle, exactly as
+    // core/test/master.c has to.
+    const sr=48000,n=Math.round(sr*0.6),amp=0.05,oc=new OAC(1,n,sr);
+    const osc=oc.createOscillator(); osc.frequency.value=1000;
+    const g=oc.createGain(); g.gain.value=amp;
+    const c=oc.createDynamicsCompressor();
+    c.threshold.value=GLUE_THRESH_DB; c.knee.value=6; c.ratio.value=GLUE_RATIO;
+    c.attack.value=GLUE_ATTACK_MS/1000; c.release.value=GLUE_RELEASE_MS/1000;
+    osc.connect(g); g.connect(c); c.connect(oc.destination); osc.start(0);
+    const buf=await oc.startRendering();
+    const d=buf.getChannelData(0), from=n>>1;
+    let a=0; for(let i=from;i<n;i++)a+=d[i]*d[i];
+    const m=Math.sqrt(a/(n-from))/(amp/Math.SQRT2);
+    if(isFinite(m)&&m>0.25&&m<4)_glueMakeup=m;
+  }catch(e){}
+  return _glueMakeup;
+};
+
+// Per-flavour input gain and its matching output trim, scaled BY THE KNOB.
+// Each curve's knee is in a different place, so a shared pre-gain reaches one
+// of them and not the others: with one, CLIP — the aggressive flavour —
+// measured CLEANER than TAPE, because the glue compressor holds the level
+// below the point where CLIP bends at all. Scaling with the knob keeps all
+// three gentle at low DRIVE, so the choice is a colour down there and only
+// separates into three kinds of loud as you push. Same numbers as drive_coef.
+const driveCharGain=(chr,d)=> chr===2 ? 1+d*0.85 : chr===1 ? 1+d*0.10 : 1;
+const driveCharTrim=(chr,d)=> chr===2 ? 1/(1+d*0.55) : chr===1 ? 1/(1+d*0.08) : 1;
+// One place that turns the knob into everything derived from it, so the JS
+// and the core cannot drift on the arithmetic rather than on the algebra.
+const driveShapeK=(d)=>DRIVE_IN_MIN+d*(DRIVE_IN_MAX-DRIVE_IN_MIN);
+const driveCurveOf=(pct)=>Math.pow(Math.max(0,Math.min(100,pct))/100,DRIVE_CURVE);
 const rvHfHz=pct=>20000*Math.pow(1200/20000,Math.max(0,Math.min(100,pct))/100);
 const rvLfHz=pct=>20*Math.pow(800/20,Math.max(0,Math.min(100,pct))/100);
 const fmtHz=f=>f>=1000?(f/1000).toFixed(f>=10000?0:1)+"k":Math.round(f)+"";
@@ -1659,8 +1917,27 @@ const SESSION_DEFAULTS = Object.freeze({
   rvSize:50, rvDamp:40, rvLfDamp:0, rvPreDelay:0, rvMod:0, dlyToRev:0,
   drumLevel:85, drumFxTrim:100, drumMix:defaultDrumMix(), activeKit:DEFAULT_KIT,
   loopMode:0, loopBar:-1, loopBars:1, loopPat:null,
+  // Master bus — all the way OFF. A stage in the path of every saved project
+  // is the last place to ship a default that colours anything: an existing
+  // project has to render exactly what it rendered before this existed, and
+  // "approximately transparent" is what the VARY disaster was made of. Both
+  // engines BYPASS rather than pass through at null, so this is literal.
+  // The same five numbers are in core/src/ll_core.c's defaults().
+  // ONE SWITCH over BOTH stages, and it starts BYPASSED with the amounts
+  // already somewhere sensible: the switch is the thing you flip, so flipping
+  // it has to do something. An old save carrying amounts but no switch
+  // therefore loads bypassed, which is the safe direction.
+  mojoOn:false,
+  driveAmt:35, driveChar:0,
+  exThump:25, exBody:20, exAir:25,
 });
 
+
+// MOJO's switch used to be TWO switches, one per stage. A save from those few
+// days carries `driveOn` / `exOn` and no `mojoOn`, and either of them being on
+// means the character stage was in the path — so either turns the one switch
+// on. This line is the only thing that still reads those two keys.
+const mojoOnOf=o=>o&&o.mojoOn!=null?!!o.mojoOn:!!(o&&(o.driveOn||o.exOn));
 
 const vcfHz=v=>Math.round(20*Math.pow(1000,v/100)); // 20Hz–20kHz
 const vcfLbl=v=>{const f=vcfHz(v);return f>=1000?(f/1000).toFixed(1)+"k":String(f);};
@@ -1761,6 +2038,96 @@ const isDoubleTap=(e,key=null)=>{
 // the same reason: it has never carried the `tnori-` prefix, and moving it in
 // the shipping build would show the install hint again to everyone who had
 // already dismissed it.
+// ── HOW IT WORKS ───────────────────────────────────────────────────────────
+// Almost everything this app can do is a GESTURE WITH NO AFFORDANCE: about
+// eight holds, tap-again on a chip, drag-a-chip-into-the-song, the two-finger
+// shift, the loop-end band, the bar tile's scrub, the step spill and LOOP's
+// cycle. None of it is on screen, and a first-timer sees a grid and three
+// buttons. That gap has already been reported once as not being able to find a
+// function at all, having tripped over it by accident.
+//
+// DATA, not markup, and at module scope: a table cannot drift into a layout,
+// adding a gesture is one line, and the same rows can feed both the reference
+// screen and the one-time hints. (It must stay data for another reason too —
+// see the CJS audit lesson: a module-level arrow returning JSX is the one thing
+// that cannot live out here.)
+const HELP_GROUPS=Object.freeze([
+  {t:"THE GRID",r:[
+    ["tap","place or remove a note"],
+    ["drag \u2190","erase as you go"],
+    ["drag \u2192 from a note","make it longer"],
+    ["drag \u2195 from a note","move it to another row"],
+    ["two fingers","shift the bar, wrapping inside it"],
+    ["the right-hand edge","drag to set this bar's length"],
+    ["hold a note","that note's OWN SOUND \u2014 the whole voice, for one note"],
+  ]},
+  {t:"STEP BUTTONS",s:"under the grid \u00b7 POLY and MONO",r:[
+    ["tap","spill that lane onto the grid \u2014 the columns become faders"],
+    ["tap again","back to the notes"],
+    ["hold","RAND and RESET for that lane"],
+    ["drag across","draw a curve"],
+    ["drag \u2195","fine-tune one step"],
+    ["double-tap a step","back to default"],
+  ]},
+  {t:"BARS",r:[
+    ["drag the 3/8 tile \u2195","move through the bars \u2014 further the faster you drag"],
+    ["tap the tile","this bar's ops"],
+    ["hold past its edge","keep stepping"],
+    ["tap a SPEED","set this bar"],
+    ["hold a SPEED","set every bar in the part"],
+  ]},
+  {t:"PATTERNS",r:[
+    ["tap a chip","select it"],
+    ["tap it again","its ops"],
+    ["hold","the same ops \u2014 \u00d72, DUP, DEL, master, tempo"],
+    ["drag onto a song slot","place it in the song"],
+    ["tap +","a new empty pattern"],
+    ["hold +","SONG \u2192 PATTERN \u2014 the whole song flattened into one"],
+  ]},
+  {t:"THE SONG",r:[
+    ["tap an empty slot","drop the selected pattern in"],
+    ["drag between slots","move it"],
+    ["drag off the lane","clear the slot"],
+    ["hold a filled slot","how many times it repeats, 1 to 4"],
+    ["drop on a seam","insert, sliding the rest right"],
+  ]},
+  {t:"TRANSPORT",r:[
+    ["\u25b6 / \u275a\u275a","draws what the next press does"],
+    ["\u25a0","stop and rewind \u2014 dimmed when there is nothing to rewind"],
+    ["LOOP","loop this bar; tap again within 2s to grow it, then the whole pattern, then off"],
+    ["FOLLOW","keep the editor on what is playing"],
+    ["space \u00b7 esc","play or pause \u00b7 stop"],
+  ]},
+  {t:"LAYERS",r:[
+    ["tap","switch part"],
+    ["hold","RAND and CLEAR for that part"],
+  ]},
+  {t:"TEMPO AND KEY",r:[
+    ["tap the tempo chip","the tempo drawer"],
+    ["hold it","scrub the value where it stands"],
+    ["tap a note in USER key","in or out of the key"],
+    ["hold a note","make it the tonic"],
+  ]},
+  {t:"SAVE",r:[
+    ["tap","save to wherever this project already lives"],
+    ["amber, with a dot","there are unsaved changes"],
+  ]},
+]);
+// ONE-TIME HINTS. The reference above is complete and durable, but nobody
+// reads a manual — so these teach the four biggest hidden surfaces at the
+// moment they are in front of you, and each is dismissed for ever once seen.
+// The two halves solve each other: a hint is the nudge, and the reference is
+// where you go when you dismissed one and want it back.
+//
+// ONE PER LAUNCH, deliberately. Showing four at once is a wall, and a queue
+// that advances as you dismiss it is a carousel; one nudge per session teaches
+// the set over the first few sittings and is never in the way.
+const HINTS=Object.freeze([
+  {k:"bars",   t:"Hold a bar chip for its ops \u2014 RAND, DUP, SPEED, DELETE"},
+  {k:"pats",   t:"Hold a pattern chip for its ops, or drag it into the song lane"},
+  {k:"step",   t:"Tap a step button to spill that lane onto the grid"},
+  {k:"layers", t:"Hold a layer button for that part's RAND and CLEAR"},
+]);
 const LS_NS=(typeof window!=="undefined"&&window.__LL_NS)||"tnori-";
 const KEY_NS=LS_NS==="tnori-"?"":LS_NS;
 const storageSet=async(k,v)=>{try{await window.storage.set(KEY_NS+k,v);return true;}catch(e){}try{localStorage.setItem(LS_NS+k,v);return true;}catch(e){}return false;};
@@ -1858,6 +2225,17 @@ const cloudGetSlot=async(sess,slot)=>{const rows=await cloudRest(sess,"projects?
 // target, so it's sent explicitly.
 const cloudPutSlot=(sess,slot,name,data)=>cloudRest(sess,"projects?on_conflict=user_id,slot",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({user_id:sess.uid,slot,name,data,updated_at:new Date().toISOString()})});
 const cloudDelSlot=(sess,slot)=>cloudRest(sess,"projects?slot=eq."+encodeURIComponent(slot),{method:"DELETE",headers:{Prefer:"return=minimal"}});
+// ACCOUNT DELETION, WHICH IS NOT OPTIONAL: App Store guideline 5.1.1(v) says an
+// app that can create an account must be able to delete one from inside itself.
+// It is also just correct — an account you can make and not unmake is a trap.
+//
+// It goes through an RPC rather than a DELETE on a table because the row that
+// matters is in `auth.users`, which no client may touch: the service-role key
+// that could is the one thing that must never be in a static file. The SQL in
+// docs/cloud-sync.md defines `delete_account()` as SECURITY DEFINER with a
+// `where id = auth.uid()`, so it runs with the rights to do it and can only
+// ever do it to the caller. The projects go with it on the FK cascade.
+const cloudDeleteAccount=sess=>cloudRest(sess,"rpc/delete_account",{method:"POST",headers:{Prefer:"return=minimal"},body:"{}"});
 // "NOW" / "20m" / "4h" / "3d" — a slot caption has room for three characters,
 // not a date.
 const cloudAgo=iso=>{
@@ -2077,7 +2455,7 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
   const onUp=useCallback(()=>{drag.current=null;},[]); // end the drag on release so it can't linger
   if(vertical){
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
+      <div data-knob={label} data-knobval={String(value)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,userSelect:"none",width:52}}>
         <div style={{fontSize:10,letterSpacing:1,fontWeight:500,color:col+"bb",textAlign:"center",lineHeight:1.4}}>
           <div>{label}</div>
           <div style={{color:col,letterSpacing:0}}>{display}</div>
@@ -2094,8 +2472,12 @@ function KnobSlider({label,value,min,max,onChange,display,accent,vertical,def}){
       </div>
     );
   }
+  // data-knob / data-knobval are the harnesses' hook. A knob is a ballistic
+  // pointer drag with no accessible value of its own, so without these there is
+  // no way to ask a headless run what one is set to — and gestures are exactly
+  // what headless tests are worst at, so the ones that CAN be read should be.
   return(
-    <div style={S.knobWrap}>
+    <div data-knob={label} data-knobval={String(value)} style={S.knobWrap}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
         <div style={Object.assign({},S.knobLabel,{color:col+"cc"})}>{label}</div>
         <div style={Object.assign({},S.knobValue,{color:col})}>{display}</div>
@@ -2203,53 +2585,229 @@ function RangeSlider({label,accent,lo,hi}){
 // One component with a switch rather than five, so size, stroke and alignment
 // cannot drift apart between them. `currentColor` throughout, so a button tints
 // its icon by setting `color` — the same way the text labels behaved.
+// The icon set. Fourteen marks on ONE 24-unit grid, round caps and joins, and
+// a single vocabulary: a circle, a lane, a right angle.
+//
+// WEIGHT VARIES INSIDE EACH MARK — 2.0 on whatever leads, easing to 1.5 on what
+// trails, 1.75 neutral. That is the set's whole signature: every glyph gets a
+// direction and an attack without gaining a single extra shape, which is how a
+// 22px mark says something at a glance.
+//
+// ONE RULE MAKES OR BREAKS IT: change weight only where the path TURNS, or
+// across a GAP between elements that do not touch. A round cap centred on a
+// tangent joint draws a disc wider than either stroke, so two widths meeting
+// mid-contour produce a visible BEAD rather than a transition. Marks with
+// nowhere to turn therefore stay uniform — `stop` is one weight, and `loop`
+// holds one weight all the way round its circuit and puts the cadence in the
+// arrowhead. Both were drawn the other way first and beaded at every tangent.
+//
+// A function DECLARATION, not `const LLIcon = () => <svg/>` — see the CJS
+// audit lesson in CLAUDE.md. (And do not name the bogus identifier that audit
+// greps for anywhere in this file: it is a plain substring search over Babel's
+// CJS output, and COMMENTS SURVIVE INTO IT, so writing the word in prose fails
+// the build exactly as a real module-level arrow would.)
 function LLIcon({name,size}){
-  const S=size||16, sw=1.6;
+  const S=size||22;
+  // No shared strokeWidth: every stroked element below states its own, because
+  // the weight IS the design. The neutral 1.75 is here only so a path added
+  // later without one inherits the set's middle rather than the SVG default of
+  // 1, which would read as a hairline against everything beside it.
   const common={width:S,height:S,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",
-    strokeWidth:sw,strokeLinecap:"round",strokeLinejoin:"round",
+    strokeWidth:1.75,strokeLinecap:"round",strokeLinejoin:"round",
     style:{display:"block",flexShrink:0,overflow:"visible"}};
-  if(name==="poly")return(
-    // Several notes at once, INTERSPERSED rather than stacked: a chord is a
-    // handful of voices that are not in a line. Solid and equal weight — the
-    // first cut faded them to 45% opacity and the icon read as dusty rather
-    // than as three of something.
+
+  // ---- Layers ------------------------------------------------------------
+  // Told apart by COUNT, not by metaphor: one circle, three circles, a lane.
+  if(name==="mono")return(
+    // One voice, one circle — visibly bigger than any of POLY's three. The size
+    // contrast is the whole message. Uniform by nature: nothing to grade.
     <svg {...common} aria-hidden="true">
-      <circle cx="8.4"  cy="8.6"  r="3.5" fill="currentColor" stroke="none"/>
-      <circle cx="16.2" cy="11.4" r="3.2" fill="currentColor" stroke="none"/>
-      <circle cx="10.8" cy="16.8" r="3.0" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="12" r="5.2" fill="currentColor" stroke="none"/>
     </svg>
   );
-  if(name==="mono")return(
-    // One voice, and visibly BIGGER than any of POLY's three — the contrast is
-    // the whole message.
+  if(name==="poly")return(
+    // Three circles, INTERSPERSED rather than stacked — a chord is voices that
+    // do not line up. Graded by voice order (3 / 2.75 / 2.5): the first voice
+    // leads. Do NOT fade them: an early cut at 45% opacity read as dust rather
+    // than as three of something. Equal-opacity solids only.
     <svg {...common} aria-hidden="true">
-      <circle cx="12" cy="12" r="5.6" fill="currentColor" stroke="none"/>
+      <circle cx="7"    cy="7.5" r="3"    fill="currentColor" stroke="none"/>
+      <circle cx="15.5" cy="12"  r="2.75" fill="currentColor" stroke="none"/>
+      <circle cx="10"   cy="17"  r="2.5"  fill="currentColor" stroke="none"/>
     </svg>
   );
   if(name==="drums")return(
-    // A kick seen face-on, with the beater about to strike it. The beater is
-    // HORIZONTAL and at the drum's centre height on purpose: the first cut ran
-    // it out of the lower-left at 45°, which is a magnifying glass, and that is
-    // exactly what it looked like.
+    // A KIT, SEEN FROM THE FRONT: a cymbal over a kick with its beater. Jake
+    // asked for a drum set and this is the only arrangement of one that
+    // survives the size — see below, because the failures are the useful part.
+    //
+    // THE RULE THIS MARK IS BUILT ON: a 22px glyph has room for a SILHOUETTE,
+    // not for an inventory. Every version that tried to show a whole kit died
+    // the same way — five circles arranged top-down (two toms, kick, snare,
+    // cymbal) reads as a PAW PRINT at 22px and only resolves into a kit around
+    // 64; four circles is worse, being a flower. A big disc with a small
+    // cymbal off one shoulder is a FRYING PAN, which is the same failure
+    // already recorded here for the original 45-degree beater reading as a
+    // magnifying glass. A kick with two toms above it is a FACE. All of them
+    // were drawn and looked at side by side at 16, 22 and 64 before this one
+    // was picked; none of it is a guess.
+    //
+    // So the kit is TWO PIECES and a hit, and each is doing a different job:
+    //   · the cymbal is WIDE, FLAT and CENTRED above — a horizontal bar cannot
+    //     be read as a handle, which is what killed every off-shoulder cymbal.
+    //     Nothing else in the set is a flat ellipse, so the silhouette is the
+    //     mark's alone.
+    //   · the kick is a RING, not a disc, and that is load-bearing: MONO is a
+    //     disc and POLY is three discs, so a drums mark made of discs makes all
+    //     three layer marks the same picture in three colours, leaving colour
+    //     to carry the whole distinction at 22px in daylight.
+    //   · the beater is the centre dot, which also stops the ring reading as a
+    //     letter O.
+    // THE CYMBAL IS LEVEL. It was tilted a few degrees at first, on the theory
+    // that a level one would read as a saucepan lid — which did not survive
+    // being looked at: a rotated ellipse is symmetric about its own centre but
+    // NOT about the mark's vertical axis, so one end lifts and the whole glyph
+    // reads as lopsided, which is how it was reported. Sitting thin and clear
+    // of the ring is what stops it being a lid, not the angle. It is a little
+    // WIDER than the kick for the same reason — a cymbal narrower than the
+    // drum sits on it like a hat.
+    //
+    // Everything is FILL or a HEAVY stroke, never a hairline. The version this
+    // replaced was a 1.5-1.9 lane on the centre line: it used a fifth of the
+    // box's height next to two neighbours that fill theirs, and it was reported
+    // as not reading at phone size. A mark does not have to survive alone — it
+    // has to survive NEXT TO THE TWO IT SITS BESIDE.
     <svg {...common} aria-hidden="true">
-      <circle cx="15" cy="12" r="6.4" strokeWidth="2"/>
-      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none"/>
-      <path d="M0.9 12 h2.9" strokeWidth="1.8"/>
-      <circle cx="5.9" cy="12" r="2.1" fill="currentColor" stroke="none"/>
+      <ellipse cx="12" cy="5.1" rx="7.4" ry="1.6" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="15.1" r="5.7" strokeWidth="2.4"/>
+      <circle cx="12" cy="15.1" r="1.5" fill="currentColor" stroke="none"/>
     </svg>
   );
-  if(name==="loop")return(
-    // A loop: round the track and back to the start.
+
+  // ---- Transport ---------------------------------------------------------
+  // STROKED, in the 24-unit box, like everything else. They were filled shapes
+  // in an 11-unit box, which made the transport a separate visual family from
+  // the tools sitting next to it in the same row.
+  if(name==="play")return(
+    // Three edges stepping down around the triangle: leading edge 2.0, bottom
+    // 1.75, back 1.5. Every change is AT a vertex, so the corner absorbs it.
     <svg {...common} aria-hidden="true">
-      <path d="M6.4 8.6 h11.2 a3.4 3.4 0 0 1 0 6.8 H6.4 a3.4 3.4 0 0 1 0 -6.8"/>
-      <path d="M8.8 6.2 L6.2 8.6 L8.8 11"/>
+      <path d="M8.5 5.5 18.5 12"  strokeWidth="2"/>
+      <path d="M18.5 12 8.5 18.5" strokeWidth="1.75"/>
+      <path d="M8.5 18.5V5.5"     strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="pause")return(
+    // Detached bars, so the weight change needs no join at all.
+    <svg {...common} aria-hidden="true">
+      <path d="M9 6v12"  strokeWidth="2"/>
+      <path d="M15 6v12" strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="stop")return(
+    // UNIFORM on purpose. A rounded square is a smooth contour with no corner
+    // to absorb a weight change, and nothing here is moving, so it carries no
+    // cadence to express. Do not "fix" this by grading the sides: that was
+    // tried and it beads at all four tangents.
+    <svg {...common} aria-hidden="true">
+      <rect x="6.75" y="6.75" width="10.5" height="10.5" rx="1.5" strokeWidth="1.75"/>
+    </svg>
+  );
+
+  // ---- History -----------------------------------------------------------
+  if(name==="undo")return(
+    // Head 2.0, tail one continuous 1.6. The single weight change sits at the
+    // chevron vertex (3, 9.5), which is a real direction change.
+    <svg {...common} aria-hidden="true">
+      <path d="M7.5 5 3 9.5 7.5 14"         strokeWidth="2"/>
+      <path d="M3 9.5h10a6 6 0 0 1 0 12h-3" strokeWidth="1.6"/>
+    </svg>
+  );
+  if(name==="redo")return(
+    <svg {...common} aria-hidden="true">
+      <path d="M16.5 5 21 9.5 16.5 14"      strokeWidth="2"/>
+      <path d="M21 9.5H11a6 6 0 0 0 0 12h3" strokeWidth="1.6"/>
+    </svg>
+  );
+
+  // ---- Tools -------------------------------------------------------------
+  if(name==="loop")return(
+    // The circuit holds ONE weight; the cadence lives in the arrowhead.
+    // Grading the four racetrack segments was tried and produced four beads.
+    <svg {...common} aria-hidden="true">
+      <path d="M8 6.5h8a5.5 5.5 0 0 1 0 11H8a5.5 5.5 0 0 1 0-11z" strokeWidth="1.6"/>
+      <path d="M10.5 4 8 6.5 10.5 9" strokeWidth="2"/>
     </svg>
   );
   if(name==="follow")return(
-    // Forward: keep up with what is playing.
+    // Forward: keep up with what is playing. A PLAIN ARROW, which is what this
+    // was before the icon set and what it is again — the set's version added a
+    // vertical playhead line for the thing being followed, and the two together
+    // read as "|>", a bar and a chevron, rather than as an arrow. Reported that
+    // way and correct: the extra element bought meaning nobody could see and
+    // cost the one shape everybody already knows.
+    //
+    // The head LEADS at 2.0 over a 1.6 shaft. The two meet at the arrow's point
+    // rather than across a gap, which normally risks a bead — it does not here
+    // because the join that lands there is the HEAVIER of the two, so it
+    // swallows the lighter cap instead of leaving one sticking out. Checked at
+    // 56px, not assumed.
     <svg {...common} aria-hidden="true">
-      <path d="M4 12 h14"/>
-      <path d="M13.4 7.4 L18 12 L13.4 16.6"/>
+      <path d="M4 12h14"                strokeWidth="1.6"/>
+      <path d="M13.4 7.4 18 12 13.4 16.6" strokeWidth="2"/>
+    </svg>
+  );
+  if(name==="mix")return(
+    // Three faders at three heights — what the MIX face actually looks like.
+    // Caps at different heights on purpose: three at one height reads as a
+    // grille or a bar chart at rest, and the whole point of a mixer is that the
+    // faders DISAGREE. The lanes recede to 1.5 so the caps carry.
+    <svg {...common} aria-hidden="true">
+      <path d="M6 3.5v6.5M6 14v6.5M12 3.5v10.5M12 18v2.5M18 3.5v3M18 10.5v10" strokeWidth="1.5"/>
+      <rect x="3.25"  y="10"  width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+      <rect x="9.25"  y="14"  width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+      <rect x="15.25" y="6.5" width="5.5" height="4" rx="1" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  if(name==="project")return(
+    // Three lines: the menu, which is what this button opens. It was a pattern
+    // matrix with one cell lit — the app's own subject rather than a filing
+    // metaphor, which reads well as an argument and did not land as a picture:
+    // at 22px it is a small grid, and a small grid on a screen full of grids
+    // says nothing about what pressing it does.
+    //
+    // UNIFORM, and that is a deliberate exception to the set's graded weight.
+    // Three lines that do not touch are exactly the case the rule permits
+    // grading across — but a hamburger is a strong enough convention that
+    // uneven lines read as a MISTAKE rather than as a design, which was clear
+    // the moment 2.0/1.75/1.5 was drawn next to this. Same licence `stop` and
+    // `loop` take, for the same reason: nothing here leads.
+    //
+    // 1.9 rather than the neutral 1.75, because a uniform mark picks the weight
+    // it needs to read — `loop`'s circuit takes 1.6 — and at 1.75 this measured
+    // thin beside the SOUND, SAVE and MIX marks it sits with.
+    <svg {...common} aria-hidden="true">
+      <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17" strokeWidth="1.9"/>
+    </svg>
+  );
+  if(name==="sound")return(
+    // A source and two wavefronts decaying outward: solid dot, 1.75, 1.5. The
+    // arcs are detached, so the decay needs no join.
+    <svg {...common} aria-hidden="true">
+      <circle cx="5.5" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+      <path d="M11 7.5a7 7 0 0 1 0 9"      strokeWidth="1.75"/>
+      <path d="M15.5 4.5a11 11 0 0 1 0 15" strokeWidth="1.5"/>
+    </svg>
+  );
+  if(name==="save")return(
+    // Commit to the line: a stem, a chevron, a baseline. No floppy disk — the
+    // disk is a picture of hardware nobody under forty has handled. The chevron
+    // is the committing stroke, so it is the heavy one, and the weight change
+    // sits at its vertex (12, 13.5).
+    <svg {...common} aria-hidden="true">
+      <path d="M12 3v10.5"            strokeWidth="1.75"/>
+      <path d="M8 9.5 12 13.5 16 9.5" strokeWidth="2"/>
+      <path d="M3.5 17.5h17"          strokeWidth="1.5"/>
     </svg>
   );
   return null;
@@ -2450,6 +3008,16 @@ class Bell{
   constructor(){
     this.ctx=null;this.master=null;this.rev=null;
     this.dly=null;this.dlyFb=null;this.dlyReturn=null;this.dlySend=null;this.dlyHp=null;this.dlyLp=null;
+    // Master bus — built in init(), routed by _wireMasterBus(). The five
+    // amounts are shadowed here because the bypasses are DERIVED from them and
+    // an AudioParam's .value is not readable back reliably mid-ramp.
+    this.drivePre=null;this.glue=null;this.tapeLp=null;this.headBump=null;
+    this.shaperIn=null;this.shaper=null;this.driveTrim=null;this.glueMakeup=1;
+    this.exIn=null;this.exOut=null;this.thGain=null;this.bdGain=null;this.arGain=null;
+    this.busIn=null;this.busOut=null;this.driveOn=false;this.exOn=false;
+    this._driveSw=false;this._exSw=false;
+    this._driveAmt=0;this._driveChar=0;this._exThump=0;this._exBody=0;this._exAir=0;
+    this._curveChar=-1;this._curveBias=-1;
     this.p={waveform:"sawtooth",detune:8,attack:8,decay:400,sustain:40,
             vcfCutoff:80,vcfRes:15,filterEnvAmt:0};
     this.stepDur=0.125;this.ready=false;this.masterLevel=0.55;
@@ -2460,9 +3028,15 @@ class Bell{
     // mono-style layers get added.
     this.monoActiveVoice=null;
   }
-  async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV){
-    this.ctx=new(window.AudioContext||window.webkitAudioContext)();
-    await this.ctx.resume();
+  // `offlineCtx` is a harness hook, and it is the reason this stage can be
+  // MEASURED rather than reasoned about: handed an OfflineAudioContext, the
+  // real graph — this graph, not a copy of it — renders a tone faster than
+  // real time and the harmonics can be read back. Neither the oracle (which
+  // only compares attacks) nor core/test/master.c (which only knows the C
+  // core) can see a bug on the JS master bus; _jsmaster.mjs can, and does.
+  async init(dlyT,fbv,sendPct,dlyHpV,dlyLpV,offlineCtx){
+    this.ctx=offlineCtx||new(window.AudioContext||window.webkitAudioContext)();
+    if(!offlineCtx)await this.ctx.resume();
     const m=this.ctx.createGain();m.gain.value=0.55;this.master=m;
     // Master limiter — a fast compressor configured brick-wall-ish so the summed
     // layers can never reach digital clipping. Everything routes voices → m →
@@ -2472,7 +3046,121 @@ class Bell{
     const lim=this.ctx.createDynamicsCompressor();
     lim.threshold.value=-1.0; lim.knee.value=0; lim.ratio.value=20;
     lim.attack.value=0.002; lim.release.value=0.1;
-    m.connect(lim); lim.connect(this.ctx.destination); this.limiter=lim;
+    // ── THE MASTER BUS: DRIVE → EXCITE → limiter ────────────────────────
+    // Between the summing gain and the limiter. DRIVE is one knob over a
+    // FIXED glue compressor and a saturator; EXCITE is three generators each
+    // listening to one band and adding its HARMONICS back in parallel. Then
+    // the limiter, which is the thing nothing gets past.
+    //
+    // Both stages are BYPASSED at zero, and bypass here means the signal does
+    // not pass through the nodes at all rather than passing through them
+    // set to null. That is what makes adding a master section cost an
+    // existing project exactly nothing — the VARY lesson, applied before the
+    // fact: a stage in the path of every saved project is the last place to
+    // be approximately transparent.
+    //
+    // The nodes are built once and the ROUTING is what changes, because
+    // rebuilding an AudioNode graph mid-playback clicks.
+    const ctx=this.ctx;
+    // DRIVE: pre-gain → glue → shaper → trim.
+    const drivePre=ctx.createGain(); drivePre.gain.value=1;
+    const glue=ctx.createDynamicsCompressor();
+    glue.threshold.value=GLUE_THRESH_DB; glue.knee.value=6; glue.ratio.value=GLUE_RATIO;
+    glue.attack.value=GLUE_ATTACK_MS/1000; glue.release.value=GLUE_RELEASE_MS/1000;
+    // TAPE's HF loss and head bump. They scale WITH the knob — tape loses top
+    // and gains bottom the harder you hit it, which is most of why it is
+    // recognised by ear at all — and sit at unity for the other two flavours.
+    const tapeLp=ctx.createBiquadFilter(); tapeLp.type="lowpass";
+    tapeLp.frequency.value=20000; tapeLp.Q.value=0.0001;
+    const headBump=ctx.createBiquadFilter(); headBump.type="lowshelf";
+    headBump.frequency.value=90; headBump.gain.value=0;
+    // oversample:"4x" is free here and worth taking: a waveshaper folds
+    // harmonics back off Nyquist as aliasing, and on a MASTER stage that
+    // reads as cheap fizz rather than as character. (The core pays for the
+    // same thing by hand, at 2x.)
+    const shaper=ctx.createWaveShaper();
+    shaper.curve=makeShaperCurve(0,0); shaper.oversample="4x";
+    // Everything the HOST does to the signal that the design did not ask for,
+    // undone in one place, immediately before the curve. Two things:
+    //   · the table's DOMAIN (see SHAPER_RANGE) — the node maps ±1 across the
+    //     whole table, so without this the stage computes shape(x*4);
+    //   · the glue compressor's own MAKEUP GAIN (see measureGlueMakeup) — a
+    //     constant the browser adds even when nothing is being compressed.
+    // It sits AFTER the compressor deliberately: the compressor's threshold has
+    // to refer to true full scale. There is no matching gain on the way out,
+    // because what the shaper now receives is what the core's shaper receives.
+    const shaperIn=ctx.createGain(); shaperIn.gain.value=SHAPER_IN_GAIN;
+    const driveTrim=ctx.createGain(); driveTrim.gain.value=1;
+    drivePre.connect(glue); glue.connect(tapeLp); tapeLp.connect(shaperIn);
+    shaperIn.connect(shaper); shaper.connect(headBump); headBump.connect(driveTrim);
+    // EXCITE: three parallel generators. Each taps the bus, listens to one
+    // band, makes harmonics, and adds them back — nothing is re-summed from
+    // the bands, so the crossover only has to decide what each one hears.
+    const exIn=ctx.createGain(), exOut=ctx.createGain();
+    exIn.connect(exOut);                                    // the DRY path
+    // THUMP — the low band through a rectifier. A rectifier is a frequency
+    // DOUBLER, so what comes back is the bass's own harmonics an octave up,
+    // which the ear reads as weight even on a speaker that cannot reproduce
+    // the fundamental at all. High-passed on the way back for exactly that
+    // reason: more sub would do nothing on a phone, which is where this gets
+    // played.
+    const thLp=ctx.createBiquadFilter(); thLp.type="lowpass"; thLp.frequency.value=EX_LO_HZ;
+    // oversample:"none" on all three, and it is not a quality compromise — it
+    // is the fix for a COMB FILTER. Chromium's oversampling costs a WaveShaper
+    // 128 samples of LATENCY at 2x and 192 at 4x (measured), and these three
+    // run in PARALLEL with the dry signal: 128 samples is 2.7ms, which at 1kHz
+    // is two thirds of a cycle, so the band came back 118° out and SUBTRACTED.
+    // Measured: BODY at 70 made a 1kHz tone 1.1dB QUIETER where the core made
+    // it 3.5dB louder — an exciter that thins what it is supposed to thicken.
+    // The core's three generators are not oversampled either (they run at 1x,
+    // sample-aligned with the dry), so this is also what makes the two agree.
+    const thRect=ctx.createWaveShaper(); thRect.oversample="none";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++){const x=i/(n-1)*2-1; c[i]=Math.tanh((Math.abs(x)*2-0.5*Math.abs(x)));}
+     thRect.curve=c;}
+    const thHp=ctx.createBiquadFilter(); thHp.type="highpass"; thHp.frequency.value=EX_LO_HP_HZ;
+    const thGain=ctx.createGain(); thGain.gain.value=0;
+    exIn.connect(thLp); thLp.connect(thRect); thRect.connect(thHp);
+    thHp.connect(thGain); thGain.connect(exOut);
+    // BODY — the mids, saturated and blended back. Density, not level.
+    const bdHp=ctx.createBiquadFilter(); bdHp.type="highpass"; bdHp.frequency.value=EX_MID_LO_HZ;
+    const bdLp=ctx.createBiquadFilter(); bdLp.type="lowpass";  bdLp.frequency.value=EX_MID_HI_HZ;
+    const bdSat=ctx.createWaveShaper(); bdSat.oversample="none";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*2.2);
+     bdSat.curve=c;}
+    const bdGain=ctx.createGain(); bdGain.gain.value=0;
+    exIn.connect(bdHp); bdHp.connect(bdLp); bdLp.connect(bdSat);
+    bdSat.connect(bdGain); bdGain.connect(exOut);
+    // AIR — Aphex-style: take the top, distort it, and hand back only what
+    // was GENERATED. It is not a shelf; a shelf lifts what is already there,
+    // and this makes detail that was not there to lift.
+    const arHp=ctx.createBiquadFilter(); arHp.type="highpass"; arHp.frequency.value=EX_HI_HZ;
+    const arSat=ctx.createWaveShaper(); arSat.oversample="none";
+    {const n=2048,c=new Float32Array(n);
+     for(let i=0;i<n;i++)c[i]=Math.tanh((i/(n-1)*2-1)*3);
+     arSat.curve=c;}
+    const arHp2=ctx.createBiquadFilter(); arHp2.type="highpass"; arHp2.frequency.value=EX_HI_HZ*1.2;
+    const arGain=ctx.createGain(); arGain.gain.value=0;
+    exIn.connect(arHp); arHp.connect(arSat); arSat.connect(arHp2);
+    arHp2.connect(arGain); arGain.connect(exOut);
+
+    this.drivePre=drivePre; this.glue=glue; this.tapeLp=tapeLp;
+    this.headBump=headBump; this.shaperIn=shaperIn; this.shaper=shaper;
+    this.driveTrim=driveTrim;
+    this.exIn=exIn; this.exOut=exOut;
+    this.thGain=thGain; this.bdGain=bdGain; this.arGain=arGain;
+    this.driveOn=false; this.exOn=false;
+    this._curveChar=0; this._curveBias=0;
+    this.busIn=m; this.busOut=lim;
+    // NOT awaited. A calibration that never resolved would be an init that
+    // never finished, i.e. an app with no sound at all — far too high a price
+    // for a fraction of a dB. It lands in milliseconds, long before anyone
+    // reaches DRIVE, and until it does the stage is simply the uncompensated
+    // one.
+    measureGlueMakeup().then(m=>{ this.glueMakeup=m; this._applyShaperIn(); });
+    this._wireMasterBus();
+    lim.connect(this.ctx.destination); this.limiter=lim;
     // Per-layer mute buses. POLY and MONO voices route their DRY through their
     // own gain (→ master) so mute/solo can cut a layer instantly in the audio
     // domain (ramped, click-free) — not just by gating note scheduling. Reverb/
@@ -2639,6 +3327,83 @@ class Bell{
   setDlyToRev(pct){if(!this.ready||!this.dlyToRev)return;
     this.dlyToRev.gain.setTargetAtTime(Math.max(0,Math.min(100,pct))/100,this.ctx.currentTime,0.02);
   }
+  // ── The master bus ──────────────────────────────────────────────────────
+  // Four routings between the summing gain and the limiter, picked by which
+  // stages are engaged. The nodes are permanent and only the CONNECTIONS
+  // change: rebuilding a graph mid-playback clicks, and this is the one place
+  // in the app where everything you can hear is passing through.
+  //
+  // Each re-wire is a full disconnect-and-reconnect rather than a diff, which
+  // is a handful of calls on a control nobody turns per bar, and is the only
+  // version of this that cannot leave a stale edge behind.
+  _wireMasterBus(){
+    const m=this.busIn, out=this.busOut;
+    if(!m||!out)return;
+    try{m.disconnect();}catch(e){}
+    try{this.driveTrim.disconnect();}catch(e){}
+    try{this.exOut.disconnect();}catch(e){}
+    const head = this.driveOn ? this.drivePre : (this.exOn ? this.exIn : out);
+    m.connect(head);
+    if(this.driveOn) this.driveTrim.connect(this.exOn?this.exIn:out);
+    if(this.exOn)    this.exOut.connect(out);
+  }
+  // DRIVE — one knob, and what it moves is k: the scale INTO the saturator's
+  // curve, with 1/k back out. Unity through the linear region, so what the
+  // knob changes is WHERE ON THE CURVE you are rather than how loud you are.
+  // See DRIVE_IN_MIN for why a pre-gain starting at unity was wrong.
+  // The one place the host's two artefacts are undone. Guarded on the NODE
+  // rather than on `ready`, because the calibration can land before init has
+  // finished and a correction dropped on the floor would be a silent return to
+  // the uncompensated build.
+  _applyShaperIn(){
+    if(!this.shaperIn)return;
+    this.shaperIn.gain.value=SHAPER_IN_GAIN/(this.glueMakeup||1);
+  }
+  _applyDrive(){
+    if(!this.ready||!this.drivePre)return;
+    this._applyShaperIn();
+    const raw=Math.max(0,Math.min(100,this._driveAmt))/100;
+    const d=driveCurveOf(this._driveAmt);
+    const chr=this._driveChar|0, t=this.ctx.currentTime;
+    const on=!!this._driveSw&&raw>0;
+    const k=driveShapeK(d);
+    this.drivePre.gain.setTargetAtTime(k*driveCharGain(chr,d),t,0.02);
+    this.driveTrim.gain.setTargetAtTime((1/k)*driveCharTrim(chr,d),t,0.02);
+    // TAPE alone colours the balance; the other two leave it where it is.
+    const tape=chr===0;
+    this.tapeLp.frequency.setTargetAtTime(tape?20000-d*7000:20000,t,0.02);
+    this.headBump.gain.setTargetAtTime(tape?d*1.4:0,t,0.02);
+    // TUBE's curve depends on the knob, so its table is rebuilt as the knob
+    // moves — cached against the last bias, because a drag would otherwise
+    // rebuild 4096 floats on every pointermove for the two flavours that do
+    // not use a bias at all.
+    const bias=chr===1?TUBE_BIAS*d:0;
+    if(this.shaper&&(chr!==this._curveChar||bias!==this._curveBias)){
+      this.shaper.curve=makeShaperCurve(chr,bias);
+      this._curveChar=chr; this._curveBias=bias;
+    }
+    if(on!==this.driveOn){ this.driveOn=on; this._wireMasterBus(); }
+  }
+  setDriveOn(v){ this._driveSw=!!v; this._applyDrive(); }
+  setDrive(v){ this._driveAmt=v; this._applyDrive(); }
+  setDriveChar(v){ this._driveChar=Math.max(0,Math.min(2,v|0)); this._applyDrive(); }
+  // EXCITE — engaged when its switch is on AND something is turned up. The
+  // switch is what you flip to A/B a setting you have already dialled in; the
+  // amounts all being zero is the free version of the same thing.
+  _applyExcite(){
+    if(!this.ready||!this.thGain)return;
+    const t=this.ctx.currentTime;
+    const n=v=>Math.max(0,Math.min(100,v))/100;
+    this.thGain.gain.setTargetAtTime(n(this._exThump)*0.9,t,0.02);
+    this.bdGain.gain.setTargetAtTime(n(this._exBody)*0.33,t,0.02);
+    this.arGain.gain.setTargetAtTime(n(this._exAir)*0.42,t,0.02);
+    const on=!!this._exSw&&!!(this._exThump||this._exBody||this._exAir);
+    if(on!==this.exOn){ this.exOn=on; this._wireMasterBus(); }
+  }
+  setExOn(v){ this._exSw=!!v; this._applyExcite(); }
+  setExThump(v){ this._exThump=v; this._applyExcite(); }
+  setExBody(v){ this._exBody=v; this._applyExcite(); }
+  setExAir(v){ this._exAir=v; this._applyExcite(); }
   // mods (optional 9th arg): array of {at, sp} entries for mid-note modulation.
   // Each entry schedules a smooth filter cutoff transition at that time using
   // the entry's flt/vel/oct/glide. Used by the scheduler for tied notes — sub-
@@ -2680,28 +3445,29 @@ class Bell{
     }
     const velRaw   = sp ? (sp.vel/127) : 1;
     // Per-section velocity scaling — no hard-coded velocity→amp / velocity→
-    // filter coupling. Each section has its own velSensitivity (0..100) and
-    // invert flag in the layer params, dialed by the user in the sound panel.
+    // filter coupling. Each section has its own sensitivity (0..100) in the
+    // layer params, dialed by the user in the sound panel.
     //
-    //   velMix(val, inv) = 1 - (val/100) * (1 - velFactor)
-    //
-    //   where velFactor = inv ? (1 - velRaw) : velRaw.
+    //   velMix(val) = 1 - (val/100) * (1 - velRaw)
     //
     // At val=0: result is 1 regardless of velocity (no effect).
-    // At val=100, normal: result = velRaw → low-vel scales down to 0.
-    // At val=100, inverted: result = 1 - velRaw → high-vel scales down to 0.
-    const velMix = (val, inv)=>{
+    // At val=100: result = velRaw — low-vel scales down to 0.
+    //
+    // There used to be an INVERT flag per section (high velocity scaling DOWN
+    // instead of up). It is deleted rather than parked: the flag was saved in
+    // layerParams, so leaving the three buttons out while the engine still
+    // read them would have left an inverted patch inverted for ever with no
+    // control anywhere — which is precisely the VARY disaster's shape.
+    const velMix = (val)=>{
       const k = Math.max(0,Math.min(100,val??0))/100;
-      const vf = inv ? (1 - velRaw) : velRaw;
-      return 1 - k * (1 - vf);
+      return 1 - k * (1 - velRaw);
     };
-    const velMulAmp = velMix(p.velAmp??100, p.velAmpInv);
-    const velMulFlt = velMix(p.velFlt??100, p.velFltInv);
+    const velMulAmp = velMix(p.velAmp??100);
+    const velMulFlt = velMix(p.velFlt??100);
     // Decay scaling: at velEnv=100, low-vel notes shrink dec/rel down to 30%
-    // of nominal (clamp so things don't reach zero). Invert → high-vel notes
-    // become the short ones, low-vel notes become long.
+    // of nominal (clamp so things don't reach zero).
     const decayK = Math.max(0,Math.min(100,p.velEnv??0))/100;
-    const decayVF = (p.velEnvInv) ? velRaw : (1 - velRaw);
+    const decayVF = 1 - velRaw;
     const decayScale = 1 - decayK * decayVF * 0.7; // 0.7 = max 70% shorter
     const fltDev  = sp ? (((sp.flt??50)-50)/50) : 0; // -1..+1
     const cutOff   = fltDev * 0.3 * 40;               // 30% → ±12 semitone cutoff offset
@@ -2717,7 +3483,11 @@ class Bell{
     // Apply decay velocity scaling to both decay (dec) and release (rel) so
     // the whole back half of the envelope shortens together — matches the
     // "low-vel notes feel shorter" mental model the user described.
-    const atk=ms(p.attack),dec=ms(p.decay)*decayScale,sus=Math.max(0.001,p.sustain/100),rel=ms(p.decay)*decayScale;
+    // rel is the RELEASE, not a second copy of the decay. Absent on a patch
+    // saved before the control existed it reads as the decay, which is exactly
+    // what it used to be — see _withRel. The C twin is ll_synth.c.
+    const atk=ms(p.attack),dec=ms(p.decay)*decayScale,sus=Math.max(0.001,p.sustain/100),
+          rel=ms(p.release!=null?p.release:p.decay)*decayScale;
     const rawDur=noteDur!=null ? noteDur : this.stepDur;
     const modDur=rawDur*(1+durMod);
     const dur=Math.max(atk+0.015, modDur);
@@ -3571,13 +4341,64 @@ export default function LoudLight(){
   const [transpose, setTranspose] = useState(0);
   const [clipboard, setClipboard] = useState(null);
   const [library,   setLibrary]   = useState([]); // local projects, newest-saved first
+  // ── WHERE SAVE GOES, AND IT SURVIVES A RELAUNCH ─────────────────────────
+  // The project this session is WORKING ON: {store:"device"|"cloud", id, name}.
+  // It is what the one-tap SAVE writes to, and it is PERSISTED, which is the
+  // whole point of it.
+  //
+  // `selDevId` / `selCloudId` used to be the only answer to "where does SAVE
+  // go", and they are plain state — so closing the app forgot it, and the next
+  // SAVE made a NEW project under a NEW generated name. Reported as ending up
+  // with a heap of near-identical local copies of one project opened from the
+  // cloud, which is exactly what that does: every launch starts anonymous and
+  // every save files a fresh one. Those two ids are still the LIST's
+  // selection — a different question, and kept per tab; this is the session's
+  // home.
+  //
+  // It carries the STORE as well as the id, so a project opened from the cloud
+  // saves back to the cloud. An earlier note here said the cloud was too slow
+  // to fire from a chip you tap without thinking — true, and the alternative
+  // is worse: a SAVE that quietly files a cloud project on the device is how
+  // you get two divergent copies with nothing to say which is current.
+  //
+  // WRITTEN ONLY BY A SAVE OR A LOAD, never by an effect on mount — the
+  // row-keys lesson. A mount effect would stamp whatever the session happened
+  // to look like, turning "hasn't been filed anywhere yet" into "filed".
+  // Cleared by NEW PROJECT and by deleting the project it points at: a home
+  // that no longer exists is worse than none, because SAVE would recreate it
+  // under its old id and quietly undo the delete.
+  //
+  // Read SYNCHRONOUSLY out of localStorage rather than through the async
+  // storageGet, which lands a frame late — the SAVE chip would spend that
+  // frame saying it is about to make a new project, and the library a frame
+  // with nothing picked.
+  const [saveTarget,setSaveTargetState]=useState(()=>{
+    try{
+      const t=JSON.parse(localStorage.getItem(LS_NS+"target")||"null");
+      return (t&&t.id&&(t.store==="device"||t.store==="cloud"))?t:null;
+    }catch(e){return null;}
+  });
+  const setSaveTarget=(t)=>{
+    setSaveTargetState(t);
+    try{
+      if(t)localStorage.setItem(LS_NS+"target",JSON.stringify(t));
+      else localStorage.removeItem(LS_NS+"target");
+    }catch(e){}
+  };
   // Which project row is highlighted. The selection is the target of SAVE /
   // LOAD / CLEAR — one set of buttons acting on whatever is picked, rather than
-  // three buttons per slot. Kept per tab so switching back doesn't lose it.
-  const [selDevId,  setSelDevId]  = useState(null);
-  const [selCloudId,setSelCloudId]= useState(null);
-  const [libTab,    setLibTab]    = useState("device"); // "device" | "cloud"
-  const [nameDraft, setNameDraft] = useState(()=>randomName([])); // the selected row's name, editable
+  // three buttons per slot. Kept per tab so switching back doesn't lose it, and
+  // seeded from the restored target so the library opens with the row SAVE
+  // would overwrite already picked. (These initializers run once, so reading
+  // `saveTarget` here is the restored value and nothing else.)
+  const [selDevId,  setSelDevId]  = useState(saveTarget&&saveTarget.store==="device"?saveTarget.id:null);
+  const [selCloudId,setSelCloudId]= useState(saveTarget&&saveTarget.store==="cloud"?saveTarget.id:null);
+  // Open the library on the bank the session's project came from, so the list
+  // and SAVE agree about where the work lives.
+  const [libTab,    setLibTab]    = useState(saveTarget&&saveTarget.store==="cloud"?"cloud":"device"); // "device" | "cloud"
+  // The restored project's own name, so the field is not offering to make a new
+  // one under a random name for a session that already has a home.
+  const [nameDraft, setNameDraft] = useState(()=>(saveTarget&&saveTarget.name)||randomName([])); // the selected row's name, editable
   const [flash,     setFlash]     = useState("");
   const [flashTone, setFlashTone] = useState("ok"); // "ok" | "warn"
   const [confirmAction, setConfirmAction] = useState(null);
@@ -3592,7 +4413,7 @@ export default function LoudLight(){
   // where there is no ESC to press — the ✕ in the sound header is that.
   useEffect(()=>{
     if(!activeSheet)return;
-    const k=(e)=>{if(e.key==="Escape")setActiveSheet(null);};
+    const k=(e)=>{if(e.key==="Escape"){setNotePatchAtR.current&&setNotePatchAtR.current(null);setActiveSheet(null);}};
     window.addEventListener("keydown",k);
     return ()=>window.removeEventListener("keydown",k);
   },[activeSheet]);
@@ -3638,8 +4459,6 @@ export default function LoudLight(){
   const [exportPhase, setExportPhase] = useState(""); // "Preparing"/"Bouncing"/"Encoding" — shown in the lock overlay
   const exportBarR = useRef(null); // progress-bar DOM node — width driven directly (no re-render) during capture
   const [exportLoops, setExportLoops] = useState(1); // # of song passes per MP3 bounce
-  // Where the transport's hold-to-export menu is anchored: {x,y} or null.
-  const [exportMenu,  setExportMenu]  = useState(null);
   // A bounced MP3 File waiting to be shared via the native share sheet (mobile).
   // navigator.share needs a fresh user gesture, and the bounce is async, so we
   // stash the file and surface a SHARE button for the user to tap.
@@ -3705,11 +4524,20 @@ export default function LoudLight(){
   const [bottomTrayOpen,setBottomTrayOpen]= useState(false);
   const sliderDragR  = useRef(false); // true while dragging a popup slider — suppresses the radial picker so it can't bleed into another arm
   const [patMenu,   setPatMenu]   = useState(null); // {id, x, y}
+  const [addMenu,   setAddMenu]   = useState(null); // {x, y} — the pattern +'s hold
   const [barMenu,   setBarMenu]   = useState(null); // {bar, x, y}
   const [drumMenu,  setDrumMenu]  = useState(null); // {id, x, y}
   const [paramPopup,setParamPopup]= useState(null); // {col,x,y,activeArm,values}
   const popupR       = useRef(null); // mirror for handlers: {col,originX,originY,baseValues}
+  const setNotePatchAtR = useRef(null);
   const longPressR   = useRef(null); // setTimeout id
+  // LONG PRESS A NOTE → THAT NOTE'S SOUND. Behind a ref because the grid
+  // handlers are `[]`-dep useCallbacks: capturing the function directly would
+  // bake in the first render's closure. Declared up here with the other gesture
+  // refs rather than beside the code that fills it — a `const` read from a
+  // handler that is DECLARED earlier in the body only works by var hoisting plus
+  // the read happening later, and that is the trap this file keeps paying for.
+  const openNoteSoundR=useRef(null);
   const patDropRef   = useRef(null); // sequence drawer drop zones
   const seqDropRef   = useRef(null);
   const activePtrsR  = useRef(new Set()); // active pointer IDs on grid — stateless multi-touch via isPrimary, this set just tracks "all up". Self-heals (cleared on every primary-down) so a missed up/cancel can't permanently lock editing.
@@ -3769,6 +4597,15 @@ export default function LoudLight(){
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
   const DEFAULT_LP = (octave)=>({
     waveform:"sawtooth", detune:8, attack:8, decay:400, sustain:40,
+    // RELEASE, in ms, and it is its own control rather than a copy of DECAY.
+    // It used to BE the decay (`rel = ms(p.decay)`) in both engines, which
+    // meant the default patch put a 400ms tail on every note however short the
+    // note was — so the gate moved 11x across the DUR lane (23ms to 250ms) and
+    // the audible length moved 1.5x (423ms to 650ms). Worse, a SHORTER note
+    // came out LOUDER, because gating earlier in the decay releases from a
+    // higher level. Reported as "duration doesn't respond on MONO — the
+    // envelope almost seems like a triggered one shot".
+    release:120,
     vcfCutoff:80, vcfRes:15, filterEnvAmt:0,
     octave: octave,    // -2..+2; lead defaults +1, bass -1, synth 0
     dlySend: 50,       // 0..100; per-layer send into the global delay bus
@@ -3783,9 +4620,9 @@ export default function LoudLight(){
     // section; 100 = full sensitivity (low-vel notes fully attenuated /
     // shortened / un-filtered, depending on which section). Each section
     // has its own invert flag so users can flip the polarity.
-    velAmp: 100,   velAmpInv: false,   // VCA peak responds to velocity (matches old behaviour)
-    velFlt: 100,   velFltInv: false,   // Filter env amount responds to velocity (matches old behaviour)
-    velEnv: 0,     velEnvInv: false,   // Decay time responds to velocity (NEW — off by default)
+    velAmp: 100,   // VCA peak responds to velocity
+    velFlt: 100,   // Filter env amount responds to velocity
+    velEnv: 0,     // Decay/release time responds to velocity (off by default)
   });
   // Default for the MONO layer — single-oscillator engine. monoSingle: true
   // tells Bell.play to skip the o2 stack even if a saved project had detune
@@ -3805,9 +4642,25 @@ export default function LoudLight(){
   // legacy "bass" slot is dropped from the output (bass params discarded;
   // bass pats are merged into lead pats by the load paths separately).
   // Lead always gets monoSingle:true forced — older saves predate the rule.
+  // A patch saved before RELEASE existed has none, and the honest reading of
+  // its absence is "what this project has always sounded like" — which was
+  // release = decay. So it is backfilled from the patch's OWN decay rather
+  // than from the new default: an existing project renders exactly as it did,
+  // and only new patches get the responsive default. The same argument (and
+  // the same shape) as GLIDE_LEGACY_PCT.
+  const _withRel=(base,saved)=>{
+    const o={...base,...saved};
+    if(saved&&saved.release==null)o.release=(saved.decay!=null?saved.decay:base.decay);
+    // The velocity INVERT flags are gone. Dropped on LOAD rather than merely
+    // left unread, so they stop travelling in every later save as data nothing
+    // can act on — a field no code reads is the one that gets read again by
+    // accident later.
+    delete o.velAmpInv; delete o.velFltInv; delete o.velEnvInv;
+    return o;
+  };
   const fillLayerParams=(lp)=>({
-    synth:{...DEFAULT_LP(0), ...(lp&&lp.synth?lp.synth:{})},
-    lead: {...DEFAULT_LP_MONO(0), ...(lp&&lp.lead ?lp.lead :{}), monoSingle:true}
+    synth:_withRel(DEFAULT_LP(0), lp&&lp.synth),
+    lead: {..._withRel(DEFAULT_LP_MONO(0), lp&&lp.lead), monoSingle:true}
   });
   const [layerParams, setLayerParams] = useState({
     synth: DEFAULT_LP(0),
@@ -3817,15 +4670,70 @@ export default function LoudLight(){
   // Active-layer accessor. For the drums layer we fall back to synth — the sound drawer's
   // drum branch never reads these so the fallback is harmless and keeps render code simple.
   const _lpKey = activeLayer==="drums" ? "synth" : activeLayer;
-  const _lp = layerParams[_lpKey];
-  const _setLP = (key)=>(val)=>setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
-  // The DISCRETE per-layer controls — waveform, the octave buttons, the INV
+  // ── EDITING ONE NOTE'S VOICE ────────────────────────────────────────────
+  // Long-pressing a note opens THIS screen scoped to that note, and the whole
+  // of it becomes a per-note editor through these three lines and nothing else.
+  // That is the entire reason it is cheap: every control on the SOUND screen
+  // already reads `_lp` and writes through `_setLP`/`_setLPStep`, so redirecting
+  // that one accessor pair reaches all ~18 of them — waveform, the ADSR, the
+  // filter, octave, both sends, the level, sub, spread and the velocity
+  // tracking — without touching a single control.
+  //
+  // The READ is the layer's patch with the note's sparse override on top, so a
+  // knob shows the value the note will actually play, not the layer's; the
+  // WRITE goes into the note. Turning a knob therefore CREATES the override for
+  // that field alone, and every field left alone keeps following the layer.
+  const [notePatchAt,setNotePatchAt]=useState(null);   // {col,row} | null
+  // The ESC listener is installed by an effect declared ABOVE this line, so it
+  // reaches the setter through a ref rather than closing over a `var` that is
+  // still undefined when that effect first runs.
+  setNotePatchAtR.current=setNotePatchAt;
+  // A note scope belongs to ONE column of ONE part. Switching pattern or layer
+  // would leave the screen pointed at a column of something else, and the next
+  // knob turn would patch the wrong note — so both drop it.
+  useEffect(()=>{setNotePatchAt(null);},[activePatternId,activeLayer]);
+  const _npPart = notePatchAt ? pats.find(x=>x.id===activeId) : null;
+  const _npOn = !!(notePatchAt && _npPart && activeLayer!=="drums");
+  const _npCur = _npOn ? (notePatchAtCol(_npPart,notePatchAt.col)||{}) : null;
+  const _lpBase = layerParams[_lpKey];
+  const _lp = _npOn ? Object.assign({},_lpBase,_npCur) : _lpBase;
+  // Which fields this note overrides — the screen badges them, because an
+  // override you cannot see is the VARY mistake in miniature: state that
+  // decides what saved work sounds like, with nothing on screen to say so.
+  const _npKeys = _npOn ? Object.keys(_npCur) : [];
+  const _setNotePatch=(key,val)=>{
+    if(NOTE_PATCH_DENY[key])return;
+    const col=notePatchAt&&notePatchAt.col; if(col==null)return;
+    setPats(ps=>ps.map(pp=>{
+      if(pp.id!==activeId)return pp;
+      const W=patW(pp);
+      const lane=Array.isArray(pp.notePatch)?pp.notePatch.slice(0,W):new Array(W).fill(null);
+      while(lane.length<W)lane.push(null);
+      if(col>=W)return pp;
+      lane[col]=Object.assign({},lane[col]||{},{[key]:val});
+      return Object.assign({},pp,{notePatch:lane});
+    }));
+  };
+  // Drop every override on this note and hand it back to the layer.
+  const _clearNotePatch=()=>{
+    const col=notePatchAt&&notePatchAt.col; if(col==null)return;
+    pushHistory();
+    setPats(ps=>ps.map(pp=>{
+      if(pp.id!==activeId||!Array.isArray(pp.notePatch))return pp;
+      const lane=pp.notePatch.slice(); if(col<lane.length)lane[col]=null;
+      return Object.assign({},pp,{notePatch:lane});
+    }));
+  };
+  const _setLP = (key)=>(val)=>{ if(_npOn){_setNotePatch(key,val);return;}
+    setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}})); };
+  // The DISCRETE per-layer controls — waveform and the octave buttons
   // toggles — push a history entry outright. The continuous ones don't come
   // through here: they are KnobSliders, and those mark themselves on the first
   // move of a drag, so routing them through this would push on every
   // pointermove. (pushHistory is declared further down; Babel lowers const to
   // var, so call it from inside the closure rather than capturing it here.)
   const _setLPStep = (key)=>(val)=>{
+    if(_npOn){ if(_lp[key]!==val)pushHistory(); _setNotePatch(key,val); return; }
     if(layerParams[_lpKey][key]!==val)pushHistory();
     setLayerParams(lps=>({...lps,[_lpKey]:{...lps[_lpKey],[key]:val}}));
   };
@@ -3837,6 +4745,7 @@ export default function LoudLight(){
   const attack = _lp.attack,             setAttack = _setLP("attack");
   const decay = _lp.decay,               setDecay = _setLP("decay");
   const sustain = _lp.sustain,           setSustain = _setLP("sustain");
+  const release = _lp.release??_lp.decay, setRelease = _setLP("release");
   const vcfCutoff = _lp.vcfCutoff,       setVcfCutoff = _setLP("vcfCutoff");
   const vcfRes = _lp.vcfRes,             setVcfRes = _setLP("vcfRes");
   const filterEnvAmt = _lp.filterEnvAmt, setFilterEnvAmt = _setLP("filterEnvAmt");
@@ -3847,11 +4756,8 @@ export default function LoudLight(){
   const subLvl  = _lp.subLevel??0,       setSubLvl  = _setLP("subLevel");
   const spread  = _lp.spread??0,         setSpread  = _setLP("spread");
   const velAmp     = _lp.velAmp??100,    setVelAmp    = _setLP("velAmp");
-  const velAmpInv  = !!_lp.velAmpInv,    setVelAmpInv = _setLPStep("velAmpInv");
   const velFlt     = _lp.velFlt??100,    setVelFlt    = _setLP("velFlt");
-  const velFltInv  = !!_lp.velFltInv,    setVelFltInv = _setLPStep("velFltInv");
   const velEnv     = _lp.velEnv??0,      setVelEnv    = _setLP("velEnv");
-  const velEnvInv  = !!_lp.velEnvInv,    setVelEnvInv = _setLP("velEnvInv");
   const glideLP    = _lp.glide??0,       setGlideLP   = _setLP("glide");
 
   // Delay graph design — global, shared across layers. (User: "global delay design".)
@@ -3868,6 +4774,31 @@ export default function LoudLight(){
   const [rvPreDelay, setRvPreDelay] = useState(0);  // pre-delay (ms, 0..500)
   const [rvMod,      setRvMod]      = useState(0);  // tail modulation depth (0..100 → chorused tail)
   const [dlyToRev,   setDlyToRev]   = useState(0);  // delay output → reverb input send
+  // ── THE MASTER BUS — DRIVE and EXCITE over the whole mix ────────────────
+  // Between the summing gain and the limiter (see Bell.init). Both all the way
+  // OFF by default, and the bypass is a real one on both engines: an existing
+  // project renders exactly what it rendered before this section existed.
+  //
+  // Five values, none of them a unit. This stage is CHARACTER, not correction,
+  // so there is nothing in here to dial to a number — which is why what was
+  // here first (threshold, ratio, attack, release, makeup, three EQ gains and
+  // a frequency) was wrong. That was a mixing desk, and a mixing desk is the
+  // wrong instrument to bolt onto the end of something you play with your
+  // thumbs. The glue compressor is still there; it is just UNDER the DRIVE
+  // knob, fixed, the way a console's is.
+  // ONE bypass over the whole stage. It was two — one on DRIVE, one on
+  // EXCITE — and two switches is two decisions for something that is one
+  // effect: you reach for MOJO to hear the mix with character or without it,
+  // not to audition its halves against each other. The ENGINES keep both
+  // switches, because each stage still has to be able to leave the path on
+  // its own (all three EXCITE knobs at zero is still a free bypass), so this
+  // one state drives both setters and the core needs no change at all.
+  const [mojoOn,    setMojoOn]    = useState(false);
+  const [driveAmt,  setDriveAmt]  = useState(35); // 0..100
+  const [driveChar, setDriveChar] = useState(0);  // 0 TAPE, 1 TUBE, 2 CLIP
+  const [exThump,   setExThump]   = useState(25); // 0..100
+  const [exBody,    setExBody]    = useState(20); // 0..100
+  const [exAir,     setExAir]     = useState(25); // 0..100
   // Mixer: per-layer levels (poly/mono mix lives in layerParams[*].mix, drum
   // bus is global because all drum voices share one engine).
   const [drumLevel, setDrumLevel] = useState(85);
@@ -4079,7 +5010,6 @@ export default function LoudLight(){
   const songPosR=useRef(0);
   const patsR=useRef(pats);
   const bpmR=useRef(bpm),scaleR=useRef(scale);
-  const exportMenuAtR=useRef(0);
   const tempoPopAtR=useRef(0);
   const tempoFieldR=useRef("bpm");
   useEffect(()=>{tempoFieldR.current=tempoField;},[tempoField]);
@@ -4117,7 +5047,11 @@ export default function LoudLight(){
       }
       // Set head's dur = how many cells it covers (1 + extension).
       newDurs[g.durStartRow][g.durStartCol] = (targetCol - g.durStartCol) + 1;
-      return Object.assign({},p,{grid:newGrid,durs:newDurs});
+      // A swallowed note can leave its column empty, and an empty column's step
+      // params are orphans exactly as they are after an ordinary erase.
+      let out=Object.assign({},p,{grid:newGrid,durs:newDurs});
+      for(let i=g.durStartCol+1;i<=targetCol;i++)out=clearColParams(out,i);
+      return out;
     }));
   };
 
@@ -4226,6 +5160,19 @@ export default function LoudLight(){
   useEffect(()=>{bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);},[rvPreDelay]);
   useEffect(()=>{bell.current.setRvMod&&bell.current.setRvMod(rvMod);},[rvMod]);
   useEffect(()=>{bell.current.setDlyToRev(dlyToRev);},[dlyToRev]);
+  // Master bus. Guarded with && like every other one of these: `bell.current`
+  // is a facade when the core is on, and a method with no twin over there is
+  // silently absent rather than an error.
+  // One state, both engine switches — see the mojoOn declaration.
+  useEffect(()=>{
+    bell.current.setDriveOn&&bell.current.setDriveOn(mojoOn);
+    bell.current.setExOn&&bell.current.setExOn(mojoOn);
+  },[mojoOn]);
+  useEffect(()=>{bell.current.setDrive&&bell.current.setDrive(driveAmt);},[driveAmt]);
+  useEffect(()=>{bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);},[driveChar]);
+  useEffect(()=>{bell.current.setExThump&&bell.current.setExThump(exThump);},[exThump]);
+  useEffect(()=>{bell.current.setExBody&&bell.current.setExBody(exBody);},[exBody]);
+  useEffect(()=>{bell.current.setExAir&&bell.current.setExAir(exAir);},[exAir]);
   useEffect(()=>{drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);},[drumLevel]);
   useEffect(()=>{drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);},[drumFxTrim]);
   // Push the GLOBAL mix to the engine whenever it changes. The mix is static
@@ -4314,6 +5261,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams:JSON.parse(JSON.stringify(layerParams)),
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
+    mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute:{...trackMute},trackSolo:{...trackSolo},
     loopMode,loopBar,loopBars,loopPat,
@@ -4382,7 +5330,12 @@ export default function LoudLight(){
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],
      ["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],
      ["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     setTrackMute(s.trackMute&&typeof s.trackMute==="object"?{...{synth:false,lead:false,drums:false},...s.trackMute}:{synth:false,lead:false,drums:false});
     setTrackSolo(s.trackSolo&&typeof s.trackSolo==="object"?{...{synth:false,lead:false,drums:false},...s.trackSolo}:{synth:false,lead:false,drums:false});
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
@@ -4442,6 +5395,17 @@ export default function LoudLight(){
         if(e.key==="Escape"){e.preventDefault();setMenuOpen(false);setConfirmAction(null);}
         return;
       }
+      // A hold menu takes the keyboard the same way the PROJECT modal does:
+      // ESC closes it and nothing else happens. Without this ESC reached the
+      // transport instead, so dismissing a menu STOPPED THE SONG — and the
+      // menus were the one dismissable thing in the app with no keyboard way
+      // out. (Safe to read these directly: this effect has no dep array, so it
+      // re-registers every render and the values are never stale.)
+      if(!isEditable&&e.key==="Escape"&&(patMenu||barMenu||addMenu)){
+        e.preventDefault();
+        setPatMenu(null);setDelArm(null);setBarMenu(null);setAddMenu(null);
+        return;
+      }
       // Spacebar is the PLAY/PAUSE button's keyboard twin — the same three-state
       // toggle, not the old play/stop one, so the key and the button under it
       // cannot mean different things. ESC is stop-and-rewind, the keyboard
@@ -4470,7 +5434,7 @@ export default function LoudLight(){
     // persisted to slot saves (issue surfaced when users noticed their reverb
     // and drum-bus levels never came back on load). Keep this list in sync
     // with captureSnapshotR / getShareState — the 4-site rule.
-    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
+    const snap={ver:PROJ_VER,patterns,activePatId:activePatternId,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeLayer,layerParams,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,mojoOn,driveAmt,driveChar,exThump,exBody,exAir,drumMix,drumLevel,drumFxTrim,activeKit,userSamples:serializeSamples(userSamples),trackMute:{...trackMute},trackSolo:{...trackSolo},loopMode,loopBar,loopBars,loopPat,song,songRep};
     const nm=cleanName(name)||randomName(library.map(p=>p.name));
     const pid=id||mkProjId();
     const row={id:pid,name:nm,updated:Date.now(),data:packProject(snap)};
@@ -4481,7 +5445,10 @@ export default function LoudLight(){
       : [row,...library];
     setLibrary(next);setSelDevId(pid);setNameDraft(nm);
     const ok=await storageSet("projects",JSON.stringify(next));
-    if(ok){showFlash("SAVED "+nm);markClean();}
+    // The session's home, and it outlives the app. Set only once the write
+    // actually landed: pointing SAVE at a project that failed to be written
+    // would have the next tap silently overwrite nothing.
+    if(ok){setSaveTarget({store:"device",id:pid,name:nm});showFlash("SAVED "+nm);markClean();}
     else{
       // Quota. Put the library back so the list matches what's on disk.
       setLibrary(library);
@@ -4508,14 +5475,38 @@ export default function LoudLight(){
   const [dirty,setDirty]=useState(false);
   const holdCleanR=useRef(0);
   const markClean=(ms)=>{setDirty(false);holdCleanR.current=Date.now()+(ms||900);};
-  // SAVE, one tap, onto whatever project was last loaded or saved. With nothing
-  // picked it behaves exactly as the library's own SAVE AS does — makes a new
-  // project under the generated name — rather than doing nothing, which is what
-  // a disabled button here would amount to.
+  // SAVE, one tap, onto whatever project was last loaded or saved — INCLUDING
+  // across a relaunch, and including back to the CLOUD if that is where this
+  // one came from. `saveTarget` is the whole answer; the two list selections
+  // are not consulted, because they are the library's own highlight and can be
+  // on a row you merely tapped to read.
+  //
+  // With no target it behaves exactly as the library's SAVE AS does — makes a
+  // new project under the generated name — rather than doing nothing, which is
+  // what a disabled button here would amount to.
+  //
+  // A missing row is treated as no target rather than as an error: a project
+  // deleted from the library (or from another device, in the cloud's case) is
+  // gone, and the sane reading of SAVE then is "file this somewhere", not
+  // "fail". The cloud branch cannot check that cheaply — the slot list is only
+  // fetched when the menu is opened — so it just writes, and a PostgREST
+  // upsert recreates the row under the same id, which is the right answer for
+  // work you have in front of you.
   const quickSave=()=>{
-    const sel=library.find(p=>p.id===selDevId);
-    doSave(sel?sel.id:null,sel?sel.name:nameDraft);
+    const t=saveTarget;
+    if(t&&t.store==="cloud"){doCloudSave(t.id,t.name);return;}
+    const sel=t&&t.store==="device"?library.find(p=>p.id===t.id):null;
+    doSave(sel?sel.id:null,sel?sel.name:(t&&t.name)||nameDraft);
   };
+  // The chip says WHERE it is about to write. It is a 42px square with one
+  // glyph on it, so the destination cannot be on its face — but a tooltip (and
+  // the accessible name, which is what a screen reader gets) can carry it, and
+  // "SAVE" with no object is exactly the ambiguity that let the old one file a
+  // cloud project onto the device without anybody noticing.
+  const saveDest=saveTarget?saveTarget.name+(saveTarget.store==="cloud"?" (cloud)":""):null;
+  const saveTitle=saveDest
+    ?(dirty?"Save changes to "+saveDest:"Saved to "+saveDest)
+    :"Save as a new project";
   // ── Load-time sanitizers ──────────────────────────────────────────────────
   const doLoad=id=>{
     const row=library.find(p=>p.id===id);if(!row)return;
@@ -4562,7 +5553,12 @@ export default function LoudLight(){
     // session default. Older saves that predate a field (e.g. rvLfDamp added
     // later) would otherwise carry the previous project's edited value.
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     setLoopMode(s.loopMode!=null?s.loopMode:SESSION_DEFAULTS.loopMode);
     setLoopBar(s.loopBar!=null?s.loopBar:SESSION_DEFAULTS.loopBar);
     setLoopBars(s.loopBars!=null?s.loopBars:SESSION_DEFAULTS.loopBars);
@@ -4577,7 +5573,10 @@ export default function LoudLight(){
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     _adoptSong(s);
 
-    setSelDevId(row.id);setNameDraft(row.name);
+    setSelDevId(row.id);setSelCloudId(null);setNameDraft(row.name);
+    // This project is now the session's home, and it stays so across a
+    // relaunch — that is the whole reason the target is persisted.
+    setSaveTarget({store:"device",id:row.id,name:row.name});
     showFlash("LOADED "+row.name);
     markClean(2500);   // the kit decodes asynchronously — see markClean
     // Load the saved kit — must come after setVoiceSamples({}) earlier in
@@ -4593,6 +5592,9 @@ export default function LoudLight(){
     const next=library.filter(p=>p.id!==id);
     setLibrary(next);
     if(selDevId===id){setSelDevId(null);setNameDraft("");}
+    // A home that no longer exists is worse than none: SAVE would recreate it
+    // under its old id and quietly undo the delete.
+    if(saveTarget&&saveTarget.store==="device"&&saveTarget.id===id)setSaveTarget(null);
     const ok=await storageSet("projects",JSON.stringify(next));
     showFlash(ok?"DELETED "+(row?row.name:""):"DELETE FAILED");
   };
@@ -4648,7 +5650,7 @@ export default function LoudLight(){
     // anywhere below it must not leave a resumable pause behind.
     pausedR.current=false;setPaused(false);
     if(playing){
-      clearInterval(tmrR.current);
+      _stopTick();
       if(CORE_ON)coreHost.stop();
       setPlaying(false);setStep(-1);setPlayId(null);setDrumStep(-1);
       if(silentLoopR.current){try{silentLoopR.current.pause();}catch(e){}}
@@ -4670,6 +5672,13 @@ export default function LoudLight(){
     setLayerParams({synth:DEFAULT_LP(0),lead:DEFAULT_LP_MONO(0)});
     setDlyIdx(3);setDlyFbPct(45);setDlyHpVal(8);setDlyLpVal(78);
     setRvSize(50);setRvDamp(40);setRvLfDamp(0);setRvPreDelay(0);setRvMod(0);setDlyToRev(0);setDrumLevel(85);setDrumFxTrim(100);setDrumMixArr(defaultDrumMix());
+    // Master bus back to off. (This is inside the long run of setters that a
+    // single throw abandons — see the doNew cliff lesson — so it stays with
+    // the rest of the sound resets rather than at the end.)
+    setMojoOn(SESSION_DEFAULTS.mojoOn);setDriveAmt(SESSION_DEFAULTS.driveAmt);
+    setDriveChar(SESSION_DEFAULTS.driveChar);
+    setExThump(SESSION_DEFAULTS.exThump);setExBody(SESSION_DEFAULTS.exBody);
+    setExAir(SESSION_DEFAULTS.exAir);
     // Transient scheduler/UI state — clear so the next play starts fresh.
     stepR.current=0;
     if(layerLastFreqR)layerLastFreqR.current={synth:null,lead:null};
@@ -4681,6 +5690,10 @@ export default function LoudLight(){
     }
     setPatternDrag(null);
     setSelDevId(null);setSelCloudId(null);
+    // A new project has no home yet, so the next SAVE files it rather than
+    // overwriting whatever was open before — the one thing a persisted target
+    // must never do.
+    setSaveTarget(null);
     setNameDraft(randomName(library.map(p=>p.name)));
     setPage("edit");
     // Stop any in-flight sample recording + clear stored samples.
@@ -4708,6 +5721,7 @@ export default function LoudLight(){
     else if(confirmAction.type==="csave")doCloudSave(confirmAction.id,confirmAction.name);
     else if(confirmAction.type==="cload")doCloudLoad(confirmAction.id);
     else if(confirmAction.type==="cclear")doCloudClear(confirmAction.id);
+    else if(confirmAction.type==="cdelacct")doCloudDeleteAccount();
     setConfirmAction(null);
   };
   const confirmNo=()=>setConfirmAction(null);
@@ -4889,7 +5903,12 @@ export default function LoudLight(){
     const pos=sw>cw?el.scrollLeft/(sw-cw):0;
     th.style.width=(frac*100).toFixed(2)+"%";
     th.style.left=((1-frac)*pos*100).toFixed(2)+"%";
-    if(trackElR.current)trackElR.current.style.opacity=cw>=sw-1?"0.25":"1";
+    // NOTHING TO SCROLL, NOTHING TO DRAW. It used to fade to 0.25 and stay,
+    // which on a short song is a full-width bar sitting under half a row of
+    // slots — it reads as "there is more over there" when there is not. It is
+    // also the lane's only pan handle, so with no overflow there is nothing for
+    // it to do either.
+    if(trackElR.current)trackElR.current.style.opacity=cw>=sw-1?"0":"1";
   };
   // Drag the track to pan. The slots set touch-action:none so a drag on one can
   // move a pattern in 2D, which means a touch starting on a slot can never
@@ -5122,7 +6141,7 @@ export default function LoudLight(){
   // has no single note colour and falls through to the brand amber. Which made
   // the drums page the one layer whose tint was not its own: it read as "lit",
   // not as "drums". Its accent is the rose the DRUMS button already wears.
-  const layerTint="rgba("+(activeLayer==="drums"?"196,114,122":noteRgb(activeLayer))+",0.045)";
+  const layerTint="rgba("+(activeLayer==="drums"?"224,112,96":noteRgb(activeLayer))+",0.045)";
   // Drums have no per-column params, so a spill cannot survive the trip there.
   useEffect(()=>{if(activeLayer==="drums"&&spillParam)setSpillParam(null);},[activeLayer,spillParam]);
   // Tapping anywhere that is not the spilled lane or the row of buttons puts it
@@ -5204,7 +6223,7 @@ export default function LoudLight(){
     "aria-label":"Loop",
     onClick:(e)=>{e.stopPropagation();tapLoop();},
   };
-  const loopBtnStyle=loopMode===2?Object.assign({},S.loopOn,{boxShadow:"inset 0 0 0 3px rgba(159,180,199,0.22)"}):(loopMode?S.loopOn:{});
+  const loopBtnStyle=loopMode===2?Object.assign({},S.toggleOn,{boxShadow:"inset 0 0 0 3px rgba(255,214,150,0.22), 0 0 7px rgba(255,214,150,0.4)"}):(loopMode?S.toggleOn:{});
   // (The LOOP scope MENU is gone. The button has no second function now: each
   //  tap steps the loop outward and then off — see tapLoop above.)
   // Switching to a different pattern while LOOP is on moves the loop with you —
@@ -5276,6 +6295,7 @@ export default function LoudLight(){
         grid:spliceCols(openBarGap(g.grid,dst,newW),sliceCols(part.grid,off),dst)});
       if(g.durs)  out.durs  = spliceCols(openBarGap(g.durs,dst,newW),  sliceCols(part.durs||[],off,COLS,()=>1),dst,0,COLS,()=>1);
       if(g.params)out.params= spliceFlat(openBarGapFlat(g.params,dst,newW),sliceFlat(part.params||[],off),dst);
+      if(g.notePatch)out.notePatch=spliceFlat(openBarGapFlat(g.notePatch,dst,newW),sliceFlat(part.notePatch||[],off,COLS,()=>null),dst,0,COLS,()=>null);
       if(g.vel)   out.vel   = spliceCols(openBarGap(g.vel,dst,newW),   sliceCols(toDrumVel2D(part.vel,oldW),off,COLS,()=>100),dst,0,COLS,()=>100);
       if(g.rat)   out.rat   = spliceCols(openBarGap(g.rat,dst,newW),   sliceCols(toDrumRat2D(part.rat,oldW),off,COLS,()=>1),  dst,0,COLS,()=>1);
       if(out.motion&&typeof out.motion==="object"){
@@ -5376,6 +6396,7 @@ export default function LoudLight(){
         grid:spliceCols(g.grid,sliceCols(part.grid,0,oldW),oldW,0,oldW)});
       if(g.durs)  out.durs  = spliceCols(g.durs, sliceCols(part.durs||[],0,oldW,()=>1),oldW,0,oldW,()=>1);
       if(g.params)out.params= spliceFlat(g.params,sliceFlat(part.params||[],0,oldW),oldW,0,oldW);
+      if(g.notePatch)out.notePatch=spliceFlat(g.notePatch,sliceFlat(part.notePatch||[],0,oldW,()=>null),oldW,0,oldW,()=>null);
       if(g.vel)   out.vel   = spliceCols(g.vel,  sliceCols(toDrumVel2D(part.vel,srcW),0,oldW,()=>100),oldW,0,oldW,()=>100);
       if(g.rat)   out.rat   = spliceCols(g.rat,  sliceCols(toDrumRat2D(part.rat,srcW),0,oldW,()=>1),  oldW,0,oldW,()=>1);
       if(out.motion&&typeof out.motion==="object"){
@@ -5485,18 +6506,44 @@ export default function LoudLight(){
     }
     return -1;
   })();
-  // Eight slots across. The grid shows two rows until the song outgrows them,
-  // then one more row than it needs — so there is always somewhere to drop the
-  // next pattern without the page being mostly empty squares.
-  const SONG_COLS=8;
+  // SLOTS ACROSS THE VISIBLE WIDTH. Ten in phone portrait, where it was eight.
+  //
+  // IT WENT TO SIXTEEN FIRST — the grid's own column count, so a slot was
+  // exactly a note cell and the two rows lined up column for column. That was
+  // an OVER-STEER, and the reason is worth keeping: **a slot is sized by what
+  // your finger has to DO to it, not by what it sits above.** A note cell takes
+  // one gesture, a tap. A song slot takes four — tap to place or select, HOLD
+  // for the repeat picker, DRAG to move a pattern out of it, and it is also the
+  // DROP TARGET a chip is dragged onto, with the outer 22% of its width reading
+  // as the insert SEAM. At 21px that seam is 4.7px wide, which is not a thing
+  // you can aim at.
+  //
+  // Ten is ~34px on a 15 and ~33 on an SE. Above the 30px the pattern CHIPS
+  // already prove for exactly this tap/hold/drag set, seam back up to 7px, and
+  // still a quarter more song on screen than the eight it started at.
+  //
+  // There is NO middle that keeps the grid alignment, which is what settles it:
+  // one cell is 21px and two cells plus a gap is 44px, i.e. the size it already
+  // was. Alignment was never what did the work anyway — the DIMMING below is.
+  //
+  // Only phone portrait. The desktop sidebar is ~220px wide and the landscape
+  // song PAGE is a page rather than a strip, so both keep the eight they had.
+  const SONG_COLS=SONG_STRIP?10:8;
   // How many slots to draw: enough for the song plus ONE empty one to place
-  // into, and never fewer than fill the visible line. Growing by a slot as you
-  // fill the last one is the whole point of the linear form — there is no grid
-  // shape to round up to, so the control is exactly as long as the song.
+  // into, and never fewer than SONG_MIN. Growing by a slot as you fill the last
+  // one is the whole point of the linear form — there is no grid shape to round
+  // up to, so the control is exactly as long as the song.
+  //
+  // The FLOOR is deliberately not SONG_COLS any more. Those were the same
+  // number while the line was eight slots wide; at sixteen, tying them would
+  // draw a fresh project sixteen empty outlines — more objects on screen, which
+  // is the opposite of what shrinking the cells was for. Eight is enough to
+  // read as "here is the song, and room to add".
+  const SONG_MIN=8;
   const _songCells=(()=>{
     let last=-1;
     for(let i=0;i<64;i++)if(song[i]!=null)last=i;
-    return Math.max(SONG_COLS,Math.min(64,last+2));
+    return Math.max(SONG_MIN,Math.min(64,last+2));
   })();
   useEffect(()=>{ if(delArm==null)return; const t=setTimeout(()=>setDelArm(null),4000); return ()=>clearTimeout(t); },[delArm]);
   useEffect(()=>{ setDelArm(null); },[activePatternId]);
@@ -5581,6 +6628,20 @@ export default function LoudLight(){
   const setPatternMaster=(layer)=>{
     pushHistory();
     setPatterns(ps=>ps.map(p2=>p2.id!==activePatternId?p2:Object.assign({},p2,{master:layer})));
+  };
+  // A pattern's OWN tempo. `null` deletes the field rather than storing a
+  // number equal to the global: those are different intentions, and only the
+  // absent one keeps following the global when the global moves. It takes the
+  // id explicitly rather than reading activePatternId — the menu does select
+  // the pattern it opens on, but a setter that says which pattern it means
+  // cannot be wrong about it later.
+  const setPatternBpm=(id,v)=>{
+    setPatterns(ps=>ps.map(p2=>{
+      if(p2.id!==id)return p2;
+      const n=Object.assign({},p2);
+      if(v==null)delete n.bpm; else n.bpm=Math.max(BPM_MIN,Math.min(BPM_MAX,Math.round(v)));
+      return n;
+    }));
   };
   // ── BAR OPS — a bar chip's second function ──────────────────────────────
   // The ops that act on ONE BAR hang off that bar's chip, which is the thing
@@ -5724,7 +6785,7 @@ export default function LoudLight(){
   const layerOpsMenu=!layerMenu?null:(()=>{
     const lm=layerMenu, isDrum=lm.layer==="drums";
     const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
-    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#79b8f2":"#c4727a";
+    const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#8279e0":"#e07060";
     const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
     const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
@@ -5763,25 +6824,80 @@ export default function LoudLight(){
   // "whose sound am I editing" and "whose notes am I editing" can never drift
   // apart, and coming out of SOUND leaves you on the part you were just
   // shaping.
+  // Filled each render. Opening the note's voice is: remember which note,
+  // put the SOUND screen on the LAYER face, and show it — the sheet on mobile,
+  // the page on desktop. It does NOT switch layer: the grid you long-pressed is
+  // already the active layer's, and switching would change what you were editing.
+  openNoteSoundR.current=(r,c)=>{
+    if(activeLayer==="drums")return;   // drum voices live in the mixer, not here
+    setNotePatchAt({col:c,row:r});
+    setSoundTab("layer");
+    if(IS_MOBILE)setActiveSheet("sound"); else setPage("sound");
+  };
+  // Leaving the screen hands the knobs back to the LAYER. Without this the
+  // screen would still be pointed at a note you can no longer see, and the next
+  // patch edit would land on it — an override applied to the wrong thing, which
+  // is the one failure mode this feature must not have.
+  const _closeNoteSound=()=>setNotePatchAt(null);
+  // The banner. It is the whole state display for the mode: which note, what it
+  // overrides, and the way out. One body, so both mounts carry it.
+  const notePatchBar=(compact)=>{
+    if(!_npOn)return null;
+    const n=_npKeys.length;
+    return(
+      <div data-notepatch="1" style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,
+        marginBottom:compact?6:8,padding:compact?"5px 7px":"7px 9px",borderRadius:8,
+        border:"1px solid "+C_VARY+"66",background:C_VARY+"14"}}>
+        <span style={{fontSize:compact?8:9,letterSpacing:1.4,color:C_VARY,whiteSpace:"nowrap"}}>
+          THIS NOTE</span>
+        <span data-notepatch-step="1" style={{fontSize:compact?8:9,letterSpacing:1,color:"rgba(232,240,248,0.72)",whiteSpace:"nowrap"}}>
+          {"BAR "+(Math.floor(notePatchAt.col/COLS)+1)+" · STEP "+(notePatchAt.col%COLS+1)}</span>
+        <span data-notepatch-n={n} style={{flex:1,minWidth:0,fontSize:compact?8:9,letterSpacing:0.6,
+          color:n?C_VARY:"rgba(178,199,219,0.4)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+          {n?(n+(n===1?" OVERRIDE":" OVERRIDES")):"following the layer"}</span>
+        {n>0&&(
+          <button data-notepatch-reset="1" onClick={_clearNotePatch} title="Drop this note's overrides"
+            style={{flexShrink:0,height:compact?22:24,padding:"0 8px",borderRadius:6,cursor:"pointer",
+              fontFamily:"inherit",fontSize:compact?8:9,letterSpacing:1,
+              border:"1px solid "+C_VARY+"66",background:"transparent",color:C_VARY}}>RESET</button>
+        )}
+        <button data-notepatch-exit="1" onClick={_closeNoteSound} title="Back to the layer's sound"
+          style={{flexShrink:0,height:compact?22:24,padding:"0 8px",borderRadius:6,cursor:"pointer",
+            fontFamily:"inherit",fontSize:compact?8:9,letterSpacing:1,
+            border:"1px solid rgba(168,190,212,0.22)",background:"transparent",color:"rgba(178,199,219,0.6)"}}>LAYER</button>
+      </div>
+    );
+  };
   const soundTabs=(compact)=>(
     <div data-soundtabs="1" style={{display:"flex",gap:4,flexShrink:0,marginBottom:compact?6:10}}>
       {compact&&(
         <button data-soundclose="1" aria-label="Close sound" title="Close"
-          onClick={()=>setActiveSheet(null)}
+          onClick={()=>{setNotePatchAt(null);setActiveSheet(null);}}
           style={{flex:"0 0 auto",width:28,height:28,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
             border:"1px solid rgba(168,190,212,0.2)",background:"transparent",
             color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1}}>✕</button>
       )}
-      {[["synth","POLY","#a8c5a0"],["lead","MONO","#79b8f2"],["drums","DRUMS","#c4727a"],["fx","FX",C_SAT]].map(([k,lbl,col])=>{
+      {/* The four faces are SHAPES, not words — the same three layer glyphs the
+          transport row wears, so "which part am I shaping" is one picture
+          wherever you are looking, plus a mixer for the whole mix. That last
+          one was the word FX, which named the buses rather than the page: the
+          face carries the layer faders, the master bus and the global sends,
+          and a mixer is the only thing true of all of it.
+          The accessible NAME is the noun; the hint goes in `title`. A whole
+          sentence as a name is read out on every focus and is not what the
+          control is called. */}
+      {[["synth","poly","Poly","#a8c5a0"],["lead","mono","Mono","#8279e0"],["drums","drums","Drums","#e07060"],["fx","mix","Mix",C_SAT]].map(([k,icon,name,col])=>{
         const on=k==="fx"?soundTab==="fx":(soundTab==="layer"&&activeLayer===k);
         return(
-          <button key={k} data-soundtab={k} aria-pressed={on}
-            onClick={()=>{ if(k==="fx"){setSoundTab("fx");} else {setSoundTab("layer");if(activeLayer!==k)switchLayer(k);} }}
+          <button key={k} data-soundtab={k} aria-pressed={on} aria-label={name}
+            title={k==="fx"?"The whole mix — levels, master bus and sends":name+" sound"}
+            onClick={()=>{ setNotePatchAt(null);
+              if(k==="fx"){setSoundTab("fx");} else {setSoundTab("layer");if(activeLayer!==k)switchLayer(k);} }}
             style={{flex:1,minWidth:0,height:compact?28:32,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
-              fontSize:9,fontWeight:700,letterSpacing:1,
+              display:"flex",alignItems:"center",justifyContent:"center",
               border:"1px solid "+(on?col:col+"33"),
               background:on?col+"22":"transparent",
-              color:on?col:col+"99"}}>{lbl}</button>
+              color:on?col:col+"99"}}><LLIcon name={icon} size={compact?15:17}/></button>
         );
       })}
     </div>
@@ -5811,7 +6927,7 @@ export default function LoudLight(){
       <div style={{position:"fixed",inset:0,zIndex:500}}
         onPointerDown={()=>{if(Date.now()-barMenuAtR.current>400)close();}}
         onClick={()=>{if(Date.now()-barMenuAtR.current>400)close();}}>
-        <div style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
+        <div data-barmenu={bm.bar} style={{position:"absolute",left:px,top:py,width:W,maxHeight:H,overflowY:"auto",
           background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
           borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
           boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"auto",pointerEvents:"all"}}
@@ -5930,7 +7046,7 @@ export default function LoudLight(){
     const cur=patterns.find(x=>x.id===pm.id)||patterns.find(x=>x.id===activePatternId)||patterns[0];
     if(!cur)return null;
     const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(230,vw-16),H=250;
+    const W=Math.min(230,vw-16),H=330;
     const px=Math.max(8,Math.min(vw-W-8,pm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,pm.y+12));
     const close=()=>{setPatMenu(null);setDelArm(null);};
@@ -5977,6 +7093,57 @@ export default function LoudLight(){
               would mean a pattern that plays a length you cannot account for
               and cannot change. It is claimed by whichever layer you composed
               first; this is the way to say otherwise. */}
+          {/* A PATTERN MAY CARRY ITS OWN TEMPO. Absent it follows the global
+              one, which is what every pattern has always done — so this is
+              additive, and a project that never touches it is unchanged. In a
+              SONG the tempo therefore changes with the arrangement, entry by
+              entry, because the clock is priced from whichever pattern is
+              playing rather than from a param. */}
+          {head(hasOwnBpm(cur)?"TEMPO — THIS PATTERN":"TEMPO — FOLLOWING GLOBAL")}
+          <div style={{display:"grid",gridTemplateColumns:"1.35fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {/* Drag it. A number is the one thing on a pattern you DO want to
+                aim at, so unlike MOJO this shows one — the ladder-of-words rule
+                is about quantities you can only judge by ear. */}
+            <div data-patbpm={hasOwnBpm(cur)?String(cur.bpm):"global"}
+              style={{padding:"7px 0 6px",background:"rgba(10,18,28,0.92)",cursor:"ns-resize",
+                touchAction:"none",userSelect:"none",textAlign:"center"}}
+              onPointerDown={e=>{
+                e.stopPropagation();
+                // CAPTURE THE ELEMENT. React reuses its synthetic event, so
+                // `e.currentTarget` is NULL by the time the pointerup handler
+                // runs — the listeners then never come off and the teardown
+                // throws instead. Read it once, here, while it is still live.
+                const el=e.currentTarget;
+                el.setPointerCapture(e.pointerId);
+                let val=patBpm(cur,bpm), last=e.clientY, marked=false;
+                const mv=ev=>{
+                  const d=last-ev.clientY; last=ev.clientY;
+                  // Same gearing as the GLOBAL bpm scrubber (0.5), so the same
+                  // crawl moves a pattern's tempo by the same amount it moves
+                  // the project's. Two tempo controls that geared differently
+                  // would be two different feels for one quantity.
+                  val=Math.max(BPM_MIN,Math.min(BPM_MAX,val+ballisticNudge(d,0.5)));
+                  // Mark on the first REAL change of the gesture, never on the
+                  // press: pushHistory does not dedupe, so a snapshot per
+                  // pointerdown fills the ring with no-ops.
+                  if(!marked){marked=true;pushHistory();}
+                  setPatternBpm(cur.id,val);
+                };
+                const up=()=>{
+                  el.removeEventListener("pointermove",mv);
+                  el.removeEventListener("pointerup",up);
+                  el.removeEventListener("pointercancel",up);
+                };
+                el.addEventListener("pointermove",mv);
+                el.addEventListener("pointerup",up);
+                el.addEventListener("pointercancel",up);
+              }}>
+              <div style={{fontSize:17,fontWeight:700,fontVariantNumeric:"tabular-nums",
+                color:hasOwnBpm(cur)?"#e6b872":"rgba(178,199,219,0.45)"}}>{Math.round(patBpm(cur,bpm))}</div>
+              <div style={{fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.3)"}}>BPM · DRAG</div>
+            </div>
+            {cell("\u21ba GLOBAL",()=>{pushHistory();setPatternBpm(cur.id,null);},!hasOwnBpm(cur))}
+          </div>
           {head("MASTER — SETS THE LENGTH")}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"rgba(168,190,212,0.08)"}}>
             {PART_LAYERS.map(l=>{
@@ -5990,6 +7157,68 @@ export default function LoudLight(){
                   onClick={()=>{setPatternMaster(l);}}>{lbl}</button>
               );
             })}
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
+  // ── The pattern +'s hold menu — the ways to MAKE a pattern ──────────────
+  // Two rows, because the + makes patterns and these are the two ways: an
+  // empty one, or one made out of the whole song. SONG → PATTERN had no
+  // visible name anywhere in portrait or on desktop before this — it was a
+  // bare hold — so it was findable only by accident.
+  //
+  // The refusal is drawn IN THE ROW rather than fired as a toast. A menu that
+  // greys out a row and says why underneath it is the honest form: you are
+  // looking at the control when you learn it cannot run, instead of reading a
+  // message at the top of the screen about something you pressed at the
+  // bottom of it. (The toast still carries the RESULT, which is a different
+  // message and is worth having fly.)
+  const addPatMenu=!addMenu?null:(()=>{
+    const vw=window.innerWidth,vh=window.innerHeight;
+    const W=Math.min(246,vw-16),H=176;
+    const px=Math.max(8,Math.min(vw-W-8,addMenu.x-W/2));
+    const py=Math.max(8,Math.min(vh-H-8,addMenu.y+12));
+    const close=()=>setAddMenu(null);
+    const dismiss=()=>{if(Date.now()-addMenuAtR.current>400)close();};
+    const full=patterns.length>=MAX_PATTERNS;
+    // Ask the real planner, so the row's reason is the same sentence the op
+    // would have flashed — never a second guess at what it would refuse.
+    // songSeq, not songSeqR: the ref is written by an effect, which runs AFTER
+    // the render that changed it, so a menu built off it would describe the
+    // song as it was one commit ago.
+    const entries=songSeq.map(id=>patterns.find(p2=>p2.id===id)).filter(Boolean);
+    const {blockers,totalBars}=collapseBlockers(entries,patterns.length);
+    const why=blockers[0]||"";
+    const row=(label,sub,fn,disabled)=>(
+      <button disabled={!!disabled}
+        style={{width:"100%",padding:"10px 12px",textAlign:"left",background:"rgba(10,18,28,0.92)",
+          border:"none",fontFamily:"inherit",cursor:disabled?"default":"pointer",
+          display:"flex",flexDirection:"column",gap:3}}
+        onClick={disabled?undefined:()=>{close();fn();}}>
+        <span style={{fontSize:11,fontWeight:700,letterSpacing:1.4,
+          color:disabled?"rgba(178,199,219,0.22)":"rgba(212,226,240,0.86)"}}>{label}</span>
+        <span style={{fontSize:8,letterSpacing:1.1,lineHeight:1.4,
+          color:disabled?"rgba(214,166,90,0.6)":"rgba(178,199,219,0.35)"}}>{sub}</span>
+      </button>
+    );
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:500}}
+        onPointerDown={dismiss} onClick={dismiss}>
+        <div style={{position:"absolute",left:px,top:py,width:W,
+          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
+          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
+          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"8px 12px 6px",borderBottom:"1px solid rgba(168,190,212,0.1)",
+            fontSize:8,letterSpacing:2,fontWeight:600,color:"rgba(178,199,219,0.3)"}}>NEW PATTERN</div>
+          <div style={{display:"flex",flexDirection:"column",gap:1,background:"rgba(168,190,212,0.08)"}}>
+            {row("＋ EMPTY",full?"THE PATTERN LIST IS FULL":"AN EMPTY PATTERN, SELECTED",
+              ()=>addPattern(),full)}
+            {row("SONG → PATTERN",
+              why?why:"FLATTEN THE WHOLE SONG INTO ONE "+totalBars+"-BAR PATTERN",
+              ()=>collapseSong(),!!why)}
           </div>
         </div>
       </div>
@@ -6039,7 +7268,7 @@ export default function LoudLight(){
   //
   // linear in the viewport width, so it lands exactly as `<k>vw - <c>px`.
   // Returned without the `calc(` so it can be embedded in a larger one.
-  const LANE_GAP=4, LANE_TRACK=6;
+  const LANE_GAP=3, LANE_TRACK=5;
   const _laneCellCss=(pad)=>"calc((100% - "+((SONG_COLS-1)*LANE_GAP)+"px) / "+SONG_COLS+")";
   const _laneBlockCss=(pad)=>{
     const k=(100/SONG_COLS).toFixed(4);
@@ -6083,7 +7312,18 @@ export default function LoudLight(){
               <div key={idx} data-song-cell="1" data-song-bar={idx} data-song-cursor={isCursor?"1":undefined}
                 style={{flex:"0 0 "+_laneCellCss(0),aspectRatio:"1",borderRadius:5,position:"relative",
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  background:pat?col0:(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.05)"),
+                  // THE LANE IS DIM AT REST AND THE SOUNDING SLOT IS NOT.
+                  // Every filled slot used to be a solid block of its own
+                  // colour, so a six-bar song was the brightest thing on the
+                  // screen — brighter than the grid, which is the thing you are
+                  // actually working in. It is a map: you read it, you do not
+                  // edit it, so it gets a map's share of the light.
+                  // The colour still carries the pattern's identity, because
+                  // that is what you recognise it by; it just carries it as a
+                  // TINT and a lit glyph rather than as a flood fill. What is
+                  // SOUNDING keeps exactly the fill it always had, which is now
+                  // the only solid block in the row and needs no ring to say so.
+                  background:pat?(isCursor?col0:col0+"2b"):(isCursor?"rgba(186,208,230,0.25)":"rgba(186,208,230,0.035)"),
                   // The border is always THERE and only changes colour. Under
                   // border-box a flex item's base size is floored at its own
                   // border, so dropping the border on a filled cell made it 2px
@@ -6091,7 +7331,20 @@ export default function LoudLight(){
                   // that came back as 2px of height too — a filled slot knocked
                   // the whole line out of alignment. It also skewed the rects
                   // _songMeasure caches for drops.
-                  border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.09)"),
+                  // NO OUTLINE ON A FILLED SLOT — it is a TIMELINE, not a row of
+                  // buttons. Once the slots came down to the grid's pitch the
+                  // lane and the pattern chips below it were two rows of the
+                  // same picture at two sizes: a coloured glyph in a coloured
+                  // outline, twice. They are not the same kind of thing — the
+                  // chips are a palette you PICK from and the lane is the shape
+                  // of the song — so the lane gives up its outlines and reads as
+                  // blocks of material laid end to end, which is also how a run
+                  // of the same pattern now shows itself without a count.
+                  // The border stays declared as a transparent 1px: under
+                  // border-box a flex item's base size is floored at its own
+                  // border, so DROPPING it makes a filled cell 2px narrower than
+                  // an empty one and, with aspect-ratio:1, 2px shorter as well.
+                  border:"1px solid "+(pat?"transparent":"rgba(186,208,230,0.07)"),
                   boxSizing:"border-box",minWidth:0,
                   // NO HALO ON THE SOUNDING SLOT. A ring around the cell says
                   // "this cell", which you can already see — and the lane is a
@@ -6105,9 +7358,9 @@ export default function LoudLight(){
                   // different question and only exists mid-drag.
                   outline:isHover?"2px solid rgba(232,220,205,0.9)":"none",
                   outlineOffset:"-1px",
-                  color:pat?(isCursor?"#fff":"#0e1c2b"):"transparent",
+                  color:pat?(isCursor?"#fff":col0):"transparent",
                   textShadow:isCursor&&pat?"0 0 6px #fff,0 0 14px rgba(255,255,255,0.75)":"none",
-                  fontSize:17,fontWeight:700,
+                  fontSize:16,fontWeight:700,
                   touchAction:"none",cursor:"pointer",userSelect:"none",
                   transition:"background .08s, outline .08s"}}
                 onPointerDown={(e)=>{
@@ -6196,7 +7449,7 @@ export default function LoudLight(){
                 )}
                 {runStart&&run>1&&(
                   <span style={{position:"absolute",right:3,bottom:2,fontSize:9,fontWeight:700,
-                    color:"rgba(10,20,32,0.6)",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
+                    color:isCursor?"rgba(10,20,32,0.6)":col0+"aa",pointerEvents:"none",lineHeight:1}}>×{plays}</span>
                 )}
                 {/* Bar dots — one per bar of the pattern, above the symbol,
                     mirroring the repeat pips below it. On the playing cell
@@ -6216,7 +7469,7 @@ export default function LoudLight(){
                           className={lit?"barpulse":undefined}
                           style={{flex:"1 1 0",minWidth:0,maxWidth:pbars<=8?4:undefined,
                             height:3,borderRadius:pbars<=8?2:0,
-                            background:lit?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.4)"}}/>
+                            background:lit?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.4)":col0+"55")}}/>
                       );
                     })}
                   </div>
@@ -6227,10 +7480,12 @@ export default function LoudLight(){
                 {pat&&rep>1&&(
                   <div style={{position:"absolute",left:0,right:0,bottom:3,display:"flex",
                     justifyContent:"center",gap:2,pointerEvents:"none"}}>
-                    {Array.from({length:rep},(_,k)=>(
-                      <div key={k} style={{width:4,height:4,borderRadius:2,
-                        background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":"rgba(10,20,32,0.45)"}}/>
-                    ))}
+                    {Array.from({length:rep},(_,k)=>{
+                      const sz=4;
+                      return(
+                      <div key={k} style={{width:sz,height:sz,borderRadius:sz/2,
+                        background:(isCursor&&k===_songPlayingPass)?"rgba(255,255,255,0.95)":(isCursor?"rgba(10,20,32,0.45)":col0+"66")}}/>
+                    );})}
                   </div>
                 )}
               </div>
@@ -6241,10 +7496,10 @@ export default function LoudLight(){
           one part a finger can pan it by — and the readout of where you are in
           a song longer than the eight slots on screen. */}
       <div ref={trackRef} onPointerDown={_lanePanStart} aria-hidden="true"
-        style={{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,
-          background:"rgba(186,208,230,0.06)",touchAction:"none",cursor:"pointer"}}>
+        style={{height:LANE_TRACK,borderRadius:LANE_TRACK/2,position:"relative",flexShrink:0,opacity:0,
+          background:"rgba(186,208,230,0.025)",touchAction:"none",cursor:"pointer",transition:"opacity .12s"}}>
         <div ref={thumbRef} style={{position:"absolute",top:0,bottom:0,left:0,width:"100%",
-          borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.26)"}}/>
+          borderRadius:LANE_TRACK/2,background:"rgba(186,208,230,0.13)"}}/>
       </div>
     </div>
   );
@@ -6296,12 +7551,18 @@ export default function LoudLight(){
           const up=()=>{document.removeEventListener("pointermove",update);document.removeEventListener("pointerup",up);document.removeEventListener("pointercancel",up);};
           document.addEventListener("pointermove",update);document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
         };
-        const strip=(label,val,color,onChange,layerKey,fxVal,onFx)=>{
+        // A strip is headed by its layer's SYMBOL, not its name. The three
+        // glyphs are already what the transport row and the SOUND selector
+        // wear, so a channel is recognised the same way wherever you meet it —
+        // and at 8px a word on this navy is the least legible thing on the
+        // page. `name` stays as the accessible label and the tooltip.
+        const strip=(name,icon,val,color,onChange,layerKey,fxVal,onFx)=>{
           const muted=!!trackMute[layerKey], solo=!!trackSolo[layerKey];
           const dim=muted||(anySolo&&!solo);
           return(
             <div key={layerKey} style={{flex:"1 1 0",minWidth:0,maxWidth:84,display:"flex",flexDirection:"column",alignItems:"center",gap:4,opacity:dim?0.4:1}}>
-              <span style={{fontSize:8,letterSpacing:1.5,fontWeight:700,color}}>{label}</span>
+              <span role="img" aria-label={name} title={name} style={{color,display:"flex",alignItems:"center",justifyContent:"center",height:14}}>
+                <LLIcon name={icon} size={13}/></span>
               {/* One tall band holds everything: the fader, then M/S, then the
                   FX trim on the far side of them. All three want vertical
                   travel or nothing, and the height is where the room is —
@@ -6344,14 +7605,14 @@ export default function LoudLight(){
           );
         };
         return(
-          <div style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
+          <div data-mixer="1" style={{width:"100%",maxWidth:640,flexShrink:0,display:"flex",flexDirection:"column",gap:5,minHeight:0}}>
             <div style={{fontSize:8,letterSpacing:2,color:"rgba(178,199,219,0.5)",fontWeight:600}}>MIX</div>
             {/* Strips are capped and left-aligned so three channels read as a
                 mixer rather than three faders stranded across the page. */}
             <div style={{display:"flex",gap:12,alignItems:"stretch",justifyContent:"flex-start",height:IS_MOBILE?176:236}}>
-              {strip("POLY",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
-              {strip("MONO",monoMix,"#79b8f2",setLeadMix,"lead",monoFx,setLeadFx)}
-              {strip("DRUMS",drumLevel,"#c4727a",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
+              {strip("Poly","poly",polyMix,"#a8c5a0",setSynthMix,"synth",polyFx,setSynthFx)}
+              {strip("Mono","mono",monoMix,"#8279e0",setLeadMix,"lead",monoFx,setLeadFx)}
+              {strip("Drums","drums",drumLevel,"#e07060",setDrumLevel,"drums",drumFxTrim,setDrumFxTrim)}
             </div>
           </div>
         );
@@ -6368,26 +7629,36 @@ export default function LoudLight(){
   // the drag has to be able to CANCEL it. A wobble under 6px does not; only a
   // real drag does.
   // ── The pattern + ────────────────────────────────────────────────────────
-  // Tap adds an empty pattern; HOLD (or right-click) makes one out of the whole
-  // song. Both halves add a pattern, which is what makes them one control
-  // rather than two crammed together — and SONG → PATTERN needed a home once
-  // the song page stopped being somewhere portrait and desktop could reach.
-  // The usual hold trap applies: swallow the trailing click, or flattening the
-  // song is followed immediately by a stray empty pattern behind the result.
+  // Tap adds an empty pattern; HOLD (or right-click) OPENS A MENU of the ways
+  // to make one, which is where SONG → PATTERN lives. Both halves still add a
+  // pattern — that is what makes this one control rather than two crammed
+  // together — and the menu is what gives the second half a NAME.
+  //
+  // The hold used to fire SONG → PATTERN outright, and that was the whole
+  // problem with it: a hold has no affordance, so the only thing on screen
+  // that ever said the function existed was an aria-label and a toast after
+  // the fact. Reported as not being able to find it at all, having just used
+  // it by accident. A menu hangs the label off the thing it acts on, the same
+  // way a bar chip's hold and a pattern chip's hold do, and it can say WHY it
+  // is refusing in place rather than firing a toast across the screen.
+  //
+  // The usual hold traps apply: swallow the trailing click (or the menu
+  // arrives with a stray empty pattern behind it), and ignore dismissals for
+  // ~400ms (or the opening press's own trailing click closes it instantly).
   // Deferred calls, never bare references: addPattern and collapseSong are
   // declared further down and Babel lowers const to var.
   const addPatR=useRef({tmr:0,held:false});
+  const addMenuAtR=useRef(0);
   const _addHoldEnd=()=>{if(addPatR.current.tmr){clearTimeout(addPatR.current.tmr);addPatR.current.tmr=0;}};
-  const _collapseFromAdd=()=>{
-    if(!songSeqR.current.length){showFlash("NO SONG TO FLATTEN");return;}
-    collapseSong();
-  };
+  const _openAddMenu=(x,y)=>{addMenuAtR.current=Date.now();setAddMenu({x,y});};
   const addChipProps={
-    "aria-label":"New pattern (hold to flatten the whole song into one)",
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();addPatR.current.held=true;_collapseFromAdd();},
+    "aria-label":"New pattern",
+    title:"New pattern — hold for SONG → PATTERN",
+    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();addPatR.current.held=true;_openAddMenu(e.clientX,e.clientY);},
     onPointerDown:(e)=>{
       e.stopPropagation();addPatR.current.held=false;_addHoldEnd();
-      addPatR.current.tmr=setTimeout(()=>{addPatR.current.tmr=0;addPatR.current.held=true;_collapseFromAdd();},450);
+      const x=e.clientX,y=e.clientY;
+      addPatR.current.tmr=setTimeout(()=>{addPatR.current.tmr=0;addPatR.current.held=true;_openAddMenu(x,y);},450);
     },
     onPointerUp:()=>_addHoldEnd(), onPointerLeave:()=>_addHoldEnd(), onPointerCancel:()=>{_addHoldEnd();addPatR.current.held=false;},
     onClick:(e)=>{e.stopPropagation();if(addPatR.current.held){addPatR.current.held=false;return;}addPattern();},
@@ -6602,9 +7873,7 @@ export default function LoudLight(){
       disabled={!playing&&!paused}
       onClick={()=>{ if(playing||paused)stopTransport(); }}
       style={Object.assign({},S.iconBtn,extra,(playing||paused)?{}:{opacity:0.35})}>
-      <svg width={glyph} height={glyph} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
-        <rect x="1" y="1" width="9" height="9" rx="1.5"/>
-      </svg>
+      <LLIcon name="stop" size={glyph}/>
     </button>
   );
   // The combined PLAY/PAUSE glyph, so the three mounts cannot drift: it shows
@@ -6612,19 +7881,28 @@ export default function LoudLight(){
   // held transport therefore offers a ▶ that carries on from where you are;
   // rewinding is the button next door, which is the whole point of splitting
   // them.
-  const playGlyph=(sz)=>(
-    <svg width={sz} height={sz} viewBox="0 0 11 11" fill="currentColor" style={{display:"block"}}>
-      {playing
-        ?<Fragment><rect x="1.4" y="1" width="3" height="9" rx="1"/><rect x="6.6" y="1" width="3" height="9" rx="1"/></Fragment>
-        :<polygon points="1.5,0.5 10.5,5.5 1.5,10.5"/>}
-    </svg>
-  );
+  // STROKED now, in the same 24-unit box as everything else in the row, so the
+  // transport and the tools beside it read as one family instead of two. It
+  // still shows what the next press DOES — the pause mark while running, the
+  // play mark when stopped OR held — so a held transport offers a play that
+  // carries on from where you are, and rewinding is the button next door.
+  //
+  // The BUTTON keeps its circle. Only the glyph inside it changed: the round
+  // play button is the one control on the row your thumb finds without looking,
+  // and its shape is half of how it does that.
+  //
+  // Sizes roughly DOUBLED at the call sites, which keeps the apparent mark the
+  // same size rather than shrinking it: the old filled glyph spanned 82% of an
+  // 11-unit box, these span ~43% of a 24-unit one. Each mount now passes the
+  // same size as the LOOP and FOLLOW beside it, which is the point of the
+  // change — a row of marks that are all the same weight at the same scale.
+  const playGlyph=(sz)=><LLIcon name={playing?"pause":"play"} size={sz}/>;
   const loopFollowPair=(sz)=>(
     <div style={{display:"flex",gap:5,flexShrink:0}}>
       <button title="Loop — tap again to grow the loop, then off"
         style={Object.assign({},S.iconBtn,{width:sz,height:sz},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={Math.round(sz*0.5)}/></button>
       <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-        style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+        style={Object.assign({},S.iconBtn,{width:sz,height:sz},followSeq?S.toggleOn:{})}
         onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={Math.round(sz*0.5)}/></button>
     </div>
   );
@@ -6669,22 +7947,53 @@ export default function LoudLight(){
   // only a number that keeps changing, and overshooting recycles you past the
   // bar you were aiming for instead of parking you at the end. Bar 1 is the
   // bottom of the travel and bar N is the top, the way a fader has ends.
-  const _spinStep=(n)=>{
-    if(!n)return;
-    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,barPageR.current+n));
-    if(want!==barPageR.current)goToBar(want);
+  // THE GESTURE CARRIES ITS OWN CURSOR (`g.bar`), seeded at pointerdown, rather
+  // than re-reading `barPageR` every move. That ref is written by an EFFECT, so
+  // it lands a commit after the `goToBar` that changed it — the same trap the
+  // TEMPO readout has. Under the old flat gearing it could never bite, because
+  // a move asked for exactly ±1; a ballistic flick asks for three bars at a
+  // time, so two pointermoves inside one frame (a 120Hz pointer, a coalesced
+  // event) would both read the same stale value and the second would OVERWRITE
+  // the first instead of adding to it. Returns whether it actually moved, which
+  // is how both callers know they have hit an end.
+  const _spinTo=(g,n)=>{
+    if(!n)return false;
+    const want=Math.max(0,Math.min(Math.max(1,barCount)-1,g.bar+n));
+    if(want===g.bar)return false;
+    g.bar=want;goToBar(want);return true;
   };
-  // 18, not 26 — and the gesture RE-ANCHORS after every bar it steps. The wrap
-  // was never broken; the TRAVEL was. The tile sits high on the screen, so an
-  // upward swipe runs out of phone long before it runs out of bars, and on an
-  // 8-bar part a full swipe lands you on the last one every time — which is
-  // exactly "swiping up impossibly high just takes me to the last bar".
-  // Re-anchoring makes the gesture incremental rather than absolute, so a
-  // second swipe carries on from where the first ended, and the edge
-  // acceleration below means one swipe held at the top keeps going. Between
-  // them the control has no reachable end, which is what wrapping was for.
-  const BAR_PX_PER_BAR=18;
+  // BALLISTIC, like every other drag in here. A FLAT px-per-bar cannot serve
+  // both of the things this control is for: 18px a bar made one bar almost
+  // impossible to land on, and the obvious fix — slow it down — would have made
+  // thirty-two bars a swipe you cannot perform. So the gearing is a function of
+  // SPEED, on the sliders' own curve (`ballisticDelta` / `ballisticNudge`):
+  // a careful crawl costs ~40-70px a bar, a flick costs ~7. Measured against
+  // the curve at DRAG_FASTPX=14: dy 2px/frame → 40px a bar, dy 6 → 15, a flick
+  // → 6.5, so 31 bars is a ~200px swipe and one bar is a deliberate nudge.
+  //   BAR_FAST is its own constant rather than NUDGE_FAST, because the dynamic
+  // range wanted here is wider than a tempo readout's: this control has to be
+  // able to express BOTH ends of a 32-bar part.
+  const BAR_PX_PER_BAR=26;   // px per bar at 1:1, before the speed curve
+  const BAR_FAST=4.0;        // the ratio a flick reaches (cf. NUDGE_FAST)
+  const BAR_TAP_PX=8;        // raw travel past which a release is a scrub, not a tap
   const BAR_EDGE_MS=110;     // one bar per tick while the finger is past the edge
+  // ONE MOVE MAY NOT CARRY MORE THAN THIS, whatever distance it claims. A
+  // pointermove is normally a frame of travel, but a stalled main thread — which
+  // this app has a long history of — delivers the whole stall COALESCED into one
+  // event, and at the flick ratio that is tens of bars from a gesture the hand
+  // never made. Six is above anything a real flick produces on a 60Hz pointer
+  // (~39px a frame), so it bounds the pathological case without costing the
+  // expressive one.
+  const BAR_MAX_PER_MOVE=6;
+  // The accumulator is what makes a ballistic gearing possible at all: the gain
+  // belongs to ONE pointermove, so bars have to be consumed out of a running
+  // total rather than measured from an anchor. The fraction carries between
+  // moves, which is what keeps a slow drag smooth instead of stalling.
+  const _barSpinDelta=(dy)=>{
+    const speed=Math.min(1,Math.abs(dy)/DRAG_FASTPX);
+    const bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;
+    return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));
+  };
   const barTile=(extra)=>{
     const isPlaying=curBar===playingBar;
     const isLoop=loopMode===2?true:!!loopMode&&(()=>{
@@ -6697,24 +8006,43 @@ export default function LoudLight(){
       style={Object.assign({flex:"0 0 auto",width:64,height:"100%",
         position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",
         touchAction:"none",cursor:"ns-resize",userSelect:"none",
-        background:"rgba(255,206,130,0.62)",color:"rgba(10,20,32,0.85)",
+        // OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
+        // song lane brought down it became the loudest object on the page —
+        // for a readout that says which of four bars you are looking at. The
+        // number is the thing you read, so the number keeps the colour and the
+        // fill goes. It still reads as the one amber thing in a row of pattern
+        // chips, which is what tells you it is a different KIND of control.
+        background:"rgba(255,206,130,0.08)",color:"#ffce82",
+        border:"1px solid rgba(255,206,130,0.22)",
         boxShadow:isPlaying?"inset 0 0 0 2px "+C_VARY:"none",
         fontSize:15,fontWeight:700,lineHeight:1},extra||{})}
       onPointerDown={e=>{
         e.stopPropagation();e.preventDefault();
         try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
         const r=e.currentTarget.getBoundingClientRect();
-        _spinR.current={y:e.clientY,start:curBar,moved:false,tmr:0,edge:0,top:r.top,bot:r.bottom};
+        _spinR.current={y:e.clientY,bar:curBar,start:curBar,moved:false,acc:0,trav:0,tmr:0,edge:0,top:r.top,bot:r.bottom};
       }}
       onPointerMove={e=>{
         if(!e.buttons)return;e.stopPropagation();
         const g=_spinR.current;
         // Up is forward, the way every other vertical control in here reads.
-        // Whole bars are CONSUMED out of the delta and the anchor moves with
-        // them, so the gesture never accumulates an absolute distance it cannot
-        // travel — see BAR_PX_PER_BAR.
-        const d=Math.trunc((g.y-e.clientY)/BAR_PX_PER_BAR);
-        if(d){g.moved=true;g.y-=d*BAR_PX_PER_BAR;_spinStep(d);}
+        // The anchor moves EVERY event now, because the gain is per-move: this
+        // is an incremental gesture rather than an absolute one, so a second
+        // swipe carries on from where the first ended and the control never
+        // runs out of phone.
+        const dy=g.y-e.clientY; g.y=e.clientY;
+        g.trav+=Math.abs(dy);
+        // A release is a TAP only if the finger barely moved. Under a flat
+        // gearing "did a bar change" was a good enough proxy; with a ballistic
+        // one a careful 40px drag can legitimately change nothing, and that
+        // must not open the bar's ops menu.
+        if(g.trav>BAR_TAP_PX)g.moved=true;
+        g.acc+=_barSpinDelta(dy);
+        const d=Math.trunc(g.acc);
+        // At either end, drop what is left rather than banking travel against
+        // the clamp — otherwise dragging back up does nothing until the
+        // overshoot has been unwound.
+        if(d){g.acc-=d;if(!_spinTo(g,d))g.acc=0;}
         // Past either edge of the tile, keep going for as long as you hold it
         // there. The same answer the song lane and the bar strip already use
         // when a drag needs somewhere off-screen.
@@ -6724,9 +8052,7 @@ export default function LoudLight(){
           // The timer stops itself at the end of the travel — without that it
           // would sit there ticking against a clamp for as long as you held it.
           if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>{
-            const at=barPageR.current;
-            _spinStep(dir);
-            if(barPageR.current===at)_spinEdgeStop();
+            if(!_spinTo(g,dir))_spinEdgeStop();
           },BAR_EDGE_MS);}
         }
       }}
@@ -6741,7 +8067,7 @@ export default function LoudLight(){
       onPointerCancel={()=>{_spinEnd();_spinR.current.moved=false;}}
       onContextMenu={e=>{e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY,120);}}>
       <span>{curBar+1}</span>
-      <span style={{fontSize:10,fontWeight:600,opacity:0.55,marginLeft:1}}>{"/"+barCount}</span>
+      <span style={{fontSize:10,fontWeight:600,opacity:0.5,marginLeft:1}}>{"/"+barCount}</span>
       {/* LOOP's steel underline, the one state the tile can still show on its
           own. How WIDE the loop is is what the expansion is for. */}
       {isLoop?<div style={{position:"absolute",left:3,right:3,bottom:2,height:2,borderRadius:1,background:C_LOOP}}/>:null}
@@ -6910,6 +8236,13 @@ export default function LoudLight(){
     if(!playing||playId!==activeId||step<0||!activePat)return out;
     const sp=(activePat.params||null)&&activePat.params[step];
     if(!sp)return out;
+    // A LIT BUTTON MEANS "THE STEP YOU ARE HEARING CARRIES AN EDIT". With no
+    // note in this column nothing is sounding, so a light there is reporting a
+    // value that cannot be heard — which is the duplicate-readout sin wearing a
+    // different hat. Deleting a note now clears the column's params, so this
+    // catches the other way in: the SPILL and the lane RAND write a curve
+    // across the whole bar, empty columns included.
+    if(!activePat.grid||!activePat.grid.some(row=>row[step]))return out;
     for(const l of HOT_LANES){
       const v=sp[l.key]!=null?sp[l.key]:l.def;
       if(v===l.def)continue;
@@ -6930,9 +8263,9 @@ export default function LoudLight(){
             title={lane.label+" — tap to spill it onto the grid, hold for RAND / RESET"}
             {...paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key))}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
-              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"33"),
-              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.04)",
-              color:on||hot?lane.color:lane.color+"99",
+              border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"1f"),
+              background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.03)",
+              color:on||hot?lane.color:lane.color+"8c",
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
               touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",
               boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
@@ -7034,8 +8367,8 @@ export default function LoudLight(){
           style={Object.assign({},_patChipBase,{
             minWidth:IS_MOBILE?32:26,height:IS_MOBILE?30:24,padding:IS_MOBILE?"0 8px":"0 6px",
             fontSize:IS_MOBILE?15:13,fontWeight:600,touchAction:"none",
-            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
-            color:"rgba(178,199,219,0.45)"})}>+</div>
+            border:"1px solid rgba(168,190,212,0.14)",background:"transparent",
+            color:"rgba(178,199,219,0.38)"})}>+</div>
       )}
       {/* The bar tile lives HERE in portrait, at the right-hand end. It is
           navigation — which pattern, which bar — so it belongs with the other
@@ -7067,8 +8400,8 @@ export default function LoudLight(){
         <div role="button" {...addChipProps}
           style={Object.assign({},_patChipBase,{
             padding:"7px 4px",borderRadius:14,fontSize:13,fontWeight:600,touchAction:"none",
-            border:"1px dashed rgba(168,190,212,0.25)",background:"transparent",
-            color:"rgba(178,199,219,0.45)"})}>+</div>
+            border:"1px solid rgba(168,190,212,0.14)",background:"transparent",
+            color:"rgba(178,199,219,0.38)"})}>+</div>
       )}
     </div>
   );
@@ -7343,6 +8676,7 @@ export default function LoudLight(){
     bpm,scale,userMask,userRoot,transpose,swing,speedMult,
     layerParams,
     dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,drumLevel,drumFxTrim,
+    mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
     drumMix:JSON.parse(JSON.stringify(drumMix)),
     trackMute,trackSolo,activeKit,
     ...(includeSamples?{userSamples:serializeSamples(userSamples)}:{}),
@@ -7401,7 +8735,12 @@ export default function LoudLight(){
     setDrumMixArr(s.drumMix?fillDrumMix(s.drumMix)
       :fillDrumMix(s.patterns[0]&&s.patterns[0].parts&&s.patterns[0].parts.drums&&s.patterns[0].parts.drums.mix));
     [["dlyIdx",setDlyIdx],["dlyFbPct",setDlyFbPct],["dlyHpVal",setDlyHpVal],["dlyLpVal",setDlyLpVal],["rvSize",setRvSize],["rvDamp",setRvDamp],["rvLfDamp",setRvLfDamp],["rvPreDelay",setRvPreDelay],["rvMod",setRvMod],["dlyToRev",setDlyToRev],["drumLevel",setDrumLevel],["drumFxTrim",setDrumFxTrim],
+     ["driveAmt",setDriveAmt],["driveChar",setDriveChar],["exThump",setExThump],["exBody",setExBody],["exAir",setExAir],
     ].forEach(([k,fn])=>{fn(s[k]!=null?s[k]:SESSION_DEFAULTS[k]);});
+    // Out of the array on purpose: the array substitutes SESSION_DEFAULTS for
+    // a missing key, which would read a two-switch save as BYPASSED and lose
+    // the setting. mojoOnOf is the one place that understands both shapes.
+    setMojoOn(mojoOnOf(s));
     _adoptSong(s);
 
     // Resolve any unknown/legacy kit id ("synth", missing) to DEFAULT_KIT.
@@ -7477,10 +8816,29 @@ export default function LoudLight(){
     setCloudStage("email");setCloudCode("");
     showFlash("SIGNED IN");
   };
+  // Deleting the account signs this device out as a CONSEQUENCE rather than as
+  // a separate step: the session it held is for a user that no longer exists,
+  // so keeping it would leave the app holding a token every later request would
+  // bounce. The stored refresh token goes with it, or the next launch would try
+  // to trade a dead one and show a broken account rather than a signed-out app.
+  const doCloudDeleteAccount=async()=>{
+    const [ok]=await cloudRun("DELETING",async()=>cloudDeleteAccount(await cloudTokenR.current()));
+    if(!ok)return;
+    await cloudSignOut();
+    showFlash("ACCOUNT DELETED");
+  };
   const cloudSignOut=async()=>{
     const cur=cloudSessR.current;
     setCloudSess(null);cloudSessR.current=null;
-    setCloudRows({});setCloudSlotActive(null);
+    // The LIST is not cleared here on purpose: the effect over
+    // `cloudSess && cloudSess.uid` already empties cloudLib and the selection
+    // when the session goes, and that effect is the one place the list is kept
+    // in step with the account. This line used to call setCloudRows /
+    // setCloudSlotActive — dead names from the slot-based cloud — and the
+    // ReferenceError took out EVERY LINE BELOW IT: the stored refresh token
+    // was never cleared, so the next launch traded it and signed you straight
+    // back in. SIGN OUT did not sign you out. The long-run-of-setters cliff,
+    // for the second time in this file.
     setCloudStage("email");setCloudCode("");
     storageSet("cloud","");
     // Best-effort server-side revoke — this device is signed out either way.
@@ -7499,7 +8857,14 @@ export default function LoudLight(){
     const pid=id||mkProjId();
     const [ok]=await cloudRun("SAVING",async()=>cloudPutSlot(await cloudTokenR.current(),pid,nm,payload));
     if(!ok)return;
-    setSelCloudId(pid);setNameDraft(nm);showFlash("SAVED "+nm+" TO CLOUD");
+    setSelCloudId(pid);setSelDevId(null);setNameDraft(nm);
+    setSaveTarget({store:"cloud",id:pid,name:nm});
+    showFlash("SAVED "+nm+" TO CLOUD");
+    // The work is filed, so the unsaved-work cue has to go out — doSave's twin
+    // had this and this one did not, so a project whose home is the CLOUD saved
+    // perfectly well and left the SAVE chip amber for ever. Two copies of one
+    // path, and the second one rotted quietly.
+    markClean();
     cloudLoadRows();
   };
   const doCloudLoad=async id=>{
@@ -7512,6 +8877,9 @@ export default function LoudLight(){
     try{parsed=JSON.parse(raw);}catch(e){showFlash(label+" IS UNREADABLE","warn");return;}
     applyShareState(parsed);
     setSelDevId(null);setSelCloudId(id);setNameDraft(label);
+    // Opened from the cloud, so SAVE goes back to the cloud — and keeps doing
+    // so after a relaunch, which is the whole point.
+    setSaveTarget({store:"cloud",id,name:label});
     showFlash("LOADED "+label);
   };
   const doCloudClear=async id=>{
@@ -7519,6 +8887,7 @@ export default function LoudLight(){
     const [ok]=await cloudRun("DELETING",async()=>cloudDelSlot(await cloudTokenR.current(),id));
     if(!ok)return;
     if(selCloudId===id){setSelCloudId(null);setNameDraft("");}
+    if(saveTarget&&saveTarget.store==="cloud"&&saveTarget.id===id)setSaveTarget(null);
     showFlash("DELETED "+(row?row.name:""));
     cloudLoadRows();
   };
@@ -7591,9 +8960,23 @@ export default function LoudLight(){
     // and this export is the underlying composition.
     const _midiCellSteps=(bar)=>_patStepsOf(bar.synth);
     let _runTick=0;
+    // A per-pattern TEMPO is not a performance layer the way speedMult is — it
+    // is compositional, and a Standard MIDI File has a tempo track built for
+    // exactly this. So each entry emits a tempo meta event when its effective
+    // tempo differs from the one already running; a song at one tempo emits
+    // nothing beyond the header event it always did.
+    let _runBpm=bpm;
     bars.forEach((bar)=>{
       const barTick=_runTick;
       const cellSteps=_midiCellSteps(bar);
+      {
+        const eb=Math.round(patBpm(patterns.find(x=>x.id===bar.synth),bpm));
+        if(eb!==Math.round(_runBpm)){
+          const u=Math.round(60000000/Math.max(1,eb));
+          meta.push({tick:barTick,data:[0xFF,0x51,0x03,(u>>16)&255,(u>>8)&255,u&255]});
+          _runBpm=eb;
+        }
+      }
       _runTick+=cellSteps*TICKS_16;
       [["synth",synthEv,0],["lead",leadEv,1]].forEach(([layer,ev,ch])=>{
         const pat=_partOf(bar[layer],layer);
@@ -7863,7 +9246,10 @@ export default function LoudLight(){
     if(hash){
       window.location.hash="";                          // clear regardless of validity
       const s=decodeState(hash);
-      if(s){applyShareState(s);loadedFromShareR.current=true;autosaveReadyR.current=true;return;}
+      // A shared link is somebody ELSE'S project, so it inherits no home:
+      // leaving the restored target in place would have the first SAVE
+      // overwrite your own work with theirs.
+      if(s){applyShareState(s);setSaveTarget(null);loadedFromShareR.current=true;autosaveReadyR.current=true;return;}
       // corrupt/unreadable hash → ignore it and restore the user's autosave below
     }
     (async()=>{
@@ -7900,7 +9286,7 @@ export default function LoudLight(){
       try{storageSet("autosave",JSON.stringify(getShareState(false)));}catch(e){}
     },1200);
     return ()=>{if(autosaveTmrR.current)clearTimeout(autosaveTmrR.current);};
-  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
+  },[playing,pats,drumPats,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,activeId,activeDrumId,activeLayer,drumMix,drumLevel,drumFxTrim,dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,mojoOn,driveAmt,driveChar,exThump,exBody,exAir,trackMute,trackSolo,activeKit,loopMode,loopBar,loopPat,song,songRep]);
   // Unsaved-work flag. The autosave deps above minus `playing` and minus the
   // navigation/transport state — see markClean for why those are left out.
   useEffect(()=>{
@@ -7909,6 +9295,7 @@ export default function LoudLight(){
     setDirty(true);
   },[patterns,layerParams,bpm,scale,userMask,userRoot,transpose,swing,speedMult,drumMix,drumLevel,drumFxTrim,
      dlyIdx,dlyFbPct,dlyHpVal,dlyLpVal,rvSize,rvDamp,rvLfDamp,rvPreDelay,rvMod,dlyToRev,
+     mojoOn,driveAmt,driveChar,exThump,exBody,exAir,
      trackMute,trackSolo,activeKit,song,songRep]);
   // Recorded USER samples persist on their own key, ONLY when they actually
   // change (record/clear sets samplesDirtyR) — never re-encoded on a restore or
@@ -7932,7 +9319,11 @@ export default function LoudLight(){
   // mid-note (FLT/OCT/GLIDE) mods for tied notes — i.e. everything the
   // synth-track main path used to do, but per-layer so each layer's plays
   // are independent (and per-pat speedMult can apply correctly).
-  const playSynthLayerStep=(layer,pat,s,at,stepDur)=>{
+  // `stepBpm` is the EFFECTIVE tempo of the pattern being played, passed in
+  // rather than read off bpmR: a pattern may carry its own, and the layer
+  // glide is "up to ~1 beat" — a beat belongs to whatever tempo is sounding.
+  // The C twin takes it the same way (play_synth_step's `bpm` argument).
+  const playSynthLayerStep=(layer,pat,s,at,stepDur,stepBpm)=>{
     if(!pat||!pat.grid)return;
     const layerLP = layerParamsR.current[layer];
     const freqs = curFreqsR.current;
@@ -7952,6 +9343,15 @@ export default function LoudLight(){
     // the previous one at the SAME timestamp — a note is born and killed within
     // the choke fade = an onset click, and it isn't truly mono. Topmost row
     // (lowest index = highest pitch) wins, matching the cross-layer cull rule.
+    // PER-NOTE VOICE. The column's patch (if any) is layered over the layer's,
+    // once per step rather than per row, so a pattern with no patches pays a
+    // single falsy test. Everything downstream already takes the patch as an
+    // argument — `Bell.play`'s `layerP` — which is why a per-note voice needed
+    // no change to the engine itself: it is the same call with a different
+    // object. `monoSingle` deliberately stays on the LAYER (see NOTE_PATCH_DENY):
+    // it decides whether a second oscillator stack exists at all.
+    const _np = notePatchAtCol(pat,s);
+    const lpN = _np ? Object.assign({},layerLP,_np) : layerLP;
     const monoOne = !!(layerLP && layerLP.monoSingle);
     for(let r=0;r<ROWS;r++){
       if(!useGrid[r][s])continue;
@@ -7962,7 +9362,7 @@ export default function LoudLight(){
       // Use actual played frequency (with octaves applied) for comparison so
       // consecutive same-cell-different-octave notes glide correctly.
       const stepOct=sp?(sp.oct-2):0;
-      const layerOct=layerLP.octave||0;
+      const layerOct=lpN.octave||0;
       const actualF=f*Math.pow(2,stepOct+layerOct);
       // How far INTO the next step the slide runs, as a fraction of a step.
       // It was a fixed 1/32 note (`60/bpm/8 * speedMult`), which is exactly half
@@ -7974,9 +9374,9 @@ export default function LoudLight(){
       // Per-layer glide knob (0..100). When >0, every note glides into the
       // next regardless of step-level glide flags. Step glide stacks on top —
       // a step-glide note uses whichever glide time is longer.
-      const layerGlide01=Math.max(0,Math.min(100,layerLP.glide||0))/100;
+      const layerGlide01=Math.max(0,Math.min(100,lpN.glide||0))/100;
       const stepGlideTime=(glidePct/100)*stepDur; // 50% == the old fixed 1/32 note
-      const layerGlideTime=layerGlide01*(60/bpmR.current); // up to ~1 beat
+      const layerGlideTime=layerGlide01*(60/stepBpm); // up to ~1 beat
       const usePrev=layerLastGlideR.current[layer]||layerGlide01>0;
       const prevF=usePrev?(layerLastFreqR.current[layer]??null):null;
       const glideTime=(prevF&&prevF!==actualF)
@@ -8000,9 +9400,9 @@ export default function LoudLight(){
         if(mods.length===0)mods=null;
       }
       if(ratch>1){
-        for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,layerLP.dlySend,ri===0?prevF:null,ri===0?glideTime:0,layerLP,layer);
+        for(let ri=0;ri<ratch;ri++)bell.current.play(f,at+ri*subDur,sp,subDur*0.9,lpN.dlySend,ri===0?prevF:null,ri===0?glideTime:0,lpN,layer);
       } else {
-        bell.current.play(f,at,sp,noteDur,layerLP.dlySend,prevF,glideTime,layerLP,layer,mods);
+        bell.current.play(f,at,sp,noteDur,lpN.dlySend,prevF,glideTime,lpN,layer,mods);
       }
       // Mono layer: stop after the first sounded note this column.
       if(monoOne)break;
@@ -8110,7 +9510,26 @@ export default function LoudLight(){
   const lastResumeTryR=useRef(0);
   const resumeAudioR=useRef(null);
   const scheduler=useCallback(()=>{
-    if(DIAG)DG.ticks++;
+    if(DIAG){
+      DG.ticks++;
+      // A STARVED scheduler, which is a different fault from a doubled one and
+      // the overlay's ticks/s cannot show it: a page the OS has throttled (a
+      // background tab, Low Power Mode) runs this interval at ~1Hz instead of
+      // 40Hz, and the catch-up guard below then resyncs bodily on every tick —
+      // so you hear one step every second or two instead of a beat. Recorded
+      // with the visibility state, because that is what distinguishes "iOS
+      // throttled us" from "the main thread is blocked".
+      const _tn=(typeof performance!=="undefined"?performance.now():Date.now());
+      if(DG.lastTick){
+        const _gap=_tn-DG.lastTick;
+        if(_gap>250){
+          DG.gaps++; DG.worstGap=Math.max(DG.worstGap,_gap);
+          dgNote("scheduler STARVED "+Math.round(_gap)+"ms (expected 25) vis="
+            +(typeof document!=="undefined"?document.visibilityState:"?"));
+        }
+      }
+      DG.lastTick=_tn;
+    }
     if(!bell.current.ready)return;
     const ctx=bell.current.ctx;
     // The transport's own watchdog. A context the OS interrupted just FREEZES
@@ -8128,10 +9547,6 @@ export default function LoudLight(){
       return;
     }
     const LOOKAHEAD=0.1; // seconds ahead to schedule
-    // Master clock = absolute, BPM-derived. NO per-pat multiplier here.
-    // Each pattern plays at its own speedMult as an independent multiplier
-    // on this clock — see playSynthLayerStep / playDrumStep call sites below.
-    const absStepDur=60/bpmR.current/4;
 
     // ── CATCH-UP GUARD — a lookahead scheduler must never schedule into the
     // PAST. If the main thread stalls (a big render, a GC pause, iOS handing
@@ -8157,6 +9572,7 @@ export default function LoudLight(){
     const _now=ctx.currentTime;
     const _lag=_now-nextNoteR.current;
     if(_lag>SCHED_RESYNC){
+      if(DIAG){DG.resync++;dgNote("clock RESYNCED forward "+Math.round(_lag*1000)+"ms — the steps it spanned are not sounded");}
       nextNoteR.current+=_lag;
       for(const l of PART_LAYERS){const lf=freeR.current[l];if(lf)lf.nextAt+=_lag;}
     }
@@ -8189,6 +9605,17 @@ export default function LoudLight(){
     if(inLoop){const lp=allPats.find(p=>p.id===loopPatR.current);if(lp)curPat=lp;}
     if(!curPat)curPat=allPats.find(p=>p.id===activePatternIdR.current)||allPats[0];
     if(!curPat)return;
+    // Master clock = absolute, tempo-derived. NO per-pat speed multiplier here;
+    // each pattern plays at its own speedMult as an independent multiplier on
+    // this clock (see the playSynthLayerStep / playDrumStep call sites below).
+    //
+    // It is computed HERE, below curPat, because a pattern may carry its own
+    // tempo — so the clock cannot be priced until it is known which pattern is
+    // playing, and in a song that changes entry by entry. Declared above
+    // `curPat` it would read a Babel-hoisted `var` and price every step from
+    // `undefined`; declared here it simply follows the arrangement.
+    const curBpm=patBpm(curPat,bpmR.current);
+    const absStepDur=60/curBpm/4;
     // LOOP cycles ONE bar of whatever pattern is playing (the song's current
     // entry in song mode, the pattern you're editing otherwise), in every part,
     // so you can sit on it and work. The bar is the one that was visible when
@@ -8293,7 +9720,7 @@ export default function LoudLight(){
         const onTime=playAt>=ctx.currentTime-lateTol;
         if(onTime&&isLayerAudibleR.current(layer)){
           if(layer==="drums")playDrumStep(pat,s,playAt,layerStepDur);
-          else playSynthLayerStep(layer,pat,s,playAt,layerStepDur);
+          else playSynthLayerStep(layer,pat,s,playAt,layerStepDur,curBpm);
         }
         // Update visual playhead for whichever layer is active.
         if(layer===activeLayerR.current){
@@ -8382,6 +9809,17 @@ export default function LoudLight(){
     bell.current.setRvPreDelay&&bell.current.setRvPreDelay(rvPreDelay);
     bell.current.setRvMod&&bell.current.setRvMod(rvMod);
     bell.current.setDlyToRev&&bell.current.setDlyToRev(dlyToRev);
+    // Master bus, same argument: a loaded project's DRIVE and EXCITE have to
+    // reach the engine on the first play, not on the first nudge of a knob.
+    // The flavour goes FIRST, because it swaps the shaper's curve and the
+    // amount is what decides whether that curve is in the path at all.
+    bell.current.setDriveChar&&bell.current.setDriveChar(driveChar);
+    bell.current.setDrive&&bell.current.setDrive(driveAmt);
+    bell.current.setDriveOn&&bell.current.setDriveOn(mojoOn);
+    bell.current.setExThump&&bell.current.setExThump(exThump);
+    bell.current.setExBody&&bell.current.setExBody(exBody);
+    bell.current.setExAir&&bell.current.setExAir(exAir);
+    bell.current.setExOn&&bell.current.setExOn(mojoOn);
     drumEngine.current.setMasterLevel&&drumEngine.current.setMasterLevel(drumLevel);
     drumEngine.current.setFxTrim&&drumEngine.current.setFxTrim(drumFxTrim);
     // Push the global drum mix to the strips on play-start (effects fire before
@@ -8454,9 +9892,37 @@ export default function LoudLight(){
   // other. Measured with ?diag=1: 40 ticks/s, 80 after one double-tap of the
   // pause toggle, 160 after four, and it stays that way for every play
   // afterwards. Everything that arms the scheduler goes through here.
+  // One handle was `tmrR`; there are two clocks now, so everything that used to
+  // call `clearInterval(tmrR.current)` calls this instead. Miss one and the old
+  // ORPHAN bug comes straight back — an interval nothing can see, surviving a
+  // pause and a stop, stealing steps from the next play.
+  const tickWkrR=useRef(null);
+  const _tickWorker=()=>{
+    if(tickWkrR.current!==null)return tickWkrR.current;
+    try{
+      const url=URL.createObjectURL(new Blob([TICK_SRC],{type:"text/javascript"}));
+      const w=new Worker(url);
+      URL.revokeObjectURL(url);
+      tickWkrR.current=w;
+    }catch(e){ tickWkrR.current=false; }
+    return tickWkrR.current;
+  };
+  const _stopTick=()=>{
+    clearInterval(tmrR.current); tmrR.current=null;
+    const w=tickWkrR.current;
+    if(w){try{w.onmessage=null;w.postMessage("stop");}catch(e){}}
+  };
   const _armScheduler=()=>{
-    clearInterval(tmrR.current);
+    _stopTick();
+    if(DIAG)DG.lastTick=0;
+    const w=_tickWorker();
+    if(w){
+      w.onmessage=()=>{scheduler();};
+      try{ w.postMessage(25); if(DIAG)dgNote("transport ARMED (worker tick)"); return; }
+      catch(e){ tickWkrR.current=false; }
+    }
     tmrR.current=setInterval(scheduler,25);
+    if(DIAG)dgNote("transport ARMED (timer tick — worker unavailable)");
   };
   // The lock that makes the guards at the top of startPlaying / resumePlay mean
   // anything. Both AWAIT `_engage`, and until that resolves `playingR` is still
@@ -8491,8 +9957,8 @@ export default function LoudLight(){
         // The lock screen's pause is a PAUSE now, and its stop a stop — the
         // three used to be one call, so every one of them rewound the song.
         navigator.mediaSession.setActionHandler("play",()=>{if(!exportingR.current&&!playingR.current)(pausedR.current?resumePlay():startStop());});
-        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)pauseTransport();});
-        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&(playingR.current||pausedR.current))stopTransport();});
+        navigator.mediaSession.setActionHandler("pause",()=>{if(!exportingR.current&&playingR.current)pauseTransport("mediaSession");});
+        navigator.mediaSession.setActionHandler("stop",()=>{if(!exportingR.current&&(playingR.current||pausedR.current))stopTransport("mediaSession");});
       }catch(e){}
     }
   };
@@ -8505,8 +9971,18 @@ export default function LoudLight(){
   // transport vanishing the moment you pause. A hold is meant to be brief: keep
   // the session, drop the wake lock (nothing is sounding; let the screen
   // sleep).
-  const _disengage=(full)=>{
-    clearInterval(tmrR.current);
+  const _disengage=(full,why)=>{
+    // DIAG only. "It stops on its own after a second" and "the button flips
+    // back to play" are the same sentence: something called this. The log says
+    // WHICH caller, because the overlay's `sched 0/s` can only tell you the
+    // interval is gone, never who cleared it.
+    if(DIAG){
+      let via="";
+      try{via=(new Error().stack||"").split("\n").slice(2,4).map(l=>l.trim().split(" ")[1]||"").filter(Boolean).join(" < ");}catch(e){}
+      dgNote("transport "+(full?"STOPPED":"HELD")+" ("+(why||"unattributed")
+        +") vis="+(typeof document!=="undefined"?document.visibilityState:"?")+(via?"  via "+via:""));
+    }
+    _stopTick();
     if(CORE_ON)coreHost.stop();
     playingR.current=false;
     setPlaying(false);
@@ -8524,8 +10000,8 @@ export default function LoudLight(){
   // stop is also what clears a PAUSE, and `resumePlay` (the other way out of a
   // hold) reads exactly these refs. Zero them here and a stop cannot be
   // resumed from by anything, whatever order the next calls come in.
-  const stopTransport=()=>{
-    _disengage(true);
+  const stopTransport=(why)=>{
+    _disengage(true,why||"stopTransport");
     pausedR.current=false;setPaused(false);
     pauseAtR.current=null;
     stepR.current=0;nextNoteR.current=0;songPosR.current=0;
@@ -8539,13 +10015,13 @@ export default function LoudLight(){
   // Hold. Everything the stop above clears is deliberately LEFT: the playhead,
   // the song position and the glide memory are the position, and showing you
   // where you are is half of what a pause is for.
-  const pauseTransport=()=>{
+  const pauseTransport=(why)=>{
     if(!playingR.current)return;
     // null, not 0, when there is no usable clock (with the core on, `bell` is a
     // stand-in): 0 would make the resume shift every cursor by the whole age of
     // the context — minutes into the future, and silence.
     try{pauseAtR.current=bell.current.ctx.currentTime;}catch(e){pauseAtR.current=null;}
-    _disengage(false);
+    _disengage(false,why||"pauseTransport");
     pausedR.current=true;setPaused(true);
   };
   const startPlaying=async()=>{
@@ -8630,7 +10106,10 @@ export default function LoudLight(){
     if(pausedR.current){ await resumePlay(); return; }
     await startPlaying();
   };
-  useEffect(()=>()=>clearInterval(tmrR.current),[]);
+  useEffect(()=>()=>{
+    clearInterval(tmrR.current);
+    const w=tickWkrR.current; if(w){try{w.terminate();}catch(e){}}
+  },[]);
 
   // ── iOS audio session + wake lock management ──────────────────────────────
   // Bringing the audio back after the OS took it away. This used to test every
@@ -8675,6 +10154,18 @@ export default function LoudLight(){
   // The shell calls this after it has re-activated the AVAudioSession, which is
   // the half of the handshake a web page cannot do for itself.
   useEffect(()=>{window.__LL_RESUME_AUDIO=()=>{resumeAudio();};return()=>{delete window.__LL_RESUME_AUDIO;};},[]);
+  // Two references for the harnesses, the same bargain as __LL_LAST_EXPORT.
+  // The saturation curve is the one thing in the master bus that has a twin
+  // in the core (ll_shape), so being able to read it back is what makes
+  // "three flavours, three genuinely different curves" checkable at all
+  // rather than a claim in a comment.
+  useEffect(()=>{window.__LL_SHAPE=llShape;},[]);
+  // The master bus's whole promise is that OFF is a real bypass — the signal
+  // does not pass through the nodes — and that is a fact about the audio
+  // GRAPH, which no DOM attribute can carry. Without this there is no way to
+  // check it headlessly at all, and "approximately transparent" in the path of
+  // every saved project is exactly the shape of the VARY disaster.
+  useEffect(()=>{window.__LL_BELL=bell.current;},[]);
   // ── DIAGNOSTIC OVERLAY (`?diag=1`) ──────────────────────────────────────
   // Built with plain DOM and written by an interval, NOT React state: an
   // instrument that re-renders the app four times a second would perturb the
@@ -8684,9 +10175,17 @@ export default function LoudLight(){
     if(!DIAG)return;
     const box=document.createElement("div");
     box.setAttribute("data-diag","1");
-    box.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;padding:5px 8px;"
+    // It hangs off the BOTTOM, not the top. In phone portrait the transport
+    // and the layer buttons sit ABOVE the grid, near the top of the screen —
+    // so a banner pinned to the top covers the one control you need while you
+    // are diagnosing a transport fault, which is exactly how it was reported.
+    // The bottom costs the step-button row instead, and that row is not what
+    // you are reaching for with the overlay up. Padded past the home indicator
+    // so the last line is readable on a phone with no bezel.
+    box.style.cssText="position:fixed;left:0;right:0;bottom:0;z-index:99999;"
+      +"padding:5px 8px calc(5px + env(safe-area-inset-bottom,0px));"
       +"font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre;color:#ffd28a;"
-      +"background:rgba(6,14,22,0.92);border-bottom:1px solid rgba(255,210,138,0.35);"
+      +"background:rgba(6,14,22,0.92);border-top:1px solid rgba(255,210,138,0.35);"
       +"-webkit-user-select:none;user-select:none;cursor:pointer;max-height:42vh;overflow:auto";
     document.body.appendChild(box);
     let prevTicks=0,prevHits=0,worstFlam=0,worstNow=0,worstLate=0;
@@ -8706,6 +10205,8 @@ export default function LoudLight(){
         +"sched "+tps+"/s (expect ~40; ~80 = TWO schedulers)\n"
         +"drum hits "+hps+"/s   total "+DG.hits+"\n"
         +"FLAMS "+DG.flam+"   played-NOW "+DG.now+"   late "+DG.late+"   min headroom "+head+"\n"
+        +"starved ticks "+DG.gaps+" (worst "+Math.round(DG.worstGap)+"ms)   resyncs "+DG.resync
+        +"   page "+(typeof document!=="undefined"?document.visibilityState:"?")+"\n"
         +(DG.notes.length?("\n"+DG.notes.slice(-8).join("\n")):"\n(no faults recorded yet)")
         +"\n\n[tap to copy]";
     },500);
@@ -8760,41 +10261,36 @@ export default function LoudLight(){
     if(!h)return;
     try{h.postMessage({playing:!!playing,paused:!!paused,title:_npTitle});}catch(e){}
   },[playing,paused,_npTitle]);
-  // ── The lock screen or the mix — you cannot have both ───────────────────
+  // ── The audio route is FIXED on the lock screen ─────────────────────────
   // A `.mixWithOthers` session is a SECONDARY audio source and iOS gives the
   // lock screen to the primary one, so the transport registered above simply
-  // does not appear while Loud Light is mixable. That makes "play over a
-  // reference track" and "control it from the lock screen" mutually exclusive
-  // on the device — not a bug to route around, a choice to make.
+  // does not appear while Loud Light is mixable. That is still true, and it is
+  // still a real trade — but it was a TOGGLE in the PROJECT menu for a while
+  // and it is not: it is a decision you make once and never think about again,
+  // sitting in a list of things you do constantly, taking the room EXPORT
+  // wanted. One of the two had to go and it was not export.
   //
-  // It is a preference rather than the build-time constant it started as
-  // because each side is right for a different session, and the only other way
-  // to change a constant is a whole TestFlight round trip.
+  // So the page pushes one STATE, always, and never reads the old preference
+  // back. Pushed rather than left to the shell's own default because the
+  // shell's is a UserDefaults value an earlier build may have set to MIX —
+  // deleting the control must not strand anyone on the side that has no lock
+  // screen. It is unconditional and idempotent: the shell ignores a value it
+  // is already on, so a launch does not tear the session down for nothing and
+  // a dropped message is repaired by the next render.
   //
-  // A DEVICE preference, deliberately NOT project state: loading someone's
-  // project must not decide what your phone does with its audio route. Read
-  // synchronously so the first push to the shell carries the real value, and
-  // WRITTEN ONLY BY THE TOGGLE — an effect that stamps it on mount would turn
-  // "hasn't decided" into "decided" and strand every install on today's
-  // default (the lesson the row-keys preference cost).
-  const [exclAudio,setExclAudio]=useState(()=>{
-    try{const v=localStorage.getItem(LS_NS+"excl-audio");return v===null?true:v==="1";}catch(e){return true;}
-  });
+  // `tnori-excl-audio` is now dead and unread. Whoever puts the choice back
+  // gives it a home that is not this list.
   useEffect(()=>{
     const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.audioSession;
     if(!h)return;
-    // State, not a transition: the shell re-reads this on every launch and
-    // ignores a value it is already on, so pushing it unconditionally costs
-    // nothing and a dropped message is repaired by the next render.
-    try{h.postMessage({exclusive:!!exclAudio});}catch(e){}
-  },[exclAudio]);
-  const setExclusiveAudio=(v)=>{
-    setExclAudio(!!v);
-    try{localStorage.setItem(LS_NS+"excl-audio",v?"1":"0");}catch(e){}
-  };
+    try{h.postMessage({exclusive:true});}catch(e){}
+  },[]);
   useEffect(()=>{resumeAudioR.current=resumeAudio;},[resumeAudio]);
   useEffect(()=>{
     const onVisible=async()=>{
+      // DIAG only: the background is where the throttled-scheduler fault lives,
+      // so the log has to say when the page left and came back.
+      if(DIAG)dgNote("page "+document.visibilityState+(playingR.current?" (transport RUNNING)":pausedR.current?" (transport HELD)":" (transport stopped)"));
       if(document.visibilityState!=="visible")return;
       await resumeAudio();
       if(playingR.current)requestWakeLock();
@@ -8989,6 +10485,9 @@ export default function LoudLight(){
       const pat=patsR.current.find(p=>p.id===activeIdR.current);
       g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
       g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
+      // Pinned at gesture start, exactly like baseParams: reading it live would
+      // rotate from wherever the last frame left it.
+      g.baseNotePatch=(pat&&Array.isArray(pat.notePatch))?pat.notePatch.map(q=>q?{...q}:null):null;
       return;
     }
 
@@ -9016,6 +10515,9 @@ export default function LoudLight(){
         const pat=patsR.current.find(p=>p.id===activeIdR.current);
         g.baseGrid=pat?pat.grid.map(r=>[...r]):null;
         g.baseParams=pat?(pat.params||defaultStepParams()).map(s=>({...s})):null;
+      // Pinned at gesture start, exactly like baseParams: reading it live would
+      // rotate from wherever the last frame left it.
+      g.baseNotePatch=(pat&&Array.isArray(pat.notePatch))?pat.notePatch.map(q=>q?{...q}:null):null;
       }
       return;
     }
@@ -9075,7 +10577,12 @@ export default function LoudLight(){
       g.longPressCell={r,c,ox,oy,baseVals};
       longPressR.current=setTimeout(()=>{
         if(g.state!=="pending")return;
-        openParamPopup(c,ox,oy,baseVals);
+        // The hold used to open the STEP-param popup for this column. Those
+        // eight values live on the step buttons under the grid now, at sixteen
+        // times the size, so the deliberate gesture was spending itself on the
+        // one thing that already had a home. It opens the note's VOICE instead.
+        g.state="popup";                      // suppresses the trailing tap
+        if(openNoteSoundR.current)openNoteSoundR.current(r,c);
       },320);
     }
   },[]);
@@ -9126,10 +10633,10 @@ export default function LoudLight(){
     if(!pat||!pat.grid[r]||!pat.grid[r][c])return;
     const ox=rect.left+rect.width/COLS*(vc+0.5);
     const oy=rect.top+rect.height/ROWS*(r+0.5);
-    const baseVals=Object.assign({},((pat.params&&pat.params[c])||defaultStepParams()[0]));
+    void ox;void oy;
     clearTimeout(longPressR.current);
-    openParamPopup(c,ox,oy,baseVals);
-  },[openParamPopup]);
+    if(openNoteSoundR.current)openNoteSoundR.current(r,c);
+  },[]);
 
   const handleGridMove=useCallback(e=>{
     const g=gesture.current;
@@ -9256,7 +10763,7 @@ export default function LoudLight(){
               setPats(ps=>ps.map(p=>{
                 if(p.id!==activeIdR.current)return p;
                 const ng=p.grid.map(r=>[...r]);ng[sc.r][sc.c]=false;
-                return Object.assign({},p,{grid:ng});
+                return clearColParams(Object.assign({},p,{grid:ng}),sc.c);
               }));
             } else {
               const isExisting=g.existingAtStart.has(key);
@@ -9296,7 +10803,7 @@ export default function LoudLight(){
         setPats(ps=>ps.map(p=>{
           if(p.id!==activeIdR.current)return p;
           const ng=p.grid.map(r=>[...r]);ng[cr][cc]=false;
-          return Object.assign({},p,{grid:ng});
+          return clearColParams(Object.assign({},p,{grid:ng}),cc);
         }));
       } else {
         // Right drag: tie existing notes, create new ones in empty cells
@@ -9380,7 +10887,12 @@ export default function LoudLight(){
         const sh=Array.from({length:ROWS},(_,r)=>Array.from({length:_W},(_,c)=>
           inWin(c)?g.baseGrid[wrap(r-ndy,ROWS)][srcC(c)]:g.baseGrid[r][c]));
         const sp=Array.from({length:_W},(_,c)=>inWin(c)?g.baseParams[srcC(c)]:g.baseParams[c]);
-        setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,{grid:sh,params:sp})));
+        // A per-note voice belongs to its note, so it rotates with it. Without
+        // this a nudge would slide the notes out from under their own patches.
+        const snp=g.baseNotePatch
+          ?Array.from({length:_W},(_,c)=>(inWin(c)?g.baseNotePatch[srcC(c)]:g.baseNotePatch[c])||null)
+          :null;
+        setPats(ps=>ps.map(p=>p.id!==activeIdR.current?p:Object.assign({},p,snp?{grid:sh,params:sp,notePatch:snp}:{grid:sh,params:sp})));
       }
     }
   },[]);
@@ -9475,7 +10987,12 @@ export default function LoudLight(){
           // A tap that turns a cell ON in a bar past the part's end extends the
           // part to cover that bar; turning one off never shortens it.
           const _out=Object.assign({},p,{grid:newGrid,durs:newDurs,params:np});
-          return wasOn?_out:growLenTo(_out,c);
+          // A tap that REMOVED a note takes the column's step params with it
+          // once nothing is left standing there — the mirror of the reset three
+          // lines up, which has always cleared them when the first note ARRIVES
+          // in an empty column. This is the path a plain tap-to-delete takes;
+          // the two paint-erase branches are the other two.
+          return wasOn?clearColParams(_out,c):growLenTo(_out,c);
         }));
       }
     }
@@ -9584,13 +11101,14 @@ export default function LoudLight(){
   // CPY / PST move ONE BAR. That's what makes a long pattern workable: build a
   // bar, copy it forward, vary it. The clipboard is a COLS-wide slice.
   const copyPat=()=>{const src=pats.find(p=>p.id===activeId);if(!src)return;const off=barOffIn(src);
-    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off)});};
+    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off),notePatch:sliceFlat(src.notePatch||[],off,COLS,()=>null)});};
   const pastePat=()=>{if(!clipboard)return;setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;const off=barOffIn(p);
     return Object.assign({},p,{
       grid:spliceCols(p.grid,clipboard.grid,off),
       durs:spliceCols(p.durs||mkDurs(gridW(p.grid)),clipboard.durs,off,0,COLS,()=>1),
-      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off)});
+      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off),
+      notePatch:spliceFlat(p.notePatch||new Array(patW(p)).fill(null),clipboard.notePatch||null,off,0,COLS,()=>null)});
   }));};
   const clearPat=()=>mutatePat((g,p2)=>spliceCols(g,null,barOffIn(p2)));
 
@@ -9603,13 +11121,14 @@ export default function LoudLight(){
   // there is no such thing as removing only its drums.
   const delPatInLayer=(layer,id)=>delPatternId(id);
   const copyPatId=(id)=>{const src=pats.find(p=>p.id===id);if(!src)return;const off=barOffIn(src);
-    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off)});};
+    setClipboard({grid:sliceCols(src.grid,off),durs:sliceCols(src.durs||mkDurs(gridW(src.grid)),off,COLS,()=>1),params:sliceFlat(src.params||defaultStepParams(gridW(src.grid)),off),notePatch:sliceFlat(src.notePatch||[],off,COLS,()=>null)});};
   const pastePatId=(id)=>{pushHistory();if(!clipboard)return;setPats(ps=>ps.map(p=>{
     if(p.id!==id)return p;const off=barOffIn(p);
     return Object.assign({},p,{
       grid:spliceCols(p.grid,clipboard.grid,off),
       durs:spliceCols(p.durs||mkDurs(gridW(p.grid)),clipboard.durs,off,0,COLS,()=>1),
-      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off)});
+      params:spliceFlat(p.params||defaultStepParams(gridW(p.grid)),clipboard.params,off),
+      notePatch:spliceFlat(p.notePatch||new Array(patW(p)).fill(null),clipboard.notePatch||null,off,0,COLS,()=>null)});
   }));};
   const clearPatId=(id)=>{pushHistory();setPats(ps=>ps.map(p=>p.id!==id?p:Object.assign({},p,{grid:spliceCols(p.grid,null,barOffIn(p))})));};
   // RAND generates one bar (randMonoGrid/randPolyGrid are COLS-wide by
@@ -10152,7 +11671,8 @@ export default function LoudLight(){
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
-    return Object.assign({},p,{params:spliceFlat(p.params||defaultStepParams(patW(p)),null,off)});
+    return Object.assign({},p,{params:spliceFlat(p.params||defaultStepParams(patW(p)),null,off),
+      notePatch:p.notePatch?spliceFlat(p.notePatch,null,off,0,COLS,()=>null):p.notePatch});
   }));
   // Double-click on any lane cell at column c resets ALL lane values for that
   // step back to their defaults (one row of defaultStepParams). Faster than
@@ -10722,48 +12242,21 @@ export default function LoudLight(){
 
   const stLabel=transpose===0?"0":transpose>0?"+"+transpose:String(transpose);
 
-  // ── EXPORT lives on the transport's HOLD ────────────────────────────────
-  // It used to be a section of the PROJECT drawer, which is a list that wants
-  // every pixel of height it can get. Export is not filing — it is rendering
-  // the song OUT — so it belongs on the control that plays the song, under the
-  // deliberate gesture, exactly like every other second function in here.
+  // ── The play button does ONE thing ──────────────────────────────────────
+  // It carried export on its hold for a while, and that was the wrong control
+  // to hang a second function on: it is the one
+  // you press mid-take, on a phone, without looking — and a finger that rests
+  // on it for half a second threw a menu over the instrument. Export is back in
+  // the PROJECT menu, which is where the rest of "do something with this song
+  // outside the app" lives.
   //
-  // The MP3 pass count is folded into the menu rather than being a second
-  // screen: it is still asked before the bounce starts (a bounce runs in REAL
-  // TIME, so an accidental 8-pass one costs minutes you cannot cancel), but
-  // choosing the count IS starting it, so a bounce is one gesture rather than
-  // three. The count is passed to exportMP3 as an argument — reading it back
-  // from state in the same handler would get the previous value.
-  const playHoldR=useRef({tmr:0,held:false});
-  const _playHoldEnd=()=>{const t=playHoldR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};
+  // `data-playbtn` stays as the harnesses' hook. They used to find this button
+  // by its title, which was the constant "Hold to export"; the title says what
+  // the next press does now, so it changes with the transport and is no longer
+  // an id. (Same argument as data-playcol and data-drumgrid.)
   const playBtnProps={
-    // A stable hook for the harnesses. They used to find this button by its
-    // title, which was the constant "Hold to export"; the title now says what
-    // the next press does, so it changes with the transport and is no longer
-    // an id. (Same argument as data-playcol and data-drumgrid.)
     "data-playbtn":"1",
-    onPointerDown:(e)=>{
-      if(e.button===2)return;
-      const t=playHoldR.current;t.held=false;_playHoldEnd();
-      const el=e.currentTarget;
-      t.tmr=setTimeout(()=>{
-        t.tmr=0;t.held=true;
-        const r=el.getBoundingClientRect();
-        exportMenuAtR.current=Date.now();
-        setExportMenu({x:r.left+r.width/2,y:r.bottom});
-      },450);
-    },
-    onPointerUp:()=>_playHoldEnd(),
-    onPointerCancel:()=>{_playHoldEnd();playHoldR.current.held=false;},
-    onPointerLeave:()=>_playHoldEnd(),
-    onContextMenu:(e)=>{e.preventDefault();e.stopPropagation();_playHoldEnd();
-      const t=playHoldR.current;t.held=true;
-      const r=e.currentTarget.getBoundingClientRect();
-      exportMenuAtR.current=Date.now();
-      setExportMenu({x:r.left+r.width/2,y:r.bottom});},
-    // The hold swallows its own trailing click, or opening the menu would also
-    // start playback behind it.
-    onClick:()=>{const t=playHoldR.current;if(t.held){t.held=false;return;}togglePlayPause();},
+    onClick:()=>togglePlayPause(),
   };
 
   // ── The TEMPO chip: tap opens the drawer, HOLD edits it in place ─────────
@@ -10881,51 +12374,6 @@ export default function LoudLight(){
     return ()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("keydown",kd);};
   },[tempoPop]);
 
-  const exportMenuEl=!exportMenu?null:(()=>{
-    const vw=window.innerWidth,vh=window.innerHeight;
-    const W=Math.min(216,vw-16),H=176;
-    const left=Math.max(8,Math.min(vw-W-8,exportMenu.x-W/2));
-    const top=Math.max(8,Math.min(vh-H-8,exportMenu.y+12));
-    const close=()=>setExportMenu(null);
-    const dismiss=()=>{if(Date.now()-exportMenuAtR.current>400)close();};
-    return(
-      <div style={{position:"fixed",inset:0,zIndex:500}}
-        onPointerDown={dismiss} onClick={dismiss}>
-        <div style={{position:"absolute",left,top,width:W,
-          background:"rgba(10,18,28,0.96)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-          borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",
-          boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden",pointerEvents:"all"}}
-          onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-          <div style={{padding:"9px 10px 8px",borderBottom:"1px solid rgba(168,190,212,0.1)",
-            display:"flex",alignItems:"baseline",gap:6}}>
-            <span style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(232,220,205,0.9)"}}>EXPORT</span>
-            <span style={{flex:1,fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
-              {songSeq.length?"THE SONG":"THIS PATTERN"}</span>
-          </div>
-          <button style={{width:"100%",padding:"11px 0",background:"none",border:"none",fontFamily:"inherit",
-            color:"rgba(212,226,240,0.82)",fontSize:10,fontWeight:700,letterSpacing:1.6,cursor:"pointer"}}
-            onClick={()=>{close();exportMIDI();}}>MIDI</button>
-          <div style={{padding:"2px 10px 4px",borderTop:"1px solid rgba(168,190,212,0.1)",
-            display:"flex",alignItems:"baseline",gap:6}}>
-            <span style={{fontSize:10,fontWeight:700,letterSpacing:1.6,
-              color:exporting?"rgba(178,199,219,0.3)":"rgba(212,226,240,0.82)"}}>MP3</span>
-            <span style={{flex:1,fontSize:7,letterSpacing:1.2,color:"rgba(178,199,219,0.3)",textAlign:"right"}}>
-              {exporting?"BOUNCING…":"PASSES — REAL TIME"}</span>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,padding:"2px 10px 10px"}}>
-            {[1,2,4,8].map(n=>(
-              <button key={n} disabled={exporting}
-                onClick={()=>{close();setExportLoops(n);exportMP3(n);}}
-                style={{padding:"9px 0",fontSize:11,fontWeight:700,fontFamily:"inherit",
-                  cursor:exporting?"wait":"pointer",borderRadius:6,opacity:exporting?0.4:1,
-                  border:"1px solid rgba(168,190,212,0.3)",background:"rgba(168,190,212,0.06)",
-                  color:"rgba(226,236,247,0.85)"}}>×{n}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  })();
 
   // ── ONE full-screen readout for every tempo scrubber ─────────────────────
   // The drawer's three widgets each carried their own copy of this overlay, and
@@ -10986,6 +12434,190 @@ export default function LoudLight(){
   // (shared by every layer); each layer's SOUND page only carries its own SEND
   // amount into the reverb/delay buses. Rendered identically on the desktop FX
   // tab and the mobile FX sheet.
+  // ── MOJO — DRIVE and EXCITE, over the whole mix ─────────────────────────
+  // On the MIX face, BESIDE the layer faders and above GLOBAL FX. The page
+  // still reads down the signal — the channel faders, then what happens to
+  // their sum, then the buses they feed — but the faders cap their strips at
+  // 84px each and leave the rest of the width unused, which is exactly the
+  // room this needs. It is a WRAP, not a hand-split row, so a phone stacks
+  // them and a desktop does not, and the arithmetic stays the browser's.
+  //
+  // NOTHING IN HERE SHOWS A NUMBER, and that is the design rather than a
+  // shortcut. This stage is character — you turn it until it sounds good and
+  // then you stop — so a readout in dB or ms would be inviting you to aim at
+  // a value you have no way to want. Each control names WHERE IT HAS GOT TO
+  // instead, on its own five-word ladder. The knobs are still continuous
+  // underneath; only the readout is coarse, which is precisely the point.
+  //
+  // This replaced a threshold, a ratio, an attack, a release, a makeup gain
+  // and a three-band EQ. Those are a mixing desk, and a mixing desk is the
+  // wrong instrument to bolt onto the end of something you play with your
+  // thumbs.
+  // words[0] is OFF and the rest split the travel evenly, so the very first
+  // nudge off zero already reads as "on" rather than spending a quarter of the
+  // knob still saying nothing is happening.
+  const mojoWord=(v,words)=>{
+    const n=words.length;
+    if(!(v>0))return words[0];
+    return words[Math.min(n-1,1+Math.floor((Math.min(100,v)-1)/100*(n-1)))];
+  };
+  const W_DRIVE=["CLEAN","WARM","PUSHED","HOT","MELTED"];
+  const W_THUMP=["\u2014","ROUND","FULL","BIG","MASSIVE"];
+  const W_BODY =["\u2014","SOLID","THICK","CHEWY","GNARLY"];
+  const W_AIR  =["\u2014","OPEN","CRISP","BRIGHT","GLASSY"];
+  // ONE BYPASS, over the whole stage. It was one per stage, and two switches
+  // is two decisions for something that is one effect — you reach for MOJO to
+  // hear the mix with character or without it, not to audition its halves
+  // against each other. It is a switch rather than "turn the knobs to zero"
+  // because the whole use of a character stage is A/B, and winding a knob down
+  // to compare loses the setting you were comparing. It also means the amounts
+  // can default to somewhere sensible, so flipping ON does something on a
+  // fresh project.
+  // IT SHARES THE FLAVOUR ROW, AND IT IS A DIFFERENT COLOUR ON PURPOSE. Four
+  // cells on one line, but they are not four of a kind: the three on the right
+  // are a radio group (which curve), and this one is a switch (in or out of the
+  // path). Same shape at this size would read as "four flavours, one of them
+  // called BYPASSED". So it takes the brand amber rather than C_MASTER, it
+  // FILLS when it is on rather than just tinting, and a wider gap separates it
+  // from the three. Its own row cost ~35px for one word.
+  const C_MOJO_SW="#e6b872";
+  const mojoSwitch=(on,set,label)=>(
+    <button data-mojo-sw={label} aria-pressed={on} aria-label={label+(on?" on":" bypassed")}
+      onClick={()=>{pushHistory();set(v=>!v);}}
+      style={{flex:"1.3 1 0",minWidth:0,padding:"6px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+        // Smaller and tighter than the flavours: "BYPASSED" is eight characters
+        // and this cell is the narrowest it gets on a 260px panel. The state is
+        // carried by the fill and the colour as much as by the word.
+        fontSize:8,fontWeight:700,letterSpacing:1.2,
+        border:"1px solid "+(on?C_MOJO_SW:C_MOJO_SW+"3a"),
+        background:on?C_MOJO_SW+"33":"transparent",
+        color:on?C_MOJO_SW:C_MOJO_SW+"70"}}>{on?"ON":"BYPASSED"}</button>
+  );
+  // The two halves are still two halves — saturation, then harmonics — but
+  // upright they are told apart by a RULE BETWEEN THEM rather than by two
+  // headings above them: one fader, a divider, three faders. A heading per
+  // half would cost two more rows to say what the gap already says, which is
+  // the height the rotation was for.
+  // THE FOUR AMOUNTS ARE VERTICAL FADERS IN ONE ROW, not four stacked knobs.
+  // Four full-width KnobSliders made the panel 410px tall; the same four
+  // upright are ~250px and no wider, because a fader spends HEIGHT — which
+  // this panel has going spare beside a 236px mixer — instead of stacking
+  // rows it does not. It also puts MOJO in the same idiom as the layer faders
+  // immediately to its left, which is what it is: four amounts over the mix.
+  //
+  // ONE BODY, four mounts. The drag contract is the mixer strip's and the
+  // knob's: ballistic relative motion, double-tap back to the default, and
+  // HIST.mark on the first REAL change of the gesture rather than on the press
+  // (pushHistory does not dedupe, so a snapshot per pointerdown fills the ring
+  // with no-ops and undo looks dead for several presses).
+  const mojoFader=(label,value,onChange,words,def)=>(
+    <div key={label} data-knob={label} data-knobval={value} data-knobword={mojoWord(value,words)}
+      style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+      <span style={{fontSize:8,letterSpacing:1.2,fontWeight:700,color:C_MASTER+"BB"}}>{label}</span>
+      {/* 112px, down from 132. A fader wants travel, but these are four
+          amounts you set by ear and leave — not a mix you ride — and 112 is
+          still 16 steps of a comfortable thumb drag on the ballistic curve. */}
+      <div data-knobtrack={label}
+        style={{width:16,height:112,background:"rgba(186,208,230,0.07)",borderRadius:8,
+          position:"relative",cursor:"ns-resize",touchAction:"none"}}
+        onPointerDown={e=>{
+          e.stopPropagation();
+          if(isDoubleTap(e,"mojo"+label)){if(value!==def){HIST.mark();onChange(def);}return;}
+          // Capture the element: React reuses its synthetic event, so
+          // e.currentTarget is null by the time pointerup runs.
+          const el=e.currentTarget;
+          el.setPointerCapture(e.pointerId);
+          const dim=el.getBoundingClientRect().height;
+          let cur=value,last=e.clientY,marked=false;
+          const mv=ev=>{
+            const pd=last-ev.clientY; last=ev.clientY;   // up = more
+            cur=Math.max(0,Math.min(100,cur+ballisticDelta(pd,dim,100)));
+            if(!marked&&Math.round(cur)!==value){marked=true;HIST.mark();}
+            onChange(Math.round(cur));
+          };
+          const up=()=>{
+            el.removeEventListener("pointermove",mv);
+            el.removeEventListener("pointerup",up);
+            el.removeEventListener("pointercancel",up);
+          };
+          el.addEventListener("pointermove",mv);
+          el.addEventListener("pointerup",up);
+          el.addEventListener("pointercancel",up);
+        }}>
+        <div style={{position:"absolute",left:0,right:0,bottom:0,height:value+"%",
+          background:C_MASTER+"99",borderRadius:8}}/>
+        <div style={{position:"absolute",left:-4,right:-4,height:7,bottom:`calc(${value}% - 3.5px)`,
+          background:"rgba(255,255,255,0.85)",borderRadius:2,boxShadow:"0 0 4px "+C_MASTER+"88"}}/>
+      </div>
+      {/* The word, not the number — see the section note. At this width it is
+          the one thing that has to stay legible, so it gets its own line. */}
+      <span style={{fontSize:7,letterSpacing:0.8,fontWeight:700,textAlign:"center",
+        color:value>0?C_MASTER+"CC":"rgba(178,199,219,0.28)"}}>{mojoWord(value,words)}</span>
+    </div>
+  );
+  // data-mojo / data-mixer are the harness's hooks for WHERE these two sit:
+  // beside each other or stacked is the whole layout decision, and a wrap has
+  // no state to read — only positions.
+  const masterBusPanel = (
+    <div data-mojo="1">
+    <SynthSection title="MOJO" accent={C_MASTER}>
+      <div style={{padding:"4px 12px 9px",display:"flex",flexDirection:"column",gap:6}}>
+        {/* ONE ROW: the bypass, then the flavour. Everything the switch governs
+            dims while the stage is out of the path — legible, still adjustable,
+            and saying without a word that what you are turning is not currently
+            being heard. The switch itself never dims: it is the way back. */}
+        <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
+          {mojoSwitch(mojoOn,setMojoOn,"MOJO")}
+          {/* The flavour is the first decision and the one you make rarely, so
+              it is on the face rather than behind a menu. Three words, and they
+              are three genuinely different curves — see ll_shape. */}
+          <div data-drivechar={driveChar}
+            style={{flex:"3 1 0",minWidth:0,display:"flex",gap:4,opacity:mojoOn?1:0.45}}>
+            {["TAPE","TUBE","CLIP"].map((lbl,i)=>{
+              const on=driveChar===i;
+              return(
+                <button key={lbl} aria-pressed={on}
+                  onClick={()=>{if(driveChar!==i){pushHistory();setDriveChar(i);}}}
+                  style={{flex:1,minWidth:0,padding:"6px 0",borderRadius:6,cursor:"pointer",fontFamily:"inherit",
+                    fontSize:9,fontWeight:700,letterSpacing:1.4,
+                    border:"1px solid "+(on?C_MASTER:C_MASTER+"30"),
+                    background:on?C_MASTER+"22":"transparent",
+                    color:on?C_MASTER:C_MASTER+"88"}}>{lbl}</button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{opacity:mojoOn?1:0.45,display:"flex",flexDirection:"column",gap:6}}>
+          {/* DRIVE is one knob over a fixed glue compressor AND a saturator,
+              the way a console's input gain is; THUMP / BODY / AIR are three
+              generators each listening to one band and adding its harmonics
+              back. The rules name the two halves without boxing them. */}
+          <div style={{display:"flex",alignItems:"flex-end",gap:6,paddingTop:1}}>
+            {mojoFader("DRIVE",driveAmt,setDriveAmt,W_DRIVE,SESSION_DEFAULTS.driveAmt)}
+            <div style={{width:1,alignSelf:"stretch",background:C_MASTER+"22",margin:"13px 2px 16px"}}/>
+            {mojoFader("THUMP",exThump,setExThump,W_THUMP,SESSION_DEFAULTS.exThump)}
+            {mojoFader("BODY", exBody, setExBody, W_BODY, SESSION_DEFAULTS.exBody)}
+            {mojoFader("AIR",  exAir,  setExAir,  W_AIR,  SESSION_DEFAULTS.exAir)}
+          </div>
+          {/* ONE line, and only the one the controls cannot say themselves.
+              The exciter prose went with the rotation: THUMP / BODY / AIR are
+              already named for what they do and each reads its own word, so a
+              paragraph restating that is the duplicate readout this app keeps
+              deleting — and here it cost four lines of the height the upright
+              faders had just bought back. The FLAVOUR line stays because three
+              curves are not guessable from three nouns, and it changes with
+              the choice. */}
+          <div style={{fontSize:8,letterSpacing:0.6,lineHeight:1.45,color:"rgba(178,199,219,0.32)"}}>
+            {driveChar===0?"TAPE: soft, loses a little top, gains a little bottom."
+             :driveChar===1?"TUBE: asymmetric, so it makes even harmonics. Warm."
+             :"CLIP: clean until it isn't. A wall, not a curve."}
+          </div>
+        </div>
+      </div>
+    </SynthSection>
+    </div>
+  );
+
   const globalFxSections = (<>
     <SynthSection title="DELAY" accent={C_DLY}>
       <div style={{padding:"4px 12px 10px",display:"flex",flexDirection:"column",gap:6}}>
@@ -11045,7 +12677,78 @@ export default function LoudLight(){
       {when&&<span style={{flexShrink:0,fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.3)"}}>{when}</span>}
     </div>
   );
-  const projectMenuBody=(
+  // HOW IT WORKS. `helpOpen` swaps the PROJECT menu's contents for the gesture
+  // reference, which is why it needs no sheet plumbing of its own: that body
+  // already has two mounts (the desktop modal and the mobile sheet) and this
+  // rides both for free. One body, two mounts, never a fork.
+  const [helpOpen,setHelpOpen]=useState(false);
+  // The hint for THIS launch, picked once at mount and never re-picked: a hint
+  // that changed under you mid-session would be a carousel. Read synchronously
+  // — an async read lands a frame late and it would pop in after the app has
+  // already settled, which reads as a glitch rather than a nudge.
+  const [hint,setHint]=useState(null);
+  const seenHintsR=useRef((()=>{try{return new Set((localStorage.getItem(LS_NS+"seen-hints")||"").split(",").filter(Boolean));}catch(e){return null;}})());
+  const dismissHint=()=>{
+    const h=hint; setHint(null);
+    if(!h||!seenHintsR.current)return;
+    seenHintsR.current.add(h.k);
+    try{localStorage.setItem(LS_NS+"seen-hints",[...seenHintsR.current].join(","));}catch(e){}
+  };
+  const seenHelpR=useRef((()=>{try{return localStorage.getItem(LS_NS+"seen-help")==="1";}catch(e){return true;}})());
+  const dismissHelp=()=>{
+    setHelpOpen(false);
+    if(!seenHelpR.current){seenHelpR.current=true;try{localStorage.setItem(LS_NS+"seen-help","1");}catch(e){}}
+  };
+  // A GENUINELY first launch opens it once, and only a genuinely first one: the
+  // marker is its own key rather than "is the library empty", so clearing your
+  // projects does not put the tutorial back in front of you.
+  useEffect(()=>{
+    if(seenHelpR.current)return;
+    const t=setTimeout(()=>{setHelpOpen(true);setActiveSheet("project");setMenuOpen(true);},700);
+    return ()=>clearTimeout(t);
+  },[]);
+  // A hint only from the SECOND launch onwards: the first one already gets the
+  // whole reference, and a nudge on top of it would be two tutorials at once.
+  // `seenHelpR` is read as it was AT MOUNT, so dismissing the reference does
+  // not immediately hand you a hint in the same sitting.
+  useEffect(()=>{
+    if(!seenHelpR.current||!seenHintsR.current)return;
+    const next=HINTS.find(h=>!seenHintsR.current.has(h.k));
+    if(!next)return;
+    const t=setTimeout(()=>setHint(next),1600);
+    return ()=>clearTimeout(t);
+  },[]);
+  const helpBody=(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>HOW IT WORKS</div>
+        <button onClick={dismissHelp}
+          style={{padding:"6px 12px",border:"1px solid rgba(168,190,212,0.25)",borderRadius:6,background:"transparent",
+            color:"rgba(178,199,219,0.7)",fontSize:9,letterSpacing:1.5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>DONE</button>
+      </div>
+      <div style={{fontSize:11,lineHeight:1.5,color:"rgba(178,199,219,0.55)"}}>
+        Most of what Loud Light can do is a gesture rather than a button. This is
+        all of them; it lives in this menu, so it is here whenever you want it.
+      </div>
+      {HELP_GROUPS.map(g=>(
+        <div key={g.t}>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+            <span style={{fontSize:9,letterSpacing:2,color:"rgba(255,214,150,0.75)",fontWeight:700}}>{g.t}</span>
+            {g.s&&<span style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.35)"}}>{g.s}</span>}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {g.r.map(([k,v],i)=>(
+              <div key={i} style={{display:"flex",gap:10,alignItems:"baseline"}}>
+                <span style={{flex:"0 0 40%",maxWidth:150,fontSize:10,letterSpacing:0.5,color:"rgba(199,216,232,0.92)",fontWeight:600}}>{k}</span>
+                <span style={{flex:1,minWidth:0,fontSize:10.5,lineHeight:1.45,color:"rgba(178,199,219,0.6)"}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+  const projectMenuBody=(helpOpen?helpBody:
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {confirmAction&&(
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",background:"rgba(196,150,80,0.1)",border:"1px solid rgba(196,150,80,0.3)",borderRadius:6}}>
@@ -11134,6 +12837,13 @@ export default function LoudLight(){
                 <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
                   <span style={{flex:1,minWidth:0,fontSize:9,letterSpacing:1,color:C_CLOUD+"aa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cloudSess.email}</span>
                   <button style={{padding:"3px 8px",border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,background:"transparent",color:"rgba(168,190,212,0.45)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>cloudSignOut()}>SIGN OUT</button>
+                  {/* Guideline 5.1.1(v). It sits next to SIGN OUT because that
+                      is where you look for "get me out of this account", and it
+                      is drawn in the warning colour rather than the furniture
+                      grey so the two are not one tap apart and identical. */}
+                  <button data-delacct="1"
+                    style={{padding:"3px 8px",border:"1px solid rgba(214,166,90,0.35)",borderRadius:4,background:"transparent",color:"rgba(214,166,90,0.75)",fontSize:8,letterSpacing:1,cursor:"pointer",fontFamily:"inherit"}}
+                    onClick={()=>setConfirmAction({type:"cdelacct",label:"DELETE ACCOUNT AND EVERY CLOUD PROJECT? CANNOT BE UNDONE"})}>DELETE ACCOUNT</button>
                 </div>
               )}
               {/* The list. Scrolls once it outgrows the box rather than pushing
@@ -11189,32 +12899,67 @@ export default function LoudLight(){
         })()}
       </div>
 
-      {/* ── Audio route (iOS app only) ──────────────────────────────────────
-          Not a setting so much as a fork: iOS hands the lock screen to the
-          PRIMARY audio app, and a mixable app is a secondary one. So this is
-          "lock-screen transport" or "jam over a reference track", and which is
-          right depends on the session rather than on taste. Hidden everywhere
-          else because nothing outside the shell has a session to set. */}
-      {IS_NATIVE&&(
-        <div>
-          <div style={Object.assign({},mSecLbl,{marginBottom:8})}>AUDIO ROUTE</div>
-          <div style={{display:"flex",gap:0,border:"1px solid rgba(168,190,212,0.15)",borderRadius:6,overflow:"hidden",marginBottom:7}}>
-            {[[true,"LOCK SCREEN"],[false,"MIX"]].map(([v,lbl])=>(
-              <button key={lbl} data-audioroute={v?"excl":"mix"} onClick={()=>setExclusiveAudio(v)}
-                style={{flex:1,padding:"7px 8px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:8,letterSpacing:1.5,fontWeight:700,
-                  background:exclAudio===v?"rgba(230,184,114,0.13)":"transparent",
-                  color:exclAudio===v?"#e6b872":"rgba(178,199,219,0.4)"}}>{lbl}</button>
-            ))}
-          </div>
-          <div style={{fontSize:9,lineHeight:1.5,color:"rgba(178,199,219,0.4)"}}>
-            {exclAudio
-              ?"Loud Light owns the route, so the lock screen and Control Centre carry its transport. It interrupts whatever else is playing."
-              :"Loud Light plays over other apps, so you can jam along with a reference track. The lock-screen transport won't appear."}
-          </div>
+      {/* ── EXPORT ──────────────────────────────────────────────────────────
+          Back where filing lives, in the room the AUDIO ROUTE toggle was
+          holding. It spent a while on the PLAY button's hold, on the argument
+          that MIDI and MP3 render the song OUT of the app rather than filing
+          it, and that the drawer is a list that wants every pixel of height.
+          Both still true — and both cost less than what the hold cost: the one
+          control you press mid-take grew a second function that throws a menu
+          over the instrument, and a hold has no affordance, so the only way to
+          learn export had moved was to trip over it.
+          The MP3 pass count is still folded in rather than being a second
+          screen. A bounce runs in real time on the JS engine, so an accidental
+          8-pass one costs minutes you cannot cancel — but CHOOSING the count
+          is what starts it, so a bounce stays one gesture. The count goes to
+          exportMP3 as an ARGUMENT: a handler that set exportLoops and then
+          read it back would bounce the previous value. */}
+      <div>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+          <div style={Object.assign({},mSecLbl,{marginBottom:0,flex:1})}>EXPORT</div>
+          <span style={{fontSize:8,letterSpacing:1.4,color:"rgba(178,199,219,0.3)"}}>
+            {songSeq.length?"THE SONG":"THIS PATTERN"}</span>
         </div>
-      )}
+        <button data-export="midi" style={Object.assign({},mBtn,{marginBottom:7})}
+          onClick={()=>exportMIDI()}>MIDI</button>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:5}}>
+          <span style={{flex:1,fontSize:10,letterSpacing:1.4,fontWeight:700,
+            color:exporting?"rgba(178,199,219,0.3)":"rgba(212,226,240,0.7)"}}>MP3</span>
+          <span style={{fontSize:8,letterSpacing:1.2,color:"rgba(178,199,219,0.3)"}}>
+            {exporting?"BOUNCING…":CORE_ON?"PASSES · OFFLINE":"PASSES · REAL TIME"}</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+          {[1,2,4,8].map(n=>(
+            <button key={n} data-export={"mp3-"+n} disabled={exporting}
+              onClick={()=>{setExportLoops(n);exportMP3(n);}}
+              style={Object.assign({},mBtn,{padding:"9px 0",fontSize:11,
+                opacity:exporting?0.4:1,cursor:exporting?"wait":"pointer",
+                color:"rgba(226,236,247,0.8)"})}>×{n}</button>
+          ))}
+        </div>
+      </div>
 
-      <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>BUILD {BUILD_ID}</div>
+      {/* The way back INTO the reference. Everything that is not playing or
+          editing lives behind this menu, and "how does this work" is exactly
+          that kind of thing — it does not want a chip of its own on a phone
+          screen whose whole job is the grid. */}
+      <button onClick={()=>setHelpOpen(true)}
+        style={Object.assign({},mBtn,{padding:"10px 0",fontSize:10,letterSpacing:1.5,
+          color:"rgba(199,216,232,0.75)",borderColor:"rgba(168,190,212,0.22)"})}>HOW IT WORKS</button>
+
+      {/* The privacy policy has to be reachable from INSIDE the app, not only
+          from the App Store listing — guideline 5.1.1(i) asks for both, and
+          this menu is where everything that is not playing or editing lives.
+          It shares the BUILD line rather than taking a row: it is a reference,
+          like the build stamp, not a control. In the iOS shell an https link
+          is cancelled by decidePolicyFor and handed to Safari, so it opens
+          outside the app rather than stranding you in a chromeless web view. */}
+      <div style={{fontSize:8,letterSpacing:1,color:"rgba(178,199,219,0.25)",textAlign:"center"}}>
+        BUILD {BUILD_ID}
+        <span style={{opacity:0.5}}>{"  ·  "}</span>
+        <a href="https://jakedbirch.github.io/Tabula/privacy.html" target="_blank" rel="noopener noreferrer"
+          data-privacy="1" style={{color:"rgba(178,199,219,0.45)",textDecoration:"none",letterSpacing:1}}>PRIVACY</a>
+      </div>
     </div>
   );
 
@@ -11292,8 +13037,34 @@ export default function LoudLight(){
           AUDIO INTERRUPTED — TAP TO RESTORE
         </div>
       )}
+      {/* The toast clears the notch / Dynamic Island. It used to sit at a bare
+          top:10, which on a phone puts it UNDER the camera — and these carry
+          the only diagnosis there is when something refuses, so an unreadable
+          one is the same as no message at all (reported exactly that way, of a
+          SONG → PATTERN refusal). The interrupted-audio banner a few lines up
+          already had the inset; this is the same sum. */}
+      {/* THE ONE-TIME HINT. Top-centre, the same sum the toast and the
+          interrupted-audio banner already use so it clears the notch — these
+          are the two places this app puts a message and a third would be a
+          third thing to look for. It sits BELOW the toast's z-index so a real
+          message is never hidden behind a nudge, and it is the only overlay in
+          here you dismiss by tapping the message itself: there is nothing else
+          to press, and a ✕ at this size is a smaller target than the bar. */}
+      {hint&&!helpOpen&&(
+        <div style={{position:"fixed",top:"calc(env(safe-area-inset-top, 0px) + 10px)",left:8,right:8,zIndex:9500,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div onClick={dismissHint} role="button" tabIndex={0} data-hint={hint.k}
+            onKeyDown={e=>{if(e.key==="Enter"||e.key===" "||e.key==="Escape")dismissHint();}}
+            style={{maxWidth:"min(92vw,420px)",padding:"9px 14px",borderRadius:8,cursor:"pointer",pointerEvents:"auto",
+              background:"rgba(10,20,32,0.97)",boxShadow:"0 4px 18px rgba(0,0,0,0.5)",
+              border:"1px solid rgba(255,214,150,0.4)",color:"rgba(255,214,150,0.92)",
+              fontSize:10,letterSpacing:0.8,lineHeight:1.5,fontWeight:600,textAlign:"center",fontFamily:"inherit"}}>
+            {hint.t}
+            <span style={{display:"block",marginTop:4,fontSize:8,letterSpacing:1,opacity:0.5,fontWeight:500}}>TAP TO DISMISS · ALL OF THEM UNDER PROJECT</span>
+          </div>
+        </div>
+      )}
       {flash&&(
-        <div style={{position:"fixed",top:10,left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+        <div style={{position:"fixed",top:"calc(env(safe-area-inset-top, 0px) + 10px)",left:8,right:8,zIndex:9600,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
           {/* Wraps rather than clipping: these carry the only diagnosis you get
               when something server-side refuses, and half a sentence is no use. */}
           <div onClick={()=>{if(flashTone==="warn"){clearTimeout(flashTmr.current);setFlash("");}}}
@@ -11464,12 +13235,12 @@ export default function LoudLight(){
       {/* Pattern pill context menu */}
       {/* Pattern ops — the + button's hold menu. One mount, both platforms. */}
       {patternOpsMenu}
+      {addPatMenu}
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
       {layerOpsMenu}
       {paramOpsMenu}
       {scrubOverlay}
-      {exportMenuEl}
 
       {/* The BPM / ST / SWING drag overlays used to be three more copies of
           the readout, mounted here. They are `scrubOverlay` above now. */}
@@ -11640,13 +13411,13 @@ export default function LoudLight(){
                   button between them would make redo a longer trip every
                   time. */}
               <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center",justifyContent:"center"}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
-                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>{playGlyph(11)}</button>
-                {stopBtn({width:38,height:38},11)}
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:38,height:38,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
+                <button style={Object.assign({},S.playBtn,{width:42,height:42,fontSize:16},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>{playGlyph(20)}</button>
+                {stopBtn({width:38,height:38},18)}
                 <button title="Loop — tap again to grow the loop, then off" style={Object.assign({},S.iconBtn,loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={18}/></button>
                 <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                  style={Object.assign({},S.iconBtn,followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                  style={Object.assign({},S.iconBtn,followSeq?S.toggleOn:{})}
                   onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={18}/></button>
               </div>
             </div>
@@ -11659,7 +13430,7 @@ export default function LoudLight(){
             <div style={{flexShrink:0,borderTop:"1px solid rgba(168,190,212,0.08)",paddingTop:8,marginTop:4}}>
               <button style={{width:"100%",padding:"9px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:6,border:"1px solid "+(menuOpen?"rgba(232,220,205,0.5)":"rgba(168,190,212,0.18)"),borderRadius:7,background:menuOpen?"rgba(232,220,205,0.1)":"transparent",color:menuOpen?"rgba(232,220,205,0.9)":"rgba(178,199,219,0.55)",fontSize:winW>650?10:8,letterSpacing:2,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                 onClick={()=>setMenuOpen(o=>!o)}>
-                <span style={{fontSize:11,lineHeight:1}}>☰</span>{winW>650&&<span>PROJECT</span>}
+                <span style={{lineHeight:0}}><LLIcon name="project" size={14}/></span>{winW>650&&<span>PROJECT</span>}
               </button>
             </div>
           )}
@@ -11754,8 +13525,9 @@ export default function LoudLight(){
                           const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;
                           const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;
                           rects.push(
-                            <div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
+                            <div key={ci} data-notepatched={notePatchAtCol(activePat,ci)?"1":undefined} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,
                               background:bright,
+                              outline:notePatchAtCol(activePat,ci)?("1px solid "+C_VARY):"none",outlineOffset:"1px",
                               boxShadow:isActive?glow:rest,
                               pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>
                               {!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}
@@ -11955,7 +13727,7 @@ export default function LoudLight(){
               )}
             {/* (The two VARY pages were here; VARY is deleted.) */}
             {page==="sound"&&(
-              <div style={{position:"absolute",top:8,left:12,right:12,zIndex:6}}>{soundTabs(false)}</div>
+              <div style={{position:"absolute",top:8,left:12,right:12,zIndex:6}}>{soundTabs(false)}{notePatchBar(false)}</div>
             )}
             {soundTab==="layer"&&activeLayer!=="drums"&&page==="sound"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
@@ -11976,14 +13748,11 @@ export default function LoudLight(){
                           <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                         )}
                         {/* OSC velocity knob = global VCA velocity sensitivity. */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                          <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                         {/* Waveform buttons stacked vertically — centered, scale with card */}
                         <div style={{display:"flex",flexDirection:"column",gap:4,flex:"0 1 40%",minWidth:50,maxWidth:90}}>
                           {WAVEFORMS.map((w,i)=>(
-                            <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
+                            <button key={w} data-wf={w} aria-pressed={waveform===w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>
                               {WF_LABELS[i]}
                             </button>
                           ))}
@@ -12007,11 +13776,9 @@ export default function LoudLight(){
                         <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                         <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                         <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
+                        <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
                         {/* ENV velocity = scales decay/release time with velocity (low vel = shorter). */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                          <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                       </div>
                     </SynthSection>
                     <SynthSection title="FILTER" accent={C_FILT}>
@@ -12020,10 +13787,7 @@ export default function LoudLight(){
                         <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                         <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
                         {/* FILTER velocity = scales filter envelope amount with velocity. */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                          <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                          <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 6px",fontSize:7,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                        </div>
+                        <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                       </div>
                     </SynthSection>
                     {/* Per-layer FX is just the SEND into the shared reverb/delay
@@ -12047,7 +13811,13 @@ export default function LoudLight(){
                 for every layer (these buses are shared), drums included. */}
             {page==="sound"&&soundTab==="fx"&&(
               <div style={{height:"100%",minHeight:0,overflowY:"auto",padding:"8px 12px 40px"}}>
-                <div style={{marginBottom:14}}>{mixerBody}</div>
+                {/* The faders and what happens to their sum, on one line.
+                    MOJO is the half that can use spare width, so it is the one
+                    that grows; the mixer caps its strips anyway. */}
+                <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-start",marginBottom:16}}>
+                  <div style={{flex:"0 1 300px",minWidth:0}}>{mixerBody}</div>
+                  <div style={{flex:"1 1 260px",minWidth:0,maxWidth:360}}>{masterBusPanel}</div>
+                </div>
                 <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:10}}>GLOBAL FX</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,alignItems:"start"}}>
                   {globalFxSections}
@@ -12082,7 +13852,7 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE LEFT RAIL — layer + pattern selection ══ */}
           {isLandscape&&(
             <div style={{width:74,flexShrink:0,display:"flex",flexDirection:"column",gap:6,padding:"8px 6px",borderRight:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#8279e0","rgba(130,121,224,"],["drums","DRUMS","#e07060","rgba(224,112,96,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
                   style={Object.assign({flexShrink:0,padding:"7px 0",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(patternDrag?.overLayerBox===lyr?c+"FF":activeLayer===lyr?c+"99":cf+"0.15)"),borderRadius:8,background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)",cursor:"pointer",fontFamily:"inherit"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={20}/></button>
@@ -12133,13 +13903,17 @@ export default function LoudLight(){
           {/* 2. Globals — TEMPO / FX / PROJECT. */}
           {!isLandscape&&(
           <div style={{flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"stretch",padding:"9px 12px 5px",gap:6}}>
-              {/* TEMPO chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
+            <div style={{display:"flex",alignItems:"stretch",padding:"4px 10px 3px",gap:4}}>
+              {/* TEMPO chip. It keeps a box — it is the one thing in this row
+                  that is a READOUT rather than a glyph, and a number floating
+                  with no frame beside five symbols reads as a caption rather
+                  than as something you can press. The frame is fainter than it
+                  was, because it is holding a number, not competing with one. */}
+              <button style={{flex:1,minWidth:0,height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="tempo"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.08)"),borderRadius:9,background:activeSheet==="tempo"?"rgba(168,190,212,0.08)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,touchAction:"none"}}
                 aria-label={"Tempo controls — tap to open, hold to change "+tempoFld.unit}
                 data-tempochip={tempoField} {...tempoChipProps}>
-                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.85)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>{tempoFld.unit}</span>
+                <span style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.8)",lineHeight:1}}>{tempoFld.show(tempoVal)}</span>
+                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>{tempoFld.unit}</span>
               </button>
               {/* The ▦ SONG chip is GONE. The song lane is two rows above the
                    grid on this very page: a chip that navigates to a copy of
@@ -12154,10 +13928,10 @@ export default function LoudLight(){
                   and the other half was hidden behind tapping a layer button
                   you were already on — a door nobody would find, on a control
                   whose real job is switching layers. */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button aria-label="Sound" title="Sound — each layer's voice and the global FX"
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"transparent"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.44)"}}
                 onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
-                <span style={{fontSize:15,lineHeight:1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.4)"}}>SOUND</span>
+                <LLIcon name="sound" size={22}/>
               </button>
               {/* SAVE — one tap onto the project you last loaded or saved. The
                    cue for unsaved work is the CHIP going amber, the same "lit"
@@ -12165,21 +13939,21 @@ export default function LoudLight(){
                    colour alone is a poor signal at 42px on a bright pavement,
                    and the dot reads even when the chip does not. */}
               <button data-save="1" data-dirty={dirty?"1":"0"}
-                aria-label={dirty?"Save — unsaved changes":"Save"}
-                title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
-                style={{flex:1,height:42,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
-                  border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.12)"),borderRadius:9,
-                  background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+                aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
+                title={saveTitle}
+                style={{flexShrink:0,width:44,height:44,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",
+                  border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"transparent"),borderRadius:9,
+                  background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,
+                  color:dirty?"#ffd28a":"rgba(178,199,219,0.44)"}}
                 onClick={quickSave}>
-                <span style={{fontSize:15,lineHeight:1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.4)"}}>SAVE</span>
-                {dirty&&<span style={{position:"absolute",top:6,right:8,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
+                <LLIcon name="save" size={22}/>
+                {dirty&&<span style={{position:"absolute",top:5,right:5,width:5,height:5,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
               </button>
               {/* PROJECT chip */}
-              <button style={{flex:1,height:42,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.12)"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
+              <button aria-label="Project" title="Projects, export and the library"
+                style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"transparent"),borderRadius:9,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="project"?"rgba(178,199,219,0.8)":"rgba(178,199,219,0.44)"}}
                 onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                <span style={{fontSize:15,lineHeight:1,color:"rgba(178,199,219,0.5)"}}>⋯</span>
-                <span style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)"}}>PROJECT</span>
+                <LLIcon name="project" size={22}/>
               </button>
               {/* ↶ ↷ live UP HERE now, not in the transport row. They are not
                   transport — they are what you press when you have just done
@@ -12190,8 +13964,8 @@ export default function LoudLight(){
                   bought a whole row below. They stay ADJACENT, because they are
                   a pair you press in runs. */}
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:34,height:42,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{width:44,height:44,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={18}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{width:44,height:44,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={18}/></button>
               </div>
             </div>
           </div>
@@ -12223,26 +13997,26 @@ export default function LoudLight(){
                 gets a sensible row rather than seven dinner plates. The two
                 groups split it 3:4, which is exactly the button count, so the
                 gap between them lands where it always did. */}
-            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 10px",gap:5}}>
+            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",padding:"0 10px 7px",gap:5}}>
               <div style={{flex:"3 1 0",display:"flex",alignItems:"center",gap:5}}>
-              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#79b8f2","rgba(121,184,242,"],["drums","DRUMS","#c4727a","rgba(196,114,122,"]].map(([lyr,lbl,c,cf])=>(
+              {[["synth","POLY","#a8c5a0","rgba(168,197,160,"],["lead","MONO","#8279e0","rgba(130,121,224,"],["drums","DRUMS","#e07060","rgba(224,112,96,"]].map(([lyr,lbl,c,cf])=>(
                 <button key={lyr} data-layer-box={lyr} aria-label={lbl} title={lbl} aria-pressed={activeLayer===lyr}
-                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99)":cf+"0.15)"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.4)"})}
+                  style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0,touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",border:"1px solid "+(activeLayer===lyr?c+"99":"transparent"),background:activeLayer===lyr?cf+"0.1)":"transparent",color:activeLayer===lyr?c:cf+"0.38)"})}
                   {...layerBtnProps(lyr)}><LLIcon name={lyr==="synth"?"poly":lyr==="lead"?"mono":"drums"} size={22}/></button>
               ))}
               </div>
               <div style={{flex:"4 1 0",display:"flex",alignItems:"center",gap:5,marginLeft:"auto"}}>
-              <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
-                {playGlyph(11)}
+              <button style={Object.assign({},S.playBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
+                {playGlyph(24)}
               </button>
-              {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},13)}
+              {stopBtn({flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},22)}
               {/* Icons, not words. LOOP and FOLLOW were the two widest things
                   in this row; as glyphs they are square and the row stops being
                   a negotiation about label width. */}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={22}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                style={Object.assign({},S.iconBtn,{flex:"1 1 0",width:"auto",height:"auto",aspectRatio:"1",maxWidth:56,minWidth:0},followSeq?S.toggleOn:{})}
                 onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={22}/></button>
               </div>
             </div>
@@ -12252,7 +14026,12 @@ export default function LoudLight(){
                  measured content area — which is why gridSizeCss no longer
                  subtracts the lane: `--ch` has already had it taken out. */}
           {SONG_STRIP&&!songPageOn&&(
-          <div style={{padding:"0 12px 6px",flexShrink:0,display:"flex",flexDirection:"column"}}>
+          // 10px, the grid box's own horizontal padding, not 12. At the grid's
+          // pitch the slots line up column-for-column with the cells below
+          // whenever portrait is width-bound (every tall phone), which is what
+          // makes the lane read as the top of the instrument rather than as a
+          // strip parked above it.
+          <div style={{padding:"0 10px 5px",flexShrink:0,display:"flex",flexDirection:"column"}}>
             {songLane()}
           </div>
           )}
@@ -12326,7 +14105,7 @@ export default function LoudLight(){
                             background:inactive?"rgba(186,208,230,0.008)":isCol?"rgba(186,208,230,0.09)":isQ?"rgba(186,208,230,0.035)":"rgba(186,208,230,0.015)",
                             outline:isQ&&!on&&!inactive?"1px solid rgba(255,255,255,0.06)":"none",outlineOffset:"-1px"})}/>);
                         })}
-                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;const vwD=Math.max(0.16,vw*(1+durMod));const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
+                        {(()=>{const rects=[];const A0=barOff,A1=barOff+COLS;let ci=Math.max(0,A0-COLS);while(ci<A1){const on=activePat?!!(activePat.grid[r]&&activePat.grid[r][ci]):false;if(on){const p=activePat?.params?.[ci];const rhy=p?Math.round(p.rhy??1):1;const span=Math.max(1,activePat?.durs?.[r]?.[ci]??1);if(ci+span<=A0){ci+=span;continue;}const vs=Math.max(ci,A0)-A0,vw=Math.min(ci+span,A1)-A0-vs;const vel=p?(p.vel??100):100;const b=0.55+(vel/127)*0.45;const inactive=colPastEnd(activePat,ci);const _nc=noteRgb(activeLayer);const bright=inactive?`rgba(186,208,230,0.12)`:`rgba(${_nc},${b})`;const glow=inactive?"none":`0 0 4px rgba(${_nc},${b*0.5}),0 0 10px rgba(${_nc},${b*0.22})`;const rest=inactive?"none":`0 0 3px rgba(${_nc},${b*0.28}),0 0 7px rgba(${_nc},${b*0.12})`;const isActive=!inactive&&playing&&playId===activeId&&step>=ci&&step<ci+span;const durMod=(rhy===1&&p&&p.dur!=null)?p.dur/100:0;const vwD=Math.max(0.16,vw*(1+durMod));const L=`calc(${vs/COLS}*(100% + ${CELL_GAP}px))`;const W=`calc(${vwD/COLS}*(100% + ${CELL_GAP}px) - ${CELL_GAP}px)`;rects.push(<div key={ci} data-notepatched={notePatchAtCol(activePat,ci)?"1":undefined} style={{position:"absolute",left:L,width:W,top:1,bottom:1,borderRadius:span>1?3:2,background:bright,outline:notePatchAtCol(activePat,ci)?("1px solid "+C_VARY):"none",outlineOffset:"1px",boxShadow:isActive?glow:rest,pointerEvents:"none",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",gap:"2px",padding:"0 2px"}}>{!inactive&&rhy===2&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy===3&&<><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/><div style={{flex:1,height:"72%",borderRadius:1,background:`rgba(0,0,0,0.25)`}}/></>}{!inactive&&rhy>=4&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px",width:"100%",height:"86%"}}>{[0,1,2,3].map(i=><div key={i} style={{borderRadius:1,background:"rgba(0,0,0,0.25)"}}/>)}</div>}{!inactive&&(()=>{const octV=p?(p.oct??2):2,sh=octV-2;if(sh===0)return null;const n=Math.abs(sh),up=sh>0;const cols=rhy>=4?2:rhy>=2?rhy:1;return(<div style={{position:'absolute',left:0,right:0,[up?'top':'bottom']:0,display:'flex',flexDirection:up?'column':'column-reverse',gap:3,pointerEvents:'none',zIndex:1}}>{Array.from({length:n},(_,i)=>(<div key={i} style={{height:3,display:'flex',gap:rhy>=4?3:2,padding:'0 2px'}}>{Array.from({length:cols},(_,j)=>(<div key={j} style={{flex:1,background:'#6a5088'}}/>))}</div>))}</div>);})()}</div>);ci+=span;}else{ci++;}}return rects;})()}
                       </div>);
                     })}
                   </div>
@@ -12491,18 +14270,18 @@ export default function LoudLight(){
           {/* ══ LANDSCAPE RIGHT RAIL — transport + tool chips ══ */}
           {isLandscape&&(
             <div style={{width:76,flexShrink:0,display:"flex",flexDirection:"column",gap:5,padding:"8px 6px",borderLeft:"1px solid rgba(255,255,255,0.07)",background:"rgba(14,26,40,0.6)",overflow:"hidden",boxSizing:"content-box"}}>
-              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place — hold to export":paused?"Held — carry on from here — hold to export":"Play from the top — hold to export"} {...playBtnProps}>
-                {playGlyph(13)}
+              <button style={Object.assign({},S.playBtn,{width:"100%",height:52,borderRadius:14,flexShrink:0},playing?S.playOn:(paused?S.playHeld:{}))} aria-label={playing?"Pause":paused?"Play on":"Play"} title={playing?"Pause, keeping your place":paused?"Held — carry on from here":"Play from the top"} {...playBtnProps}>
+                {playGlyph(22)}
               </button>
-              {stopBtn({width:"100%",height:32,flexShrink:0},13)}
+              {stopBtn({width:"100%",height:32,flexShrink:0},17)}
               <button title="Loop — tap again to grow the loop, then off" aria-label="Loop"
                 style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},loopBtnStyle)} {...loopBtnProps}><LLIcon name="loop" size={17}/></button>
               <button title="Follow the playhead" aria-label="Follow" aria-pressed={followSeq}
-                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?{border:"1px solid #7aaa96",color:"#7aaa96",background:"rgba(122,170,150,0.12)"}:{})}
+                style={Object.assign({},S.iconBtn,{width:"100%",height:32,flexShrink:0},followSeq?S.toggleOn:{})}
                 onClick={()=>setFollowSeq(f=>!f)}><LLIcon name="follow" size={17}/></button>
               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}>↶</button>
-                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,fontSize:14,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}>↷</button>
+                <button title="Undo" aria-label="Undo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,opacity:historyR.current.length?1:0.35})} onClick={undo} disabled={!historyR.current.length}><LLIcon name="undo" size={14}/></button>
+                <button title="Redo" aria-label="Redo" style={Object.assign({},S.histBtn,{flex:1,width:"auto",height:26,opacity:redoR.current.length?1:0.35})} onClick={redo} disabled={!redoR.current.length}><LLIcon name="redo" size={14}/></button>
               </div>
               <div style={{height:1,background:"rgba(255,255,255,0.07)",flexShrink:0,margin:"1px 0"}}/>
               <div style={{flex:1,display:"flex",flexDirection:"column",gap:5,overflowY:"auto",overflowX:"hidden"}}>
@@ -12517,22 +14296,22 @@ export default function LoudLight(){
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}>≋</span>
+                  <span style={{lineHeight:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}><LLIcon name="sound" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
                 <button data-save="1" data-dirty={dirty?"1":"0"}
-                  aria-label={dirty?"Save — unsaved changes":"Save"}
-                  title={selDevId?(dirty?"Save changes to this project":"Saved"):"Save as a new project"}
+                  aria-label={(dirty?"Save — unsaved changes":"Save")+(saveDest?" — "+saveDest:"")}
+                  title={saveTitle}
                   style={{flexShrink:0,height:40,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                     border:"1px solid "+(dirty?"rgba(255,214,150,0.55)":"rgba(168,190,212,0.1)"),borderRadius:8,
                     background:dirty?"rgba(255,214,150,0.10)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}}
                   onClick={quickSave}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}>⤓</span>
+                  <span style={{lineHeight:0,color:dirty?"#ffd28a":"rgba(178,199,219,0.5)"}}><LLIcon name="save" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:dirty?"#ffd28a":"rgba(178,199,219,0.35)"}}>SAVE</span>
                   {dirty&&<span style={{position:"absolute",top:4,right:6,width:4,height:4,borderRadius:"50%",background:"#ffd28a",boxShadow:"0 0 5px #ffd28a"}}/>}
                 </button>
                 <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="project"?"rgba(168,190,212,0.45)":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="project"?"rgba(168,190,212,0.07)":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="project"?null:"project")}>
-                  <span style={{fontSize:12,lineHeight:1.1,color:"rgba(178,199,219,0.45)"}}>⋯</span>
+                  <span style={{lineHeight:0,color:"rgba(178,199,219,0.45)"}}><LLIcon name="project" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>PROJECT</span>
                 </button>
               </div>
@@ -12595,7 +14374,7 @@ export default function LoudLight(){
                   <div style={{paddingBottom:8}}>
                     {(()=>{
                       const isDrum=activeLayer==="drums";
-                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#79b8f2":"#c4727a";
+                      const accent=activeLayer==="synth"?"#a8c5a0":activeLayer==="lead"?"#8279e0":"#e07060";
                       const accentF=activeLayer==="synth"?"rgba(168,197,160,":activeLayer==="lead"?"rgba(121,184,242,":"rgba(196,114,122,";
                       const ops=isDrum
                         ?[["RAND",randDrumVel,false,false],["CLR",clearDrums,false,false],["DUP",dupDrumPat,drumPats.length>=MAX_PATTERNS,false],["DEL",delDrumPat,drumPats.length<=1,true],["CPY",copyDrumPatFn,false,false],["PST",pasteDrumPatFn,!drumClipboard,false],["MUT8",mutateDrumPat1,false,false]]
@@ -12720,6 +14499,7 @@ export default function LoudLight(){
                     ?{flexShrink:0,display:"flex",flexDirection:"column"}
                     :{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
                     {soundTabs(true)}
+                    {notePatchBar(true)}
                     {soundTab==="layer"&&activeLayer!=="drums"&&(
                       <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
                         {/* Portrait is too narrow for two columns (knobs shrink and
@@ -12741,13 +14521,10 @@ export default function LoudLight(){
                               {activeLayer==="lead"&&(
                                 <KnobSlider vertical label="GLIDE" value={glideLP} min={0} max={100} onChange={setGlideLP} display={glideLP+"%"} accent={C_OSC}/>
                               )}
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
-                                <button onClick={()=>setVelAmpInv(!velAmpInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_OSC+(velAmpInv?"":"22"),background:velAmpInv?C_OSC+"14":"transparent",color:velAmpInv?C_OSC:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="VEL" value={velAmp} min={0} max={100} def={100} onChange={setVelAmp} display={velAmp+"%"} accent={C_OSC}/>
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
-                                  <button key={w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
+                                  <button key={w} data-wf={w} aria-pressed={waveform===w} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:C_OSC+(waveform===w?"":"22"),color:waveform===w?C_OSC:"rgba(178,199,219,0.35)",background:waveform===w?C_OSC+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
                                 ))}
                               </div>
                             </div>
@@ -12769,10 +14546,8 @@ export default function LoudLight(){
                               <KnobSlider vertical label="ATK" value={attack}  min={1}  max={2000} def={8} onChange={setAttack}  display={attack+"ms"}  accent={C_ENV}/>
                               <KnobSlider vertical label="DEC" value={decay}   min={10} max={4000} def={400} onChange={setDecay}   display={decay+"ms"}   accent={C_ENV}/>
                               <KnobSlider vertical label="SUS" value={sustain} min={0}  max={100}  def={40} onChange={setSustain} display={sustain+"%"}  accent={C_ENV}/>
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
-                                <button onClick={()=>setVelEnvInv(!velEnvInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_ENV+(velEnvInv?"":"22"),background:velEnvInv?C_ENV+"14":"transparent",color:velEnvInv?C_ENV:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="REL" value={release} min={5}  max={4000} def={120} onChange={setRelease} display={release+"ms"} accent={C_ENV}/>
+                              <KnobSlider vertical label="VEL" value={velEnv} min={0} max={100} onChange={setVelEnv} display={velEnv+"%"} accent={C_ENV}/>
                             </div>
                           </SynthSection>
                           <SynthSection title="FILTER" accent={C_FILT}>
@@ -12780,10 +14555,7 @@ export default function LoudLight(){
                               <KnobSlider vertical label="CUT" value={vcfCutoff}    min={0} max={100} def={80} onChange={setVcfCutoff}    display={vcfLbl(vcfCutoff)} accent={C_FILT}/>
                               <KnobSlider vertical label="RES" value={vcfRes}       min={0} max={100} def={15} onChange={setVcfRes}       display={vcfRes+"%"}        accent={C_FILT}/>
                               <KnobSlider vertical label="ENV" value={filterEnvAmt} min={0} max={100} onChange={setFilterEnvAmt} display={filterEnvAmt+"%"}  accent={C_FILT}/>
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                                <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
-                                <button onClick={()=>setVelFltInv(!velFltInv)} style={{padding:"2px 5px",fontSize:6,letterSpacing:1,fontWeight:600,border:"1px solid "+C_FILT+(velFltInv?"":"22"),background:velFltInv?C_FILT+"14":"transparent",color:velFltInv?C_FILT:"rgba(178,199,219,0.4)",borderRadius:3,cursor:"pointer",fontFamily:"inherit"}}>INV</button>
-                              </div>
+                              <KnobSlider vertical label="VEL" value={velFlt} min={0} max={100} def={100} onChange={setVelFlt} display={velFlt+"%"} accent={C_FILT}/>
                             </div>
                           </SynthSection>
                           {/* Per-layer FX = SEND only; design lives on the FX sheet. */}
@@ -12810,7 +14582,14 @@ export default function LoudLight(){
                 {/* FX sheet — global reverb / delay design */}
                 {activeSheet==="sound"&&soundTab==="fx"&&(
                   <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
-                    <div style={{marginBottom:16}}>{mixerBody}</div>
+                    {/* Same wrap as desktop. On a phone the two basis widths
+                        cannot both fit, so MOJO lands under the faders — which
+                        is the honest answer: three 84px strips leave ~80px
+                        beside them, and a knob is not a control at 80px. */}
+                    <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-start",marginBottom:16}}>
+                      <div style={{flex:"0 1 300px",minWidth:0}}>{mixerBody}</div>
+                      <div style={{flex:"1 1 260px",minWidth:0,maxWidth:360}}>{masterBusPanel}</div>
+                    </div>
                     <div style={{fontSize:9,letterSpacing:2,color:"rgba(178,199,219,0.35)",fontWeight:500,marginBottom:12}}>GLOBAL FX</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                       {globalFxSections}
@@ -12929,27 +14708,55 @@ const S={
   bpmOverlayLbl: {fontSize:11,letterSpacing:1,color:"rgba(178,199,219,0.4)",marginTop:6},
   bpmOverlayHint:{fontSize:9,color:"rgba(255,255,255,0.2)",marginTop:10,letterSpacing:1},
   loopBtn:   {padding:"0 12px",height:38,borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(178,199,219,0.3)",fontSize:9,letterSpacing:2,cursor:"pointer",transition:"all .12s",flexShrink:0},
-  loopOn:    {border:"1px solid #9fb4c7",color:"#9fb4c7",background:"rgba(159,180,199,0.12)"},
+  // THE ENGAGED AMBER, for the two TOGGLES — LOOP and FOLLOW. It was steel for
+  // one and green for the other, which is two rules to learn for one idea, and
+  // neither colour carried any information the toggle's own on/off didn't.
+  //
+  // THE TRANSPORT IS DELIBERATELY NOT IN THIS SCHEME. S.playOn stays white with
+  // its big glow and S.playHeld stays its own amber: "is it running" is the one
+  // state you read from across a room, and the white is what makes it carry.
+  // Held-vs-running would survive the merge (the glyph already differs, and
+  // stopped-vs-held is ring or no ring) — this is about the running cue being
+  // worth more as its own colour, not about ambiguity.
+  //
+  // boxShadow rather than a drop-shadow FILTER, which is what the design sheet
+  // uses: it is the idiom S.playOn already spends its glow in, and it composes
+  // with the inset ring the grown loop draws. A filter would also make these
+  // two the only stacking contexts in the row for no gain.
+  toggleOn:  {border:"1px solid rgba(255,214,150,0.5)",color:"#ffd696",background:"rgba(255,214,150,0.12)",boxShadow:"0 0 7px rgba(255,214,150,0.4)"},
   playBar:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:IS_MOBILE?430:780,padding:IS_MOBILE?"12px 20px 28px":"16px 40px 32px",background:"linear-gradient(to top, #000 70%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",gap:IS_MOBILE?16:24,zIndex:100},
   playBtn:   {width:IS_MOBILE?64:72,height:IS_MOBILE?64:72,borderRadius:"50%",border:"2px solid rgba(178,199,219,0.25)",background:"rgba(168,190,212,0.05)",color:"#fff",fontSize:IS_MOBILE?22:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0},
   playOn:    {border:"2px solid #fff",background:"rgba(186,208,230,0.12)",boxShadow:"0 0 28px rgba(255,255,255,0.35)"},
   // HELD. The play/pause button shows a ▶ when stopped and when held, so the
-  // ring is what tells the two apart — amber, the way every engaged toggle in
-  // here is drawn, and the same amber the old separate pause button lit with.
+  // ring is what tells the two apart — the same amber the old separate pause
+  // button lit with. NOTE this is NOT the toggles' amber: LOOP and FOLLOW went
+  // to #ffd696 with the icon set and the transport deliberately stayed out of
+  // that scheme, so there are two ambers in the row and it is on purpose.
   // (The other half of the readout is the STOP button beside it, which is
   // dimmed only when there is genuinely nothing to rewind.)
   playHeld:  {border:"2px solid #e6b872",color:"#e6b872",background:"rgba(230,184,114,0.13)"},
   // A square button whose content is a glyph rather than a word. Same height as
   // the transport's round play button so the row reads as one row.
+  //
+  // NO BOX AT REST, AND THAT IS THE WHOLE POINT OF HAVING DRAWN THE ICONS.
+  // These carried a 1px outline from back when they carried WORDS and a word
+  // needs a container to be a button. Thirteen of them across the two rows
+  // above the grid, and the eye counts rectangles before it reads anything
+  // inside them — so the chrome was out-shouting the instrument with pure
+  // furniture. A row of glyphs on this navy reads as a toolbar without any
+  // help; the border is kept as a transparent 1px so the box model, and
+  // therefore every measured size in here, is untouched, and it comes BACK the
+  // moment a control is engaged, which is what makes "engaged" a thing you can
+  // see at a glance instead of a shade of grey you have to compare.
   iconBtn:   {width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",padding:0,
-              borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",
-              color:"rgba(168,190,212,0.5)",cursor:"pointer",flexShrink:0,transition:"all .12s",fontFamily:"inherit"},
+              borderRadius:10,border:"1px solid transparent",background:"transparent",
+              color:"rgba(168,190,212,0.46)",cursor:"pointer",flexShrink:0,transition:"all .12s",fontFamily:"inherit"},
   loopBtnBottom:{padding:IS_MOBILE?"0 12px":"0 16px",height:IS_MOBILE?40:44,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?9:10,letterSpacing:1,cursor:"pointer",transition:"all .12s"},
   // UNDO / REDO carry a glyph and no word, so they are square rather than
   // word-width: the arrows are unambiguous and the row has better uses for
   // the ~80px they were spending on two labels. Same height as the rest of
   // the transport, so the row still reads as one row.
-  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,borderRadius:10,border:"1px solid rgba(168,190,212,0.15)",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
+  histBtn:      {flex:"0 0 auto",width:IS_MOBILE?40:44,height:IS_MOBILE?40:44,padding:0,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,border:"1px solid transparent",background:"transparent",color:"rgba(168,190,212,0.4)",fontSize:IS_MOBILE?16:17,lineHeight:1,cursor:"pointer",transition:"all .12s",fontFamily:"inherit"},
 
   tabs:      {display:"flex",gap:3,marginBottom:IS_MOBILE?14:18},
   tab:       {flex:1,padding:IS_MOBILE?"11px 0":"13px 0",border:"1px solid rgba(168,190,212,0.12)",background:"transparent",color:"rgba(168,190,212,0.35)",fontSize:IS_MOBILE?7:12,letterSpacing:1,cursor:"pointer",borderRadius:10,transition:"all .12s"},
