@@ -6863,6 +6863,21 @@ export default function LoudLight(){
   // patch edit would land on it — an override applied to the wrong thing, which
   // is the one failure mode this feature must not have.
   const _closeNoteSound=()=>setNotePatchAt(null);
+  // THE SOUND BUTTON IS ALWAYS THE LAYER. It is the ordinary way in, so it
+  // cannot depend on what a previous visit left behind: a scope set by a long
+  // press on a note outlives the sheet being closed, and without this the chip
+  // re-opened straight into that note. Only the long press sets the scope.
+  const _openSound=(toggle)=>{
+    // From the NOTE face it does not toggle shut — it lands on the layer. The
+    // promise is "this button is always the whole layer's sound", so pressing
+    // it while looking at one note has somewhere to go, and it doubles as a
+    // second way out of the note scope beside the header's ◂ LAYER. From the
+    // layer face it is the ordinary toggle it has always been.
+    const wasNote=_npOn;
+    setNotePatchAt(null);
+    if(IS_MOBILE)setActiveSheet(s=>(toggle&&s==="sound"&&!wasNote)?null:"sound");
+    else setPage("sound");
+  };
   // The banner. It is the whole state display for the mode: which note, what it
   // overrides, and the way out. One body, so both mounts carry it.
   const notePatchBar=(compact)=>{
@@ -6927,6 +6942,18 @@ export default function LoudLight(){
       <div data-notepatch="1" data-noteheader="1" style={{flexShrink:0,display:"flex",alignItems:"center",gap:compact?5:7,
         marginBottom:compact?6:10,padding:compact?"0 0 6px":"0 0 8px",
         borderBottom:"1px solid "+C_VARY+"44"}}>
+        {/* The ✕ that the four-face row carries, because this header replaced
+            that row on the mobile sheet — and a nearly full-screen sheet leaves
+            no reachable backdrop, so dropping it made the note face the one
+            sheet a phone could not close. `◂ POLY` goes back to the LAYER, which
+            is a different question from closing the sheet. */}
+        {compact&&(
+          <button data-soundclose="1" aria-label="Close sound" title="Close"
+            onClick={()=>{setNotePatchAt(null);setActiveSheet(null);}}
+            style={{flex:"0 0 auto",width:28,height:28,padding:0,borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+              border:"1px solid rgba(168,190,212,0.2)",background:"transparent",
+              color:"rgba(178,199,219,0.55)",fontSize:13,lineHeight:1}}>✕</button>
+        )}
         <button data-notepatch-exit="1" onClick={_closeNoteSound} aria-label="Back to the layer's sound"
           title={"Back to the whole "+lyr+" sound"}
           style={{flexShrink:0,height:compact?28:32,padding:"0 9px",borderRadius:7,cursor:"pointer",
@@ -13485,7 +13512,7 @@ export default function LoudLight(){
               <div style={{display:"flex",gap:4}}>
                 {[["edit","EDIT"],["sound","SOUND"]].map(([pg,lbl])=>(
                   <button key={pg} style={Object.assign({},S.tab,{flex:1,padding:"7px 0",minWidth:0},page===pg?S.tabOn:{})}
-                    onClick={()=>setPage(pg)}>{lbl}</button>
+                    onClick={()=>{setNotePatchAt(null);setPage(pg);}}>{lbl}</button>
                 ))}
               </div>
               {/* The transport WRAPS rather than being laid out as a fixed
@@ -14020,7 +14047,7 @@ export default function LoudLight(){
                   whose real job is switching layers. */}
               <button aria-label="Sound" title="Sound — each layer's voice and the global FX"
                 style={{flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"transparent"),borderRadius:9,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.44)"}}
-                onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                onClick={()=>_openSound(true)}>
                 <LLIcon name="sound" size={22}/>
               </button>
               {/* SAVE — one tap onto the project you last loaded or saved. The
@@ -14385,7 +14412,7 @@ export default function LoudLight(){
                   <span style={{fontSize:14,fontWeight:700,color:songView?"rgba(178,199,219,0.9)":songMode?"rgba(178,199,219,0.7)":"rgba(178,199,219,0.5)",lineHeight:1.1}}>▦</span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:"rgba(178,199,219,0.35)"}}>SONG</span>
                 </button>
-                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>setActiveSheet(s=>s==="sound"?null:"sound")}>
+                <button style={{flexShrink:0,height:40,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",border:"1px solid "+(activeSheet==="sound"?C_SAT+"99":"rgba(168,190,212,0.1)"),borderRadius:8,background:activeSheet==="sound"?C_SAT+"1a":"transparent",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>_openSound(true)}>
                   <span style={{lineHeight:0,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.5)"}}><LLIcon name="sound" size={15}/></span>
                   <span style={{fontSize:5,letterSpacing:1.5,color:activeSheet==="sound"?C_SAT:"rgba(178,199,219,0.35)"}}>SND</span>
                 </button>
