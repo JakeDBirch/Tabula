@@ -929,23 +929,51 @@ adjust, double-tap resets the step), at sixteen times the size.
   long, +100 twice. Ratcheted notes keep their span — that box is divided into
   sub-hits and stretching it would say something untrue about them.
 
-**SCALE AND TRIM RIDE ABOVE THE SPILLED LANE.** Two steppers — `▼ SCALE ▲` and
-`▼ TRIM ▲` — in a row at the top of the overlay. TRIM adds or subtracts a set
-amount on every live step at once; SCALE widens or narrows the ratio between
-the bar's lowest and highest value. They are the two things you want over a
-whole lane rather than a step at a time: a curve you drew is the right SHAPE at
-the wrong LEVEL, or the right shape without enough RANGE, and fixing either by
-redrawing sixteen faders loses the shape you were keeping.
+**SCALE AND TRIM ARE TWO GRIPS ABOVE THE SPILLED LANE.** Each is a wide handle
+you hold and drag vertically. TRIM adds or subtracts the same amount on every
+live step; SCALE widens or narrows the ratio between the bar's lowest and
+highest value. They are the two things you want over a whole lane rather than a
+step at a time: a curve you drew is the right SHAPE at the wrong LEVEL, or the
+right shape without enough RANGE, and fixing either by redrawing sixteen faders
+loses the shape you were keeping.
 
-- **SCALE PIVOTS ON THE BAR'S MEAN, not on the midpoint of the axis.** That is
-  what makes it an expander rather than a stretch: a mostly-flat lane with one
-  spike keeps its body where it is and pushes the outlier out, instead of the
-  whole mass sliding toward the middle of the range. `k` is 1.25 up, 0.8 down,
-  so up-then-down comes back to within a rounding step.
-- **TRIM's step is a TWENTIETH OF THE LANE'S OWN RANGE, never a constant.**
-  These lanes run 0..127 (VEL), 1..4 (RTCH) and −100..100 (DUR), so any one
-  number is a nudge on one lane and the whole travel on another. Twenty taps
-  crosses any of them: VEL moves 6 a tap, DUR 10, RTCH and OCT 1.
+- **IT SHIPPED AS FOUR ▲▼ BUTTONS FIRST AND THAT WAS THE WRONG READ OF
+  "HANDLE".** Reported in one line — "no arrows are wrong, I want a handle I
+  can hold and drag" — and that is right for a reason worth keeping: SHAPING IS
+  AN EAR JOB, NOT AN ARITHMETIC ONE. You do not know how much you want, you
+  find it, so the control has to move continuously under your finger with the
+  result moving with it. A stepper makes you guess an amount, tap, listen, tap
+  again; and twenty taps for a full sweep is the arithmetic tell that the form
+  was wrong. Everything else continuous in this app is already a ballistic
+  drag — that was the precedent to follow.
+- **THE TRANSFORM RUNS OFF THE POINTERDOWN SNAPSHOT, NEVER THE RUNNING
+  RESULT**, and that is the whole reason the drag is usable rather than merely
+  present. Dragging out and back returns the lane EXACTLY to where it started,
+  a value that hit the rail on the way out comes back off it, and the rounding
+  cannot compound over a hundred pointermoves. Applied incrementally it would
+  be a ratchet: every excursion would cost information and you could never find
+  your way back to the sound you had. Both halves are asserted.
+- **`amt` is an OFFSET for TRIM and an EXPONENT for SCALE** (`k = 2^amt`), so
+  up and down are symmetric — +1 doubles the spread, −1 halves it — and the
+  middle of the travel is ×1 rather than somewhere arbitrary. SCALE PIVOTS ON
+  THE BAR'S MEAN, not the midpoint of the axis: that is what makes it an
+  expander rather than a stretch, so a mostly-flat lane with one spike keeps
+  its body where it is and pushes the outlier out.
+- **The gearing is the SLIDERS' own curve** (`ballisticDelta`), scaled against
+  the FADERS' height so a full-travel drag means the same thing on a phone and
+  a desktop — read off a ref, never by walking `parentNode`, because a selector
+  naming a DOM shape is what broke `_master.mjs` when this overlay gained a
+  row. TRIM spans the lane's OWN range, never a constant: these lanes run
+  0..127 (VEL), 1..4 (RTCH) and −100..100 (DUR). SCALE spans 2 exponents, so
+  the full height is ×4 one way and a quarter the other — more than anyone
+  wants in one go, which leaves the slow end of the curve doing the real work.
+  Measured: a deliberate 60px pull is about ×1.15 or 13 velocity units, and a
+  10px crawl in one-pixel moves resolves a SINGLE unit — so you can land on any
+  value, which is the thing a stepper was supposed to be good at.
+- **THE GRIP SAYS WHAT IT IS DOING WHILE YOU HOLD IT** — the word is replaced
+  by `+13` or `×1.15` under your finger, and the faders move live behind it. A
+  continuous control with no readout is a guess. It is the one thing the STATE
+  exists for; the snapshot the drag is computed from lives in a ref.
 - **THEY LIVE INSIDE THE OVERLAY, WHICH IS WHAT MAKES THE ROW FREE.** A row of
   its own, appearing only while a lane is open, would jog the grid's top edge on
   every tap of a step button — the exact thing `_gridtop.mjs` exists to forbid.
@@ -953,46 +981,45 @@ redrawing sixteen faders loses the shape you were keeping.
   nothing at all, it arrives and leaves with the lane it shapes, and it is the
   only answer that also works in mobile landscape, where the grid is
   height-bound and there is no spare row above it to have taken.
-- **34px is under the 44 the persistent chrome holds to, deliberately.** It is
-  spent out of the travel of the very fader it is shaping, each button is ~60px
-  WIDE on a phone, and the row only exists while a lane is open. Height is the
-  scarce axis here and width is not, so the target is bought in width.
-- **A REFUSAL IS DRAWN ON THE CONTROL, with its reason in the name.** A flat
-  lane has no ratio to widen, so SCALE dims both ways and says so; a lane
-  already at its rail dims the TRIM that would do nothing; a bar with no notes
-  dims all four. It is computed by RUNNING the transform and comparing, never
-  by a second guess at what it would refuse — the same rule the SONG → PATTERN
-  menu's blockers follow. That also makes a no-op tap cost no undo step, which
-  matters because `pushHistory` does not dedupe and a dimmed button you keep
-  pressing would otherwise make undo look dead.
+- **34px is under the 44 the persistent chrome holds to, and that is fine for a
+  GRIP.** It is only where you GRAB it — the pointer is captured, so the travel
+  is the whole screen — each handle is ~180px WIDE on a phone, and the row only
+  exists while a lane is open. Height is the scarce axis here; width is not.
+- **A REFUSAL IS DRAWN ON THE GRIP, with its reason in the name.** A flat lane
+  has no ratio to scale, so SCALE loses its `ns-resize` cursor, dims, and says
+  why; a bar with no notes refuses both. The handler is not installed at all
+  when it is refused, so the drag is inert rather than merely unhelpful.
 - **Bar-scoped AND note-scoped**, like everything else on this surface: the
   visible bar only, and only the columns a finger could drag. A locked column
-  refuses a drag, so a button must not write one behind your back either.
+  refuses a drag, so a grip must not write one behind your back either.
   `spillEditCols` is ONE body for that scan, because the overlay draws those
-  columns and the buttons write them — two copies of a note scan would drift the
+  columns and the grips write them — two copies of a note scan would drift the
   moment either changed. (It still tests a key called `glide`, which is the
   lane's OLD name — it has been `glideT` for a while, so GLIDE has always fallen
   through to the note-start rule. Left exactly as it was on purpose: a glide
   TIME is read at the attack, so the behaviour is right even though the string
   is stale, and "fixing" it would make dead cells editable.)
-- **The two steppers are spaced apart from each other and tight within
-  themselves.** Four identical boxes evenly spread read as four of a kind with
-  two words wedged in; the wide gap between the pairs is the whole of what makes
-  them two controls. The MOJO bypass switch's argument again. And the ARROW is
-  brighter than the WORD, because the arrow is the thing you press.
-- `data-spillshape`, `data-shape` (`scaleup` / `scaledn` / `trimup` / `trimdn`),
-  `data-spillcols` and `data-spillv` are the hooks. `data-spillcols` exists
-  because the overlay is two rows now and "the second child" is exactly the
-  DOM-shape selector that broke `_master.mjs` once already. `_spillshape.mjs`
-  asserts the BEHAVIOUR rather than the buttons — TRIM moves every live step by
-  the SAME amount (that is what separates it from a scale), SCALE widens the
-  lowest-to-highest spread and narrows it back, neither touches an empty column
-  or a second bar, each tap is one undo step and a refused tap is none — across
-  portrait, an SE and desktop.
-  - One harness note: **a tap on anything outside the overlay puts the lane
-    away**, by the capture-phase listener that is the spill's backdrop. So the
-    UNDO button closes it, and a test that reads values after an undo has to
-    re-open the lane first.
+- **ONE GESTURE IS ONE UNDO STEP.** History is marked on the first move that
+  actually changes a value, never on the press — `pushHistory` does not dedupe,
+  and a grab you thought better of must not cost a step. Note a WOBBLE is not
+  the test here the way it is for a hold: this is a ballistic drag, so two
+  pixels legitimately move the value, which is what the slow end of the curve
+  is for. What must cost nothing is a grab that never moved.
+- `data-spillshape`, `data-shape` (`scale` / `trim`), `data-shapeamt` (the live
+  amount, present only while held), `data-shapeword`, `data-spillcols` and
+  `data-spillv` are the hooks. `data-spillcols` exists because the overlay is
+  two rows now. `_spillshape.mjs` asserts the BEHAVIOUR rather than the
+  handles — TRIM moves every live step by the SAME amount (that is what
+  separates it from a scale), SCALE widens the spread on an up-drag and narrows
+  it on a down-drag, a drag out and back restores the lane exactly, a clamped
+  step comes back off the rail, neither touches an empty column or a second
+  bar — across portrait, an SE, mobile landscape and desktop.
+  - Two harness notes. **The moves must be paced ONE PER FRAME** and at a
+    realistic speed: the curve is speed-sensitive, so a synchronous burst tests
+    nothing and a 12px-a-frame move tests only the flick end. And **a tap on
+    anything outside the overlay puts the lane away**, by the capture-phase
+    listener that is the spill's backdrop — so the UNDO button closes it, and a
+    test that reads values after an undo has to re-open the lane first.
 
 The old step sheet and step page are still in the source, unreachable, so the
 two can be compared. Delete them once this has been lived with.
