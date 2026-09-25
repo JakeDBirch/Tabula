@@ -100,6 +100,23 @@ want to look at it on the phone, not on every local iteration** — otherwise th
 repo grows by most of a megabyte per experiment. (`index.html` has always had
 this cost; the lab just gets rebuilt far more often.)
 
+**THE FORK'S BASE IS NOT "THE LAST COMMIT WHERE THE TWO FILES MATCHED" — NO SUCH
+COMMIT EXISTS.** `lab:reset` lands in a commit that also carries the first
+experiment, so `src/lab.jsx` and `src/loudlight.jsx` are never equal in history.
+Worse, a `git merge main` into a lab branch moves the branch forward and **cannot
+carry `loudlight.jsx`'s changes into `lab.jsx`**, so a lab can be several shipping
+commits behind while `lab:diff` reports a small number and every merge is clean.
+That happened on 2026-09-25: two merges of `main`, and the fork still had none of
+the SCALE/TRIM spill work — `grep -c spillShape` was 6 against 0.
+
+Find the base by diffing the current `lab.jsx` against `loudlight.jsx` **at each
+revision** and taking the minimum; then
+`git merge-file --diff3 ours base theirs` is the whole re-apply, and it is worth
+trying before a hand-port — it took zero conflicts here, and `_notepatch` passed
+unchanged, which is what said the experiment and the grips were independent.
+Re-run the experiment's own harness afterwards; a clean textual merge says
+nothing about whether the two features still agree.
+
 `--lab` and `--ios` are **mutually exclusive**: the iOS payload is the shipping
 app, and there is no signed offline build of the experiment.
 
@@ -928,6 +945,92 @@ adjust, double-tap resets the step), at sixteen times the size.
   `rawDur*(1+dur/100)`, so the rect is scaled by exactly that: −50 draws half as
   long, +100 twice. Ratcheted notes keep their span — that box is divided into
   sub-hits and stretching it would say something untrue about them.
+
+**IN THE LAB: THE EIGHT STEP BUTTONS ARE SLOTS, NOT A FIXED SET.** Each button
+holds a lane KEY and the row is a list of eight of them, reassigned from the
+button's own hold menu (which already carried RAND / RESET). A key may name one
+of two kinds of thing, and the second is what makes this worth having:
+
+- `src:"step"` — `pat.params[col][key]`, the eight lanes this app has always
+  had. Unchanged, and still the row a fresh install gets.
+- `src:"patch"` — `pat.notePatch[col][key]`, a VOICE parameter for that one
+  column: ATK, DEC, SUS, REL, CUT, RES, FENV, DTN, SUB, SPRD.
+
+**THE SECOND KIND IS VERY NEARLY FREE, WHICH IS THE WHOLE ARGUMENT FOR A SLOT
+MODEL RATHER THAN A NEW SUBSYSTEM.** `notePatch` already exists — long press a
+note and you get its own voice — and the engine already merges it over
+`layerParams` at the attack. A spilled ATK lane is **the same data** as the note
+editor's ATK knob, read a bar at a time instead of a note at a time; edit one and
+the other is already showing it. There is one store, so the two surfaces cannot
+drift.
+
+- **`laneSpec` is the one resolver and nothing reads either table directly.** A
+  patch lane's `def` is the **layer's own value**, which is what makes the lane
+  read as "this note against the patch" instead of against an arbitrary
+  constant — and it is exactly why this cannot be a module-level table. Because
+  `def` carries that, every existing `lane.def` comparison (the button's
+  brightness, SCALE's flat-lane refusal, whether a fader draws its value) keeps
+  meaning "this step is not doing anything of its own", with no site needing to
+  know which kind of lane it has. `applyLaneWrites` and `laneValAt` are the one
+  write and the one read; `setStepParam` survives for the per-step popup.
+- **RESET ON A PATCH LANE DELETES THE KEY, it does not write the layer's current
+  value.** Only the absent one keeps FOLLOWING the layer when you move that knob
+  later; a copy of today's number silently freezes the note against a patch you
+  are still designing. The same persist-a-CHOICE-not-a-state argument as
+  `pat.bpm`'s INHERIT and the row-keys preference. It is also what keeps a lane
+  you opened, looked at and closed from leaving sixteen overrides in the save.
+  Tested the only way that separates the two: reset the lane, then **move the
+  layer's knob and watch the lane follow**.
+- **RAND and RESET on a patch lane are scoped to columns that have a NOTE**,
+  where a step lane still writes the whole bar. An override on an empty column
+  is a voice setting for a note that does not exist and it would ride in every
+  save from then on. (The step lanes keep writing the whole bar because that is
+  what they have always done, and `_hotLanes` already knows it.)
+- **A PATCH LANE IS ALWAYS IN THE BRIGHTNESS SCHEME.** VEL / OCT / RTCH / DUR
+  are excluded because the grid draws them on the note itself; the grid cannot
+  draw an attack time at all, so there is nothing for the light to duplicate.
+- **The row is a DEVICE PREFERENCE** (`stepslots`, through `LS_NS`) —
+  deliberately not in `SESSION_DEFAULTS`, the snapshot, `getShareState` or the
+  save pair. Loading someone's project must not rearrange your buttons, exactly
+  as it must not fold away your row keys. The DATA a lane edits is in the
+  pattern and travels with it either way; a slot records only which window you
+  are looking through, and every parameter stays reachable from the note editor
+  whether or not a button points at it. Read synchronously in the initializer,
+  **written only by the picker and never by an effect on mount**, and validated
+  key by key against `SLOT_KEYS` so an unknown key falls back to whatever the
+  default row has in that position — a slot can never be a button that resolves
+  to nothing.
+- **Picking a lane that is already on another button SWAPS the two.** Two
+  buttons editing one parameter is two readouts of one thing, and it would cost
+  you a slot without saying so. A reassignment also closes the spill: looking at
+  a lane that just moved out from under you is worse than looking at nothing.
+- `only` marks the two that belong to one engine — SUB is MONO's sub-oscillator,
+  SPREAD is POLY's detune stack. A slot holding the wrong one **dims in place**
+  rather than vanishing, so the row does not reflow when you switch layer.
+- **Double-tapping a step now clears its voice overrides too.** "Every lane on
+  it" has to mean that once a slot can hold one, or the tap would clear the
+  eight lanes it can see and silently leave the attack time it cannot.
+- **MONO's own `glide` layer param is deliberately NOT a lane.** `glideT` is
+  already a step lane doing portamento time, and two GLIDE buttons in one row is
+  the duplicate this app keeps deleting. It would also read as mid-note in
+  `spillEditCols`, whose stale `"glide"` test is harmless only while no lane
+  carries that key.
+- **A fader column is FOUR CHARACTERS wide, measured.** "1.6s" fits and "701ms"
+  does not — and the clip reads as a number (`701m`), which is worse than no
+  unit. So a time lane drops the "ms" (the button above the lane says ATK) and
+  crosses into seconds past 1000, where the digits run out anyway.
+- `data-slot`, `data-patchlane` and `data-pick` are the harness hooks.
+  `_stepslots.mjs` asserts the default row is unchanged, the reassignment, the
+  swap, the preference surviving a relaunch and staying out of the autosave, an
+  unknown key falling back, SCALE/TRIM working on a voice lane (TRIM by the SAME
+  amount on every live step), SUB/SPRD dimming without reflow, drums untouched —
+  and the two that matter: the patched column's attack ramp really is longer
+  (measured off the VCA automation, not the state), and RESET means inherit.
+  - One harness trap, and it is the house kind inverted: **a step button clears
+    its hold flag on POINTERDOWN, so `el.click()` is swallowed where a finger's
+    tap is not.** After a hold the flag is still set (the release landed on the
+    menu's backdrop, not the button), and a synthesised click has no pointerdown
+    to clear it. Drive the pointer.
 
 **SCALE AND TRIM ARE TWO GRIPS ABOVE THE SPILLED LANE.** Each is a wide handle
 you hold and drag vertically. TRIM adds or subtracts the same amount on every

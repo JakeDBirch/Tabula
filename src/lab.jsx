@@ -2852,6 +2852,108 @@ const LANES=[
   {key:"oct",  label:"OCT",  color:"#79b8f2",min:0,   max:4,   def:2,   center:2,    bool:false},
   {key:"glideT",label:"GLIDE",color:"#00bcd4",min:0,   max:100, def:0,   center:null, bool:false},
 ];
+
+// ── THE EIGHT STEP BUTTONS ARE SLOTS, NOT A FIXED SET ────────────────────
+// `LANES` above is the per-column STEP parameters, and it used to BE the row:
+// eight lanes, eight buttons, wired one to one. That is the wrong shape for a
+// choice that belongs to whoever is playing it. If you are working on attack
+// time and never touch ratchets, the button saying RTCH is a button you never
+// press, sitting exactly where the one you want should be.
+//
+// So a slot holds a lane KEY and the row is a list of eight of them. A key may
+// now name one of two kinds of thing:
+//   src:"step"   `pat.params[col][key]`  — the eight lanes this app has always
+//                had. Unchanged, and still the row you get out of the box.
+//   src:"patch"  `pat.notePatch[col][key]` — a VOICE parameter for that one
+//                column, baselined on the layer's own patch.
+//
+// THE SECOND KIND IS VERY NEARLY FREE, AND THAT IS THE WHOLE REASON THIS IS A
+// SLOT MODEL RATHER THAN A NEW SUBSYSTEM. `notePatch` already exists — long
+// press a note and you get its own voice — and the engine already merges it
+// over `layerParams` at the attack. A spilled ATK lane is THE SAME DATA as the
+// note editor's ATK knob, read a bar at a time instead of a note at a time. The
+// two surfaces cannot drift apart, because there is only one store; edit a note
+// in one and the other is already showing it.
+//
+// The two key spaces do not collide (`vel`/`flt`/... against `attack`/`decay`/...),
+// so a slot is ONE STRING and nothing has to record which table it came from.
+// `laneSpec` is the one resolver and nothing reads either table directly.
+//
+// Ranges are the SOUND page's own knob mounts, not new numbers — if a knob's
+// range changes there, change it here, so the note editor and the lane keep
+// agreeing about what the travel means.
+//
+// `only` marks the two that belong to one engine: SUB is MONO's sub-oscillator
+// and SPREAD is POLY's detune stack. A slot holding the wrong one DIMS rather
+// than vanishing — the row must not reflow when you switch layer.
+//
+// Deliberately NOT in here: MONO's own `glide` layer param, because `glideT` is
+// already a step lane doing portamento TIME and two GLIDE buttons in one row is
+// the duplicate this app keeps deleting. It would also read as mid-note in
+// `spillEditCols`, whose stale `"glide"` test is harmless only while no lane
+// actually carries that key.
+const PATCH_LANES=[
+  {key:"attack",      label:"ATK",  color:C_ENV,  min:1, max:2000, unit:"ms"},
+  {key:"decay",       label:"DEC",  color:C_ENV,  min:10,max:4000, unit:"ms"},
+  {key:"sustain",     label:"SUS",  color:C_ENV,  min:0, max:100,  unit:"%"},
+  {key:"release",     label:"REL",  color:C_ENV,  min:5, max:4000, unit:"ms"},
+  {key:"vcfCutoff",   label:"CUT",  color:C_FILT, min:0, max:100,  unit:"%"},
+  {key:"vcfRes",      label:"RES",  color:C_FILT, min:0, max:100,  unit:"%"},
+  {key:"filterEnvAmt",label:"FENV", color:C_FILT, min:0, max:100,  unit:"%"},
+  {key:"detune",      label:"DTN",  color:C_OSC,  min:0, max:50,   unit:"c"},
+  {key:"subLevel",    label:"SUB",  color:C_OSC,  min:0, max:100,  unit:"%", only:"mono"},
+  {key:"spread",      label:"SPRD", color:C_OSC,  min:0, max:100,  unit:"%", only:"poly"},
+].map(l=>Object.assign({src:"patch",center:null,bool:false},l));
+// The row you get with no preference stored: exactly what the eight buttons
+// were before they were slots, so nothing about a fresh install changes.
+const SLOTS_DEFAULT=Object.freeze(["vel","flt","dly","rev","rhy","dur","oct","glideT"]);
+const SLOT_COUNT=SLOTS_DEFAULT.length;
+// Every key a slot may legally hold, for validating what comes back off disk.
+const SLOT_KEYS=Object.freeze(LANES.map(l=>l.key).concat(PATCH_LANES.map(l=>l.key)));
+
+// Apply lane writes to one pattern. `pairs` is [[absCol,value],...], and a value
+// of `null` means RESET — which means two different things, the one asymmetry in
+// here worth knowing.
+//
+// A STEP lane resets to its constant default, because that default is what this
+// app has always meant by "nothing set here".
+//
+// A PATCH lane resets by DELETING THE KEY, never by writing the layer's current
+// value. Only the absent one keeps FOLLOWING the layer when you move that knob
+// later; a copy of today's number silently freezes the note against a patch you
+// are still designing. Same persist-a-CHOICE-not-a-state argument as `pat.bpm`'s
+// INHERIT and the row-keys preference — and it is also what keeps a lane you
+// opened, looked at and closed from leaving sixteen overrides behind it.
+const applyLaneWrites=(p,lane,pairs)=>{
+  const W=patW(p);
+  if(lane.src==="patch"){
+    const ln=Array.isArray(p.notePatch)?p.notePatch.slice(0,W):new Array(W).fill(null);
+    while(ln.length<W)ln.push(null);
+    pairs.forEach(([c,v])=>{
+      if(c<0||c>=W)return;
+      if(v==null){const q=Object.assign({},ln[c]||{});delete q[lane.key];
+        ln[c]=Object.keys(q).length?q:null;return;}
+      ln[c]=Object.assign({},ln[c]||{},{[lane.key]:v});
+    });
+    return Object.assign({},p,{notePatch:ln});
+  }
+  const params=(p.params||defaultStepParams(W)).slice();
+  pairs.forEach(([c,v])=>{if(params[c])params[c]=Object.assign({},params[c],{[lane.key]:v==null?lane.def:v});});
+  return Object.assign({},p,{params});
+};
+// What a column reads on a lane. An absent patch override reads as the LAYER's
+// value, which `laneSpec` has already resolved into `def` — so every existing
+// `lane.def` comparison (the button's brightness, SCALE/TRIM's refusal, the
+// fader's own value label) keeps meaning "this step is not doing anything of
+// its own", with no site needing to know which kind of lane it has.
+const laneValAt=(p,col,lane)=>{
+  if(lane.src==="patch"){
+    const q=p.notePatch&&p.notePatch[col];
+    return (q&&q[lane.key]!=null)?q[lane.key]:lane.def;
+  }
+  const sp=p.params&&p.params[col];
+  return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;
+};
 // rhy: 1=×1 (normal), 2=×2, 3=×3, 4=×4 ratchet. Tie done via grid only.
 // dur: -100 to +100 — percentage modifier on note gate length (0=default)
 // oct: 0=−2, 1=−1, 2=0, 3=+1, 4=+2
@@ -2876,6 +2978,14 @@ const VDEF={DROP:13,SHIFT:17,RANGE:1,PITCH:0,GHOST:0};
 // Compact per-step value label for the tall STEP lanes (rhy → ×N, oct → signed
 // octave, dur → signed %, else the raw number).
 const fmtStepVal=(lane,v)=>{
+  // A patch lane carries a unit, and a fader column is ~22px wide on a phone —
+  // FOUR characters, measured. "1.6s" fits and "701ms" does not, and the clip
+  // reads as a number ("701m") rather than as an overflow, which is worse than
+  // no unit at all. So a TIME drops the "ms" — the button above the lane
+  // already says ATK — and crosses into seconds past 1000, where the digits
+  // would run out anyway. A percentage keeps its sign at "100%", the same four.
+  if(lane.unit==="ms")return v>=1000?(v/1000).toFixed(1)+"s":""+v;
+  if(lane.unit)return v+lane.unit;
   if(lane.key==="rhy")return "×"+Math.max(1,v);
   if(lane.key==="glideT")return v+"%";
   if(lane.key==="oct"){const o=v-2;return (o>0?"+":"")+o;}
@@ -4841,6 +4951,80 @@ export default function LoudLight(){
     };
     f.__lpKey=key; return f; };
 
+  // ── The step-button SLOTS: state, preference, resolver ──────────────────
+  // WHICH PARAMETER EACH BUTTON HOLDS IS A DEVICE PREFERENCE, NOT PROJECT
+  // STATE. It is plain localStorage, deliberately absent from SESSION_DEFAULTS,
+  // the undo snapshot, `getShareState` and the save pair — loading someone
+  // else's project must not rearrange your buttons, exactly as it must not fold
+  // away your row keys. The DATA a lane edits is in the pattern and travels
+  // with it either way; what a slot records is only which window you are
+  // looking through, and every parameter stays reachable from the note editor
+  // whether or not a button points at it.
+  //
+  // Read SYNCHRONOUSLY in the initializer: the async `storageGet` lands a frame
+  // late and the row would visibly re-label itself on every launch. Validated
+  // against `SLOT_KEYS` key by key rather than trusted, because a stored row is
+  // a row that outlives any renaming of a lane — an unknown key falls back to
+  // whatever the default row has in that position, so a slot can never be a
+  // button that resolves to nothing.
+  const [stepSlots,setStepSlotsRaw]=useState(()=>{
+    try{
+      const raw=JSON.parse(localStorage.getItem(LS_NS+"stepslots")||"null");
+      if(!Array.isArray(raw))return SLOTS_DEFAULT.slice();
+      return SLOTS_DEFAULT.map((d,i)=>SLOT_KEYS.indexOf(raw[i])>=0?raw[i]:d);
+    }catch(e){return SLOTS_DEFAULT.slice();}
+  });
+  // WRITTEN ONLY BY THE PICKER, never by an effect on mount. An effect stamps
+  // the current row into storage on every launch, which turns "hasn't chosen"
+  // into "chose the default" for everyone — and a later change to
+  // SLOTS_DEFAULT would then reach nobody. The row-keys lesson: persist a
+  // CHOICE, not a state.
+  const setStepSlots=(next)=>{
+    setStepSlotsRaw(next);
+    try{localStorage.setItem(LS_NS+"stepslots",JSON.stringify(next));}catch(e){}
+  };
+  // Put a lane in a slot. A lane already in another slot SWAPS with it rather
+  // than appearing twice: two buttons editing one parameter is two readouts of
+  // one thing, and it would also cost you a slot without saying so.
+  // The spill's setter, reached through a ref because it is declared far below
+  // and a reassignment must be able to close a lane it moved.
+  const setSpillParamR=useRef(null);
+  const assignSlot=(idx,key)=>{
+    const cur=stepSlots.slice();
+    const at=cur.indexOf(key);
+    if(at===idx)return;
+    if(at>=0)cur[at]=cur[idx];
+    cur[idx]=key;
+    setStepSlots(cur);
+    // Looking at a lane that just moved out from under you is worse than
+    // looking at nothing, so a reassignment closes the spill.
+    setSpillParamR.current&&setSpillParamR.current(null);
+  };
+  // ONE RESOLVER, and everything downstream takes a resolved lane rather than a
+  // key. A PATCH lane's `def` is the LAYER'S OWN VALUE, which is what makes the
+  // lane read as "this note against the patch" instead of against an arbitrary
+  // constant — and it is precisely why this cannot be a module-level table.
+  //
+  // Declared here, above `spillLane`, `paramRow` and the ops menu: Babel lowers
+  // `const` to `var`, so a JSX value or a memo built above this would capture
+  // `undefined` and the row would silently have no buttons.
+  const laneSpec=(key)=>{
+    const st=LANES.find(l=>l.key===key); if(st)return st;
+    const pl=PATCH_LANES.find(l=>l.key===key); if(!pl)return null;
+    const base=_lpBase||{};
+    // RELEASE reads through the same legacy backfill the knob does: a patch
+    // saved before it existed has none, and its absence means release = decay.
+    const raw=base[pl.key]!=null?base[pl.key]
+      :(pl.key==="release"?(base.decay!=null?base.decay:120):pl.min);
+    return Object.assign({},pl,{def:Math.max(pl.min,Math.min(pl.max,Math.round(raw)))});
+  };
+  // The eight buttons, resolved. A key that no longer resolves falls back to the
+  // default row's key for that position, so the row is always eight buttons.
+  const slotLanes=stepSlots.map((k,i)=>laneSpec(k)||laneSpec(SLOTS_DEFAULT[i]));
+  // Whether this lane applies to the layer on screen. SUB is MONO's and SPREAD
+  // is POLY's; a slot holding the other one dims instead of disappearing.
+  const laneApplies=(lane)=>!lane.only||lane.only===(activeLayer==="lead"?"mono":"poly");
+
   // Existing UI references {waveform, setWaveform, ...} continue to work; they now
   // read/write the active layer's slot in layerParams.
   const waveform = _lp.waveform,         setWaveform = _setLPStep("waveform");
@@ -6132,6 +6316,7 @@ export default function LoudLight(){
   // edits, and coming back to a project with the grid silently in VEL mode is
   // the kind of thing a save should never be able to do to you.
   const [spillParam,setSpillParam]=useState(null);
+  setSpillParamR.current=setSpillParam;
   // The SCALE / TRIM grip's live gesture. The REF carries the snapshot the
   // whole drag is computed from; the STATE exists only so the handle can draw
   // the number under your finger, which is why it holds the amount and nothing
@@ -6239,7 +6424,7 @@ export default function LoudLight(){
       if(activeLayerR.current!==lyr)switchLayer(lyr);
     },
   });
-  const spillLane=spillParam?LANES.find(l=>l.key===spillParam)||null:null;
+  const spillLane=spillParam?laneSpec(spillParam):null;
   // The grid's ground carries the part's colour at the very bottom of its
   // range. A lit note has taken its layer's colour since the icons landed, but
   // the surface under it did not, so an empty POLY grid and an empty MONO grid
@@ -6863,9 +7048,22 @@ export default function LoudLight(){
   // what you are about to change and every existing bar-scoped implementation
   // needed no changes.
   const paramOpsMenu=!paramMenu?null:(()=>{
-    const lane=LANES.find(l=>l.key===paramMenu.key);
+    const lane=laneSpec(paramMenu.key);
     if(!lane)return null;
-    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=124;
+    const slotIdx=stepSlots.indexOf(paramMenu.key);
+    // The picker is a grid of every lane, 4 across, so the menu's height is a
+    // function of how many there are rather than a constant that rots the next
+    // time one is added.
+    const PICK_COLS=4;
+    // Height is derived from the two bands' OWN row counts, not from a total:
+    // they are drawn as separate blocks with a heading each, so a single
+    // ceil(18/4) is short by a row and clips the last one mid-button. Sized
+    // this way a lane added to either table moves the menu rather than hiding
+    // behind a scrollbar.
+    const _bandH=n=>13+Math.ceil(n/PICK_COLS)*37+5;
+    const pickH=15+_bandH(LANES.length)+_bandH(PATCH_LANES.length);
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(272,vw-16);
+    const H=Math.min(vh-16,124+pickH);
     const px=Math.max(8,Math.min(vw-W-8,paramMenu.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,paramMenu.y-H-10));   // above the row, which sits low
     const close=()=>setParamMenu(null);
@@ -6892,6 +7090,53 @@ export default function LoudLight(){
                 onClick={()=>{fn();close();}}>{t}</button>
             ))}
           </div>
+          {/* ── WHAT THIS BUTTON HOLDS ──────────────────────────────────
+              The assignment hangs off the button it reassigns, which is the
+              same argument every hold menu in here is built on: a menu that
+              acts on a thing you pointed at, rather than on whichever thing
+              happened to be selected. It sits UNDER the two ops rather than
+              above them, because RAND and RESET are what you come here for
+              day to day and reassignment is the rarer, structural decision —
+              the same ordering the bar menu uses.
+
+              STEP and VOICE are drawn as two labelled bands, not one flat
+              list of eighteen, because they are genuinely different kinds of
+              thing: a step parameter belongs to the COLUMN and a voice
+              parameter belongs to the NOTE's patch, and which one you are
+              editing decides whether RESET means "back to the default" or
+              "back to following the layer". */}
+          {slotIdx>=0&&(
+            <div style={{borderTop:"1px solid rgba(168,190,212,0.1)",padding:"7px 8px 8px",
+              maxHeight:Math.max(120,H-124),overflowY:"auto"}}>
+              {[["STEP \u00b7 THE COLUMN",LANES],["VOICE \u00b7 THIS NOTE'S PATCH",PATCH_LANES]].map(([hd,tbl])=>(
+                <div key={hd}>
+                  <div style={{fontSize:7,letterSpacing:1.4,color:"rgba(178,199,219,0.34)",
+                    margin:"2px 0 4px"}}>{hd}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat("+PICK_COLS+",1fr)",gap:3,marginBottom:5}}>
+                    {tbl.map(cand=>{
+                      const sp=laneSpec(cand.key)||cand;
+                      const held=cand.key===lane.key;
+                      const elsewhere=!held&&stepSlots.indexOf(cand.key)>=0;
+                      const na=!laneApplies(cand);
+                      return(
+                        <button key={cand.key} data-pick={cand.key} aria-pressed={held}
+                          title={na?sp.label+" — "+(cand.only==="mono"?"MONO":"POLY")+" only"
+                            :elsewhere?sp.label+" — already on another button; picking it swaps the two"
+                            :sp.label}
+                          onClick={()=>{if(!held)assignSlot(slotIdx,cand.key);close();}}
+                          style={{padding:"8px 0",borderRadius:4,fontFamily:"inherit",cursor:"pointer",
+                            border:"1px solid "+sp.color+(held?"":elsewhere?"55":"1f"),
+                            background:held?sp.color+"2e":"rgba(186,208,230,0.03)",
+                            color:sp.color+(held?"":"aa"),opacity:na?0.4:1,
+                            fontSize:9,fontWeight:700,letterSpacing:0.3}}>
+                          {sp.label==="GLIDE"?"GLD":sp.label}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -8436,12 +8681,12 @@ export default function LoudLight(){
   // it can travel from its default, so a small filter move glows faintly and a
   // full one glows hard. "This step has something on it" was worth knowing;
   // "this step has a LOT of it" is what you actually listen for.
-  const HOT_LANES=LANES.filter(l=>["flt","dly","rev","glideT"].indexOf(l.key)>=0);
+  // Which STEP lanes join the scheme. A PATCH lane always does: the grid cannot
+  // draw an attack time at all, so there is nothing for a light to duplicate.
+  const HOT_STEP_KEYS=["flt","dly","rev","glideT"];
   const _hotLanes=(()=>{
     const out={};
     if(!playing||playId!==activeId||step<0||!activePat)return out;
-    const sp=(activePat.params||null)&&activePat.params[step];
-    if(!sp)return out;
     // A LIT BUTTON MEANS "THE STEP YOU ARE HEARING CARRIES AN EDIT". With no
     // note in this column nothing is sounding, so a light there is reporting a
     // value that cannot be heard — which is the duplicate-readout sin wearing a
@@ -8449,8 +8694,9 @@ export default function LoudLight(){
     // catches the other way in: the SPILL and the lane RAND write a curve
     // across the whole bar, empty columns included.
     if(!activePat.grid||!activePat.grid.some(row=>row[step]))return out;
-    for(const l of HOT_LANES){
-      const v=sp[l.key]!=null?sp[l.key]:l.def;
+    for(const l of slotLanes){
+      if(l.src!=="patch"&&HOT_STEP_KEYS.indexOf(l.key)<0)continue;
+      const v=laneValAt(activePat,step,l);
       if(v===l.def)continue;
       const span=Math.max(Math.abs(l.max-l.def),Math.abs(l.def-l.min))||1;
       out[l.key]=Math.max(0.18,Math.min(1,Math.abs(v-l.def)/span));
@@ -8459,15 +8705,21 @@ export default function LoudLight(){
   })();
   const paramRow=(
     <div data-paramrow="1" style={{flex:"5 1 0",minWidth:0,display:"flex",gap:2,height:"100%",minHeight:BAR_ROW_H,touchAction:"none"}}>
-      {LANES.map(lane=>{
+      {slotLanes.map((lane,slotIdx)=>{
         const on=spillParam===lane.key;
+        // SUB on POLY / SPREAD on MONO: the slot keeps its place and dims, so
+        // the row never reflows when you switch layer.
+        const na=!laneApplies(lane);
         // 0 when cold, 0.18..1 when lit — how far this step's value has moved.
         const heat=on?0:(_hotLanes[lane.key]||0);
         const hot=heat>0;
         return(
-          <button key={lane.key} data-param={lane.key} data-hot={hot?"1":undefined} aria-pressed={on}
-            title={lane.label+" — tap to spill it onto the grid, hold for RAND / RESET"}
-            {...paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key))}
+          <button key={slotIdx} data-param={lane.key} data-slot={slotIdx} data-patchlane={lane.src==="patch"?"1":undefined}
+            data-hot={hot?"1":undefined} aria-pressed={on} disabled={na}
+            aria-label={lane.label}
+            title={na?lane.label+" — "+(lane.only==="mono"?"MONO":"POLY")+" only"
+              :lane.label+" — tap to spill it onto the grid, hold to reassign this button, RAND or RESET"}
+            {...(na?{}:paramBtnProps(lane.key,()=>setSpillParam(on?null:lane.key)))}
             style={{flex:1,minWidth:0,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
               border:"1px solid "+(on?lane.color:hot?lane.color+_a(0.35+0.65*heat):lane.color+"1f"),
               background:on?lane.color+"2e":hot?lane.color+_a(0.10+0.34*heat):"rgba(186,208,230,0.03)",
@@ -8475,6 +8727,7 @@ export default function LoudLight(){
               fontSize:9,fontWeight:700,letterSpacing:0,padding:0,overflow:"hidden",
               touchAction:"none",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none",
               boxShadow:on?"0 0 8px "+lane.color+"44":hot?"0 0 "+Math.round(4+10*heat)+"px "+lane.color+_a(0.25+0.55*heat):"none",
+              opacity:na?0.3:1,
               transition:"background .08s, box-shadow .08s"}}>{lane.key==="glideT"?"GLD":lane.label}</button>
         );
       })}
@@ -11853,25 +12106,30 @@ export default function LoudLight(){
     const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>i===col?Object.assign({},sp,{[key]:val}):sp);
     return Object.assign({},p,{params});
   }));};
+  // RAND and RESET over the visible bar's lane, on whichever store the slot
+  // names. A PATCH lane is scoped to the columns that actually have a NOTE,
+  // where a step lane still writes the whole bar: an override on an empty column
+  // is a voice setting for a note that does not exist, and it would ride in
+  // every save from then on. (The step lanes keep writing the whole bar because
+  // that is what they have always done, and `_hotLanes` already knows it.)
+  const laneBarCols=(p,lane)=>{
+    const off=barOffIn(p), out=[];
+    if(lane.src!=="patch"){for(let i=off;i<off+COLS;i++)out.push(i);return out;}
+    const live=spillEditCols(p,off,lane.key);
+    for(let vc=0;vc<COLS;vc++) if(live[vc])out.push(off+vc);
+    return out;
+  };
   const randStepLane=(key)=>{pushHistory();setFollowSeq(false);
-    const lane=LANES.find(l=>l.key===key);if(!lane)return;
-    setPats(ps=>ps.map(p=>{
-      if(p.id!==activeId)return p;
-      const off=barOffIn(p);
-      const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>(i<off||i>=off+COLS)?sp:Object.assign({},sp,{[key]:Math.round(lane.min+Math.random()*(lane.max-lane.min))}));
-      return Object.assign({},p,{params});
-    }));
+    const lane=laneSpec(key);if(!lane)return;
+    setPats(ps=>ps.map(p=>p.id!==activeId?p:applyLaneWrites(p,lane,
+      laneBarCols(p,lane).map(c=>[c,Math.round(lane.min+Math.random()*(lane.max-lane.min))]))));
   };
   randStepLaneR.current=randStepLane;
   const randStepAll=()=>LANES.forEach(l=>randStepLane(l.key));
   const resetStepLane=(key)=>{pushHistory();setFollowSeq(false);
-    const lane=LANES.find(l=>l.key===key);if(!lane)return;
-    setPats(ps=>ps.map(p=>{
-      if(p.id!==activeId)return p;
-      const off=barOffIn(p);
-      const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>(i<off||i>=off+COLS)?sp:Object.assign({},sp,{[key]:lane.def}));
-      return Object.assign({},p,{params});
-    }));
+    const lane=laneSpec(key);if(!lane)return;
+    setPats(ps=>ps.map(p=>p.id!==activeId?p:applyLaneWrites(p,lane,
+      laneBarCols(p,lane).map(c=>[c,null]))));
   };
   resetStepLaneR.current=resetStepLane;
   // SCALE / TRIM over the visible bar's lane, written from a DRAG. Bar-scoped
@@ -11879,12 +12137,8 @@ export default function LoudLight(){
   // locked column refuses a finger, so a handle must not write one behind your
   // back either. `cols` and `base` are snapshotted at pointerdown by the handle
   // and handed back on every move, which is what makes the gesture reversible.
-  const writeShapeCols=(cols,key,vals)=>setPats(ps=>ps.map(p=>{
-    if(p.id!==activeId)return p;
-    const params=(p.params||defaultStepParams(patW(p))).slice();
-    cols.forEach((c,i)=>{if(params[c])params[c]=Object.assign({},params[c],{[key]:vals[i]});});
-    return Object.assign({},p,{params});
-  }));
+  const writeShapeCols=(cols,lane,vals)=>setPats(ps=>ps.map(p=>
+    p.id!==activeId?p:applyLaneWrites(p,lane,cols.map((c,i)=>[c,vals[i]]))));
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
@@ -11900,7 +12154,13 @@ export default function LoudLight(){
       if(p.id!==activeId)return p;
       const dflt=defaultStepParams(1)[0];
       const params=(p.params||defaultStepParams(patW(p))).map((sp,i)=>i===col?Object.assign({},dflt):sp);
-      return Object.assign({},p,{params});
+      // "Every lane on it" has to mean the voice overrides too now that a slot
+      // can hold one — otherwise a double-tap would clear the eight it can see
+      // and silently leave the attack time it cannot. Same clear the note
+      // editor's RESET does, on one column.
+      const np=Array.isArray(p.notePatch)?p.notePatch.slice():null;
+      if(np&&col<np.length)np[col]=null;
+      return Object.assign({},p,np?{params,notePatch:np}:{params});
     }));
   };
 
@@ -11926,12 +12186,13 @@ export default function LoudLight(){
     const lane=spillLane;
     if(!lane||activeLayer==="drums"||!activePat)return null;
     const pat=activePat;
-    const allParams=pat.params||defaultStepParams(patW(pat));
     // Which columns are live — the same scan the SCALE/TRIM buttons write
     // through, so what a finger may reach and what a button may write cannot
     // drift apart. See `spillEditCols`.
     const colHasNote=spillEditCols(pat,barOff,lane.key);
-    const valAt=(vc)=>{const sp=allParams[barOff+vc];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;};
+    // One read and one write, both lane-aware: the faders do not know or care
+    // whether they are drawing a step parameter or a voice parameter.
+    const valAt=(vc)=>laneValAt(pat,barOff+vc,lane);
     const colAt=(clientX,el)=>{
       const rect=el.getBoundingClientRect();
       return Math.max(0,Math.min(COLS-1,Math.floor((clientX-rect.left)/rect.width*COLS)));
@@ -11943,7 +12204,9 @@ export default function LoudLight(){
     };
     const write=(vc,v)=>{
       if(!colHasNote[vc])return;
-      setStepParam(barOff+vc,lane.key,Math.max(lane.min,Math.min(lane.max,Math.round(v))));
+      const clamped=Math.max(lane.min,Math.min(lane.max,Math.round(v)));
+      setFollowSeq(false);
+      setPats(ps=>ps.map(p=>p.id!==activeId?p:applyLaneWrites(p,lane,[[barOff+vc,clamped]])));
     };
     const playCol=playing&&playId===activeId&&step>=barOff&&step<barOff+COLS?step-barOff:-1;
     // The values SCALE and TRIM work on: this bar's live steps, in order.
@@ -11977,7 +12240,7 @@ export default function LoudLight(){
       // `base` is what the whole gesture is computed FROM and never changes;
       // `cur` is what is on screen, so a move that rounds to the same values
       // writes nothing and costs no undo step.
-      const base=cols.map(c=>{const sp=allParams[c];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;});
+      const base=cols.map(c=>laneValAt(pat,c,lane));
       _shapeDragR.current={mode,amt:0,ly:e.clientY,marked:false,cols,base,cur:base.slice(),
         dim:Math.max(80,colsEl?colsEl.getBoundingClientRect().height:200)};
       setShapeDrag({mode,amt:0});
@@ -11993,7 +12256,7 @@ export default function LoudLight(){
       // better of must not cost an undo step.
       if(next.some((v,i)=>v!==d.cur[i])){
         if(!d.marked){pushHistory();setFollowSeq(false);d.marked=true;}
-        d.cur=next; writeShapeCols(d.cols,lane.key,next);
+        d.cur=next; writeShapeCols(d.cols,lane,next);
       }
     };
     const shapeEnd=()=>{_shapeDragR.current=null;setShapeDrag(null);};
