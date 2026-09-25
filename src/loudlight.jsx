@@ -2822,46 +2822,55 @@ const fmtStepVal=(lane,v)=>{
 };
 
 // ── SCALE and TRIM: the two shapes you want over a WHOLE lane ─────────
-// TRIM slides every step by a set amount; SCALE expands or compresses the
+// TRIM slides every step by the same amount; SCALE expands or compresses the
 // spread about the bar's MEAN. The mean is the pivot rather than the midpoint
 // of the range because that is what an expander does: a mostly-flat lane with
 // one spike keeps its body where it is and pushes the outlier out, instead of
 // the whole mass sliding toward the middle of the axis.
 //
-// The step is a TWENTIETH OF THE LANE'S OWN RANGE, never an absolute number:
-// these lanes run 0..127 (VEL), 1..4 (RTCH) and -100..100 (DUR), so any one
-// constant is a nudge on one and the whole travel on another. Twenty taps
-// crosses any lane.
-const SPILL_SCALE_K=1.25;
-const spillTrimStep=(lane)=>Math.max(1,Math.round((lane.max-lane.min)/20));
-// The height the SCALE/TRIM row takes out of the top of the spill. Under the
-// 44px the persistent chrome holds to, deliberately: it is spent out of the
-// fader travel of the thing it is shaping, it is wide (~60px a button on a
-// phone) and it only exists while a lane is open. 34 is what a thumb can hit
-// without the lane losing a tenth of its height.
-const SPILL_HDR_H=IS_MOBILE?34:28;
-// Returns the transformed values, or NULL when the transform changes nothing —
-// which is what disables the button AND what keeps a no-op tap from costing an
-// undo step. A FLAT lane has no ratio to widen, so SCALE reports null in both
-// directions and dims itself rather than reading as a dead control.
-const spillShape=(lane,vals,mode,dir)=>{
-  if(!vals.length)return null;
+// `amt` is CONTINUOUS and comes off a drag: for TRIM it is an offset in the
+// lane's own units, for SCALE it is an EXPONENT — k = 2^amt — so that up and
+// down are symmetric (amt +1 doubles the spread, -1 halves it) and the middle
+// of the travel is x1 rather than somewhere arbitrary.
+//
+// IT IS APPLIED TO THE VALUES AS THEY WERE WHEN THE FINGER WENT DOWN, never to
+// the running result. That is the whole reason a drag here is usable: dragging
+// back to where you started returns the lane EXACTLY to where it started, a
+// value that hit the rail on the way out comes back off it, and the rounding
+// does not compound over a hundred pointermoves.
+const spillShape=(lane,base,mode,amt)=>{
   let out;
-  if(mode==="trim"){
-    const d=spillTrimStep(lane)*(dir>0?1:-1);
-    out=vals.map(v=>v+d);
-  }else{
-    const k=dir>0?SPILL_SCALE_K:1/SPILL_SCALE_K;
-    const piv=vals.reduce((a,b)=>a+b,0)/vals.length;
-    out=vals.map(v=>piv+(v-piv)*k);
+  if(mode==="trim") out=base.map(v=>v+amt);
+  else{
+    const k=Math.pow(2,amt);
+    const piv=base.reduce((a,b)=>a+b,0)/base.length;
+    out=base.map(v=>piv+(v-piv)*k);
   }
-  out=out.map(v=>Math.max(lane.min,Math.min(lane.max,Math.round(v))));
-  return out.some((v,i)=>v!==vals[i])?out:null;
+  return out.map(v=>Math.max(lane.min,Math.min(lane.max,Math.round(v))));
 };
+// The gearing. TRIM spans the lane's OWN range, never an absolute number —
+// these lanes run 0..127 (VEL), 1..4 (RTCH) and -100..100 (DUR), so any one
+// constant is a nudge on one and the whole travel on another. SCALE spans
+// 2 exponents, i.e. the full height of the grid is x4 one way and a quarter
+// the other, which is more than anyone wants in one go and leaves the
+// ballistic curve's slow end doing the real work.
+const SPILL_SCALE_SPAN=2;
+const spillSpan=(lane,mode)=>mode==="trim"?(lane.max-lane.min):SPILL_SCALE_SPAN;
+// What the handle says while you are holding it. A drag with no readout is a
+// guess, and these are the two numbers you are actually aiming at.
+const spillShapeWord=(mode,amt)=>mode==="trim"
+  ?(amt>0?"+":"")+Math.round(amt)
+  :"\u00d7"+Math.pow(2,amt).toFixed(2);
+// The height of the handle row, taken out of the top of the spill. Under the
+// 44px the persistent chrome holds to, deliberately: it is spent out of the
+// fader travel of the very thing it is shaping, each handle is ~170px WIDE on
+// a phone, and it is a GRIP — once your finger is down the pointer is captured
+// and the travel is the whole screen, not these 34 pixels.
+const SPILL_HDR_H=IS_MOBILE?34:28;
 // Which of the visible bar's columns a spill may write. FLT and OCT animate
 // mid-note, so they stay live across a tied note's extension cells; everything
 // else is locked at note-start and is dead on a column with no attack. ONE
-// body, because the overlay draws these and the SCALE/TRIM buttons write them
+// body, because the overlay draws these and the SCALE/TRIM handles write them
 // — two copies of a note scan would drift the moment either changed.
 // (The third key tested is `glide`, the lane's OLD name — it is `glideT` now,
 // so GLIDE has always fallen through to the note-start rule. Left exactly as
@@ -5980,6 +5989,13 @@ export default function LoudLight(){
   // edits, and coming back to a project with the grid silently in VEL mode is
   // the kind of thing a save should never be able to do to you.
   const [spillParam,setSpillParam]=useState(null);
+  // The SCALE / TRIM grip's live gesture. The REF carries the snapshot the
+  // whole drag is computed from; the STATE exists only so the handle can draw
+  // the number under your finger, which is why it holds the amount and nothing
+  // else.
+  const [shapeDrag,setShapeDrag]=useState(null);   // {mode,amt} while held
+  const _shapeDragR=useRef(null);
+  const _spillColsR=useRef(null);
   // Which drum channel the mixer is focused on, or null for the level-only
   // overview. A view state, not persisted — it is where you are looking.
   const [drumFocus,setDrumFocus]=useState(null);
@@ -6104,6 +6120,10 @@ export default function LoudLight(){
   // over the whole screen would eat the taps meant for the transport, the
   // pattern chips and the bar tile, all of which stay live while a lane is up.
   useEffect(()=>{
+    // A grip held while the lane changes under it would be left looking held
+    // for ever — the capture ends with the element, and an unmounted handler
+    // never sees the pointerup. Cleared here rather than guessed at.
+    _shapeDragR.current=null; setShapeDrag(null);
     if(!spillParam)return;
     const away=(e)=>{
       const t=e.target;
@@ -11545,29 +11565,17 @@ export default function LoudLight(){
     }));
   };
   resetStepLaneR.current=resetStepLane;
-  // SCALE / TRIM over the visible bar's lane. Bar-scoped like every other lane
-  // op, and NOTE-scoped like the spill's own drag: a locked column refuses a
-  // finger, so a button must not write one behind your back either. Nothing is
-  // pushed to history unless the transform actually moves a value — `pushHistory`
-  // does not dedupe, and a dimmed button you keep tapping would otherwise fill
-  // the ring with no-ops and make undo look dead.
-  const shapeStepLane=(key,mode,dir)=>{
-    const lane=LANES.find(l=>l.key===key); if(!lane||!activePat)return;
-    const pat=activePat, off=barOffIn(pat);
-    const ok=spillEditCols(pat,off,key);
-    const all=pat.params||defaultStepParams(patW(pat));
-    const cols=[]; for(let vc=0;vc<COLS;vc++) if(ok[vc])cols.push(off+vc);
-    const cur=cols.map(c=>{const sp=all[c];return (sp&&sp[key]!=null)?sp[key]:lane.def;});
-    const next=spillShape(lane,cur,mode,dir);
-    if(!next)return;
-    pushHistory(); setFollowSeq(false);
-    setPats(ps=>ps.map(p=>{
-      if(p.id!==activeId)return p;
-      const params=(p.params||defaultStepParams(patW(p))).slice();
-      cols.forEach((c,i)=>{if(params[c])params[c]=Object.assign({},params[c],{[key]:next[i]});});
-      return Object.assign({},p,{params});
-    }));
-  };
+  // SCALE / TRIM over the visible bar's lane, written from a DRAG. Bar-scoped
+  // like every other lane op, and NOTE-scoped like the spill's own drag: a
+  // locked column refuses a finger, so a handle must not write one behind your
+  // back either. `cols` and `base` are snapshotted at pointerdown by the handle
+  // and handed back on every move, which is what makes the gesture reversible.
+  const writeShapeCols=(cols,key,vals)=>setPats(ps=>ps.map(p=>{
+    if(p.id!==activeId)return p;
+    const params=(p.params||defaultStepParams(patW(p))).slice();
+    cols.forEach((c,i)=>{if(params[c])params[c]=Object.assign({},params[c],{[key]:vals[i]});});
+    return Object.assign({},p,{params});
+  }));
   const resetStepAll=()=>setPats(ps=>ps.map(p=>{
     if(p.id!==activeId)return p;
     const off=barOffIn(p);
@@ -11632,54 +11640,96 @@ export default function LoudLight(){
     const shapeVals=[];
     for(let vc=0;vc<COLS;vc++) if(colHasNote[vc])shapeVals.push(valAt(vc));
     const noSteps=shapeVals.length===0;
-    // ── SCALE / TRIM, drawn ABOVE the lane they shape ──────────────────
-    // Inside the overlay rather than in a row of its own, so the controls
-    // arrive and leave with the lane and THE GRID'S TOP EDGE NEVER MOVES —
-    // a row that appeared only while a lane was open would jog the whole
-    // instrument on every tap of a step button (`_gridtop`). It costs the
-    // faders this row's height out of ~370px of travel and nothing else,
-    // and in mobile landscape — the one height-bound layout — there is no
-    // spare row above the grid to have used instead.
-    // The gap BETWEEN the two groups is wider than the gap inside one. Four
-    // identical boxes evenly spaced read as four of a kind with two words
-    // wedged in; spaced like this they read as two steppers, which is what they
-    // are — the same argument the MOJO bypass switch is set apart by.
+    // ── SCALE / TRIM: two GRIPS, held and dragged ─────────────────────
+    // Drawn INSIDE the overlay rather than in a row of its own, so the
+    // handles arrive and leave with the lane and THE GRID'S TOP EDGE NEVER
+    // MOVES — a row that appeared only while a lane was open would jog the
+    // whole instrument on every tap of a step button (`_gridtop`). It costs
+    // the faders this row's height and the layout nothing, and in mobile
+    // landscape — the one height-bound layout — there is no spare row above
+    // the grid to have used instead.
+    //
+    // Each is a ballistic VERTICAL drag on the sliders' own speed curve, with
+    // the pointer captured, so the 34px the grip occupies is only where you
+    // GRAB it: the travel is the whole screen. A slow crawl is fine and a
+    // flick is coarse, exactly as on every other continuous control here.
+    const shapeAmt=(mode)=>(shapeDrag&&shapeDrag.mode===mode)?shapeDrag.amt:null;
+    const shapeStart=(mode,e)=>{
+      const cols=[]; for(let vc=0;vc<COLS;vc++) if(colHasNote[vc])cols.push(barOff+vc);
+      if(!cols.length)return;
+      e.stopPropagation();e.preventDefault();
+      try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
+      // The travel the gearing is scaled against is the FADERS' height, so a
+      // full-height drag means the same thing on a phone and on a desktop.
+      // Read off a ref, never by walking parentNode: a selector that names a
+      // DOM SHAPE is what broke `_master.mjs` when this overlay gained a row.
+      const colsEl=_spillColsR.current;
+      // `base` is what the whole gesture is computed FROM and never changes;
+      // `cur` is what is on screen, so a move that rounds to the same values
+      // writes nothing and costs no undo step.
+      const base=cols.map(c=>{const sp=allParams[c];return (sp&&sp[lane.key]!=null)?sp[lane.key]:lane.def;});
+      _shapeDragR.current={mode,amt:0,ly:e.clientY,marked:false,cols,base,cur:base.slice(),
+        dim:Math.max(80,colsEl?colsEl.getBoundingClientRect().height:200)};
+      setShapeDrag({mode,amt:0});
+    };
+    const shapeMove=(e)=>{
+      const d=_shapeDragR.current; if(!d)return; e.stopPropagation();
+      const pd=d.ly-e.clientY; d.ly=e.clientY;
+      d.amt+=ballisticDelta(pd,d.dim,spillSpan(lane,d.mode));
+      const next=spillShape(lane,d.base,d.mode,d.amt);
+      setShapeDrag({mode:d.mode,amt:d.amt});
+      // History on the first move that actually CHANGES something, never on
+      // the press: `pushHistory` does not dedupe, and a grab you thought
+      // better of must not cost an undo step.
+      if(next.some((v,i)=>v!==d.cur[i])){
+        if(!d.marked){pushHistory();setFollowSeq(false);d.marked=true;}
+        d.cur=next; writeShapeCols(d.cols,lane.key,next);
+      }
+    };
+    const shapeEnd=()=>{_shapeDragR.current=null;setShapeDrag(null);};
     const shapeRow=(
       <div data-spillshape={lane.key} style={{display:"flex",gap:CELL_GAP*4,height:SPILL_HDR_H,flexShrink:0,marginBottom:2}}>
-        {[["scale","SCALE"],["trim","TRIM"]].map(([mode,label])=>(
-          <div key={mode} style={{flex:1,minWidth:0,display:"flex",gap:CELL_GAP,alignItems:"stretch"}}>
-            {[[-1,"▼"],[0,null],[1,"▲"]].map(([dir,glyph])=>{
-              if(glyph===null)return(
-                <span key="lbl" style={{flex:1,minWidth:0,display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:9,fontWeight:700,letterSpacing:0.5,color:lane.color+"5c",
-                  pointerEvents:"none",userSelect:"none",WebkitUserSelect:"none"}}>{label}</span>
-              );
-              const live=!noSteps&&!!spillShape(lane,shapeVals,mode,dir);
-              // The refusal says WHY, on the control, rather than leaving a
-              // dead-looking button: a flat lane has no ratio to widen, and a
-              // lane already at its rail has nothing left to add.
-              const why=noSteps?"no notes in this bar"
-                :mode==="scale"?"this bar's "+lane.label+" is flat — no spread to "+(dir>0?"widen":"narrow")
-                :"every step is already at the "+(dir>0?"top":"bottom");
-              const does=mode==="scale"
-                ?(dir>0?"widen":"narrow")+" the spread between this bar's lowest and highest "+lane.label
-                :(dir>0?"add ":"subtract ")+spillTrimStep(lane)+" on every step in this bar";
-              return(
-                <button key={dir} data-shape={mode+(dir>0?"up":"dn")} disabled={!live}
-                  aria-label={label+(dir>0?" up":" down")}
-                  title={label+" — "+(live?does:why)}
-                  onPointerDown={e=>e.stopPropagation()}
-                  onClick={e=>{e.stopPropagation();shapeStepLane(lane.key,mode,dir);}}
-                  style={{flex:1,minWidth:0,borderRadius:4,padding:0,fontFamily:"inherit",
-                    border:"1px solid "+lane.color+(live?"1f":"10"),
-                    background:live?"rgba(186,208,230,0.03)":"rgba(186,208,230,0.015)",
-                    color:lane.color+(live?"b8":"30"),
-                    fontSize:11,lineHeight:1,cursor:live?"pointer":"default",
-                    touchAction:"manipulation",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}>{glyph}</button>
-              );
-            })}
-          </div>
-        ))}
+        {[["scale","SCALE"],["trim","TRIM"]].map(([mode,label])=>{
+          // A flat lane has no ratio to widen, so SCALE has nothing to do with
+          // it; with no notes in the bar neither has. The refusal is drawn on
+          // the grip, with its reason in the name, rather than leaving a
+          // handle that simply does not move under your finger.
+          const live=!noSteps&&(mode==="trim"||Math.max.apply(null,shapeVals)!==Math.min.apply(null,shapeVals));
+          const amt=live?shapeAmt(mode):null;
+          const held=amt!=null;
+          const why=noSteps?"no notes in this bar"
+            :"this bar's "+lane.label+" is flat — there is no spread to scale";
+          const does=mode==="scale"
+            ?"hold and drag up to widen the spread between this bar's lowest and highest "+lane.label+", down to narrow it"
+            :"hold and drag up or down to add or subtract the same amount on every step in this bar";
+          // The grip: three rules, the mark every draggable thing wears. They
+          // run ACROSS the drag, which is what says which way it moves.
+          const grip=(k)=>(
+            <span key={k} style={{width:11,alignSelf:"center",height:9,borderRadius:1,
+              background:"repeating-linear-gradient(to bottom,"+lane.color+(live?"66":"22")+" 0 1px,transparent 1px 4px)"}}/>
+          );
+          return(
+            <div key={mode} data-shape={mode} data-shapeamt={held?amt.toFixed(3):undefined}
+              aria-label={label} title={label+" — "+(live?does:why)}
+              onPointerDown={live?(e=>shapeStart(mode,e)):undefined}
+              onPointerMove={live?shapeMove:undefined}
+              onPointerUp={live?shapeEnd:undefined}
+              onPointerCancel={live?shapeEnd:undefined}
+              style={{flex:1,minWidth:0,borderRadius:4,display:"flex",alignItems:"center",
+                justifyContent:"center",gap:7,
+                border:"1px solid "+lane.color+(held?"4d":live?"1f":"10"),
+                background:held?lane.color+"1c":live?"rgba(186,208,230,0.03)":"rgba(186,208,230,0.015)",
+                color:lane.color+(held?"e6":live?"8c":"33"),
+                fontSize:held?11:9,fontWeight:700,letterSpacing:held?0:0.5,
+                fontVariantNumeric:"tabular-nums",
+                cursor:live?"ns-resize":"default",touchAction:"none",
+                userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none"}}>
+              {grip("l")}
+              <span data-shapeword style={{pointerEvents:"none"}}>{held?spillShapeWord(mode,amt):label}</span>
+              {grip("r")}
+            </div>
+          );
+        })}
       </div>
     );
     return(
@@ -11689,7 +11739,7 @@ export default function LoudLight(){
       {/* `data-spillcols` is the harnesses' hook for the faders themselves —
           the overlay is two rows now, and "the second child" is exactly the
           DOM-shape selector that broke `_master.mjs` once already. */}
-        <div data-spillcols="1"
+        <div ref={_spillColsR} data-spillcols="1"
           style={{flex:1,minHeight:0,display:"flex",gap:CELL_GAP,
             touchAction:"none",cursor:"ns-resize"}}
           onPointerDown={e=>{
