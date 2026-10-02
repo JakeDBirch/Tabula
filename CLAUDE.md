@@ -2220,7 +2220,13 @@ itself:
   `ll_render`. One `os_unfair_lock` guards the core between the render thread
   and the main thread; a sample's frames are copied outside it. Events go
   back on a 30Hz timer, dropped while the app is inactive. Type-checked by
-  CI's `compile` job; **not yet run on a device.**
+  CI's `compile` job, and **IT RUNS ON THE DEVICE — confirmed 2026-10-02**, on
+  TestFlight build 138. That line read "not yet run on a device" for three
+  weeks and it was the single biggest unknown in the project: the whole case
+  for the core is background audio, and until it had rendered a sample on real
+  hardware every statement about what the app SOUNDS like came from a test
+  suite. It has now rendered on a phone. Lock-screen and background survival
+  are a separate observation and are not settled by it.
 
 - **`BundleSchemeHandler`** serves the bundle over `loudlight://app` rather than
   `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
@@ -2449,7 +2455,11 @@ Two things gate whether it actually appears, and only one of them is code:
     than a state.
   - The control renders only under `IS_NATIVE`, since nothing outside the shell
     has an `AVAudioSession` to set. `_audioroute.mjs` covers both halves.
-  **Unverified on hardware**, like everything else in the shell.
+  **Still unverified on hardware** — but no longer "like everything else in the
+  shell", which is what this said while nothing in it had run: the app itself
+  works on the device now (see `CoreAudioHost`), so what is left here is the
+  AUDIO ROUTE preference specifically, on a control that has since been deleted
+  from the UI anyway.
 - **A mixer on the lock screen is not possible**, and it is worth writing down
   why so it isn't re-litigated. The media controls there are
   `MPNowPlayingInfoCenter` (title, artist, artwork, rate) plus whichever
@@ -2801,17 +2811,31 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   Still to do: the on-device checklist in `docs/ios-testflight.md` — project
   survives a force-quit is the one that matters, since `localStorage` is the
   whole project library.
-- **Public beta (external TestFlight)**: the paperwork is written and the app
-  side is done — privacy manifest, `NSMicrophoneUsageDescription`, the capture
-  delegate, in-app account deletion, `privacy.html` and the link to it. The copy
-  to paste into App Store Connect, the App Privacy answers and the order of
-  operations are `docs/app-store-connect.md`. **Four things are Jake's and none
-  of them are code**: re-run the SQL in `docs/cloud-sync.md` so `delete_account()`
-  exists; a real contact address on `privacy.html`; the sample kits' licence;
-  and the device checks — which are the critical path, because everything the
-  beta description claims about sound, timing and background playback is a
-  claim from a test suite rather than from a phone. Then the metadata, then
-  Actions ▸ iOS TestFlight, then internal group, then submit for Beta App Review.
+- **Public beta (external TestFlight)**: the paperwork is written, the app side
+  is done — privacy manifest, `NSMicrophoneUsageDescription`, the capture
+  delegate, in-app account deletion, `privacy.html` and the link to it — and
+  **A SIGNED BUILD IS ALREADY ON APP STORE CONNECT** (run #138, 2026-09-23,
+  archive and upload green in 3m21s, built from `c39698b`). The copy to paste
+  into App Store Connect, the App Privacy answers and the order of operations
+  are `docs/app-store-connect.md`.
+  - **THE DEVICE CHECKS ARE DONE — it works, 2026-10-02.** That was the
+    critical path and it has cleared; see `CoreAudioHost` above. Everything
+    remaining is forms and two facts.
+  - **THREE THINGS ARE JAKE'S AND NONE OF THEM ARE CODE**: re-run the SQL in
+    `docs/cloud-sync.md` so `delete_account()` exists (review checks in-app
+    deletion under 5.1.1(v), and without the function the button 404s); a real
+    contact address on `privacy.html` (`privacy@loudlight.co` is a
+    placeholder); and the sample kits' licence, since App Store Connect asks
+    about third-party content and a paid app is where that bites.
+  - **TESTFLIGHT GOES BEHIND `main` AND NOTHING SAYS SO.** Build 138 predates
+    the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
+    the dispatched run's `head_sha` against `origin/main` before telling anyone
+    what the testers have — a green `payload` tick on a push is NOT a build.
+  - Then: the metadata, a fresh dispatch, internal group, submit for Beta App
+    Review. **The shortest route to people's hands is not TestFlight at all** —
+    the Pages build is live, installs from Safari via Add to Home Screen, and
+    needs nobody's permission; its honest caveats are no background audio
+    (WebKit suspends the context) and the JS engine unless `?core=1`.
 - **The oracle is back in the loop.** It sat unrun for a day and went red twice
   over — one stale fixture and one genuine JS/core split that broke song
   playback on the default engine (see the dependency-array lesson). It is now

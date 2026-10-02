@@ -20,10 +20,11 @@ needs a build. So:
 1. **Run the SQL** in `docs/cloud-sync.md` (it now defines `delete_account()`,
    which the in-app DELETE ACCOUNT calls — without it that button 404s, and it
    is a store requirement under 5.1.1(v)).
-2. **Device checks** — `docs/ios-testflight.md`, "Verify on device before you
-   trust it". This is the critical path, not the copy: nothing here matters if
-   the app does not make a sound. `CoreAudioHost` has still never run on
-   hardware.
+2. ~~**Device checks**~~ — **DONE, 2026-10-02.** Jake confirms the app works on
+   the device, which settles what had been the critical path through this whole
+   list: `CoreAudioHost` has RUN on hardware and the app makes a sound. The
+   remaining device questions are narrower and named under "What is still
+   unverified" below — they are no longer the thing everything else waits on.
 3. **Fill in the metadata below**, including App Privacy and the age rating.
 4. **Build**: Actions ▸ iOS TestFlight ▸ Run workflow ▸ main. (A cloud session
    cannot press this — see the note in CLAUDE.md.)
@@ -256,16 +257,18 @@ React, lamejs and DM Sans are all permissively licensed and credited in
 
 ## What is still unverified
 
-Stated plainly, because the copy above describes behaviour that has not been
-observed on hardware:
+Much shorter than it was. **The audio engine has run on hardware and the app
+works** (confirmed 2026-10-02), so "What to Test" points 1–3 are no longer
+claims from a test suite alone. What is left is specific:
 
-- **The audio engine has never run on a device.** Everything "What to Test"
-  asks about in points 1–4 is a claim from a test suite, not from a phone.
-- **Background and lock-screen audio** are reasoned from how AVAudioEngine
-  works, and the Now Playing transport from documented iOS behaviour. If
-  background playback does not hold, `UIBackgroundModes: audio` must come out of
-  `Info.plist` before external review — declaring a background mode the app does
-  not use is itself a rejection reason.
+- **Background and lock-screen audio, and the Now Playing transport.** Reasoned
+  from how AVAudioEngine works and from documented iOS behaviour; whether they
+  hold through a lock, an app switch and a phone call is a separate observation
+  from "it works", and this doc does not assume the one from the other.
+  **`UIBackgroundModes: audio` rides on it**: if background playback does not
+  hold, that key must come out of `Info.plist` before external review, because
+  declaring a background mode the app does not use is itself a rejection reason.
+  Nothing else in the list is blocked by it — it is one plist line either way.
 - **The microphone in a WKWebView.** `NSMicrophoneUsageDescription` is now
   present (without it iOS terminates the app at the request) and the WKUIDelegate
   grants the capture ask, but whether `getUserMedia` is exposed at all under the

@@ -264,13 +264,21 @@ rather than a website with an icon.
 
 ## Verify on device before you trust it
 
-I could not test any of this on hardware — there is no Mac, no Xcode and no
-iPhone in the environment it was written in. The web payload is verified
-(renders headlessly, loads React and the font locally, makes zero network
-requests, install hint correctly suppressed). The Swift is type-checked by CI
-on every push that touches `ios/`, and the shell has run on Jake's devices —
-but `CoreAudioHost` (the AVAudioEngine host for the DSP core) has only been
-compiled, never run.
+**IT WORKS ON THE DEVICE — confirmed 2026-10-02**, on TestFlight build 138.
+That retires the biggest unknown in this file: `CoreAudioHost`, the AVAudioEngine
+host for the DSP core, had until then only ever been COMPILED, so every claim
+about what the app sounds like was a claim from a test suite. It has now run.
+
+None of this was testable from the environment it was written in — no Mac, no
+Xcode, no iPhone — so the list below is what Jake checked by hand and by ear.
+What is verified from here is the web payload (renders headlessly, loads React
+and the font locally, makes zero network requests, install hint correctly
+suppressed) and the Swift type-checking, which CI does on every push touching
+`ios/`.
+
+Work the list below on each new build rather than once: a shell that ran on one
+build is not a shell that runs on the next, and items 4–8 are narrower
+questions that "it works" does not answer.
 
 Specifically worth checking by hand and by ear, in rough order of how likely
 they are to bite:
