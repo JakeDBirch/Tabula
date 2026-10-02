@@ -60,10 +60,14 @@
 		<string>LaunchBackground</string>
 	</dict>
 	<!-- Keeps the sequencer running when the screen locks or you switch away to
-	     check something. WKWebView's background audio support has historically
-	     been unreliable, so verify this on a device before relying on it — and
-	     remove the key if it turns out not to hold, because declaring a
-	     background mode the app doesn't use is itself a review rejection. -->
+	     check something. VERIFIED ON THE DEVICE, 2026-10-02: it survives a lock
+	     and an app switch, so this key is HONEST and stays. It was declared on
+	     trust for three weeks with a note to remove it if it did not hold —
+	     declaring a background mode the app does not use is itself a rejection
+	     reason — and the thing that made it true is that the sequencer is no
+	     longer Web Audio: it is the C core in AVAudioEngine (CoreAudioHost).
+	     WKWebView could never have done this; see the WebKit note in
+	     CLAUDE.md. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

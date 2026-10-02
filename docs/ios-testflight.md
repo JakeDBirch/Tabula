@@ -301,9 +301,11 @@ they are to bite:
    same. Take a call and hang up: it should come back on its own (the shell
    restarts the engine on interruption-ended and on return to the foreground).
    When you come back, the transport button should still say what the engine
-   is doing. `UIBackgroundModes: audio` is declared and is now used; if
-   background playback does NOT work, that is a bug to fix, not a key to
-   remove.
+   is doing. **CONFIRMED 2026-10-02: it survives a lock and an app switch**, so
+   `UIBackgroundModes: audio` is declared, used and honest. Re-check it on each
+   build rather than taking it on trust — it is the one behaviour the whole
+   native core exists to provide, and an AVAudioEngine that stops itself on a
+   configuration change is a fault this shell has had before.
    **Lock-screen transport controls.** `NowPlayingController` registers
    play / pause / toggle / stop with MPRemoteCommandCenter and publishes a Now
    Playing entry (the selected pattern's name, the app icon). Lock the screen

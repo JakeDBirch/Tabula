@@ -2225,8 +2225,9 @@ itself:
   weeks and it was the single biggest unknown in the project: the whole case
   for the core is background audio, and until it had rendered a sample on real
   hardware every statement about what the app SOUNDS like came from a test
-  suite. It has now rendered on a phone. Lock-screen and background survival
-  are a separate observation and are not settled by it.
+  suite. It has now rendered on a phone, and **background and lock-screen
+  survival are confirmed too** — a locked screen and an app switch both hold,
+  which is the single thing this whole port was for.
 
 - **`BundleSchemeHandler`** serves the bundle over `loudlight://app` rather than
   `file://`. Not cosmetic: WebKit gives `file://` documents an opaque per-load
@@ -2471,29 +2472,31 @@ Two things gate whether it actually appears, and only one of them is code:
   App Intent per control and a two-way mute bridge, so it is a piece of work
   rather than a setting.
 
-**Background audio does not work — with Web Audio.** The shell now hosts the
-DSP core in AVAudioEngine (`CoreAudioHost`), which is not Web Audio, and the
-sequencer runs inside its render block; so this paragraph describes what the
-shell is escaping from, and `UIBackgroundModes: audio` is now honest. Whether
-it survives a locked screen and an app switch on a real phone is the first
-thing to check on the next TestFlight build. The old situation, worth keeping
-because it is why the core exists:
+**BACKGROUND AUDIO WORKS — CONFIRMED ON THE DEVICE, 2026-10-02.** It survives a
+locked screen and an app switch. That is the whole point of the core and the
+reason it was written: the shell hosts the DSP core in AVAudioEngine
+(`CoreAudioHost`), the sequencer runs inside its render block, and none of it is
+Web Audio. `UIBackgroundModes: audio` is therefore honest and **stays** — it was
+declared on trust with a standing note to remove it before external review if
+it did not hold, and that note is now spent. The old situation, kept because it
+is why the core exists AND because the trade it describes is permanent for the
+WEB build, which is still Web Audio and still cannot do this:
 **Web Audio in a WKWebView cannot play on the lock screen or sustain in the
 background.** WebKit suspends the `AudioContext` when the host app backgrounds
 regardless of `UIBackgroundModes` or the host's `AVAudioSession`; the WebKit bug
 for it ([173932](https://bugs.webkit.org/show_bug.cgi?id=173932)) has been open
 since 2017, and the underlying failure is `Required client entitlement is
 missing` — a private entitlement third-party apps cannot get. No configuration
-fixes it. `UIBackgroundModes: audio` is still declared and should be **removed
-before external review** unless testing shows it buys the reported ~27 seconds
-of app-switch survival; declaring a background mode the app doesn't use is
-itself a rejection reason.
+fixes it, which is why "move the engine out of Web Audio" was the only route and
+why the core exists. **This is still exactly true of the PAGE** — the Pages
+build has no background audio and cannot be given any, so it is the one honest
+caveat to hand anyone you send the web link to.
 
-The only real fix is moving the engines (`Bell`, `drumEngine`) out of Web Audio
+The only real fix was moving the engines (`Bell`, `drumEngine`) out of Web Audio
 into AVAudioEngine/Core Audio, with the web layer reduced to UI — the same work
-that unlocks AUv3, Core MIDI and Ableton Link. Until then the honest case for
-the app is offline reliability, home-screen presence and TestFlight
-distribution, **not** audio.
+that unlocks AUv3, Core MIDI and Ableton Link. **That work is done and it
+landed**, which is what makes the case for the app AUDIO now rather than merely
+offline reliability and home-screen presence.
 
 
 ## The native audio core
@@ -2818,15 +2821,30 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
   archive and upload green in 3m21s, built from `c39698b`). The copy to paste
   into App Store Connect, the App Privacy answers and the order of operations
   are `docs/app-store-connect.md`.
-  - **THE DEVICE CHECKS ARE DONE — it works, 2026-10-02.** That was the
-    critical path and it has cleared; see `CoreAudioHost` above. Everything
-    remaining is forms and two facts.
-  - **THREE THINGS ARE JAKE'S AND NONE OF THEM ARE CODE**: re-run the SQL in
-    `docs/cloud-sync.md` so `delete_account()` exists (review checks in-app
-    deletion under 5.1.1(v), and without the function the button 404s); a real
-    contact address on `privacy.html` (`privacy@loudlight.co` is a
-    placeholder); and the sample kits' licence, since App Store Connect asks
-    about third-party content and a paid app is where that bites.
+  - **THE DEVICE CHECKS ARE DONE — 2026-10-02, and it survives everything so
+    far**: it launches, a project survives a force-quit, it makes the right
+    sound, and it keeps playing through a lock and an app switch. That was the
+    critical path and it has cleared; `UIBackgroundModes: audio` is honest and
+    stays. Everything remaining is forms and three facts.
+  - **THREE THINGS ARE JAKE'S AND NONE OF THEM ARE CODE**: the SQL, the contact
+    address, the sample licence.
+    - **THE SQL IS NOT OPTIONAL, AND THE REASON IS MEASURED RATHER THAN
+      ARGUED.** Asked directly whether the beta could ship without it, so
+      `_delsql.mjs` mocks a project with the table but no `delete_account()`
+      and drives the real button: confirming DELETE ACCOUNT puts up **"CLOUD
+      TABLE MISSING — RUN THE SETUP SQL"** and leaves the account signed in.
+      That is strictly WORSE than having no button at all — 5.1.1(v) asks for
+      in-app deletion and this is a visibly broken required feature whose error
+      text tells the user to run SQL. Internal TestFlight and the web link
+      never check; external review might, and the whole block is safe to
+      re-run, so it is one paste against a possible bounce. **The web is live
+      and signed-in users can reach that button today**, which is the half that
+      is not about Apple at all.
+    - A real contact address on `privacy.html` — `privacy@loudlight.co` is a
+      placeholder, and if `loudlight.co` is Jake's then a forwarding rule makes
+      the file correct as written rather than needing an edit.
+    - The sample kits' licence, since App Store Connect asks about third-party
+      content and a paid app is where that bites.
   - **TESTFLIGHT GOES BEHIND `main` AND NOTHING SAYS SO.** Build 138 predates
     the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
     the dispatched run's `head_sha` against `origin/main` before telling anyone
