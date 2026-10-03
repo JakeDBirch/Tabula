@@ -2861,8 +2861,26 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
     the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
     the dispatched run's `head_sha` against `origin/main` before telling anyone
     what the testers have — a green `payload` tick on a push is NOT a build.
-  - Then: the metadata, a fresh dispatch, internal group, submit for Beta App
-    Review. **The shortest route to people's hands is not TestFlight at all** —
+  - **INTERNAL TESTING NEEDS NONE OF THE METADATA, AND THAT WAS BURIED.**
+    Asked "is there any way to get other people on the iOS app without
+    jumping through all these hoops" after an External group showed a tester
+    **"No Builds Available"** — and the honest answer is yes: internal needs no
+    Beta App Review, no App Privacy, no age rating, no Test Information. The
+    docs had the fact (`docs/ios-testflight.md`) but `docs/app-store-connect.md`
+    opened with a six-step list that read as the price of ANY tester, so the
+    cheap route was invisible at the moment of use. **A doc that is right in one
+    file and misleading in the one you are reading is wrong.**
+    - **A GROUP IS EXTERNAL OR INTERNAL AND CANNOT BE CONVERTED**, and an
+      External group with a build attached still shows **"No Builds
+      Available"** until review passes — the SAME message as a group with no
+      build. Two causes, one message, which is what makes it confusing.
+    - **ATTACHING a build is separate from UPLOADING one**: the group's own
+      Builds tab, not the app-level list. A group header reading "0 Builds" is
+      the first thing to check.
+    - The cost of internal is an **App Store Connect user seat per tester**
+      (any Apple ID, including Yahoo/Gmail) and a cap of 100.
+  - Then: the metadata, a fresh dispatch, submit for Beta App Review — needed
+    only for a public link or more than 100 people. **The shortest route to people's hands is not TestFlight at all** —
     the Pages build is live, installs from Safari via Add to Home Screen, and
     needs nobody's permission; its honest caveats are no background audio
     (WebKit suspends the context) and the JS engine unless `?core=1`.

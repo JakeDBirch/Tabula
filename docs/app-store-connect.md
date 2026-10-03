@@ -12,6 +12,37 @@ other two. Change one, change all three.
 
 ---
 
+## INTERNAL TESTING NEEDS NONE OF THIS — read before working the list
+
+**Everything on this page is for EXTERNAL testing.** Internal testing needs no
+Beta App Review, no App Privacy, no age rating and no Test Information: a build
+is available to internal testers within minutes of processing finishing, and
+nothing below gates it. If the goal is "get it into some hands", that is the
+route, and the build already on App Store Connect is enough.
+
+What internal costs instead: **each internal tester must be a user on the
+Apple Developer team** (App Store Connect ▸ Users and Access ▸ **+**, then they
+accept the invite with their Apple ID — any address, including a Yahoo or Gmail
+one). Cap of **100**. So it is right for a handful of trusted ears and wrong for
+a mailing list, and that is the only reason external exists.
+
+**A GROUP IS EXTERNAL OR INTERNAL AND YOU CANNOT CONVERT ONE.** An External
+group with a build attached still distributes nothing until review passes —
+which reads on the tester row as **"No Builds Available"**, the same message you
+get when no build is attached at all. Two different causes, one message.
+
+**AND ATTACHING A BUILD IS A SEPARATE ACT FROM UPLOADING ONE.** The group's own
+**Builds** tab is what matters; the app-level build list showing a build means
+only that it processed. A group header reading **"0 Builds"** is the thing to
+check first when a tester cannot see anything.
+
+**The external hoops are ONE TIME, not per build.** Once the metadata is in and
+the first build of a version string is approved, later builds on that same
+`MARKETING_VERSION` go straight out with no further review. So the list below is
+an afternoon once, not a tax on every release.
+
+---
+
 ## Order of operations
 
 External testing needs Beta App Review, which needs the metadata below, which
