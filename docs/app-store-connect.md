@@ -47,6 +47,86 @@ needs a build. So:
 
 ---
 
+## Where each field goes
+
+**App Store Connect moves its labels around, and I cannot see it from here**, so
+these are section names rather than promises about exact wording. If a label
+below does not match what is on screen, the section it sits in will.
+
+Everything starts at **appstoreconnect.apple.com → Apps → Loud Light**. Two
+tabs matter — **Distribution** (the App Store side) and **TestFlight** — each
+with its own left sidebar. Work them in this order, because the last step is
+gated on the first three.
+
+### 1. App Information *(Distribution tab → App Information)*
+
+| Field | Answer | Where the copy is |
+|---|---|---|
+| Primary category | **Music** | — |
+| Secondary category | Entertainment, or leave blank | — |
+| **Content Rights** | **No** — the kits are Jake's own recordings | `samples/README.md` |
+| **Age Rating** → Edit | answer the questionnaire; it lands on **4+** | "App Information" below |
+
+Nothing in the app rates: no user-to-user communication, no web browsing, no
+purchases, no content beyond the sounds in the box. The microphone records onto
+a drum pad; it does not publish anything.
+
+### 2. Privacy Policy URL
+
+```
+https://jakedbirch.github.io/Tabula/privacy.html
+```
+
+**There are two fields for this and both want it** — one on the Distribution
+side (App Privacy, or App Information depending on the current layout) and one
+under TestFlight ▸ Test Information. Filling only one is the commonest way the
+submit button stays greyed out with no useful explanation.
+
+### 3. App Privacy *(Distribution tab → App Privacy → Get Started)*
+
+The questionnaire, then **Publish** — it does not count until published, and
+external testing is gated on it. The three data types, their answers and the
+reasoning are under **App Privacy** below. It must agree with
+`ios/LoudLight/PrivacyInfo.xcprivacy`, which is inside the build.
+
+### 4. Test Information *(TestFlight tab → Test Information)*
+
+Per-app, not per-build, so it is typed once:
+
+- **Beta App Description** → the block under "Beta App Description" below.
+- **Feedback Email** → shown to every tester, so a public address in practice.
+- **Marketing URL** (optional) → `https://jakedbirch.github.io/Tabula`
+- **Privacy Policy URL** → as above.
+- **Beta App Review Information** → contact name, email, phone; **Sign-in
+  required: No**; and the review notes, all under "Beta App Review
+  Information" below. The sign-in answer has reasoning attached — read it
+  before ticking the box.
+
+### 5. What to Test — **per BUILD, not per app**
+
+This one is attached to the build rather than to Test Information, so it is
+entered on the build itself (TestFlight ▸ the build ▸ What to Test) or when the
+build is added to a group, depending on the layout. It is what testers read in
+the TestFlight app. Copy under "What to Test" below.
+
+### 6. Groups, then submit
+
+- **Internal Testing** ▸ **+** ▸ add the group, add testers, add the build.
+  No review, live within minutes of processing. Each internal tester needs an
+  App Store Connect user seat.
+- **External Testing** ▸ **+** ▸ add the group and the build. Adding a build to
+  an external group is what prompts for **Beta App Review**, on the first build
+  of each version string.
+
+### What gates the submit button
+
+App Privacy **published**, Age Rating **complete**, Test Information filled
+(Beta App Description and Feedback Email at minimum), and a build in an
+external group. Export compliance never asks, because
+`ITSAppUsesNonExemptEncryption` is `false` in `Info.plist`.
+
+---
+
 ## Test Information
 
 *TestFlight ▸ Test Information. These are per-app, not per-build, so they are
