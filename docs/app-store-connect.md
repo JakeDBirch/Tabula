@@ -90,8 +90,8 @@ https://jakedbirch.github.io/Tabula/privacy.html
 ```
 
 Committed as `privacy.html` at the repo root and served by Pages from `main`.
-**Change the contact address on it first** — it currently reads
-`privacy@loudlight.co`, which is a placeholder.
+Its contact address (`privacy@loudlight.co`) **forwards and is live** —
+confirmed 2026-10-03, so there is nothing to change before you paste this URL.
 
 ### Marketing URL (optional)
 

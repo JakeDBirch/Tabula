@@ -2353,8 +2353,12 @@ one, change all three.
   stamp carries a `PRIVACY` link beside it (`data-privacy`) — a reference, like
   the stamp, not a control. In the shell an `https` link is cancelled by
   `decidePolicyFor` and handed to Safari, so it opens outside the app.
-- **The contact address on it is a placeholder** (`privacy@loudlight.co`) and is
-  Jake's to make real before submission.
+- **The contact address on it is LIVE** (`privacy@loudlight.co`, forwarding
+  confirmed 2026-10-03). It needed no edit to the file, which was the point of
+  picking a role address on a domain Jake owns rather than a personal one:
+  forwarding made the page correct as written. Nothing in the app or in CI can
+  tell whether it still forwards, so it is the first thing to doubt if a
+  reviewer says they could not reach anyone.
 - **`ITSAppUsesNonExemptEncryption` is already `false`**, so the upload never
   asks about export compliance — the only cryptography is TLS to Supabase.
 - **The sample kits' provenance is unknown to me** and is flagged in the ASC
@@ -2840,11 +2844,13 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
       re-run, so it is one paste against a possible bounce. **The web is live
       and signed-in users can reach that button today**, which is the half that
       is not about Apple at all.
-    - A real contact address on `privacy.html` — `privacy@loudlight.co` is a
-      placeholder, and if `loudlight.co` is Jake's then a forwarding rule makes
-      the file correct as written rather than needing an edit.
+    - ~~A real contact address on `privacy.html`~~ — **DONE, 2026-10-03**:
+      `privacy@loudlight.co` forwards and mail arrives. It took no edit to the
+      file at all, which is what a role address on your own domain buys over a
+      personal one.
     - The sample kits' licence, since App Store Connect asks about third-party
-      content and a paid app is where that bites.
+      content and a paid app is where that bites. **This is the last of the
+      three that is still open**, alongside the SQL if it has not been run.
   - **TESTFLIGHT GOES BEHIND `main` AND NOTHING SAYS SO.** Build 138 predates
     the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
     the dispatched run's `head_sha` against `origin/main` before telling anyone
