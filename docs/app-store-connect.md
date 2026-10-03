@@ -236,20 +236,19 @@ collection that does not happen is its own kind of wrong.
   never asks. It is the correct answer: the only cryptography is HTTPS to
   Supabase, which is the standard exemption.
 
-### Content rights — **your call, and worth making before external review**
+### Content rights — **settled: answer NO**
 
-App Store Connect asks whether the app contains third-party content. It ships
-two sample kits (`samples/808-kit`, `samples/vp-kit`), and **I do not know where
-those came from.** If they are from a pack whose licence permits redistribution
-inside a product, the answer is straightforward. If they are not — or if the
-licence is one of the common "for use in your music, not for resale as sounds"
-kinds — that is a real exposure for a paid app, and much cheaper to settle now
-than after a takedown.
+> **Does your app contain, show, or access third-party content?** → **No.**
 
-Check the licence, and if it is unclear, either replace the kits or ship with
-the synthesized voices as the default. Nothing else in the app is anyone else's:
-React, lamejs and DM Sans are all permissively licensed and credited in
-`vendor/`.
+**The sample kits are Jake's own recordings** (confirmed 2026-10-03), so there
+is no licence to produce and nothing to evidence — which is the one answer to
+this question that cannot come back. It was the last open item on this page, and
+it was open because the provenance of `samples/808-kit` and `samples/vp-kit` is
+not recorded anywhere in the repo; worth writing down here so nobody has to ask
+again, and worth adding a line to `samples/` if the kits ever grow.
+
+Nothing else in the app is anyone else's either: React, lamejs and DM Sans are
+permissively licensed and credited in `vendor/`.
 
 ---
 

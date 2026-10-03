@@ -2361,10 +2361,10 @@ one, change all three.
   reviewer says they could not reach anyone.
 - **`ITSAppUsesNonExemptEncryption` is already `false`**, so the upload never
   asks about export compliance — the only cryptography is TLS to Supabase.
-- **The sample kits' provenance is unknown to me** and is flagged in the ASC
-  doc: App Store Connect asks about third-party content, and "for use in your
-  music, not for resale as sounds" is the common licence shape that would bite a
-  paid app.
+- **The sample kits are JAKE'S OWN RECORDINGS** (confirmed 2026-10-03), so App
+  Store Connect's third-party-content question is NO and there is no licence to
+  evidence. It is recorded here and in the ASC doc because it appears nowhere
+  in `samples/` itself, which is why it had to be asked at all.
 
 **Built and running, on device and in CI.** The app runs on Jake's iPhone and
 iPad from Xcode, and the TestFlight workflow went green on its first run
@@ -2830,9 +2830,11 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
     sound, and it keeps playing through a lock and an app switch. That was the
     critical path and it has cleared; `UIBackgroundModes: audio` is honest and
     stays. Everything remaining is forms and three facts.
-  - **ONE THING IS LEFT OF THE THREE, and it is not code either**: the SQL and
-    the contact address are both done (2026-10-03); the sample kits' licence is
-    not.
+  - **ALL THREE NON-CODE ITEMS ARE DONE (2026-10-03)**: the setup SQL, the
+    contact address and the sample kits' licence. **Nothing is left that is
+    code, a fact or a decision** — what remains is the App Store Connect
+    metadata (drafted, `docs/app-store-connect.md`), a fresh build, the
+    internal group, and submitting for Beta App Review.
     - ~~**The SQL**~~ — **DONE, 2026-10-03**: `delete_account()` is on the live
       project, so in-app deletion works and 5.1.1(v) is satisfied. **The
       finding survives the task, because a NEW project starts without it** — a
@@ -2848,16 +2850,13 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
       `privacy@loudlight.co` forwards and mail arrives. It took no edit to the
       file at all, which is what a role address on your own domain buys over a
       personal one.
-    - **THE SAMPLE KITS' LICENCE IS THE LAST OF THE THREE, AND THE ONLY ONE
-      NOTHING HERE CAN SETTLE.** App Store Connect asks whether the app
-      contains third-party content, and `samples/808-kit` and `samples/vp-kit`
-      ship inside the bundle. Where they came from is unknown to me and
-      unrecorded anywhere in the repo — there is no licence file — so it is
-      Jake's to confirm. The shape that would bite a PAID app is the common
-      "use these sounds in your music, but do not redistribute them as
-      sounds" clause, which a bundled kit is exactly a redistribution of. If
-      it cannot be established, the options are to replace the kits or to ship
-      with the synthesised voices as the default.
+    - ~~The sample kits' licence~~ — **DONE, 2026-10-03: THE KITS ARE JAKE'S
+      OWN RECORDINGS**, so App Store Connect's third-party-content question is
+      a flat NO and there is nothing to evidence. Recorded here because the
+      provenance of `samples/808-kit` and `samples/vp-kit` is written nowhere
+      in the repo — there is no licence file — so the question got asked twice
+      and would have got asked again. Add a line to `samples/` if the kits
+      ever grow with anything that is not his.
   - **TESTFLIGHT GOES BEHIND `main` AND NOTHING SAYS SO.** Build 138 predates
     the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
     the dispatched run's `head_sha` against `origin/main` before telling anyone
