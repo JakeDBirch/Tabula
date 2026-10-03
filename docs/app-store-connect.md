@@ -17,18 +17,20 @@ other two. Change one, change all three.
 External testing needs Beta App Review, which needs the metadata below, which
 needs a build. So:
 
-1. **Run the SQL** in `docs/cloud-sync.md`, which defines `delete_account()`.
-   **The whole block is safe to re-run** — `create table if not exists`,
-   `drop policy if exists`, `create or replace function` — so it is one paste
-   into the Supabase SQL editor, not a careful edit.
-   **MEASURED, so it is not a judgement call** (`_delsql.mjs`, against a mocked
-   project with the table but no function): a reviewer who taps DELETE ACCOUNT
-   and confirms gets the toast **"CLOUD TABLE MISSING — RUN THE SETUP SQL"**,
-   and the account is still there. That is strictly worse than having no button
-   — guideline 5.1.1(v) asks for in-app deletion, and this is a *visibly broken*
-   required feature whose error text tells the user to run SQL. Internal
-   TestFlight and the web link do not check; external review might, and the
-   downside is a bounce over ~20 seconds of work.
+1. ~~**Run the SQL**~~ — **DONE, 2026-10-03.** `delete_account()` exists on the
+   live project, so in-app account deletion works and 5.1.1(v) is satisfied.
+   Kept here because **a NEW Supabase project starts without it** — a second
+   environment, a restored backup, a migration — and the failure is one a
+   reviewer can walk into: `_delsql.mjs` drives the real button against a
+   mocked project that has the table but no function, and confirming DELETE
+   ACCOUNT puts up **"CLOUD TABLE MISSING — RUN THE SETUP SQL"** while leaving
+   the account signed in. That is strictly worse than having no button at all,
+   which is why it was never a judgement call. The whole block in
+   `docs/cloud-sync.md` is safe to re-run (`create table if not exists`,
+   `drop policy if exists`, `create or replace function`), so re-running it is
+   always the cheap answer. To check without deleting anything:
+   `select proname, prosecdef from pg_proc p join pg_namespace n on
+   n.oid = p.pronamespace where n.nspname='public' and proname='delete_account';`
 2. ~~**Device checks**~~ — **DONE, 2026-10-02.** Jake confirms the app works on
    the device, which settles what had been the critical path through this whole
    list: `CoreAudioHost` has RUN on hardware and the app makes a sound. The

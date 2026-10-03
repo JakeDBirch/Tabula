@@ -2765,7 +2765,7 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
 
 ## Open threads
 
-- **Cloud sync (task #87)**: **LIVE.** `CLOUD_URL` / `CLOUD_KEY` are filled in and have been since the "Delete VARY" commit, so `CLOUD_ON` is true and the DEVICE/CLOUD toggle ships — this entry said "switched off" for a while after it stopped being true, which is worth not repeating. The three Supabase setup steps are done. **Re-run the SQL in `docs/cloud-sync.md` after any change to it**: it now also defines `delete_account()`, which the in-app DELETE ACCOUNT needs and which an older project will not have. Verified end-to-end against a MOCKED Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out, account deletion); **never run against the real service** — `_delacct.mjs` in particular destroys an account.
+- **Cloud sync (task #87)**: **LIVE.** `CLOUD_URL` / `CLOUD_KEY` are filled in and have been since the "Delete VARY" commit, so `CLOUD_ON` is true and the DEVICE/CLOUD toggle ships — this entry said "switched off" for a while after it stopped being true, which is worth not repeating. The three Supabase setup steps are done. **Re-run the SQL in `docs/cloud-sync.md` after any change to it** — the whole block is idempotent, so that is always safe. `delete_account()` is the most recent addition and **IS on the live project as of 2026-10-03**, so in-app deletion works; but a project created BEFORE that, or a new one, will not have it, and the failure a reviewer would see is measured in the public-beta thread below. Verified end-to-end against a MOCKED Supabase (sign-in, wrong code, save, load, overwrite, clear, refresh-token restore, sign-out, account deletion); **never run against the real service** — `_delacct.mjs` in particular destroys an account.
   - **ACCOUNT DELETION IS A STORE REQUIREMENT, NOT A NICETY** (guideline 5.1.1(v)): an app that can create an account must delete one from inside itself. It cannot be a DELETE on a table, because the row is in `auth.users` and the only key that may touch it is the service-role key, which must never be in a static file. So it is an RPC to a `SECURITY DEFINER` function whose whole confinement is `where id = auth.uid()` — the caller's own id out of their own JWT, with no argument to pass a different one. The projects go with it on the FK cascade.
   - **AND IT FOUND THAT SIGN OUT HAD NEVER SIGNED YOU OUT.** `cloudSignOut` called `setCloudRows` / `setCloudSlotActive`, dead names from the slot-based cloud, and the ReferenceError took out every line below: the stored refresh token was never cleared, so the next launch traded it and signed you straight back in, and the "SIGNED OUT" flash never fired either. The long-run-of-setters cliff for the second time in this file, found by a harness reading `pageerror` rather than by anything on screen. The list is not cleared there at all now — the effect over `cloudSess && cloudSess.uid` already does it, and that effect is the one place the list is kept in step with the account.
 - **Cloud sync, next**: last-write-wins, manual only. Auto-sync and conflict handling are deliberately not in v1.
@@ -2830,27 +2830,34 @@ One thing to watch on navy: **mid-alpha warm colours desaturate to khaki.** The 
     sound, and it keeps playing through a lock and an app switch. That was the
     critical path and it has cleared; `UIBackgroundModes: audio` is honest and
     stays. Everything remaining is forms and three facts.
-  - **THREE THINGS ARE JAKE'S AND NONE OF THEM ARE CODE**: the SQL, the contact
-    address, the sample licence.
-    - **THE SQL IS NOT OPTIONAL, AND THE REASON IS MEASURED RATHER THAN
-      ARGUED.** Asked directly whether the beta could ship without it, so
-      `_delsql.mjs` mocks a project with the table but no `delete_account()`
-      and drives the real button: confirming DELETE ACCOUNT puts up **"CLOUD
-      TABLE MISSING — RUN THE SETUP SQL"** and leaves the account signed in.
-      That is strictly WORSE than having no button at all — 5.1.1(v) asks for
-      in-app deletion and this is a visibly broken required feature whose error
-      text tells the user to run SQL. Internal TestFlight and the web link
-      never check; external review might, and the whole block is safe to
-      re-run, so it is one paste against a possible bounce. **The web is live
-      and signed-in users can reach that button today**, which is the half that
-      is not about Apple at all.
+  - **ONE THING IS LEFT OF THE THREE, and it is not code either**: the SQL and
+    the contact address are both done (2026-10-03); the sample kits' licence is
+    not.
+    - ~~**The SQL**~~ — **DONE, 2026-10-03**: `delete_account()` is on the live
+      project, so in-app deletion works and 5.1.1(v) is satisfied. **The
+      finding survives the task, because a NEW project starts without it** — a
+      second environment, a restored backup, a migration. Asked directly
+      whether the beta could ship without running it, `_delsql.mjs` mocked a
+      project with the table but no function and drove the real button:
+      confirming DELETE ACCOUNT puts up **"CLOUD TABLE MISSING — RUN THE SETUP
+      SQL"** and leaves the account signed in. That is strictly WORSE than
+      having no button at all, which is what made it not a judgement call — and
+      the reason to answer a "can I skip this" question by MEASURING THE
+      FAILURE MODE rather than by weighing how likely anyone is to check.
     - ~~A real contact address on `privacy.html`~~ — **DONE, 2026-10-03**:
       `privacy@loudlight.co` forwards and mail arrives. It took no edit to the
       file at all, which is what a role address on your own domain buys over a
       personal one.
-    - The sample kits' licence, since App Store Connect asks about third-party
-      content and a paid app is where that bites. **This is the last of the
-      three that is still open**, alongside the SQL if it has not been run.
+    - **THE SAMPLE KITS' LICENCE IS THE LAST OF THE THREE, AND THE ONLY ONE
+      NOTHING HERE CAN SETTLE.** App Store Connect asks whether the app
+      contains third-party content, and `samples/808-kit` and `samples/vp-kit`
+      ship inside the bundle. Where they came from is unknown to me and
+      unrecorded anywhere in the repo — there is no licence file — so it is
+      Jake's to confirm. The shape that would bite a PAID app is the common
+      "use these sounds in your music, but do not redistribute them as
+      sounds" clause, which a bundled kit is exactly a redistribution of. If
+      it cannot be established, the options are to replace the kits or to ship
+      with the synthesised voices as the default.
   - **TESTFLIGHT GOES BEHIND `main` AND NOTHING SAYS SO.** Build 138 predates
     the SCALE/TRIM grips, so the web has a feature the beta does not. Compare
     the dispatched run's `head_sha` against `origin/main` before telling anyone
