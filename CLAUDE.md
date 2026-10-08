@@ -1158,6 +1158,28 @@ loses the shape you were keeping.
 The old step sheet and step page are still in the source, unreachable, so the
 two can be compared. Delete them once this has been lived with.
 
+**IN THE LAB: ONE DRUM LABEL PER ROW, AND THE KIT IS FOUR SHELVES.** Reported
+by a tester as hard to see, and it was: the voice name was tiled FOUR times
+across the row at 22% in the voice's own colour, over the notes. A repeated
+word is a texture (that is what a watermark is), a mid-alpha colour on this
+navy is mud, and text above the notes crossed the cell it named. Now
+`drumRowLabel`: one instance, left-anchored, voice colour at full strength on a
+dark backplate, zIndex 1 — and a LIT cell takes zIndex 2 so the notes paint
+over it. A busy row hides its name behind what you are hearing; an empty row
+shows it whole, which is when you need it. Two of the ideas floated with it
+were rejected on the way, and rightly: a per-row colour wash LOWERS contrast
+under text that is already faint, and lighting the label on a hit (or on a
+populated row) helps nobody who has not placed a note yet — once there are
+notes you have the sound as well as the picture. `DRUM_SHELF_START` splits the
+display order into percussion / cymbals+hats / toms / core with a wider gap
+and a hairline (`drumShelfRule`); Jake wants the shelves regardless of how the
+label lands. The gaps cost height, so `DRUM_SEP_TOTAL` goes into the desktop
+`dh` and into `gridSizeCss`'s new `extra` arg — and the paint's pointer→row
+mapping reads the row RECTS (`drumRowAtY`, `data-drow`) rather than dividing
+the grid height by 13, which stopped being the row pitch the moment the gaps
+were uneven. `_drumlabels.mjs` asserts all of it on a 15, an SE, landscape and
+desktop, including a vertical paint down the whole kit landing on every row.
+
 ### THE SOUND SCREEN
 
 **One screen for everything that shapes the sound**, reached from its own chip
