@@ -8963,13 +8963,54 @@ export default function LoudLight(){
   // (zIndex 2 against the label's 1). A busy row hides its name behind the
   // notes you are already hearing; an empty row shows it in full, which is
   // exactly when you need it.
-  const drumRowLabel=(voice,dc)=>(
-    <div data-drumlabel={voice.key} style={{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",zIndex:1,pointerEvents:"none",
-      fontSize:IS_MOBILE?10:12,fontWeight:700,letterSpacing:1.2,lineHeight:1,whiteSpace:"nowrap",
-      color:dc,background:"rgba(10,20,32,0.86)",border:"1px solid "+dc+"55",borderRadius:3,padding:"2px 5px 2px 6px"}}>
-      {voice.full||voice.label}
+  // ...AND IT MOVES OUT OF THE NOTES' WAY. Asked for directly. The label looks
+  // for the first run of empty cells in the visible bar wide enough to hold
+  // it and sits at the left of that run; if no run holds the word it falls back
+  // to the voice's two-letter key in the first gap that holds that; a bar with
+  // no gap for even that hides it — you can hear that row. Columns
+  // past the bar's length count as empty, since nothing is drawn there. The
+  // width it needs is estimated from the text against the grid's measured
+  // cell pitch (`drumCellPx`); the move is a CSS transition on `left`, so a
+  // note placed under the label slides it along rather than teleporting it.
+  // Two forms, one table: the word, and the compact two-letter key that has to
+  // fit ONE phone cell (~21px). `need` is estimated from exactly these metrics
+  // so the estimate and the drawn box cannot drift apart.
+  const DRUM_LBL={full:{fs:IS_MOBILE?10:12,ls:1.2,padX:11,pad:"2px 5px 2px 6px"},key:{fs:IS_MOBILE?9:11,ls:0,padX:4,pad:"1px 2px"}};
+  const drumLabelNeed=(text,form)=>{const m=DRUM_LBL[form];return drumCellPx>0?Math.ceil((text.length*(m.fs*0.74+m.ls)+m.padX+2)/drumCellPx):3;};
+  const drumLabelRuns=cols=>{
+    const runs=[];let start=-1;
+    for(let c=0;c<=COLS;c++){
+      const empty=c<COLS&&!cols[c];
+      if(empty&&start<0)start=c;
+      if((!empty||c===COLS)&&start>=0){runs.push({col:start,len:c-start});start=-1;}
+    }
+    return runs;
+  };
+  // Full name in the first gap that holds it; failing that the two-letter key
+  // (KICK → BD) in the first gap that holds THAT — a busy row keeps a legible
+  // mark instead of a word with notes through it; failing that, hide.
+  const drumLabelCol=(voice,cols)=>{
+    const runs=drumLabelRuns(cols);
+    if(!runs.length)return {col:-1,text:voice.full||voice.label,form:"full"};
+    for(const [text,form] of [[voice.full||voice.label,"full"],[voice.label,"key"]]){
+      const need=drumLabelNeed(text,form);
+      const r=runs.find(r=>r.len>=need);
+      if(r)return {col:r.col,text,form};
+    }
+    return {col:-1,text:voice.label,form:"key"};
+  };
+  const drumRowLabel=(voice,dc,cols,gap)=>{
+    const {col,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
+    return(
+    <div data-drumlabel={voice.key} data-labelcol={col} data-labelfit={col<0?0:1} style={{position:"absolute",
+      left:col<0?3:"calc("+col+" * (100% + "+gap+"px) / "+COLS+" + 2px)",top:"50%",transform:"translateY(-50%)",zIndex:1,pointerEvents:"none",
+      opacity:col<0?0:1,transition:"left .18s ease, opacity .18s ease",
+      fontSize:m.fs,fontWeight:700,letterSpacing:m.ls,lineHeight:1,whiteSpace:"nowrap",
+      color:dc,background:"rgba(10,20,32,0.86)",border:"1px solid "+dc+"55",borderRadius:3,padding:m.pad}}>
+      {text}
     </div>
-  );
+    );
+  };
   // The hairline above a row that starts a shelf, drawn in the widened gap
   // (`marginTop:DRUM_SEP` on the row) so it costs the row nothing.
   const drumShelfRule=voice=>DRUM_SHELF_START.has(voice.key)?(
@@ -12819,6 +12860,21 @@ export default function LoudLight(){
   // Drums: same band, but it captures directly — the drum grid has no
   // container-level pointer handler for a tap to bubble into.
   const drumGridRef=useRef(null);
+  // The drum grid's cell pitch in px, so a row label can know how many cells
+  // it needs to sit in. One ResizeObserver, re-pointed whenever the grid
+  // element changes (the two mounts swap with orientation); no re-render on
+  // every frame, just one state write when the width actually changes.
+  const [drumCellPx,setDrumCellPx]=useState(0);
+  const _drumRO=useRef({el:null,ro:null});
+  useEffect(()=>{
+    const el=drumGridRef.current;const cur=_drumRO.current;
+    if(el===cur.el)return;
+    if(cur.ro){cur.ro.disconnect();cur.ro=null;}
+    cur.el=el;if(!el)return;
+    const set=()=>{const w=el.clientWidth/COLS;setDrumCellPx(px=>Math.abs(px-w)<0.5?px:w);};
+    set();
+    if(typeof ResizeObserver!=="undefined"){cur.ro=new ResizeObserver(set);cur.ro.observe(el);}
+  });
   const _setDrumLenFromX=useCallback((clientX)=>{
     const el=drumGridRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
@@ -14205,7 +14261,7 @@ export default function LoudLight(){
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
                     <div key={voice.key} data-drow={r} style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
-                      {drumRowLabel(voice,dc)}
+                      {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),2)}
                       {Array.from({length:COLS},(_,c)=>{
                         // c = view column on this bar page; ac = absolute column.
                         const ac=barOff+c;
@@ -14797,7 +14853,7 @@ export default function LoudLight(){
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
                           <div key={voice.key} data-drow={r} style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
-                            {drumRowLabel(voice,dc)}
+                            {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),GAP)}
                             {Array.from({length:COLS},(_,step)=>{
                               // step = view column on this bar page; ac = absolute.
                               const ac=barOff+step;

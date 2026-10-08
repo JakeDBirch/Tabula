@@ -1165,8 +1165,16 @@ word is a texture (that is what a watermark is), a mid-alpha colour on this
 navy is mud, and text above the notes crossed the cell it named. Now
 `drumRowLabel`: one instance, left-anchored, voice colour at full strength on a
 dark backplate, zIndex 1 — and a LIT cell takes zIndex 2 so the notes paint
-over it. A busy row hides its name behind what you are hearing; an empty row
-shows it whole, which is when you need it. Two of the ideas floated with it
+over it. **And it MOVES OUT OF THE NOTES' WAY** (asked for directly): it
+takes the first gap in the visible bar wide enough to hold the word, sliding
+there on a CSS transition as you place notes; if no gap holds the word it
+falls back to the voice's two-letter KEY (`BD`, `CH`) in the first gap that
+holds that — compact metrics of its own, sized to fit one ~21px phone cell;
+and a bar with no gap at all hides it, because you can hear that row. The
+width it needs is estimated from the SAME metrics table the box is drawn
+from (`DRUM_LBL`) against the grid's measured cell pitch (`drumCellPx`, one
+ResizeObserver, re-pointed when the mount swaps), so the estimate and the
+box cannot drift. Two of the ideas floated with it
 were rejected on the way, and rightly: a per-row colour wash LOWERS contrast
 under text that is already faint, and lighting the label on a hit (or on a
 populated row) helps nobody who has not placed a note yet — once there are
@@ -1178,7 +1186,11 @@ label lands. The gaps cost height, so `DRUM_SEP_TOTAL` goes into the desktop
 mapping reads the row RECTS (`drumRowAtY`, `data-drow`) rather than dividing
 the grid height by 13, which stopped being the row pitch the moment the gaps
 were uneven. `_drumlabels.mjs` asserts all of it on a 15, an SE, landscape and
-desktop, including a vertical paint down the whole kit landing on every row.
+desktop, including a vertical paint down the whole kit landing on every row,
+the label sliding off a placed note, hiding on a full bar, coming back in a
+cleared gap, and the key fallback on an every-other-step row. One harness
+trap: tap cells by their OWN rects — stepping by cell width ignores the gap
+and by column 15 the tap lands on 14 and toggles it back off.
 
 ### THE SOUND SCREEN
 
