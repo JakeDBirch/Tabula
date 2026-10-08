@@ -1174,7 +1174,10 @@ loses the shape you were keeping.
 The old step sheet and step page are still in the source, unreachable, so the
 two can be compared. Delete them once this has been lived with.
 
-**IN THE LAB: ONE DRUM LABEL PER ROW, AND THE KIT IS FOUR SHELVES.** Reported
+**ONE DRUM LABEL PER ROW, AND THE KIT IS FOUR SHELVES** (built in the lab
+2026-10-08, promoted to `main` the same day on Jake's call — ported as the
+lab's own diff via `git apply`, zero conflicts; the step-slots experiment
+stays in the lab). Reported
 by a tester as hard to see, and it was: the voice name was tiled FOUR times
 across the row at 22% in the voice's own colour, over the notes. A repeated
 word is a texture (that is what a watermark is), a mid-alpha colour on this

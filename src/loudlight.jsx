@@ -500,19 +500,19 @@ const cullPatToMono=(grid,durs)=>{
 // changing this order requires migrating old saves by voice KEY — see
 // DRUM_ORDER_* + migrateDrumPatRows. Bump DRUM_ORDER_V on any future reorder.
 const DRUM_VOICES=[
-  {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
-  {key:"SD",label:"SD",full:"SNARE",  color:"#e09050"},
-  {key:"RM",label:"RM",full:"RIM",    color:"#cf8f6a"},
-  {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
-  {key:"HT",label:"HT",full:"HI TOM", color:"#a0b840"},
-  {key:"MT",label:"MT",full:"MID TOM",color:"#b8b040"},
-  {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
-  {key:"CH",label:"CH",full:"CL HAT", color:"#60b878"},
-  {key:"OH",label:"OH",full:"OP HAT", color:"#50a8c0"},
-  {key:"CY",label:"CY",full:"CYMBAL", color:"#7888d0"},
-  {key:"CL",label:"CL",full:"CLAVES", color:"#d4956a"},
-  {key:"SH",label:"SH",full:"SHAKER", color:"#8fb0c0"},
-  {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
+  {key:"BD",label:"BD",full:"KICK",   long:"KICK DRUM",color:"#e07060"},
+  {key:"SD",label:"SD",full:"SNARE",  long:"SNARE DRUM",color:"#e09050"},
+  {key:"RM",label:"RM",full:"RIM",    long:"RIMSHOT",color:"#cf8f6a"},
+  {key:"CP",label:"CP",full:"CLAP",   long:"HAND CLAP",color:"#c070c0"},
+  {key:"HT",label:"HT",full:"HI TOM", long:"HIGH TOM",color:"#a0b840"},
+  {key:"MT",label:"MT",full:"MID TOM",long:"MID TOM",color:"#b8b040"},
+  {key:"LT",label:"LT",full:"LO TOM", long:"LOW TOM",color:"#c8a840"},
+  {key:"CH",label:"CH",full:"CL HAT", long:"CLOSED HAT",color:"#60b878"},
+  {key:"OH",label:"OH",full:"OP HAT", long:"OPEN HAT",color:"#50a8c0"},
+  {key:"CY",label:"CY",full:"CYMBAL", long:"CYMBAL",color:"#7888d0"},
+  {key:"CL",label:"CL",full:"CLAVES", long:"CLAVES",color:"#d4956a"},
+  {key:"SH",label:"SH",full:"SHAKER", long:"SHAKER",color:"#8fb0c0"},
+  {key:"CB",label:"CB",full:"COWBELL",long:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
 // ── DRUM ROW ORDER IS A DISPLAY CONCERN ONLY ─────────────────────────────
@@ -534,6 +534,33 @@ const DRUM_ROWS=DRUM_VOICES.length;
 // Voices missing from the list are appended rather than dropped — a new voice
 // must never become invisible because someone forgot to name it here.
 const DRUM_DISPLAY_KEYS=["CB","SH","CL","CY","OH","CH","HT","MT","LT","CP","RM","SD","BD"];
+// THE KIT IS FOUR SHELVES, NOT THIRTEEN ROWS. Percussion, then cymbals and
+// hats, then the toms, then the core (clap / rim / snare / kick). A voice whose
+// key is here STARTS a shelf, so it gets a wider gap and a hairline above it.
+// Thirteen identical rows read as a wall; three rules turn it into four places
+// to look. The gap costs real height (DRUM_SEP px per rule) and every site that
+// budgets the drum grid's height adds `DRUM_SEP_TOTAL` for it — and the pointer
+// → row mapping inside a paint reads the ROW RECTS rather than dividing the
+// height by DRUM_ROWS, which stopped being the row pitch the moment the gaps
+// were uneven.
+const DRUM_SHELF_START=new Set(["CY","HT","CP"]);
+const DRUM_SEP=IS_MOBILE?5:7;
+const DRUM_SEP_TOTAL=DRUM_SEP*DRUM_DISPLAY_KEYS.filter(k=>DRUM_SHELF_START.has(k)).length;
+// The pointer's row during a drum paint, read off the row elements' own rects
+// (cached once per gesture) rather than from the grid's height divided by
+// DRUM_ROWS — the shelf gaps make the rows unevenly spaced. Clamps to the
+// nearest row above the first and below the last, as the division did.
+const drumRowRects=gridEl=>Array.from(gridEl.querySelectorAll("[data-drow]")).map(el=>{const b=el.getBoundingClientRect();return {r:+el.dataset.drow,top:b.top,bottom:b.bottom};});
+const drumRowAtY=(rects,y)=>{
+  if(!rects.length)return DRUM_DISPLAY[0];
+  for(let i=0;i<rects.length;i++){
+    const a=rects[i];
+    if(y<a.bottom)return a.r;
+    const nx=rects[i+1];
+    if(nx&&y<nx.top)return (y-a.bottom)<(nx.top-y)?a.r:nx.r;
+  }
+  return rects[rects.length-1].r;
+};
 const DRUM_DISPLAY=(function(){
   const seen={},out=[];
   for(const k of DRUM_DISPLAY_KEYS){
@@ -5923,7 +5950,7 @@ export default function LoudLight(){
   // real furniture now (the 6px padding top and bottom, the bar strip at its
   // actual wrapped height, the 6px gap above it) plus, where the song strip
   // shows, ONE reserved lane row; the lane grows into everything past that.
-  const gridSizeCss=(pad,factor)=>{
+  const gridSizeCss=(pad,factor,extra)=>{
     const f=factor||1;
     // 12 = the column's 6px padding top and bottom; then the bar strip at its
     // real wrapped height; then, where the song strip shows, the 6px gap below
@@ -5933,7 +5960,9 @@ export default function LoudLight(){
     // content area and must not be subtracted here — `--ch` has already had it
     // taken out of it. Subtracting it again cost the grid the lane's height
     // twice over.
-    const h="var(--ch,100dvh) - "+(12+_barStripPx)+"px";
+    // `extra` is fixed height the box carries beyond width*factor — the drum
+    // shelf gaps — and it comes off the budget before the division.
+    const h="var(--ch,100dvh) - "+(12+_barStripPx+(extra||0))+"px";
     return "min(100%,calc(("+h+")"+(f===1?"":" / "+f.toFixed(4))+"))";
   };
   const curBar        = Math.max(0,Math.min(barCount-1,barPage));
@@ -8393,6 +8422,78 @@ export default function LoudLight(){
   // Same idea on the drum page: the voice under your finger, at the level its
   // mixer strip is set to. The drum grid spaces its rows by 2, so this column
   // does too or the labels walk away from the rows they name.
+  // ONE LABEL PER DRUM ROW, AT THE LEFT, UNDER THE NOTES. It was the voice's
+  // name tiled four times across the row at 22% in the voice's own colour, over
+  // the notes — and all three of those worked against reading it. A word
+  // repeated four times is a texture, which is what a watermark is and why the
+  // eye skips it; a mid-alpha colour on this navy goes to mud (the note fill's
+  // own lesson); and sitting ABOVE the notes meant text crossing the very cell
+  // it named. Reported as hard to see, correctly. So: one instance, where a
+  // label goes, on a dark backplate so it reads whatever the ground is doing,
+  // in the voice colour at full strength — and a LIT cell paints over it
+  // (zIndex 2 against the label's 1). A busy row hides its name behind the
+  // notes you are already hearing; an empty row shows it in full, which is
+  // exactly when you need it.
+  // ...AND IT MOVES OUT OF THE NOTES' WAY. Asked for directly. The label looks
+  // for the first run of empty cells in the visible bar wide enough to hold
+  // it and sits at the left of that run; if no run holds the word it falls back
+  // to the voice's two-letter key in the first gap that holds that; a bar with
+  // no gap for even that hides it — you can hear that row. Columns
+  // past the bar's length count as empty, since nothing is drawn there. The
+  // width it needs is estimated from the text against the grid's measured
+  // cell pitch (`drumCellPx`); the move is a CSS transition on `left`, so a
+  // note placed under the label slides it along rather than teleporting it.
+  // Two forms, one table: the word, and the compact two-letter key that has to
+  // fit ONE phone cell (~21px). `need` is estimated from exactly these metrics
+  // so the estimate and the drawn box cannot drift apart.
+  const DRUM_LBL={full:{fs:IS_MOBILE?10:12,ls:1.2,padX:11,pad:"2px 5px 2px 6px"},key:{fs:IS_MOBILE?9:11,ls:0,padX:4,pad:"1px 2px"}};
+  const drumLabelNeed=(text,form)=>{const m=DRUM_LBL[form];return drumCellPx>0?Math.ceil((text.length*(m.fs*0.74+m.ls)+m.padX+2)/drumCellPx):3;};
+  const drumLabelRuns=cols=>{
+    const runs=[];let start=-1;
+    for(let c=0;c<=COLS;c++){
+      const empty=c<COLS&&!cols[c];
+      if(empty&&start<0)start=c;
+      if((!empty||c===COLS)&&start>=0){runs.push({col:start,len:c-start});start=-1;}
+    }
+    return runs;
+  };
+  // THREE TIERS, LONGEST THAT FITS: the full name (CLOSED HAT), the short name
+  // (CL HAT), then the two-letter key (CH). Each tier is tried against every
+  // gap in the visible bar, first gap that holds it wins, and the label sits
+  // CENTRED in that gap. Failing all three, hide. So an empty row reads its
+  // whole name across the middle, and the words give way a tier at a time as
+  // the bar fills rather than jumping straight to two letters.
+  const drumLabelCol=(voice,cols)=>{
+    const runs=drumLabelRuns(cols);
+    if(!runs.length)return {col:-1,len:0,text:voice.long||voice.full||voice.label,form:"full"};
+    const tiers=[[voice.long||voice.full||voice.label,"full"],[voice.full||voice.label,"full"],[voice.label,"key"]];
+    for(const [text,form] of tiers){
+      const need=drumLabelNeed(text,form);
+      const r=runs.find(r=>r.len>=need);
+      if(r)return {col:r.col,len:r.len,text,form};
+    }
+    return {col:-1,len:0,text:voice.label,form:"key"};
+  };
+  const drumRowLabel=(voice,dc,cols,gap)=>{
+    const {col,len,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
+    // Centre of the run, in row coordinates: the run spans `len` cell pitches
+    // less one trailing gap, starting `col` pitches in.
+    const left=col<0?"50%":"calc(("+col+" + "+(len/2)+") * (100% + "+gap+"px) / "+COLS+" - "+(gap/2)+"px)";
+    return(
+    <div data-drumlabel={voice.key} data-labelcol={col} data-labelfit={col<0?0:1} style={{position:"absolute",
+      left,top:"50%",transform:"translate(-50%,-50%)",zIndex:1,pointerEvents:"none",
+      opacity:col<0?0:1,transition:"left .18s ease, opacity .18s ease",
+      fontSize:m.fs,fontWeight:700,letterSpacing:m.ls,lineHeight:1,whiteSpace:"nowrap",
+      color:dc,background:"rgba(10,20,32,0.86)",border:"1px solid "+dc+"55",borderRadius:3,padding:m.pad}}>
+      {text}
+    </div>
+    );
+  };
+  // The hairline above a row that starts a shelf, drawn in the widened gap
+  // (`marginTop:DRUM_SEP` on the row) so it costs the row nothing.
+  const drumShelfRule=voice=>DRUM_SHELF_START.has(voice.key)?(
+    <div data-shelf={voice.key} style={{position:"absolute",left:0,right:0,top:-(DRUM_SEP/2)-2,height:1,background:"rgba(186,208,230,0.22)",pointerEvents:"none"}}/>
+  ):null;
   const drumRowKeys=!(ROWKEYS_ON&&rowKeysOpen)?null:(
     <div style={{position:"absolute",left:0,top:0,bottom:0,width:ROWKEY_W,zIndex:6,
       display:"flex",flexDirection:"column",gap:2,touchAction:"none"}}>
@@ -12199,6 +12300,21 @@ export default function LoudLight(){
   // Drums: same band, but it captures directly — the drum grid has no
   // container-level pointer handler for a tap to bubble into.
   const drumGridRef=useRef(null);
+  // The drum grid's cell pitch in px, so a row label can know how many cells
+  // it needs to sit in. One ResizeObserver, re-pointed whenever the grid
+  // element changes (the two mounts swap with orientation); no re-render on
+  // every frame, just one state write when the width actually changes.
+  const [drumCellPx,setDrumCellPx]=useState(0);
+  const _drumRO=useRef({el:null,ro:null});
+  useEffect(()=>{
+    const el=drumGridRef.current;const cur=_drumRO.current;
+    if(el===cur.el)return;
+    if(cur.ro){cur.ro.disconnect();cur.ro=null;}
+    cur.el=el;if(!el)return;
+    const set=()=>{const w=el.clientWidth/COLS;setDrumCellPx(px=>Math.abs(px-w)<0.5?px:w);};
+    set();
+    if(typeof ResizeObserver!=="undefined"){cur.ro=new ResizeObserver(set);cur.ro.observe(el);}
+  });
   const _setDrumLenFromX=useCallback((clientX)=>{
     const el=drumGridRef.current; if(!el)return;
     const rect=el.getBoundingClientRect();
@@ -13555,7 +13671,7 @@ export default function LoudLight(){
               const dPat=drumPats.find(p=>p.id===activeDrumId)||drumPats[0];
               const dLen=(dPat?.gridLen)??16;
               const dw=gridPx||null;
-              const dh=dw?Math.floor(dw*DRUM_ROWS/COLS):null;
+              const dh=dw?Math.floor(dw*DRUM_ROWS/COLS)+DRUM_SEP_TOTAL:null;
               return(
               <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6}}>
                 {/* (RAND/CLR live in the action row — no duplicate header here.) */}
@@ -13583,8 +13699,8 @@ export default function LoudLight(){
                   {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
-                    <div key={voice.key} style={{flex:1,display:"flex",gap:2,position:"relative"}}>
-                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
+                    <div key={voice.key} data-drow={r} style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                      {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),2)}
                       {Array.from({length:COLS},(_,c)=>{
                         // c = view column on this bar page; ac = absolute column.
                         const ac=barOff+c;
@@ -13600,7 +13716,7 @@ export default function LoudLight(){
                         const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                         const onBg=isActive?"rgba(255,255,255,0.9)":dc+aHex;
                         return(
-                          <div key={c} style={{flex:1,position:"relative",borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(186,208,230,0.02)":on?onBg:isActive?"rgba(186,208,230,0.15)":isQ?"rgba(186,208,230,0.06)":"rgba(186,208,230,0.03)",border:"1px solid "+(inactive?"rgba(186,208,230,0.04)":on?dc:isQ?"rgba(186,208,230,0.12)":"rgba(186,208,230,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
+                          <div key={c} style={{flex:1,position:"relative",zIndex:on?2:undefined,borderRadius:2,cursor:inactive?"default":"pointer",background:inactive?"rgba(186,208,230,0.02)":on?onBg:isActive?"rgba(186,208,230,0.15)":isQ?"rgba(186,208,230,0.06)":"rgba(186,208,230,0.03)",border:"1px solid "+(inactive?"rgba(186,208,230,0.04)":on?dc:isQ?"rgba(186,208,230,0.12)":"rgba(186,208,230,0.06)"),boxShadow:on&&isActive?"0 0 6px "+dc:"none",transition:"background .06s"}}
                             onPointerDown={e=>{
                               // Shift+drag (desktop) or a SECOND FINGER (touch)
                               // → move the whole pattern (grid+vel+rat).
@@ -13614,7 +13730,7 @@ export default function LoudLight(){
                               // pure tap = toggle. paintVal is decided by the start
                               // cell (empty → paint on, lit → erase).
                               const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
-                              const cw=ge.width/COLS||1,chh=ge.height/DRUM_ROWS||1;
+                              const cw=ge.width/COLS||1,rowRects=drumRowRects(e.currentTarget.parentElement.parentElement);
                               const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
                               let mode=null;const painted=new Set();
                               const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
@@ -13640,7 +13756,7 @@ export default function LoudLight(){
                                   // rendered with; only this hit test, which derives
                                   // a row from geometry, could get it wrong, and it
                                   // wrote to the mirrored voice.
-                                  const rr=DRUM_DISPLAY[Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)))];
+                                  const rr=drumRowAtY(rowRects,ev.clientY);
                                   paint(rr,cc);
                                 }
                               };
@@ -14130,7 +14246,7 @@ export default function LoudLight(){
                   // each row so the cells themselves get the full width.
                   // 13 rows of 16 columns — the drum grid is never square, so
                   // its height budget divides by that ratio rather than by one.
-                  const SIZE=gridSizeCss(10,DRUM_ROWS/COLS);
+                  const SIZE=gridSizeCss(10,DRUM_ROWS/COLS,DRUM_SEP_TOTAL);
                   // The SQUARE the synth page reserves. The drum grid is 13 rows
                   // to the synth's 16, so its block is ~70px shorter on a phone
                   // and ~150px on desktop — and with the block centred, that
@@ -14174,8 +14290,8 @@ export default function LoudLight(){
                         {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
-                          <div key={voice.key} style={{display:"flex",gap:GAP,position:"relative"}}>
-                            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-around",pointerEvents:"none",zIndex:2,fontSize:10,fontWeight:700,color:dc,opacity:0.22,letterSpacing:1}}>{[0,1,2,3].map(i=><span key={i}>{voice.full||voice.label}</span>)}</div>
+                          <div key={voice.key} data-drow={r} style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                            {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),GAP)}
                             {Array.from({length:COLS},(_,step)=>{
                               // step = view column on this bar page; ac = absolute.
                               const ac=barOff+step;
@@ -14187,7 +14303,7 @@ export default function LoudLight(){
                               const isQ=step%4===0;
                               const aHex=Math.round((0.30+0.70*(cv/127))*255).toString(16).padStart(2,"0");
                               const onBg=isActive?"rgba(255,255,255,0.88)":dc+aHex;
-                              return(<div key={step} style={{flex:1,position:"relative",aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
+                              return(<div key={step} style={{flex:1,position:"relative",zIndex:on?2:undefined,aspectRatio:"1",borderRadius:2,cursor:inactive?"default":"pointer",
                                 background:inactive?"rgba(186,208,230,0.015)":on?onBg:isActive?"rgba(186,208,230,0.1)":isQ?"rgba(186,208,230,0.05)":"rgba(186,208,230,0.03)",
                                 border:"1px solid "+(inactive?"rgba(186,208,230,0.03)":on?dc:"rgba(186,208,230,0.07)"),
                                 boxShadow:on&&isActive?"0 0 4px "+dc:"none",
@@ -14202,7 +14318,7 @@ export default function LoudLight(){
                                 // Horizontal drag = paint/erase a run; vertical drag
                                 // = per-cell velocity; tap = toggle.
                                 const ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();
-                                const cw=ge.width/COLS||1,chh=ge.height/DRUM_ROWS||1;
+                                const cw=ge.width/COLS||1,rowRects=drumRowRects(e.currentTarget.parentElement.parentElement);
                                 const startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;
                                 let mode=null;const painted=new Set();
                                 const paint=(rr,cc)=>{const k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};
@@ -14228,7 +14344,7 @@ export default function LoudLight(){
                                   // rendered with; only this hit test, which derives
                                   // a row from geometry, could get it wrong, and it
                                   // wrote to the mirrored voice.
-                                  const rr=DRUM_DISPLAY[Math.max(0,Math.min(DRUM_ROWS-1,Math.floor((ev.clientY-ge.top)/chh)))];
+                                  const rr=drumRowAtY(rowRects,ev.clientY);
                                     paint(rr,cc);
                                   }
                                 };
