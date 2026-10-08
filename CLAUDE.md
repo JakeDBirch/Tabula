@@ -120,6 +120,22 @@ nothing about whether the two features still agree.
 `--lab` and `--ios` are **mutually exclusive**: the iOS payload is the shipping
 app, and there is no signed offline build of the experiment.
 
+**THE LAB CHECKS IT IS THE LATEST LAB AND RELOADS ITSELF IF NOT.** Reported
+as closing and reopening the home-screen shortcut several times and still
+getting an older build. An iOS home-screen web app holds its start page far
+past the ten minutes Pages asks for, and the lab registers no service worker
+(deliberately, above), so nothing goes network-first on its behalf — the live
+app's worker does, which is why `index.html` never showed this. The scaffold
+now stamps `window.__LL_BUILD`, fetches its own url with `cache:"no-store"`,
+reads the stamp out of the bytes, and if it differs navigates to the same
+page under `?fresh=<stamp>` — a url the cache has no entry for. A
+`sessionStorage` note of the stamp last chased stops a CDN edge still serving
+the old file from making it a loop. `_labfresh.mjs` covers the redirect, the
+landing, the no-loop guard and that a current build stays put. **The copy
+already on a phone predates the check and cannot update itself**: delete the
+shortcut, load the url in Safari with a throwaway query string, Add to Home
+Screen again. Once.
+
 `_lab.mjs` is the harness. It asserts the isolation on the real built files over
 one origin — the seed lands, the lab's writes move no live key, a second launch
 doesn't re-seed, the live library survives — and it has a **negative control**

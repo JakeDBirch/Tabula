@@ -208,6 +208,33 @@ const LAB_BOOT = `<script>
         localStorage.setItem(NS + "_seeded", String(keys.length));
       } catch (e) {}
     })();
+    // THE LAB CHECKS IT IS THE LATEST LAB, AND RELOADS ITSELF IF NOT. An iOS
+    // home-screen web app holds on to its start page far past the 10 minutes
+    // Pages asks for, and the lab registers no service worker (deliberately —
+    // see above), so there was nothing to go network-first on its behalf:
+    // reported as closing and reopening the shortcut several times and still
+    // getting an older build. So on load it fetches its OWN url with the HTTP
+    // cache bypassed, reads the build stamp out of the bytes, and if that is
+    // not the stamp it was built with, navigates to the same page under a
+    // fresh query string — a url the cache has no entry for. A sessionStorage
+    // note of the stamp it last chased stops a CDN edge still serving the old
+    // file from turning this into a loop; the shortcut's start url is
+    // untouched, so nothing about the install changes.
+    window.__LL_BUILD = ${JSON.stringify(stamp)};
+    (function () {
+      try {
+        if (!navigator.onLine) return;
+        var here = location.pathname.split("/").pop() || "lab.html";
+        fetch(here, { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) {
+          var m = /__LL_BUILD = "([^"]+)"/.exec(t);
+          if (!m || m[1] === window.__LL_BUILD) return;
+          var key = "tnori-lab-_chased";
+          if (sessionStorage.getItem(key) === m[1]) return;
+          sessionStorage.setItem(key, m[1]);
+          location.replace(here + "?fresh=" + encodeURIComponent(m[1]));
+        }).catch(function () {});
+      } catch (e) {}
+    })();
     // A mark you cannot miss and cannot press. It lives in the SCAFFOLD, not in
     // src/lab.jsx, so the fork can stay a byte-for-byte copy of the shipping
     // source until you actually change something — which is what makes
