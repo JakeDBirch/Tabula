@@ -4625,6 +4625,18 @@ export default function LoudLight(){
     setRowKeysOpen(next);
     try{localStorage.setItem(LS_NS+"rowkeys-open",next?"1":"0");}catch(e){}
   };
+  // DRUM ROW LABELS ON/OFF — a VIEW PREFERENCE, like the row keys: through
+  // LS_NS, read synchronously, written only by the toggle (persist a CHOICE,
+  // not a state). Absent means ON. Lives on the DRUMS layer button's hold
+  // menu beside RAND / CLEAR, because that is the one place that is about the
+  // drum grid as a whole. Asked for after living with the labels in context.
+  const [drumLabelsOn,setDrumLabelsOn]=useState(()=>{
+    try{return localStorage.getItem(LS_NS+"drumlabels")!=="0";}catch(e){return true;}
+  });
+  const toggleDrumLabels=()=>{
+    const next=!drumLabelsOn;setDrumLabelsOn(next);
+    try{localStorage.setItem(LS_NS+"drumlabels",next?"1":"0");}catch(e){}
+  };
   const [audRow, setAudRow] = useState(-1);
   const audRowTmrR=useRef(0);
   const flashRowKey=k=>{
@@ -5394,9 +5406,11 @@ export default function LoudLight(){
       // menus were the one dismissable thing in the app with no keyboard way
       // out. (Safe to read these directly: this effect has no dep array, so it
       // re-registers every render and the values are never stale.)
-      if(!isEditable&&e.key==="Escape"&&(patMenu||barMenu||addMenu)){
+      // The LAYER hold menu too — it was missed when this landed, so ESC on it
+      // fell through to the transport exactly as the others once did.
+      if(!isEditable&&e.key==="Escape"&&(patMenu||barMenu||addMenu||layerMenu)){
         e.preventDefault();
-        setPatMenu(null);setDelArm(null);setBarMenu(null);setAddMenu(null);
+        setPatMenu(null);setDelArm(null);setBarMenu(null);setAddMenu(null);setLayerMenu(null);
         return;
       }
       // Spacebar is the PLAY/PAUSE button's keyboard twin — the same three-state
@@ -6790,7 +6804,7 @@ export default function LoudLight(){
     const lm=layerMenu, isDrum=lm.layer==="drums";
     const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
     const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#8279e0":"#e07060";
-    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=isDrum?158:120;
     const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
     const close=()=>setLayerMenu(null);
@@ -6818,6 +6832,13 @@ export default function LoudLight(){
                 onClick={()=>act(fn)}>{t}</button>
             ))}
           </div>
+          {isDrum&&(
+            <button data-drumlabels-toggle="1" aria-pressed={drumLabelsOn}
+              style={{display:"block",width:"100%",padding:"10px 0",background:"rgba(10,18,28,0.92)",border:"none",
+                borderTop:"1px solid rgba(168,190,212,0.1)",fontFamily:"inherit",
+                color:drumLabelsOn?"rgba(212,226,240,0.82)":"rgba(178,199,219,0.4)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
+              onClick={()=>act(toggleDrumLabels)}>LABELS {drumLabelsOn?"ON":"OFF"}</button>
+          )}
         </div>
       </div>
     );
@@ -8475,6 +8496,7 @@ export default function LoudLight(){
     return {col:-1,len:0,text:voice.label,form:"key"};
   };
   const drumRowLabel=(voice,dc,cols,gap)=>{
+    if(!drumLabelsOn)return null;
     const {col,len,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
     // Centre of the run, in row coordinates: the run spans `len` cell pitches
     // less one trailing gap, starting `col` pitches in.

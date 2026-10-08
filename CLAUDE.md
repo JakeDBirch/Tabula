@@ -1215,6 +1215,18 @@ cleared gap, the three tiers giving way as one row's widest gap shrinks
 trap: tap cells by their OWN rects — stepping by cell width ignores the gap
 and by column 15 the tap lands on 14 and toggles it back off.
 
+**LABELS ON/OFF lives on the DRUMS layer button's HOLD menu**, beside RAND /
+CLEAR — asked for after living with the labels in context. It is a VIEW
+PREFERENCE exactly like the row keys: `drumlabels` through `LS_NS`, absent
+means ON, read synchronously, written only by the toggle. `drumRowLabel`
+returns null when off, so the labels cost nothing hidden. Found on the way:
+**ESC did not close the layer hold menu** — the ESC-closes-menus branch named
+`patMenu`/`barMenu`/`addMenu` and missed `layerMenu`, so ESC on it fell
+through to the transport and stopped the song. Fixed. `_drumlabeltoggle.mjs`
+drives the real hold (with a wobble) on both pages, phone and desktop:
+hidden, written, hidden across a relaunch, back on; and POLY's menu does not
+carry the row.
+
 ### THE SOUND SCREEN
 
 **One screen for everything that shapes the sound**, reached from its own chip
