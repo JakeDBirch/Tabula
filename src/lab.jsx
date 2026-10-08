@@ -500,19 +500,19 @@ const cullPatToMono=(grid,durs)=>{
 // changing this order requires migrating old saves by voice KEY — see
 // DRUM_ORDER_* + migrateDrumPatRows. Bump DRUM_ORDER_V on any future reorder.
 const DRUM_VOICES=[
-  {key:"BD",label:"BD",full:"KICK",   color:"#e07060"},
-  {key:"SD",label:"SD",full:"SNARE",  color:"#e09050"},
-  {key:"RM",label:"RM",full:"RIM",    color:"#cf8f6a"},
-  {key:"CP",label:"CP",full:"CLAP",   color:"#c070c0"},
-  {key:"HT",label:"HT",full:"HI TOM", color:"#a0b840"},
-  {key:"MT",label:"MT",full:"MID TOM",color:"#b8b040"},
-  {key:"LT",label:"LT",full:"LO TOM", color:"#c8a840"},
-  {key:"CH",label:"CH",full:"CL HAT", color:"#60b878"},
-  {key:"OH",label:"OH",full:"OP HAT", color:"#50a8c0"},
-  {key:"CY",label:"CY",full:"CYMBAL", color:"#7888d0"},
-  {key:"CL",label:"CL",full:"CLAVES", color:"#d4956a"},
-  {key:"SH",label:"SH",full:"SHAKER", color:"#8fb0c0"},
-  {key:"CB",label:"CB",full:"COWBELL",color:"#9bbfaa"},
+  {key:"BD",label:"BD",full:"KICK",   long:"KICK DRUM",color:"#e07060"},
+  {key:"SD",label:"SD",full:"SNARE",  long:"SNARE DRUM",color:"#e09050"},
+  {key:"RM",label:"RM",full:"RIM",    long:"RIMSHOT",color:"#cf8f6a"},
+  {key:"CP",label:"CP",full:"CLAP",   long:"HAND CLAP",color:"#c070c0"},
+  {key:"HT",label:"HT",full:"HI TOM", long:"HIGH TOM",color:"#a0b840"},
+  {key:"MT",label:"MT",full:"MID TOM",long:"MID TOM",color:"#b8b040"},
+  {key:"LT",label:"LT",full:"LO TOM", long:"LOW TOM",color:"#c8a840"},
+  {key:"CH",label:"CH",full:"CL HAT", long:"CLOSED HAT",color:"#60b878"},
+  {key:"OH",label:"OH",full:"OP HAT", long:"OPEN HAT",color:"#50a8c0"},
+  {key:"CY",label:"CY",full:"CYMBAL", long:"CYMBAL",color:"#7888d0"},
+  {key:"CL",label:"CL",full:"CLAVES", long:"CLAVES",color:"#d4956a"},
+  {key:"SH",label:"SH",full:"SHAKER", long:"SHAKER",color:"#8fb0c0"},
+  {key:"CB",label:"CB",full:"COWBELL",long:"COWBELL",color:"#9bbfaa"},
 ];
 const DRUM_ROWS=DRUM_VOICES.length;
 // ── DRUM ROW ORDER IS A DISPLAY CONCERN ONLY ─────────────────────────────
@@ -8986,24 +8986,31 @@ export default function LoudLight(){
     }
     return runs;
   };
-  // Full name in the first gap that holds it; failing that the two-letter key
-  // (KICK → BD) in the first gap that holds THAT — a busy row keeps a legible
-  // mark instead of a word with notes through it; failing that, hide.
+  // THREE TIERS, LONGEST THAT FITS: the full name (CLOSED HAT), the short name
+  // (CL HAT), then the two-letter key (CH). Each tier is tried against every
+  // gap in the visible bar, first gap that holds it wins, and the label sits
+  // CENTRED in that gap. Failing all three, hide. So an empty row reads its
+  // whole name across the middle, and the words give way a tier at a time as
+  // the bar fills rather than jumping straight to two letters.
   const drumLabelCol=(voice,cols)=>{
     const runs=drumLabelRuns(cols);
-    if(!runs.length)return {col:-1,text:voice.full||voice.label,form:"full"};
-    for(const [text,form] of [[voice.full||voice.label,"full"],[voice.label,"key"]]){
+    if(!runs.length)return {col:-1,len:0,text:voice.long||voice.full||voice.label,form:"full"};
+    const tiers=[[voice.long||voice.full||voice.label,"full"],[voice.full||voice.label,"full"],[voice.label,"key"]];
+    for(const [text,form] of tiers){
       const need=drumLabelNeed(text,form);
       const r=runs.find(r=>r.len>=need);
-      if(r)return {col:r.col,text,form};
+      if(r)return {col:r.col,len:r.len,text,form};
     }
-    return {col:-1,text:voice.label,form:"key"};
+    return {col:-1,len:0,text:voice.label,form:"key"};
   };
   const drumRowLabel=(voice,dc,cols,gap)=>{
-    const {col,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
+    const {col,len,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
+    // Centre of the run, in row coordinates: the run spans `len` cell pitches
+    // less one trailing gap, starting `col` pitches in.
+    const left=col<0?"50%":"calc(("+col+" + "+(len/2)+") * (100% + "+gap+"px) / "+COLS+" - "+(gap/2)+"px)";
     return(
     <div data-drumlabel={voice.key} data-labelcol={col} data-labelfit={col<0?0:1} style={{position:"absolute",
-      left:col<0?3:"calc("+col+" * (100% + "+gap+"px) / "+COLS+" + 2px)",top:"50%",transform:"translateY(-50%)",zIndex:1,pointerEvents:"none",
+      left,top:"50%",transform:"translate(-50%,-50%)",zIndex:1,pointerEvents:"none",
       opacity:col<0?0:1,transition:"left .18s ease, opacity .18s ease",
       fontSize:m.fs,fontWeight:700,letterSpacing:m.ls,lineHeight:1,whiteSpace:"nowrap",
       color:dc,background:"rgba(10,20,32,0.86)",border:"1px solid "+dc+"55",borderRadius:3,padding:m.pad}}>

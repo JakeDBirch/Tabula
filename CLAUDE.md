@@ -1182,11 +1182,14 @@ navy is mud, and text above the notes crossed the cell it named. Now
 `drumRowLabel`: one instance, left-anchored, voice colour at full strength on a
 dark backplate, zIndex 1 — and a LIT cell takes zIndex 2 so the notes paint
 over it. **And it MOVES OUT OF THE NOTES' WAY** (asked for directly): it
-takes the first gap in the visible bar wide enough to hold the word, sliding
-there on a CSS transition as you place notes; if no gap holds the word it
-falls back to the voice's two-letter KEY (`BD`, `CH`) in the first gap that
-holds that — compact metrics of its own, sized to fit one ~21px phone cell;
-and a bar with no gap at all hides it, because you can hear that row. The
+sits CENTRED in a gap of the visible bar, sliding there on a CSS transition
+as you place notes, and the words give way a TIER at a time as the bar
+crowds: the voice's long name (`CLOSED HAT`, `voice.long`) in the first gap
+that holds it, else the short name (`CL HAT`, `voice.full`), else the
+two-letter KEY (`CH`, `voice.label`) — compact metrics of its own, sized to
+fit one ~21px phone cell — and a bar with no gap for even that hides it,
+because you can hear that row. An empty row reads its whole name across the
+middle. The
 width it needs is estimated from the SAME metrics table the box is drawn
 from (`DRUM_LBL`) against the grid's measured cell pitch (`drumCellPx`, one
 ResizeObserver, re-pointed when the mount swaps), so the estimate and the
@@ -1204,7 +1207,8 @@ the grid height by 13, which stopped being the row pitch the moment the gaps
 were uneven. `_drumlabels.mjs` asserts all of it on a 15, an SE, landscape and
 desktop, including a vertical paint down the whole kit landing on every row,
 the label sliding off a placed note, hiding on a full bar, coming back in a
-cleared gap, and the key fallback on an every-other-step row. One harness
+cleared gap, the three tiers giving way as one row's widest gap shrinks
+16 → 4 → 1, and the key centred in its one-cell gap. One harness
 trap: tap cells by their OWN rects — stepping by cell width ignores the gap
 and by column 15 the tap lands on 14 and toggles it back off.
 
