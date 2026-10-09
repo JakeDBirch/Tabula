@@ -1257,23 +1257,44 @@ is the whole of it plus the step slots. Promote by porting `drumLabelCol`,
 `drumLabelMemR`, the two `left` lines in `drumRowLabel` and the row
 `background`; nothing else differs.
 
-**HOLD A DRUM CELL TO RATCHET IT.** Drum ratchets had ONE gesture and it was
-desktop-only: Ctrl/Cmd+click cycled the count, and nothing on a phone could
-reach it — reported as "how do I ratchet these drum cells? I'm struggling to
-remember", which is the honest symptom of a feature that was never on the
-phone. Now a 450ms hold on a cell cycles 2 → 3 → 4 → 1 and KEEPS cycling
-every 420ms while the finger stays down, so 4 is one hold rather than three
-(`armHold` in both drum-cell handlers — the two mounts are separate bodies,
-as ever, so it is written twice). Any paint or velocity drag cancels it (those
-thresholds already sit above a wobble), a hold is never a tap (the release
-leaves the note alone), and on an EMPTY cell the press has already lit it so
-the hold places the hit at 2. The sub-hit lines the cell already drew are the
-readout. In HOW IT WORKS under THE GRID, with the drum velocity drag beside it,
-which was also undocumented. `_drumrat.mjs` reads the ratchet off the cell's
-own sub-hit lines (the autosave is packed), covers the place-at-2, the long
-hold to 4, the wrap to 1, the release not clearing, a tap still toggling and a
-paint drag held still at its end not ratcheting its last cell. One timing
-trap: a 1.5s hold is THREE ticks (450, 870, 1290) and lands on 1, not 4.
+**HOLD A LIT DRUM CELL TO RATCHET IT.** Drum ratchets had ONE gesture and it
+was desktop-only: Ctrl/Cmd+click cycled the count, and nothing on a phone
+could reach it — reported as "how do I ratchet these drum cells? I'm
+struggling to remember", the honest symptom of a feature that was never on
+the phone. Now a 600ms hold on a cell that is ALREADY LIT steps it 2 → 3 → 4
+→ 1, one step per hold. The sub-hit lines the cell already drew are the
+readout. In HOW IT WORKS under THE GRID, with the drum velocity drag beside
+it, which was also undocumented.
+- **IT SHIPPED WRONG FIRST AND "BROKE THE SOUND OF THE DRUMS."** The first cut
+  was 450ms on ANY cell, auto-cycling every 420ms while held. That hijacked
+  every press that lingered: a slow tap placed a note already ratcheted, a
+  hesitant velocity drag (press, think, then drag) ratcheted to 4 and the
+  velocity never moved, and a slow tap meant to ERASE left the note in place
+  — rolls on half the hits, which is exactly what it sounded like. Found by
+  A/B, not by reading: the engine path measured identical on the old and new
+  builds (same 13 hits, same onsets, no flams — `_drumslow.mjs` and the diag
+  overlay), so the defect had to be in what the GESTURES were writing. Three
+  rules came out of it. **A hold on a grid cell is in conflict with every slow
+  tap and every hesitant drag, so it must be the narrowest gesture it can
+  be**: never on a placement (`wasOn` gates the timer — a hesitant tap is a
+  tap), one step per press (hold again for the next), 600ms, and a drag that
+  begins after the hold lands still edits velocity (`mode==="hold"` is
+  treated like `null` for drag detection). **A hold that auto-repeats cannot
+  be released at the value you wanted** on a finger you are not watching.
+  And **the one cost that remains is stated**: a press on a lit cell that
+  stays still for 600ms is a hold, so a very slow tap-to-erase ratchets to 2
+  instead; a real tap is ~150ms and the next tap clears it.
+- Both drum-cell handlers carry it (the two mounts are separate bodies, as
+  ever). `_drumrat.mjs` reads the ratchet off the cell's own sub-hit lines
+  (the autosave is packed) and covers: a hold on an empty cell is a plain
+  placement, a hold on a lit cell gives 2 and stops there at 1.5s, two more
+  holds reach 4, the next wraps to 1, a drag after the hold changes the
+  velocity, a tap still toggles, and a paint drag held still at its end does
+  not ratchet. `_drumslow.mjs` is the A/B that found it: the same three slow
+  gestures on `old.html` (yesterday's build, from a worktree) and today's.
+- **A project edited on the broken build may carry ratchets you never
+  placed.** They show as sub-hit lines on the cell; hold the cell round to 1,
+  or undo.
 
 **LABELS ON/OFF is an EXPOSED BUTTON UNDER THE DRUM GRID** (`drumLabelsBtnEl`,
 `data-drumlabels-toggle`) — asked for after living with the labels in context.

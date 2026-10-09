@@ -13797,19 +13797,20 @@ export default function LoudLight(){
                               const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                               pushHistory();
                               if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
-                              // HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
-                              // 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
-                              // down, so 4 is one hold rather than three. Any paint or velocity
-                              // drag cancels it (those thresholds are already above a wobble), and
-                              // a hold is never a tap: the release leaves the note alone. The cell
-                              // was already lit on the press, so on an empty cell a hold places the
-                              // hit at 2. Ctrl/Cmd+click is still the desktop route.
-                              let holdT=0;const armHold=ms=>{holdT=setTimeout(()=>{if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);armHold(420);},ms);};armHold(450);
+                              // HOLD = RATCHET, on a cell that was ALREADY LIT, once per press. It
+                              // shipped as 450ms on any cell with auto-cycling while held, and that
+                              // hijacked every press that lingered: a slow tap placed a note already
+                              // ratcheted, a hesitant velocity drag ratcheted to 4 and never moved the
+                              // velocity, and a slow tap to ERASE left the note in place. Reported as
+                              // "that broke the sound of the drums", which is what rolls on half the
+                              // hits sounds like. So: never on a placement (a hesitant tap is a tap),
+                              // 600ms, one step per hold (hold again for the next), and a drag after
+                              // the hold still edits velocity. Ctrl/Cmd+click is the desktop route.
+                              let holdT=0;if(wasOn)holdT=setTimeout(()=>{if(mode!==null)return;mode="hold";cycleDrumRat(r,ac);},600);
                               const onMove=ev=>{
                                 const dx=ev.clientX-startX,dy=startY-ev.clientY;
-                                if(mode==="hold")return;
-                                  if(mode===null){
-                                  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
+                                                                  if(mode===null||mode==="hold"){
+                                  if(mode===null&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                   else if(Math.abs(dy)>5){mode="vel";}
                                   if(mode!==null)clearTimeout(holdT);
                                 }
@@ -14397,19 +14398,20 @@ export default function LoudLight(){
                                 const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                                 pushHistory();
                                 if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
-                                // HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
-                                // 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
-                                // down, so 4 is one hold rather than three. Any paint or velocity
-                                // drag cancels it (those thresholds are already above a wobble), and
-                                // a hold is never a tap: the release leaves the note alone. The cell
-                                // was already lit on the press, so on an empty cell a hold places the
-                                // hit at 2. Ctrl/Cmd+click is still the desktop route.
-                                let holdT=0;const armHold=ms=>{holdT=setTimeout(()=>{if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);armHold(420);},ms);};armHold(450);
+                                // HOLD = RATCHET, on a cell that was ALREADY LIT, once per press. It
+                                // shipped as 450ms on any cell with auto-cycling while held, and that
+                                // hijacked every press that lingered: a slow tap placed a note already
+                                // ratcheted, a hesitant velocity drag ratcheted to 4 and never moved the
+                                // velocity, and a slow tap to ERASE left the note in place. Reported as
+                                // "that broke the sound of the drums", which is what rolls on half the
+                                // hits sounds like. So: never on a placement (a hesitant tap is a tap),
+                                // 600ms, one step per hold (hold again for the next), and a drag after
+                                // the hold still edits velocity. Ctrl/Cmd+click is the desktop route.
+                                let holdT=0;if(wasOn)holdT=setTimeout(()=>{if(mode!==null)return;mode="hold";cycleDrumRat(r,ac);},600);
                                 const onMove=ev=>{
                                   const dx=ev.clientX-startX,dy=startY-ev.clientY;
-                                  if(mode==="hold")return;
-                                    if(mode===null){
-                                    if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
+                                                                      if(mode===null||mode==="hold"){
+                                    if(mode===null&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                     else if(Math.abs(dy)>5){mode="vel";}
                                     if(mode!==null)clearTimeout(holdT);
                                   }

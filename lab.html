@@ -48,7 +48,7 @@
     // note of the stamp it last chased stops a CDN edge still serving the old
     // file from turning this into a loop; the shortcut's start url is
     // untouched, so nothing about the install changes.
-    window.__LL_BUILD = "2026-10-09 02:50Z LAB";
+    window.__LL_BUILD = "2026-10-09 03:00Z LAB";
     (function () {
       try {
         if (!navigator.onLine) return;
@@ -1497,7 +1497,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-10-09 02:50Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-10-09 03:00Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -5560,14 +5560,16 @@ if(e.ctrlKey||e.metaKey){e.preventDefault();pushHistory();cycleDrumRat(r,ac);ret
 // cell (empty → paint on, lit → erase).
 var ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();var cw=ge.width/COLS||1,rowRects=drumRowRects(e.currentTarget.parentElement.parentElement);var startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;var mode=null;var painted=new Set();var paint=function paint(rr,cc){var k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};// Snapshot BEFORE anything is painted, so a second finger arriving
 // mid-gesture can restore this and shift from it instead.
-var snap={grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};pushHistory();if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}// HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
-// 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
-// down, so 4 is one hold rather than three. Any paint or velocity
-// drag cancels it (those thresholds are already above a wobble), and
-// a hold is never a tap: the release leaves the note alone. The cell
-// was already lit on the press, so on an empty cell a hold places the
-// hit at 2. Ctrl/Cmd+click is still the desktop route.
-var holdT=0;var _armHold=function armHold(ms){holdT=setTimeout(function(){if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);_armHold(420);},ms);};_armHold(450);var onMove=function onMove(ev){var dx=ev.clientX-startX,dy=startY-ev.clientY;if(mode==="hold")return;if(mode===null){if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}else if(Math.abs(dy)>5){mode="vel";}if(mode!==null)clearTimeout(holdT);}if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));else if(mode==="paint"){var cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));// The row under the finger is a DISPLAY row, and
+var snap={grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};pushHistory();if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}// HOLD = RATCHET, on a cell that was ALREADY LIT, once per press. It
+// shipped as 450ms on any cell with auto-cycling while held, and that
+// hijacked every press that lingered: a slow tap placed a note already
+// ratcheted, a hesitant velocity drag ratcheted to 4 and never moved the
+// velocity, and a slow tap to ERASE left the note in place. Reported as
+// "that broke the sound of the drums", which is what rolls on half the
+// hits sounds like. So: never on a placement (a hesitant tap is a tap),
+// 600ms, one step per hold (hold again for the next), and a drag after
+// the hold still edits velocity. Ctrl/Cmd+click is the desktop route.
+var holdT=0;if(wasOn)holdT=setTimeout(function(){if(mode!==null)return;mode="hold";cycleDrumRat(r,ac);},600);var onMove=function onMove(ev){var dx=ev.clientX-startX,dy=startY-ev.clientY;if(mode===null||mode==="hold"){if(mode===null&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}else if(Math.abs(dy)>5){mode="vel";}if(mode!==null)clearTimeout(holdT);}if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));else if(mode==="paint"){var cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));// The row under the finger is a DISPLAY row, and
 // every write below this point is by DATA row —
 // the grid is drawn in DRUM_DISPLAY order, so the
 // two are a permutation apart. Map it. The tap was
@@ -5621,14 +5623,16 @@ if(e.ctrlKey||e.metaKey){pushHistory();cycleDrumRat(r,ac);return;}// Horizontal 
 // = per-cell velocity; tap = toggle.
 var ge=e.currentTarget.parentElement.parentElement.getBoundingClientRect();var cw=ge.width/COLS||1,rowRects=drumRowRects(e.currentTarget.parentElement.parentElement);var startX=e.clientX,startY=e.clientY,wasOn=on,startVel=cv,paintVal=!wasOn;var mode=null;var painted=new Set();var paint=function paint(rr,cc){var k=rr+":"+cc;if(painted.has(k))return;painted.add(k);if(cc<dLen)setDrumCell(rr,cc,paintVal);};// Snapshot BEFORE anything is painted, so a second finger arriving
 // mid-gesture can restore this and shift from it instead.
-var snap={grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};pushHistory();if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}// HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
-// 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
-// down, so 4 is one hold rather than three. Any paint or velocity
-// drag cancels it (those thresholds are already above a wobble), and
-// a hold is never a tap: the release leaves the note alone. The cell
-// was already lit on the press, so on an empty cell a hold places the
-// hit at 2. Ctrl/Cmd+click is still the desktop route.
-var holdT=0;var _armHold2=function armHold(ms){holdT=setTimeout(function(){if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);_armHold2(420);},ms);};_armHold2(450);var onMove=function onMove(ev){var dx=ev.clientX-startX,dy=startY-ev.clientY;if(mode==="hold")return;if(mode===null){if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}else if(Math.abs(dy)>5){mode="vel";}if(mode!==null)clearTimeout(holdT);}if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));else if(mode==="paint"){var cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));// The row under the finger is a DISPLAY row, and
+var snap={grid:dPat.grid.map(function(rw){return _toConsumableArray(rw);}),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};pushHistory();if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}// HOLD = RATCHET, on a cell that was ALREADY LIT, once per press. It
+// shipped as 450ms on any cell with auto-cycling while held, and that
+// hijacked every press that lingered: a slow tap placed a note already
+// ratcheted, a hesitant velocity drag ratcheted to 4 and never moved the
+// velocity, and a slow tap to ERASE left the note in place. Reported as
+// "that broke the sound of the drums", which is what rolls on half the
+// hits sounds like. So: never on a placement (a hesitant tap is a tap),
+// 600ms, one step per hold (hold again for the next), and a drag after
+// the hold still edits velocity. Ctrl/Cmd+click is the desktop route.
+var holdT=0;if(wasOn)holdT=setTimeout(function(){if(mode!==null)return;mode="hold";cycleDrumRat(r,ac);},600);var onMove=function onMove(ev){var dx=ev.clientX-startX,dy=startY-ev.clientY;if(mode===null||mode==="hold"){if(mode===null&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}else if(Math.abs(dy)>5){mode="vel";}if(mode!==null)clearTimeout(holdT);}if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));else if(mode==="paint"){var cc=barOff+Math.max(0,Math.min(COLS-1,Math.floor((ev.clientX-ge.left)/cw)));// The row under the finger is a DISPLAY row, and
 // every write below this point is by DATA row —
 // the grid is drawn in DRUM_DISPLAY order, so the
 // two are a permutation apart. Map it. The tap was
