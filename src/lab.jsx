@@ -2087,6 +2087,8 @@ const HELP_GROUPS=Object.freeze([
     ["two fingers","shift the bar, wrapping inside it"],
     ["the right-hand edge","drag to set this bar's length"],
     ["hold a note","that note's OWN SOUND \u2014 the whole voice, for one note"],
+    ["drums: drag \u2195 on a cell","its velocity"],
+    ["drums: hold a cell","ratchet it \u2014 2, 3, 4, then off; keep holding to cycle"],
   ]},
   {t:"STEP BUTTONS",s:"under the grid \u00b7 POLY and MONO",r:[
     ["tap","spill that lane onto the grid \u2014 the columns become faders"],
@@ -9025,19 +9027,32 @@ export default function LoudLight(){
     return runs;
   };
   // THREE TIERS, LONGEST THAT FITS: the full name (CLOSED HAT), the short name
-  // (CL HAT), then the two-letter key (CH). Each tier is tried against every
-  // gap in the visible bar, first gap that holds it wins, and the label sits
-  // CENTRED in that gap. Failing all three, hide. So an empty row reads its
-  // whole name across the middle, and the words give way a tier at a time as
-  // the bar fills rather than jumping straight to two letters.
+  // (CL HAT), then the two-letter key (CH). Failing all three, hide.
+  //
+  // LAB RULE — LEFT IS HOME, AND A NOTE TURNS A ROW LABEL INTO A CELL LABEL.
+  // An empty row reads its name from the LEFT edge, labelling the row. Once
+  // the bar has a note, the label re-anchors to the first gap to the RIGHT of
+  // a note that can hold it — sitting hard against that note's right edge, so
+  // it reads as "this is a KICK" on the hit rather than as a row heading. If
+  // no gap after any note holds the tier, the gap BEFORE the first note is
+  // tried (a bar whose notes are all at the end labels from the left as it
+  // always did). Left-anchored in its gap, never centred. (main's rule is
+  // lazy-centre: see src/loudlight.jsx.)
   const drumLabelCol=(voice,cols)=>{
     const runs=drumLabelRuns(cols);
     if(!runs.length)return {col:-1,len:0,text:voice.long||voice.full||voice.label,form:"full"};
     const tiers=[[voice.long||voice.full||voice.label,"full"],[voice.full||voice.label,"full"],[voice.label,"key"]];
-    for(const [text,form] of tiers){
-      const need=drumLabelNeed(text,form);
-      const r=runs.find(r=>r.len>=need);
-      if(r)return {col:r.col,len:r.len,text,form};
+    const after=runs.filter(r=>r.col>0&&cols[r.col-1]);   // gaps that start right after a note
+    const before=runs.filter(r=>r.col===0);               // the gap before the first note (or the whole empty bar)
+    // ANCHORING BEATS LENGTH: every tier is tried after a note before any
+    // tier is tried before one, so a two-letter key on the hit wins over the
+    // full name sitting in the empty room to its left.
+    for(const pool of [after,before]){
+      for(const [text,form] of tiers){
+        const need=drumLabelNeed(text,form);
+        const r=pool.find(r=>r.len>=need);
+        if(r)return {col:r.col,len:need,text,form};
+      }
     }
     return {col:-1,len:0,text:voice.label,form:"key"};
   };
@@ -9046,10 +9061,13 @@ export default function LoudLight(){
     const {col,len,text,form}=drumLabelCol(voice,cols||[]);const m=DRUM_LBL[form];
     // Centre of the run, in row coordinates: the run spans `len` cell pitches
     // less one trailing gap, starting `col` pitches in.
-    const left=col<0?"50%":"calc(("+col+" + "+(len/2)+") * (100% + "+gap+"px) / "+COLS+" - "+(gap/2)+"px)";
+    // LAB: LEFT-ANCHORED at the footprint's first cell — a label that names
+    // the hit beside it sits flush against that hit, not centred in the room
+    // after it. (main centres in the footprint.)
+    const left=col<0?"0px":"calc("+col+" * (100% + "+gap+"px) / "+COLS+" + 1px)";
     return(
     <div data-drumlabel={voice.key} data-labelcol={col} data-labelfit={col<0?0:1} style={{position:"absolute",
-      left,top:"50%",transform:"translate(-50%,-50%)",zIndex:1,pointerEvents:"none",
+      left,top:"50%",transform:"translate(0,-50%)",zIndex:1,pointerEvents:"none",
       opacity:col<0?0:1,transition:"left .18s ease, opacity .18s ease",
       fontSize:m.fs,fontWeight:700,letterSpacing:m.ls,lineHeight:1,whiteSpace:"nowrap",
       color:dc,background:"rgba(10,20,32,0.86)",border:"1px solid "+dc+"55",borderRadius:3,padding:m.pad}}>
@@ -14347,11 +14365,21 @@ export default function LoudLight(){
                               const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                               pushHistory();
                               if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
+                              // HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
+                              // 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
+                              // down, so 4 is one hold rather than three. Any paint or velocity
+                              // drag cancels it (those thresholds are already above a wobble), and
+                              // a hold is never a tap: the release leaves the note alone. The cell
+                              // was already lit on the press, so on an empty cell a hold places the
+                              // hit at 2. Ctrl/Cmd+click is still the desktop route.
+                              let holdT=0;const armHold=ms=>{holdT=setTimeout(()=>{if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);armHold(420);},ms);};armHold(450);
                               const onMove=ev=>{
                                 const dx=ev.clientX-startX,dy=startY-ev.clientY;
-                                if(mode===null){
+                                if(mode==="hold")return;
+                                  if(mode===null){
                                   if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                   else if(Math.abs(dy)>5){mode="vel";}
+                                  if(mode!==null)clearTimeout(holdT);
                                 }
                                 if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                 else if(mode==="paint"){
@@ -14368,7 +14396,7 @@ export default function LoudLight(){
                                   paint(rr,cc);
                                 }
                               };
-                              const detach=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
+                              const detach=()=>{clearTimeout(holdT);document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
                               const onUp=()=>{
                                 detach();
                                 if(mode===null&&wasOn)setDrumCell(r,ac,false); // pure tap on existing note → clear
@@ -14938,11 +14966,21 @@ export default function LoudLight(){
                                 const snap={grid:dPat.grid.map(rw=>[...rw]),vel:toDrumVel2D(dPat.vel,gridW(dPat.grid)),rat:toDrumRat2D(dPat.rat,gridW(dPat.grid)),gridLen:dLen};
                                 pushHistory();
                                 if(!wasOn){setDrumCell(r,ac,true);painted.add(r+":"+ac);}
+                                // HOLD = RATCHET. 450ms still and the cell's ratchet count cycles
+                                // 2 → 3 → 4 → 1, and keeps cycling every 420ms while the finger stays
+                                // down, so 4 is one hold rather than three. Any paint or velocity
+                                // drag cancels it (those thresholds are already above a wobble), and
+                                // a hold is never a tap: the release leaves the note alone. The cell
+                                // was already lit on the press, so on an empty cell a hold places the
+                                // hit at 2. Ctrl/Cmd+click is still the desktop route.
+                                let holdT=0;const armHold=ms=>{holdT=setTimeout(()=>{if(mode!==null&&mode!=="hold")return;mode="hold";cycleDrumRat(r,ac);armHold(420);},ms);};armHold(450);
                                 const onMove=ev=>{
                                   const dx=ev.clientX-startX,dy=startY-ev.clientY;
-                                  if(mode===null){
+                                  if(mode==="hold")return;
+                                    if(mode===null){
                                     if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>cw*0.5){mode="paint";paint(r,ac);}
                                     else if(Math.abs(dy)>5){mode="vel";}
+                                    if(mode!==null)clearTimeout(holdT);
                                   }
                                   if(mode==="vel")setDrumVelCell(r,ac,Math.max(1,Math.min(127,Math.round(startVel+dy))));
                                   else if(mode==="paint"){
@@ -14959,7 +14997,7 @@ export default function LoudLight(){
                                     paint(rr,cc);
                                   }
                                 };
-                                const detach=()=>{document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
+                                const detach=()=>{clearTimeout(holdT);document.removeEventListener("pointermove",onMove);document.removeEventListener("pointerup",onUp);document.removeEventListener("pointercancel",onUp);drumGestR.current=null;};
                                 const onUp=()=>{
                                   detach();
                                   if(mode===null&&wasOn)setDrumCell(r,ac,false);

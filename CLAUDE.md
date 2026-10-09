@@ -1215,6 +1215,56 @@ cleared gap, the three tiers giving way as one row's widest gap shrinks
 trap: tap cells by their OWN rects — stepping by cell width ignores the gap
 and by column 15 the tap lands on 14 and toggles it back off.
 
+**THE LABEL IS LAZY: ITS HOME IS THE CENTRE OF THE BAR, AND ONLY A NOTE UNDER
+IT MOVES IT.** Reported: "shifting with the presence of any cell, not just
+conflict cells … it seems to center on blank space whether or not there's a
+conflict in the middle." Exactly what the first rule did — centre in the first
+gap that fits — so one hit on step 1 moved every label half a cell for
+nothing. `drumLabelCol` now works from a HOME (the bar's centre) and a
+FOOTPRINT (`need` cells): if the centred footprint is clear, the label sits
+exactly centred; if a note lands under it, it slides the MINIMUM distance
+inside its gap that clears the note; only when that gap is too small does it
+go to the gap whose nearest placement is closest to home. `col` can be
+fractional now (it is a footprint edge, not a run index). `_drumlabels.mjs`
+asserts the two halves that matter: a note at step 1 leaves the label at its
+exact previous col, and a note dead centre moves it off by less than 1.5
+cells. **That harness loads `index.html` now** — it was written in the lab
+and still pointed at `lab.html` after the promotion, so for a day it was
+guarding the fork and reporting on main.
+
+**IN THE LAB: LEFT IS HOME, AND A NOTE TURNS THE ROW LABEL INTO A CELL
+LABEL** (`src/lab.jsx` only, Jake's parallel idea, 2026-10-09). An empty row
+reads its name from the left edge, labelling the row; once the bar has a
+note, the label re-anchors flush against the right edge of the first note
+whose following gap holds it — "labelling the cell" — and only when no gap
+after any note holds any tier does it fall back to the gap before the first
+note (notes only at the end leave it where it was). **Anchoring beats
+length**: every tier is tried after a note before any tier is tried before
+one, so `BD` on the hit wins over `KICK DRUM` in the empty room to its left —
+the first cut had the loops the other way round and the full name kept
+winning the left. Left-anchored in its footprint (`translate(0,-50%)`), not
+centred. `_lablabels.mjs` drives it; `npm run lab:diff` is the whole of it
+plus the step slots. Promote by porting `drumLabelCol` and the two `left`
+lines in `drumRowLabel`; nothing else differs.
+
+**HOLD A DRUM CELL TO RATCHET IT.** Drum ratchets had ONE gesture and it was
+desktop-only: Ctrl/Cmd+click cycled the count, and nothing on a phone could
+reach it — reported as "how do I ratchet these drum cells? I'm struggling to
+remember", which is the honest symptom of a feature that was never on the
+phone. Now a 450ms hold on a cell cycles 2 → 3 → 4 → 1 and KEEPS cycling
+every 420ms while the finger stays down, so 4 is one hold rather than three
+(`armHold` in both drum-cell handlers — the two mounts are separate bodies,
+as ever, so it is written twice). Any paint or velocity drag cancels it (those
+thresholds already sit above a wobble), a hold is never a tap (the release
+leaves the note alone), and on an EMPTY cell the press has already lit it so
+the hold places the hit at 2. The sub-hit lines the cell already drew are the
+readout. In HOW IT WORKS under THE GRID, with the drum velocity drag beside it,
+which was also undocumented. `_drumrat.mjs` reads the ratchet off the cell's
+own sub-hit lines (the autosave is packed), covers the place-at-2, the long
+hold to 4, the wrap to 1, the release not clearing, a tap still toggling and a
+paint drag held still at its end not ratcheting its last cell. One timing
+trap: a 1.5s hold is THREE ticks (450, 870, 1290) and lands on 1, not 4.
+
 **LABELS ON/OFF is an EXPOSED BUTTON UNDER THE DRUM GRID** (`drumLabelsBtnEl`,
 `data-drumlabels-toggle`) — asked for after living with the labels in context.
 It spent a day as a row on the DRUMS layer button's hold menu and Jake pulled
