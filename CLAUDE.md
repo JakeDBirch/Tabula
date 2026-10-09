@@ -1238,14 +1238,24 @@ reads its name from the left edge, labelling the row; once the bar has a
 note, the label re-anchors flush against the right edge of the first note
 whose following gap holds it — "labelling the cell" — and only when no gap
 after any note holds any tier does it fall back to the gap before the first
-note (notes only at the end leave it where it was). **Anchoring beats
-length**: every tier is tried after a note before any tier is tried before
-one, so `BD` on the hit wins over `KICK DRUM` in the empty room to its left —
-the first cut had the loops the other way round and the full name kept
-winning the left. Left-anchored in its footprint (`translate(0,-50%)`), not
-centred. `_lablabels.mjs` drives it; `npm run lab:diff` is the whole of it
-plus the step slots. Promote by porting `drumLabelCol` and the two `left`
-lines in `drumRowLabel`; nothing else differs.
+note (notes only at the end leave it where it was). **LENGTH BEATS
+ANCHORING** (refined the same day): the full name is tried in every gap —
+after a note first, then before — before any shorter tier is considered, so a
+bar never abbreviates a name there was room to spell. It shipped the other
+way round for an hour (`BD` on the hit beating `KICK DRUM` in the room to its
+left) and Jake called it: "preferring placement to the right at the expense
+of abbreviating labels unnecessarily". **AND IT REMEMBERS** (`drumLabelMemR`,
+per voice): an EMPTY row shows the label wherever the last populated bar left
+it, not back at the left edge — under FOLLOW a one-bar fill was sliding every
+label home and back on every pass. Only a populated bar decides a position.
+Left-anchored in its footprint (`translate(0,-50%)`), not centred. **Each row
+is TINTED in its voice's colour** (`data-rowtint`, `dc+"1c"`, ~11% alpha):
+rejected once as lowering contrast under faint text, and the dark backplate
+took that objection away. `_lablabels.mjs` drives all of it, including a
+`＋ BAR` through the bar tile's menu to prove the memory; `npm run lab:diff`
+is the whole of it plus the step slots. Promote by porting `drumLabelCol`,
+`drumLabelMemR`, the two `left` lines in `drumRowLabel` and the row
+`background`; nothing else differs.
 
 **HOLD A DRUM CELL TO RATCHET IT.** Drum ratchets had ONE gesture and it was
 desktop-only: Ctrl/Cmd+click cycled the count, and nothing on a phone could

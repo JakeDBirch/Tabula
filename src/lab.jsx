@@ -9016,6 +9016,7 @@ export default function LoudLight(){
   // fit ONE phone cell (~21px). `need` is estimated from exactly these metrics
   // so the estimate and the drawn box cannot drift apart.
   const DRUM_LBL={full:{fs:IS_MOBILE?10:12,ls:1.2,padX:11,pad:"2px 5px 2px 6px"},key:{fs:IS_MOBILE?9:11,ls:0,padX:4,pad:"1px 2px"}};
+  const drumLabelMemR=useRef({});
   const drumLabelNeed=(text,form)=>{const m=DRUM_LBL[form];return drumCellPx>0?Math.ceil((text.length*(m.fs*0.74+m.ls)+m.padX+2)/drumCellPx):3;};
   const drumLabelRuns=cols=>{
     const runs=[];let start=-1;
@@ -9031,30 +9032,46 @@ export default function LoudLight(){
   //
   // LAB RULE — LEFT IS HOME, AND A NOTE TURNS A ROW LABEL INTO A CELL LABEL.
   // An empty row reads its name from the LEFT edge, labelling the row. Once
-  // the bar has a note, the label re-anchors to the first gap to the RIGHT of
-  // a note that can hold it — sitting hard against that note's right edge, so
-  // it reads as "this is a KICK" on the hit rather than as a row heading. If
-  // no gap after any note holds the tier, the gap BEFORE the first note is
-  // tried (a bar whose notes are all at the end labels from the left as it
-  // always did). Left-anchored in its gap, never centred. (main's rule is
-  // lazy-centre: see src/loudlight.jsx.)
+  // the bar has a note, the label re-anchors flush against the right edge of
+  // the first note whose following gap holds it — "this is a KICK" on the hit
+  // — and only when no gap after a note holds it does it fall back to the gap
+  // before the first note. Left-anchored in its gap, never centred.
+  //
+  // LENGTH BEATS ANCHORING (refined 2026-10-09): the full name is tried in
+  // every gap — after a note first, then before — before any shorter tier is
+  // considered, so a bar never abbreviates a name there was room to spell.
+  // (The first cut put anchoring first and abbreviated unnecessarily.)
+  //
+  // LAB: EACH ROW IS TINTED IN ITS VOICE'S COLOUR (`data-rowtint`, dc+"1c").
+  // Rejected once as lowering contrast under faint text; the dark backplate
+  // took that objection away, so the row can carry the colour the label reads
+  // in. Asked for on 2026-10-09.
+  //
+  // AND IT REMEMBERS. An EMPTY row shows the label wherever the last
+  // populated bar left it (`drumLabelMemR`, per voice), not back at the left
+  // edge — under FOLLOW a one-bar fill would otherwise slide every label
+  // home and back on every pass. The label can live anywhere; moving it for
+  // nothing is the one thing it must not do. Only a populated bar decides.
   const drumLabelCol=(voice,cols)=>{
     const runs=drumLabelRuns(cols);
     if(!runs.length)return {col:-1,len:0,text:voice.long||voice.full||voice.label,form:"full"};
     const tiers=[[voice.long||voice.full||voice.label,"full"],[voice.full||voice.label,"full"],[voice.label,"key"]];
-    const after=runs.filter(r=>r.col>0&&cols[r.col-1]);   // gaps that start right after a note
-    const before=runs.filter(r=>r.col===0);               // the gap before the first note (or the whole empty bar)
-    // ANCHORING BEATS LENGTH: every tier is tried after a note before any
-    // tier is tried before one, so a two-letter key on the hit wins over the
-    // full name sitting in the empty room to its left.
-    for(const pool of [after,before]){
-      for(const [text,form] of tiers){
-        const need=drumLabelNeed(text,form);
-        const r=pool.find(r=>r.len>=need);
-        if(r)return {col:r.col,len:need,text,form};
-      }
+    if(runs.length===1&&runs[0].len===COLS){
+      const m=drumLabelMemR.current[voice.key];
+      if(m&&m.col>=0)return m;
+      const [text,form]=tiers[0];return {col:0,len:drumLabelNeed(text,form),text,form};
     }
-    return {col:-1,len:0,text:voice.label,form:"key"};
+    const after=runs.filter(r=>r.col>0&&cols[r.col-1]);   // gaps that start right after a note
+    const before=runs.filter(r=>r.col===0);               // the gap before the first note
+    let out=null;
+    for(const [text,form] of tiers){
+      const need=drumLabelNeed(text,form);
+      const r=after.find(r=>r.len>=need)||before.find(r=>r.len>=need);
+      if(r){out={col:r.col,len:need,text,form};break;}
+    }
+    if(!out)out={col:-1,len:0,text:voice.label,form:"key"};
+    if(out.col>=0)drumLabelMemR.current[voice.key]=out;
+    return out;
   };
   const drumRowLabel=(voice,dc,cols,gap)=>{
     if(!drumLabelsOn)return null;
@@ -14325,7 +14342,7 @@ export default function LoudLight(){
                   {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
-                    <div key={voice.key} data-drow={r} style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                    <div key={voice.key} data-drow={r} data-rowtint="1" style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0,background:dc+"1c",borderRadius:2}}>{drumShelfRule(voice)}
                       {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),2)}
                       {Array.from({length:COLS},(_,c)=>{
                         // c = view column on this bar page; ac = absolute column.
@@ -14929,7 +14946,7 @@ export default function LoudLight(){
                         {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
-                          <div key={voice.key} data-drow={r} style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                          <div key={voice.key} data-drow={r} data-rowtint="1" style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0,background:dc+"1c",borderRadius:2}}>{drumShelfRule(voice)}
                             {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),GAP)}
                             {Array.from({length:COLS},(_,step)=>{
                               // step = view column on this bar page; ac = absolute.
