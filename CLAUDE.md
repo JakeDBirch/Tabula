@@ -1215,17 +1215,37 @@ cleared gap, the three tiers giving way as one row's widest gap shrinks
 trap: tap cells by their OWN rects — stepping by cell width ignores the gap
 and by column 15 the tap lands on 14 and toggles it back off.
 
-**LABELS ON/OFF lives on the DRUMS layer button's HOLD menu**, beside RAND /
-CLEAR — asked for after living with the labels in context. It is a VIEW
-PREFERENCE exactly like the row keys: `drumlabels` through `LS_NS`, absent
-means ON, read synchronously, written only by the toggle. `drumRowLabel`
-returns null when off, so the labels cost nothing hidden. Found on the way:
-**ESC did not close the layer hold menu** — the ESC-closes-menus branch named
-`patMenu`/`barMenu`/`addMenu` and missed `layerMenu`, so ESC on it fell
-through to the transport and stopped the song. Fixed. `_drumlabeltoggle.mjs`
-drives the real hold (with a wobble) on both pages, phone and desktop:
-hidden, written, hidden across a relaunch, back on; and POLY's menu does not
-carry the row.
+**LABELS ON/OFF is an EXPOSED BUTTON UNDER THE DRUM GRID** (`drumLabelsBtnEl`,
+`data-drumlabels-toggle`) — asked for after living with the labels in context.
+It spent a day as a row on the DRUMS layer button's hold menu and Jake pulled
+it back out: the drum block is 13 rows to the synth's 16 and reserves the
+synth square's height, so the room under it is FREE on every layout that is
+width-bound — a view switch you flip while looking at the grid does not need
+to be a hidden gesture when the space to show it costs nothing. Small, quiet,
+left-aligned on the grid's own edge, a fixed `minWidth` so ON/OFF cannot
+change its size.
+- **In phone LANDSCAPE it sits BESIDE the grid, not under it.** That layout is
+  height-bound: the drum grid is already the full square tall, so a row under
+  it landed at y=390 on a 390px viewport (measured — Playwright then scrolled
+  the `overflow:hidden` column 20px to reach it, which read as "the grid moved
+  on the toggle"). It is `position:absolute; left:100%` OFF the grid row's box,
+  bottom-aligned, in the ~200px of spare width to the right. **Not a flex
+  sibling**: the row is width-bound to `SIZE` there, so a sibling took its
+  width straight out of the grid (410 → 317px).
+- It is a VIEW PREFERENCE exactly like the row keys: `drumlabels` through
+  `LS_NS`, absent means ON, read synchronously, written only by the toggle.
+  `drumRowLabel` returns null when off, so the labels cost nothing hidden.
+- Found on the way, and kept: **ESC did not close the layer hold menu** — the
+  ESC-closes-menus branch named `patMenu`/`barMenu`/`addMenu` and missed
+  `layerMenu`, so ESC on it fell through to the transport and stopped the
+  song. Fixed.
+- `_drumlabeltoggle.mjs` asserts the PLACEMENT by position on a 15, an SE,
+  landscape and desktop, both pages: below the grid and inside the reserved
+  square (beside it and on screen in landscape), the synth grid's top edge
+  untouched, the grid neither moving nor resizing on a toggle; then hidden,
+  written, hidden across a relaunch, back on; and the DRUMS hold menu is RAND
+  / CLEAR with no LABELS row (counted INSIDE the fixed overlay — the desktop
+  sidebar has a RAND of its own, which made the first count read 3).
 
 ### THE SOUND SCREEN
 

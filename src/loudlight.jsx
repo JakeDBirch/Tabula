@@ -4627,9 +4627,12 @@ export default function LoudLight(){
   };
   // DRUM ROW LABELS ON/OFF — a VIEW PREFERENCE, like the row keys: through
   // LS_NS, read synchronously, written only by the toggle (persist a CHOICE,
-  // not a state). Absent means ON. Lives on the DRUMS layer button's hold
-  // menu beside RAND / CLEAR, because that is the one place that is about the
-  // drum grid as a whole. Asked for after living with the labels in context.
+  // not a state). Absent means ON. It is an EXPOSED button under the drum
+  // grid, not a row on the DRUMS hold menu (where it lived for a day): the
+  // drum block is 13 rows to the synth's 16 and reserves the synth square's
+  // height, so the room under it is free on every layout, and a hidden
+  // gesture for a thing you flip while looking at the grid is the gap HOW IT
+  // WORKS exists to patch. Asked for after living with the labels in context.
   const [drumLabelsOn,setDrumLabelsOn]=useState(()=>{
     try{return localStorage.getItem(LS_NS+"drumlabels")!=="0";}catch(e){return true;}
   });
@@ -5866,6 +5869,27 @@ export default function LoudLight(){
   // chip strip instead. Both are exactly `_barStripPx` tall, which is what lets
   // them swap without the grid moving; the strip needs a row this wide to draw
   // a four-bar window, and this is the only row that is.
+  // LABELS — the drum-row-label switch, ONE button with two placements. Under
+  // the grid on desktop and in phone portrait, where the 13-row drum block
+  // leaves the bottom of the reserved synth square free; BESIDE it in phone
+  // landscape, where the drum grid is height-bound and already the full
+  // square tall, so a row under it would be off the bottom of the screen
+  // (measured: the button landed at y=390 on a 390px viewport). Landscape has
+  // ~240px of spare width to the right of the grid instead. Small and quiet:
+  // it is a view switch, not a transport control, and must read under the
+  // bar chips beside it.
+  const drumLabelsBtnEl=(
+      <button data-drumlabels-toggle="1" aria-pressed={drumLabelsOn} title={drumLabelsOn?"Hide the drum row labels":"Show the drum row labels"}
+        style={{padding:IS_MOBILE?"4px 9px":"5px 11px",borderRadius:6,fontFamily:"inherit",cursor:"pointer",
+          background:drumLabelsOn?"rgba(224,112,96,0.12)":"transparent",
+          border:"1px solid "+(drumLabelsOn?"rgba(224,112,96,0.5)":"rgba(168,190,212,0.18)"),
+          color:drumLabelsOn?"rgba(236,214,206,0.92)":"rgba(178,199,219,0.4)",
+          fontSize:9,fontWeight:700,letterSpacing:1.4,lineHeight:1,touchAction:"manipulation",minWidth:92,textAlign:"center"}}
+        onClick={toggleDrumLabels}>LABELS {drumLabelsOn?"ON":"OFF"}</button>
+  );
+  const drumLabelsBtn=(
+    <div style={{width:"100%",display:"flex",justifyContent:"flex-start",marginTop:IS_MOBILE?5:7,flexShrink:0}}>{drumLabelsBtnEl}</div>
+  );
   const _belowGridRow=(w)=>(
     <div style={{width:w,height:_barStripPx,marginTop:5,flexShrink:0,display:"flex",alignItems:"stretch"}}>
       {loopExpand
@@ -6804,7 +6828,7 @@ export default function LoudLight(){
     const lm=layerMenu, isDrum=lm.layer==="drums";
     const lbl=lm.layer==="synth"?"POLY":lm.layer==="lead"?"MONO":"DRUMS";
     const col=lm.layer==="synth"?"#a8c5a0":lm.layer==="lead"?"#8279e0":"#e07060";
-    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=isDrum?158:120;
+    const vw=window.innerWidth,vh=window.innerHeight,W=Math.min(190,vw-16),H=120;
     const px=Math.max(8,Math.min(vw-W-8,lm.x-W/2));
     const py=Math.max(8,Math.min(vh-H-8,lm.y+14));
     const close=()=>setLayerMenu(null);
@@ -6832,13 +6856,6 @@ export default function LoudLight(){
                 onClick={()=>act(fn)}>{t}</button>
             ))}
           </div>
-          {isDrum&&(
-            <button data-drumlabels-toggle="1" aria-pressed={drumLabelsOn}
-              style={{display:"block",width:"100%",padding:"10px 0",background:"rgba(10,18,28,0.92)",border:"none",
-                borderTop:"1px solid rgba(168,190,212,0.1)",fontFamily:"inherit",
-                color:drumLabelsOn?"rgba(212,226,240,0.82)":"rgba(178,199,219,0.4)",fontSize:10,fontWeight:700,letterSpacing:1.4,cursor:"pointer"}}
-              onClick={()=>act(toggleDrumLabels)}>LABELS {drumLabelsOn?"ON":"OFF"}</button>
-          )}
         </div>
       </div>
     );
@@ -13714,7 +13731,8 @@ export default function LoudLight(){
                     spacer rather than a constraining wrapper. */}
                 <div style={{position:"relative",width:"100%",display:"flex",alignItems:"flex-start",justifyContent:"center",flexShrink:0}}>
                 <div style={{width:dw||"80%",height:dw||"80%",flexShrink:0,pointerEvents:"none"}}/>
-                <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:dw||"80%",height:dh||"auto",display:"flex"}}>
+                <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:dw||"80%",display:"flex",flexDirection:"column"}}>
+                <div style={{height:dh||"auto",display:"flex",position:"relative"}}>
                 {drumRowKeys}
                 <div ref={drumGridRef} data-drumgrid="1" style={Object.assign({},shifting?S.gridShifting:{},{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2,position:"relative",background:layerTint})}>
                   {lenEdgeDrums}
@@ -13799,6 +13817,8 @@ export default function LoudLight(){
                     </div>
                   )})}
                 </div>
+                </div>
+                {drumLabelsBtn}
                 </div>
                 </div>
 
@@ -14386,7 +14406,12 @@ export default function LoudLight(){
                           </div>
                         )})}
                       </div>
+                      {/* Absolutely placed OUTSIDE the row's box: a flex sibling
+                          takes its width from the grid, which is width-bound to
+                          SIZE here (measured: 410 → 317px). */}
+                      {isLandscape&&<div style={{position:"absolute",left:"100%",bottom:0,marginLeft:8}}>{drumLabelsBtnEl}</div>}
                       </div>
+                      {!isLandscape&&<div style={{width:SIZE,display:"flex"}}><div style={{width:drumKeyPad,flexShrink:0}}/>{drumLabelsBtn}</div>}
                       </div>
                       </div>
                       {stripBelow?_belowGridRow(SIZE):null}
