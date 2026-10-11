@@ -1248,14 +1248,18 @@ of abbreviating labels unnecessarily". **AND IT REMEMBERS** (`drumLabelMemR`,
 per voice): an EMPTY row shows the label wherever the last populated bar left
 it, not back at the left edge — under FOLLOW a one-bar fill was sliding every
 label home and back on every pass. Only a populated bar decides a position.
-Left-anchored in its footprint (`translate(0,-50%)`), not centred. **Each row
-is TINTED in its voice's colour** (`data-rowtint`, `dc+"1c"`, ~11% alpha):
-rejected once as lowering contrast under faint text, and the dark backplate
-took that objection away. `_lablabels.mjs` drives all of it, including a
-`＋ BAR` through the bar tile's menu to prove the memory; `npm run lab:diff`
-is the whole of it plus the step slots. Promote by porting `drumLabelCol`,
-`drumLabelMemR`, the two `left` lines in `drumRowLabel` and the row
-`background`; nothing else differs.
+Left-anchored in its footprint (`translate(0,-50%)`), not centred.
+`_lablabels.mjs` drives all of it, including a `＋ BAR` through the bar
+tile's menu to prove the memory; `npm run lab:diff` is the whole of it plus
+the step slots. Promote by porting `drumLabelCol`, `drumLabelMemR` and the
+two `left` lines in `drumRowLabel`; nothing else differs.
+
+**EACH DRUM ROW IS TINTED IN ITS VOICE'S COLOUR** (`data-rowtint`,
+`dc+"1c"`, ~11% alpha, both mounts) — built in the lab, promoted to `main`
+on 2026-10-11. Rejected once as lowering contrast under faint text; the dark
+backplate took that objection away, and the tint is what ties the label to
+the row it names. Verified by reading each row's computed background and its
+label's colour back from the DOM: same RGB on every row, alpha in range.
 
 **HOLD A LIT DRUM CELL TO RATCHET IT.** Drum ratchets had ONE gesture and it
 was desktop-only: Ctrl/Cmd+click cycled the count, and nothing on a phone

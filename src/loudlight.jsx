@@ -8497,6 +8497,10 @@ export default function LoudLight(){
     }
     return runs;
   };
+  // EACH ROW IS TINTED IN ITS VOICE'S COLOUR (`data-rowtint`, dc+"1c", ~11%).
+  // Rejected once as lowering contrast under faint text; the dark backplate
+  // took that objection away. Built in the lab, promoted 2026-10-11.
+  //
   // THREE TIERS, LONGEST THAT FITS: the full name (CLOSED HAT), the short name
   // (CL HAT), then the two-letter key (CH). Failing all three, hide.
   //
@@ -13757,7 +13761,7 @@ export default function LoudLight(){
                   {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                     const dc=drumColor(r,linkHat,linkTom);
                     return(
-                    <div key={voice.key} data-drow={r} style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                    <div key={voice.key} data-drow={r} data-rowtint="1" style={{flex:1,display:"flex",gap:2,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0,background:dc+"1c",borderRadius:2}}>{drumShelfRule(voice)}
                       {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),2)}
                       {Array.from({length:COLS},(_,c)=>{
                         // c = view column on this bar page; ac = absolute column.
@@ -14361,7 +14365,7 @@ export default function LoudLight(){
                         {DRUM_DISPLAY.map((r)=>{const voice=DRUM_VOICES[r];
                           const dc=drumColor(r,linkHat,linkTom);
                           return(
-                          <div key={voice.key} data-drow={r} style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0}}>{drumShelfRule(voice)}
+                          <div key={voice.key} data-drow={r} data-rowtint="1" style={{display:"flex",gap:GAP,position:"relative",marginTop:DRUM_SHELF_START.has(voice.key)?DRUM_SEP:0,background:dc+"1c",borderRadius:2}}>{drumShelfRule(voice)}
                             {drumRowLabel(voice,dc,Array.from({length:COLS},(_,c)=>!!(dPat?.grid[r]?.[barOff+c])),GAP)}
                             {Array.from({length:COLS},(_,step)=>{
                               // step = view column on this bar page; ac = absolute.
