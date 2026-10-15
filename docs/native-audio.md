@@ -92,6 +92,10 @@ computed in JS any more.
   (`core/ll_params.js`, by `core/build.mjs`) so the two sides cannot drift.
 - **Samples** are decoded by the app as before, then downmixed to mono,
   resampled to the engine rate if needed, and copied into the core's arena.
+  The synth layers' own one-shots (the SAMPLE wave) go into the same arena as
+  voice `LL_DRUM_ROWS + layer`, re-sent after every kit push because the
+  arena is cleared wholesale; `synth_play` reads them in place of o1, pitched
+  from `LL_L_ROOT`.
 - **Events** come back as `{type, a, b, frame}` quads: the step each part is
   on, the playing pattern, the song position, the pulse for the bar dots, and
   every drum hit. The JS used to write these at *schedule* time (up to 100ms

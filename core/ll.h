@@ -147,7 +147,7 @@ enum { LL_DRIVE_TAPE=0, LL_DRIVE_TUBE=1, LL_DRIVE_CLIP=2 };
 /* Per-layer synth parameters — ll_set_layer(layer, id, v). Only SYNTH and
  * LEAD have these. Mirrors layerParams[layer]. */
 enum ll_lparam {
-  LL_L_WAVE,         /* 0 sine, 1 square, 2 sawtooth, 3 triangle */
+  LL_L_WAVE,         /* 0 sine, 1 square, 2 sawtooth, 3 triangle, 4 SAMPLE (the layer's own, see ll_sample_alloc) */
   LL_L_DETUNE,       /* cents */
   LL_L_ATTACK,       /* ms */
   LL_L_DECAY,        /* ms */
@@ -172,6 +172,10 @@ enum ll_lparam {
    * its own" and the decay is used instead — which is what release WAS in
    * both engines, so a patch saved before this existed sounds unchanged. */
   LL_L_RELEASE,      /* ms; 0 = follow LL_L_DECAY */
+  /* The SAMPLE wave's root: the MIDI note the recording is taken to be, so a
+   * note at that pitch plays it at rate 1 and every other row re-pitches it
+   * from there. 0 = C4 (60), which is what a patch without one means. */
+  LL_L_ROOT,
   LL_L_COUNT
 };
 
@@ -240,7 +244,11 @@ float ll_shape(int chr, float x, float bias);
  * samples for the host to fill, or NULL. `src_rate` is the sample's own rate:
  * the core resamples on playback, so a 44.1k kit plays in tune on a 48k
  * engine and no host has to resample. Filling the buffer may happen outside
- * any lock the host uses — the region is private until ll_sample_commit. */
+ * any lock the host uses — the region is private until ll_sample_commit.
+ * `voice` is a drum row, OR LL_DRUM_ROWS + a synth layer (0 POLY, 1 MONO):
+ * the layer's own one-shot, played by a voice whose LL_L_WAVE is 4, pitched
+ * from LL_L_ROOT and shaped by the layer's VCF and VCA like any other wave.
+ * Same arena, same clear — a kit switch re-sends the layer samples too. */
 void   ll_samples_clear(void);
 float* ll_sample_alloc(int voice, int kind, int slot, int frames, float src_rate);
 void   ll_sample_commit(int voice, int kind, int nslots);

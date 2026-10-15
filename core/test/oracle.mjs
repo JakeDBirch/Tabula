@@ -65,13 +65,18 @@ const buildFixture=(scenario)=>({
     if(${JSON.stringify(!!scenario.plainSong)}){ song[0]=B.id; song[1]=B.id; song[2]=B.id; }
     const sc=${JSON.stringify(scenario)};
     const state=packProject({ver:PROJ_VER,bpm:120,scale:'major',userMask:USER_MASK_DEF,userRoot:0,transpose:sc.transpose||0,swing:sc.swing||0,speedMult:1,
-      layerParams:{synth:{waveform:'sawtooth',detune:8,attack:8,decay:400,sustain:40,release:sc.release??120,vcfCutoff:80,vcfRes:15,filterEnvAmt:40,octave:0,dlySend:50,rvSend:30,mix:85,fxTrim:100,subLevel:0,spread:50,glide:0,velAmp:100,velFlt:100,velEnv:0},
+      layerParams:{synth:{waveform:sc.sampleWave?'sample':'sawtooth',sampleRoot:60,detune:8,attack:8,decay:400,sustain:40,release:sc.release??120,vcfCutoff:80,vcfRes:15,filterEnvAmt:40,octave:0,dlySend:50,rvSend:30,mix:85,fxTrim:100,subLevel:0,spread:50,glide:0,velAmp:100,velFlt:100,velEnv:0},
                    lead:{waveform:'square',detune:0,attack:8,decay:300,sustain:40,release:sc.release??90,vcfCutoff:70,vcfRes:10,filterEnvAmt:20,octave:1,dlySend:30,rvSend:20,mix:85,fxTrim:100,subLevel:50,spread:0,glide:sc.leadGlide||0,monoSingle:true}},
       dlyIdx:3,dlyFbPct:45,dlyHpVal:8,dlyLpVal:78,rvSize:50,rvDamp:40,rvLfDamp:0,rvPreDelay:0,rvMod:0,dlyToRev:0,drumLevel:85,drumFxTrim:100,
       drumMix:defaultDrumMix(),trackMute:{synth:false,lead:false,drums:false},trackSolo:{synth:false,lead:false,drums:false},activeKit:'808-kit',
       loopMode:sc.loop||0,loopBar:sc.loopBar??-1,loopPat:sc.loop?A.id:null,varyMode:{synth:false,lead:false,drums:false},
       patterns,activePatId:A.id,song,songRep,activeLayer:'synth'});
     localStorage.setItem('tnori-autosave',JSON.stringify(state));
+    // The SAMPLE scenario needs a recording to play: half a second of a decaying
+    // C4 sine, stored the way a REC stores it (base64 WAV under autosave_smp).
+    if(sc.sampleWave){ const sr=44100,n=sr/2; const b=new OfflineAudioContext(1,n,sr).createBuffer(1,n,sr); const d=b.getChannelData(0);
+      for(let i=0;i<n;i++)d[i]=0.6*Math.sin(2*Math.PI*261.63*i/sr)*Math.exp(-3*i/n);
+      localStorage.setItem('tnori-autosave_smp',JSON.stringify({synth:abToBase64(audioBufToWav(b))})); }
     return {A:A.id,B:B.id};
   })()`});
 
@@ -207,6 +212,10 @@ const SCENARIOS=[
   // is a new number both engines have to read the same way. A long one puts
   // every note's tail well past its gate, which is where a mismatch shows.
   {name:'long RELEASE on both layers',song:false,release:900,seconds:7,horizon:6},
+  // POLY on the SAMPLE wave: the attacks are the same attacks (the sampler is
+  // a different o1, not a different scheduler), on both engines, with a
+  // recording loaded and nothing thrown on the way.
+  {name:'POLY on the SAMPLE wave',song:false,sampleWave:true,seconds:7,horizon:6},
 ];
 for(const sc of SCENARIOS){
   console.log('\n── '+sc.name+' ──');

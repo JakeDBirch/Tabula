@@ -12,6 +12,9 @@ static inline float ms_(float v){ return ll_max(0.001f,v/1000.f); }
 static inline float vcf_hz(float v){ return ll_round(20.f*ll_pow(1000.f,v/100.f)); }
 
 void synth_reset(void){ for(int i=0;i<LL_NSVOICES;i++)G.sv[i].active=0; G.monoVoice=-1; }
+/* The arena is about to be reused: a voice still reading a sample would read
+ * whatever lands there next. Drums do the same in drums_stop_samples. */
+void synth_stop_samples(void){ for(int i=0;i<LL_NSVOICES;i++){ ll_svoice*v=&G.sv[i]; if(v->active&&v->wave==WV_SAMPLE){ v->active=0; if(G.monoVoice==i)G.monoVoice=-1; } } }
 
 static ll_svoice* alloc_voice(void){
   int best=-1; double bestEnd=1e300;
@@ -63,7 +66,19 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   ll_svoice*v=alloc_voice();
   memset(v,0,sizeof *v);
   v->active=1; v->layer=layer; v->t0=t; v->chokeAt=-1; v->mono=monoSingle;
-  v->wave=(int)p[LL_L_WAVE]; if(v->wave<0||v->wave>3)v->wave=WV_SAW;
+  v->wave=(int)p[LL_L_WAVE]; if(v->wave<0||v->wave>WV_SAMPLE)v->wave=WV_SAW;
+  /* ── SAMPLE ── the layer's one-shot stands in for o1. No detune stack and
+   * no spread (there is one reader, as MONO has one oscillator), and with no
+   * sample loaded the voice is SILENT rather than a saw: a sampler with
+   * nothing in it makes no sound, and the SOUND page says so. */
+  int isSample=v->wave==WV_SAMPLE;
+  if(isSample){
+    ll_sampleset*ss=&G.smp[LL_DRUM_ROWS+(layer==LL_LEAD?1:0)];
+    if(ss->n>0&&ss->p[0]){ v->smp=ss->p[0]; v->smpLen=ss->len[0]; v->srcRatio=ss->sr[0]/sr; }
+    float root=p[LL_L_ROOT]>0.f?p[LL_L_ROOT]:60.f;
+    v->rootHz=440.f*ll_exp2((root-69.f)/12.f);
+    v->pos=0;
+  }
 
   /* ── VCF ── */
   float rawCut=ll_clamp(p[LL_L_CUTOFF]+cutOff,0,100);
@@ -101,7 +116,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   }
   /* ── VCA ── */
   float mixMul=p[LL_L_MIX]/100.f;
-  float peak=((p[LL_L_DETUNE]>2.f&&!monoSingle)?0.28f:0.42f)*velMulAmp*mixMul;
+  float peak=((p[LL_L_DETUNE]>2.f&&!monoSingle&&!isSample)?0.28f:0.42f)*velMulAmp*mixMul;
   float gainAtGate=decayFraction>=1.f?sus*peak:ll_max(0.001f,peak*ll_pow(ll_max(0.001f,sus),decayFraction));
   auto_init(&v->vca,0.f);
   auto_set(&v->vca,t,0.f);
@@ -114,7 +129,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   }
   auto_exp(&v->vca,t+sec2f(end),0.0001f);
   /* ── spread ── */
-  float spreadAmt=(!monoSingle&&p[LL_L_DETUNE]>2.f)?ll_clamp(p[LL_L_SPREAD],0,100)/100.f:0.f;
+  float spreadAmt=(!monoSingle&&!isSample&&p[LL_L_DETUNE]>2.f)?ll_clamp(p[LL_L_SPREAD],0,100)/100.f:0.f;
   if(spreadAmt>0.f){
     v->spread=1; v->comp=1.f+spreadAmt;
     v->gL1=ll_min(1.f,1.f+spreadAmt); v->gR1=ll_min(1.f,1.f-spreadAmt);   /* o1 panned left  */
@@ -126,7 +141,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
     auto_set(&v->frq,t,ll_max(1.f,prevFreq));
     auto_exp(&v->frq,t+sec2f(glideSec),ll_max(1.f,playFreq));
   }
-  v->has2=(p[LL_L_DETUNE]>2.f&&!monoSingle);
+  v->has2=(p[LL_L_DETUNE]>2.f&&!monoSingle&&!isSample);
   v->detRatio=ll_exp2(p[LL_L_DETUNE]/1200.f);
   v->subLvl=ll_clamp(p[LL_L_SUB],0,100)/100.f;
   v->hasSub=v->subLvl>0.f;
@@ -177,7 +192,14 @@ void synth_render(int n){
       float g=auto_tick(&v->vca,tt);
       float cut=v->envOn?auto_tick(&v->vcf,tt):v->baseHz;
       if(((v->coefN++)&7)==0&&cut!=v->lastCut){ bq_set(&v->fL,BQ_LP,cut,v->qdb,0,sr); v->fR.b0=v->fL.b0;v->fR.b1=v->fL.b1;v->fR.b2=v->fL.b2;v->fR.a1=v->fL.a1;v->fR.a2=v->fL.a2; v->lastCut=cut; }
-      float o1=osc_run(&v->o1,v->wave,f1,sr);
+      float o1;
+      if(v->wave==WV_SAMPLE){
+        if(v->smp){
+          int ip=(int)v->pos;
+          if(ip+1<v->smpLen){ float fr=(float)(v->pos-ip); o1=v->smp[ip]+(v->smp[ip+1]-v->smp[ip])*fr; } else o1=0.f;
+          v->pos+=(double)((f1/v->rootHz)*v->srcRatio);
+        } else o1=0.f;
+      } else o1=osc_run(&v->o1,v->wave,f1,sr);
       float o2=v->has2?osc_run(&v->o2,v->wave,f1*v->detRatio,sr):0.f;
       float sb=v->hasSub?osc_run(&v->sub,WV_SINE,f1*0.5f,sr)*v->subLvl:0.f;
       float L,R;

@@ -1379,6 +1379,113 @@ CLEAR** — bar-scoped, like the bar menu's, and it switches to that layer as it
 opens so you can see what you are about to change. `layerBtnProps` is one
 contract for all three mounts.
 
+### THE LAYER SAMPLER — POLY and MONO can play a recording
+
+**A synth layer has a fifth wave, `SAMPLE` (the `SMP` button), and it is the
+layer's own recording in place of o1** — landed 2026-10-15 on Jake's three
+answers: per LAYER (not per note), ONE-SHOT for now but through the layer's
+VCF and VCA envelopes exactly as an oscillator is, and on BOTH engines, because
+"this is now an iOS first app". Pitched by row: `sampleRoot` (a MIDI note,
+default C4) is the note the recording is taken to be, so that row plays it at
+rate 1 and every other row re-pitches from there (`playbackRate = hz/root` on
+the web, `(f1/rootHz)*srcSr/sr` per frame in the core, so glide and the
+mid-note OCT mods move a sample exactly as they move an oscillator).
+- **It is a different o1, not a different voice.** Everything after the
+  reader — the filter and its envelope, the VCA, velocity, sends, the mono
+  choke, the sub oscillator — is untouched, which is why the oracle's SAMPLE
+  scenario is simply "the attacks are the same attacks". The sample is a
+  single reader, so it takes MONO's single-oscillator gain and no detune
+  stack or spread (`isSample` gates those three sites on both engines).
+- **No recording loaded = SILENT, on both engines**, not a saw nobody chose;
+  the row says EMPTY. Note the SUB oscillator is its own sine under whatever
+  the wave is, so MONO with SUB up still hums on an empty sampler — that is
+  the sub, not the sampler, and `core/test/lsample.c` turns it off to say so.
+- **The buffer lives in `userSamples` under the layer's key** (`synth` /
+  `lead`, beside the USER kit's drum keys), so every save, the autosave's
+  `autosave_smp`, the cloud and the library carry it with NO new persistence
+  site — the first time the multi-site rule has cost nothing twice. One
+  mirror effect over `userSamples` calls `bell.current.setLayerSample` for
+  both layers; the JS Bell keeps the buffer on the instance and the core's
+  facade twin (`LLCore.Bell.setLayerSample` → `pushLayerSample`) puts it in
+  the ARENA beside the kit.
+- **The core addresses it as voice `LL_DRUM_ROWS + layer`** through the
+  existing `ll_sample_alloc` / `ll_sample_commit` — no new message type.
+  The arena is cleared WHOLESALE on every kit push, so `pushSamples` re-sends
+  the layer samples after the kit every time (and the offline bounce's
+  `snapshot` carries them): a kit switch that forgot them would leave POLY
+  reading freed frames. `synth_stop_samples` is `drums_stop_samples`' twin
+  for the same reason. `LL_L_ROOT` is APPENDED to `enum ll_lparam`;
+  `WV_SAMPLE`=4 and `WAVE.sample=4` in `core/host.js` must agree.
+- **`sampleRoot` is a layer param** (`_setLPStep`, so it pushes history),
+  absent on every existing patch and read as 60. `fillLayerParams` passes it
+  through unchanged.
+- **NEW PROJECT clears `userSamples` now.** It cleared only the live drum map,
+  so the last project's USER-kit recordings rode into the new project's first
+  save — a pre-existing leak the layer sampler would have doubled.
+- **The SOUND row** (`sampleRow`, one body, two mounts, under the OSC card's
+  OCT row only while SMP is selected): REC / STOP with its phase in the label
+  (`ARMED — STOP` while listening, `STOP ●` once the onset has landed), ✕,
+  `− C4 +` for the root, and the take's length. `data-smprow`, `data-smprec`
+  (+`data-recphase`), `data-smpclear`, `data-smproot(-up/-dn)`, `data-smplen`
+  are the hooks.
+
+**THE RECORDER WAS REWORKED FOR QUIET, LONG-DECAYING SOURCES — "the sampling
+for pocket chimes, specifically the threshold and arm/stop workflow".** It
+served the drum sampler too, so the USER kit gets all of this.
+- **What was wrong, measured.** Start-on-onset against a FIXED 0.08, stop
+  after 300ms under a FIXED 0.025. A soft attack to a 0.06 peak never armed
+  (NO INPUT after ten seconds of ringing); when a source did arm, the first
+  20–40ms were gone, because the MediaRecorder started AFTER the analyser
+  frame that saw the onset; and the decay was cut the moment it dipped under
+  a number chosen for the silence after a kick.
+- **The recorder runs from ARM and the take is CUT FROM THE AUDIO** (`cutTake`):
+  the lead-in is trimmed to the first sample over the onset level with
+  `REC_PRE_MS` of pre-roll, so the attack is in the take whatever the frame
+  rate was. **The onset level is relative to the ROOM** (the first 250ms after
+  arming measure the floor; onset = 4× that, never under 0.02; a hit inside
+  that window is an onset, not a floor). **The stop level is relative to the
+  TAKE** (36dB under its peak, never under the floor), held 600ms, with a 12s
+  cap and STOP always a tap away. The take is normalised to 0.8 and
+  downmixed to mono — a quiet source at a sensible distance is otherwise a
+  quiet sample that every fader has to push up.
+- **The analyser reads FLOAT, not bytes** (`getFloatTimeDomainData`, bytes as
+  the fallback). The 8-bit read quantises at 0.8%, and a quiet tail is under
+  that for most of its length: the first version of the harness measured a
+  0.06-peak chime with a 1.2s decay cut at 2.2s instead of ringing to ~4.
+  `cutTake` estimates the floor AGAIN from the take's own lead-in, because a
+  room quieter than the analyser's half-step measured as nothing at all and a
+  tail would then never be trimmed.
+- **The mic is asked for RAW audio** (`echoCancellation`, `autoGainControl`,
+  `noiseSuppression` all false). All three are voice-call processors and all
+  three fight a sampler: AGC pumps a decaying tail back UP over the seconds
+  the stop level is waiting for it to fall, noise suppression eats the quiet
+  harmonics a chime is made of, and echo cancellation gates against the app's
+  own output. A browser that cannot honour a constraint ignores it.
+- `_lsample.mjs` is the harness and it is END TO END: Chromium's fake mic
+  plays a synthesised chime (1s of room hiss, a 30ms attack to a 0.06 peak,
+  a 1.2s-τ decay) through the REAL recorder, and it asserts the arm, the
+  take's length (the ring, not 300ms), the pre-roll, mono, the normalisation,
+  that a POLY note then starts an `AudioBufferSourceNode` with that buffer
+  and NO audible oscillator, that ROOT +12 halves the rate, that it is back
+  after a relaunch, that NEW PROJECT hands the engine null, and that the
+  phone's SOUND sheet carries the row. Two harness traps: hook `Bell` from
+  the init script on a 2ms interval, because the restore's mirror runs before
+  `networkidle`; and count only oscillators that START above 20Hz, since the
+  reverb's eight comb LFOs are oscillators too.
+- **One honest limit:** `getUserMedia` under the shell's `loudlight://` scheme
+  is still untested on a device (see the privacy notes). The web build is
+  where the sampler has been exercised; the core's rendering is proven by
+  `core/test/lsample.c` and the oracle, not yet by ear.
+
+**A TEST RENDER LOOP THAT OVERRUNS ITS BUFFER LOOKS LIKE AN ENGINE BUG.**
+`for(off=0;off<48000;off+=256)` renders 48128 frames into `L[48000]`; the
+last block writes into `R`, and `R` into whatever follows. The first cut of
+`lsample.c` did that and reported a silent sample, a missing attack and an
+`inf` render — on the UNTOUCHED core too, which is what said it was the
+harness. `sampler.c` had the same overrun and had been passing by luck. Size
+the buffers for the overrun (`48256`), and when a native test misbehaves,
+run the same loop against the baseline before reading the engine.
+
 ### Controls & interaction conventions
 
 - **The TEMPO chip: tap opens the drawer, hold edits it in place.** It shows

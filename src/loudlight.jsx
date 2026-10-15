@@ -200,8 +200,8 @@ const SPEED_OPTS=[
   {label:"¼×",  mult:4},
 ];
 const SHIFT_THRESHOLD=10;
-const WAVEFORMS=["sawtooth","square","triangle","sine"];
-const WF_LABELS=["SAW","SQ","TRI","SIN"];
+const WAVEFORMS=["sawtooth","square","triangle","sine","sample"];
+const WF_LABELS=["SAW","SQ","TRI","SIN","SMP"];
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
 // MOJO — the master bus. A colour of its own, deliberately not one of the
@@ -2070,6 +2070,12 @@ const HELP_GROUPS=Object.freeze([
     ["hold a filled slot","how many times it repeats, 1 to 4"],
     ["drop on a seam","insert, sliding the rest right"],
   ]},
+  {t:"SAMPLING",s:"SOUND \u00b7 the SMP wave",r:[
+    ["SMP","POLY or MONO plays a recording instead of an oscillator \u2014 pitched by row, through its own filter and envelope"],
+    ["REC","arms the mic: it starts on the first sound and stops once it has decayed, or when you tap STOP"],
+    ["\u2212 / + beside the note","the ROOT \u2014 the note the recording is, so the grid plays it in tune"],
+    ["drums: REC on the USER kit","the same sampler, one recording per voice"],
+  ]},
   {t:"TRANSPORT",r:[
     ["\u25b6 / \u275a\u275a","draws what the next press does"],
     ["\u25a0","stop and rewind \u2014 dimmed when there is nothing to rewind"],
@@ -3085,7 +3091,13 @@ class Bell{
     // one MONO layer; future-proof to a Map keyed by layer name if more
     // mono-style layers get added.
     this.monoActiveVoice=null;
+    // The layer sampler's buffers, keyed "synth"/"lead": what the SAMPLE wave
+    // reads in place of o1. Set by the app whenever a recording lands or goes;
+    // the core twin (LLCore.Bell.setLayerSample) puts the same buffer in the
+    // arena beside the kit.
+    this.layerSamples={};
   }
+  setLayerSample(layer,buf){ this.layerSamples[layer]=buf||null; }
   // `offlineCtx` is a harness hook, and it is the reason this stage can be
   // MEASURED rather than reasoned about: handed an OfflineAudioContext, the
   // real graph — this graph, not a copy of it — renders a tone faster than
@@ -3471,6 +3483,12 @@ class Bell{
     if(!this.ready||this.ctx.state!=="running")return;
     const t=(at!=null)?at:this.ctx.currentTime,p=layerP||this.p;
     const hasMods=!!(mods&&mods.length);
+    // SAMPLE: the layer's own one-shot stands in for o1 (see below). One
+    // reader, so no detune stack and no spread — the single-oscillator gain
+    // and routing, as MONO has. The C twin is `isSample` in synth_play.
+    const isSample=p.waveform==="sample";
+    const smpBuf=isSample?(this.layerSamples&&this.layerSamples[layer])||null:null;
+    const rootHz=isSample?440*Math.pow(2,(((p.sampleRoot!=null)?p.sampleRoot:60)-69)/12):0;
     // Choke the previous MONO voice before scheduling this one — true mono
     // behaviour, otherwise notes ring out over each other. Fast-fade the
     // previous vca to silence at this note's start time and stop its oscs
@@ -3601,7 +3619,7 @@ class Bell{
     const mixMul=(p&&p.mix!=null)?(p.mix/100):0.85;
     // monoSingle short-circuits the dual-osc check below — peak gain follows the
     // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
-    const peak=((p.detune>2&&!(p&&p.monoSingle))?0.28:0.42)*velMulAmp*mixMul;
+    const peak=((p.detune>2&&!(p&&p.monoSingle)&&!isSample)?0.28:0.42)*velMulAmp*mixMul;
     // gainAtGate must be computed AFTER peak is defined
     const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
@@ -3636,7 +3654,7 @@ class Bell{
     // — MONO is a single oscillator regardless of saved detune. Tested below
     // wherever the dual-osc / spread path is gated.
     const isMonoSingle = !!(p && p.monoSingle);
-    const spreadAmt=(!isMonoSingle&&p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
+    const spreadAmt=(!isMonoSingle&&!isSample&&p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
     let spreadMerger=null;
     if(spreadAmt>0){
       spreadMerger=this.ctx.createChannelMerger(2);
@@ -3663,19 +3681,33 @@ class Bell{
       osc.connect(gL);gL.connect(spreadMerger,0,0);
       osc.connect(gR);gR.connect(spreadMerger,0,1);
     };
-    const o1=this.ctx.createOscillator();
-    o1.type=p.waveform;
+    // o1 — or, on the SAMPLE wave, the layer's recording in its place: an
+    // AudioBufferSourceNode whose playbackRate is hz/root, through the same
+    // VCF and VCA as an oscillator would be. `o1Pitch` and `toPitch` are what
+    // the glide and the mid-note OCT mods write to, so a sample slides and
+    // re-pitches exactly as an oscillator does. With no recording loaded the
+    // source has no buffer and is SILENT — a sampler with nothing in it, which
+    // the SOUND page says in so many words — rather than falling back to a
+    // waveform nobody chose. The core does the same.
+    let o1,o1Pitch,toPitch;
+    if(isSample){
+      o1=this.ctx.createBufferSource(); if(smpBuf)o1.buffer=smpBuf;
+      o1Pitch=o1.playbackRate; toPitch=(hz)=>hz/rootHz;
+    } else {
+      o1=this.ctx.createOscillator(); o1.type=p.waveform;
+      o1Pitch=o1.frequency; toPitch=(hz)=>hz;
+    }
     if(prevFreq&&glideTime>0){
       // prevFreq is the actual played frequency from previous step (oct already applied)
-      o1.frequency.setValueAtTime(Math.max(1,prevFreq),t);
-      o1.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
+      o1Pitch.setValueAtTime(toPitch(Math.max(1,prevFreq)),t);
+      o1Pitch.exponentialRampToValueAtTime(toPitch(Math.max(1,playFreq)),t+glideTime);
     } else {
-      o1.frequency.value=playFreq;
+      o1Pitch.value=toPitch(playFreq);
     }
     panOsc(o1,-spreadAmt);
     o1.start(t);o1.stop(t+end+.05);
     let o2=null;
-    if(p.detune>2&&!isMonoSingle){
+    if(p.detune>2&&!isMonoSingle&&!isSample){
       o2=this.ctx.createOscillator();
       o2.type=p.waveform;
       if(prevFreq&&glideTime>0){
@@ -3743,11 +3775,11 @@ class Bell{
         const mPlayFreq=freq*Math.pow(2,mStepOct+layerOct);
         if(Math.abs(mPlayFreq-prevModFreq)>0.5){
           if(prevModGlide){
-            o1.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
+            o1Pitch.exponentialRampToValueAtTime(toPitch(Math.max(1,mPlayFreq)),m.at);
             if(o2)o2.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
             if(subOsc)subOsc.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           } else {
-            o1.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
+            o1Pitch.setValueAtTime(toPitch(Math.max(1,mPlayFreq)),m.at);
             if(o2)o2.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
             if(subOsc)subOsc.frequency.setValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           }
@@ -4508,6 +4540,9 @@ export default function LoudLight(){
   const userSamplesR = useRef({});
   useEffect(()=>{userSamplesR.current=userSamples;},[userSamples]);
   const [recordingVoice, setRecordingVoice] = useState(null);
+  // "arm" while waiting for the onset, "rec" once it has landed — the label
+  // on the REC button, so you can see that it is listening and not stuck.
+  const [recPhase, setRecPhase] = useState(null);
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
   // that don't come from a kit — loading a kit replaces them all.
@@ -4662,6 +4697,9 @@ export default function LoudLight(){
   // Drums has its own engine + per-voice mix (in pat.mix), independent of this.
   const DEFAULT_LP = (octave)=>({
     waveform:"sawtooth", detune:8, attack:8, decay:400, sustain:40,
+    // The SAMPLE wave's root: the MIDI note the recording is taken to be, so
+    // that row plays it at its own pitch and the others re-pitch from there.
+    sampleRoot:60,
     // RELEASE, in ms, and it is its own control rather than a copy of DECAY.
     // It used to BE the decay (`rel = ms(p.decay)`) in both engines, which
     // meant the default patch put a 400ms tail on every note however short the
@@ -4751,6 +4789,7 @@ export default function LoudLight(){
   // Existing UI references {waveform, setWaveform, ...} continue to work; they now
   // read/write the active layer's slot in layerParams.
   const waveform = _lp.waveform,         setWaveform = _setLPStep("waveform");
+  const sampleRoot = _lp.sampleRoot??60, setSampleRoot = _setLPStep("sampleRoot");
   const detune = _lp.detune,             setDetune = _setLP("detune");
   const attack = _lp.attack,             setAttack = _setLP("attack");
   const decay = _lp.decay,               setDecay = _setLP("decay");
@@ -5148,6 +5187,11 @@ export default function LoudLight(){
   useEffect(()=>{if(CORE_ON){coreHost.pushLayer("synth",layerParams.synth);coreHost.pushLayer("lead",layerParams.lead);}},[layerParams]);
   useEffect(()=>{if(CORE_ON)coreHost.setSong(songSeq);},[songSeq]);
   useEffect(()=>{if(CORE_ON)coreHost.pushSamples(voiceSamples);},[voiceSamples]);
+  // The layer sampler's buffers live in userSamples under the layer's own key
+  // (so every save, the autosave and the cloud carry them for free beside the
+  // USER kit's); the engine is told whenever that map changes. One effect for
+  // both engines — the core's facade twin re-sends the kit with them.
+  useEffect(()=>{for(const l of SYNTH_LAYERS)if(bell.current.setLayerSample)bell.current.setLayerSample(l,userSamples[l]||null);},[userSamples]);
   // Patterns go over one slot at a time, only the ones whose identity changed
   // — an edit replaces one pattern object, so a tap on the grid ships ~2KB.
   const corePatR=useRef([]);
@@ -5712,8 +5756,11 @@ export default function LoudLight(){
     if(recorderRef.current&&recorderRef.current.state==="recording"){try{recorderRef.current.stop();}catch(e){}}
     if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
     recorderRef.current=null;
-    setRecordingVoice(null);
+    setRecordingVoice(null);setRecPhase(null);
     setVoiceSamples({});
+    // …and the persistent map, or the last project's recordings — the USER
+    // kit's and the layer samplers' — ride into the new project's first save.
+    setUserSamples({});userSamplesR.current={};samplesDirtyR.current=true;
     // Reload the default kit's samples rather than dropping to bare synth.
     if(DEFAULT_KIT!=="synth")loadKit(DEFAULT_KIT).catch(()=>{});
     else{setActiveKit("synth");}
@@ -11563,24 +11610,80 @@ export default function LoudLight(){
     })();
   };
 
-  // Capture mic audio via MediaRecorder, decode into an AudioBuffer, and
-  // store it per drum voice. Drum playback paths read voiceSamplesR.current
-  // and substitute the sample for the synthesized voice when present.
-  // Sampler: auto-arm on onset, auto-stop on silence. The recorder doesn't
-  // start capturing until the input level crosses ONSET_THRESH — so the
-  // resulting sample begins at the first transient, not from a silent lead-in.
-  // Silence for SILENCE_HOLD_MS after recording starts ends the capture.
-  const startRecord=async(voiceKey)=>{
-    if(recordingVoice)return; // serialize — one voice at a time
+  // ── THE SAMPLER ─────────────────────────────────────────────────────────
+  // Captures the mic into a buffer for a DRUM VOICE (the USER kit) or for a
+  // SYNTH LAYER (the SAMPLE wave; keyed "synth"/"lead" in the same map). One
+  // recorder, every target; both engines read the same buffer.
+  //
+  // ARM AND STOP ARE DECIDED FROM THE INPUT, AND THE TAKE IS CUT FROM THE AUDIO.
+  // It used to start the MediaRecorder on the onset and stop it after 300ms of
+  // silence, against two FIXED levels (0.08 in, 0.025 out). Fine for a drum,
+  // wrong for anything quiet with a long tail — pocket chimes were the case: a
+  // soft attack never crossed 0.08 (NO INPUT after ten seconds of ringing), and
+  // when it did, the first 20–40ms were already gone, because the recorder
+  // started AFTER the analyser frame that saw the onset, and the decay was cut
+  // the moment it dipped under a number chosen for the silence after a kick.
+  //   - The recorder runs from ARM, and the take is cut afterwards from the
+  //     decoded samples themselves: the lead-in is trimmed to the first sample
+  //     over the onset level with REC_PRE_MS of pre-roll kept, so the attack
+  //     is in the take whatever the analyser's frame rate was.
+  //   - The ONSET level is relative to the ROOM. The first REC_FLOOR_MS after
+  //     arming measure the floor; the onset is REC_ONSET_X times that, and
+  //     never under REC_ONSET_MIN. A quiet source arms in a quiet room and a
+  //     noisy room does not arm itself. A hit inside the floor window — you
+  //     tapped REC and played at once — is an onset, not a floor.
+  //   - The STOP level is relative to the TAKE: REC_TAIL_DB under the loudest
+  //     thing recorded so far (never under the floor), held for REC_SILENCE_MS
+  //     before the take ends. A chime decays INTO that level instead of being
+  //     cut at a fixed one, and the hold rides out the dips in a ringing tail.
+  //     REC_MAX_S caps a take that never decays; STOP is always a tap away.
+  //   - The take is NORMALISED to REC_NORM peak and downmixed to mono. A quiet
+  //     source at a sensible distance is otherwise a quiet sample that has to
+  //     be pushed up on every fader it meets.
+  const REC_FLOOR_MS=250, REC_ONSET_X=4, REC_ONSET_MIN=0.02, REC_TAIL_DB=36, REC_SILENCE_MS=600,
+        REC_MAX_S=12, REC_ARM_S=20, REC_PRE_MS=25, REC_POST_MS=80, REC_NORM=0.8;
+  // Cut a decoded take to the sound in it: mono, trimmed, normalised, with a
+  // 4ms fade either end so the cut is not a click. null = nothing crossed the
+  // onset level (a STOP while still armed).
+  const cutTake=(ctx,buf,onsetThr,floorThr)=>{
+    const n=buf.length,ch=buf.numberOfChannels,sr=buf.sampleRate;
+    const m=new Float32Array(n);
+    for(let c=0;c<ch;c++){const x=buf.getChannelData(c);for(let i=0;i<n;i++)m[i]+=x[i]/ch;}
+    let a=-1,pk=0;
+    for(let i=0;i<n;i++){const v=Math.abs(m[i]);if(v>pk)pk=v;if(a<0&&v>=onsetThr)a=i;}
+    if(a<0||pk<=0)return null;
+    // The floor again, from the take's own lead-in this time: the analyser
+    // reads 8-bit, so a room quieter than half a step there (0.4%) measured
+    // as nothing at all, and a tail would then never be trimmed — the hiss
+    // after a chime is over is as loud as the threshold it never reached.
+    const fw=Math.min(a,Math.round(sr*REC_FLOOR_MS/1000));
+    if(fw>sr*0.05){ let fp=0; for(let i=0;i<fw;i++){const v=Math.abs(m[i]);if(v>fp)fp=v;} floorThr=Math.max(floorThr,fp*1.5); }
+    const tailThr=Math.max(floorThr,pk*Math.pow(10,-REC_TAIL_DB/20));
+    let b=a; for(let i=n-1;i>a;i--){if(Math.abs(m[i])>=tailThr){b=i;break;}}
+    a=Math.max(0,a-Math.round(sr*REC_PRE_MS/1000));
+    b=Math.min(n,b+Math.round(sr*REC_POST_MS/1000));
+    const len=Math.min(b-a,Math.round(sr*REC_MAX_S));
+    if(len<=0)return null;
+    const out=ctx.createBuffer(1,len,sr),o=out.getChannelData(0),g=REC_NORM/pk;
+    for(let i=0;i<len;i++)o[i]=m[a+i]*g;
+    const f=Math.min(len>>1,Math.round(sr*0.004));
+    for(let i=0;i<f;i++){const w=i/f;o[i]*=w;o[len-1-i]*=w;}
+    return out;
+  };
+  const _isDrumKey=(k)=>DRUM_VOICES.some(v=>v.key===k);
+  const startRecord=async(key)=>{
+    if(recordingVoice)return; // serialize — one target at a time
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined"){
       showFlash("MIC UNSUPPORTED");return;
     }
-    const ONSET_THRESH=0.08;     // peak deviation from center (0..1)
-    const SILENCE_THRESH=0.025;
-    const SILENCE_HOLD_MS=300;
-    const ARM_TIMEOUT_MS=10000;  // if no onset in 10s, bail out
     try{
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      // RAW audio, as far as the browser allows: the three "voice call" processors
+      // are on by default and all three fight a sampler. Auto gain pumps a
+      // decaying tail back UP over a few seconds — exactly the thing the stop
+      // level is waiting to fall — noise suppression eats the quiet harmonics
+      // a chime is made of, and echo cancellation gates against the app's own
+      // output. A browser that cannot honour a constraint ignores it.
+      const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,autoGainControl:false,noiseSuppression:false}});
       recordStreamRef.current=stream;
       // The recorder needs a REAL AudioContext (a stream source and an
       // analyser). The JS engine's is one; with the core on there may be none,
@@ -11592,86 +11695,121 @@ export default function LoudLight(){
       }
       const source=ctx.createMediaStreamSource(stream);
       const analyser=ctx.createAnalyser();analyser.fftSize=512;source.connect(analyser);
-      const buf=new Uint8Array(analyser.fftSize);
-      let recorder=null;let chunks=[];
-      let armed=true;let silentSince=null;let stopped=false;
-      const armedStart=performance.now();
+      // FLOAT samples where the browser has them. The 8-bit read quantises at
+      // 0.8%, and a quiet source's tail — the thing the stop level is waiting
+      // to fall below — is under that for most of its length: measured, a
+      // 0.06-peak chime with a 1.2s decay was cut at 2.2s instead of ringing
+      // to 4. The byte read stays as the fallback.
+      const fbuf=analyser.getFloatTimeDomainData?new Float32Array(analyser.fftSize):null;
+      const buf=fbuf?null:new Uint8Array(analyser.fftSize);
+      const chunks=[];
+      const recorder=new MediaRecorder(stream);
+      recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
+      let armed=true,stopped=false,floorPk=0,onsetThr=REC_ONSET_MIN,takePk=0,silentSince=null,onsetAt=0;
+      const t0=performance.now();
+      const teardown=()=>{
+        if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
+        recorderRef.current=null;
+        setRecordingVoice(null);setRecPhase(null);
+      };
       const finishWith=async()=>{
         stopped=true;
         try{
-          if(chunks.length){
-            const blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)||"audio/webm"});
-            const ab=await blob.arrayBuffer();
-            const audioBuf=await ctx.decodeAudioData(ab);
-            // Store in BOTH the live map and the persistent user-kit map so the
-            // recording survives kit switches and is saved with the project.
-            setVoiceSamples(prev=>({...prev,[voiceKey]:audioBuf}));
-            setUserSamples(prev=>({...prev,[voiceKey]:audioBuf}));
-            samplesDirtyR.current=true; // user recorded → persist to autosave_smp
-            showFlash("REC OK "+voiceKey);
+          let take=null;
+          if(!armed&&chunks.length){
+            const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+            const audioBuf=await ctx.decodeAudioData(await blob.arrayBuffer());
+            take=cutTake(ctx,audioBuf,onsetThr,floorPk*1.5);
           }
+          if(take){
+            // The persistent map is the one every save reads; the live drum
+            // map only for a drum voice (the layer samplers read userSamples
+            // through the mirror effect, and a layer key in voiceSamples would
+            // be a key the kit code does not know).
+            setUserSamples(prev=>({...prev,[key]:take}));
+            if(_isDrumKey(key))setVoiceSamples(prev=>({...prev,[key]:take}));
+            samplesDirtyR.current=true; // user recorded → persist to autosave_smp
+            showFlash("REC OK "+(key==="synth"?"POLY":key==="lead"?"MONO":key)+" "+take.duration.toFixed(1)+"s");
+          } else showFlash("NO INPUT");
         }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
-        if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
-        recorderRef.current=null;
-        setRecordingVoice(null);
+        teardown();
       };
+      recorder.onstop=finishWith;
+      recorder.start();
+      recorderRef.current=recorder;
+      const endTake=()=>{ if(recorder.state==="recording")recorder.stop(); else finishWith(); };
       const tick=()=>{
         if(stopped)return;
-        analyser.getByteTimeDomainData(buf);
         let peak=0;
-        for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]-128)/128;if(v>peak)peak=v;}
+        if(fbuf){ analyser.getFloatTimeDomainData(fbuf); for(let i=0;i<fbuf.length;i++){const v=Math.abs(fbuf[i]);if(v>peak)peak=v;} }
+        else { analyser.getByteTimeDomainData(buf); for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]-128)/128;if(v>peak)peak=v;} }
         const now=performance.now();
         if(armed){
-          if(now-armedStart>ARM_TIMEOUT_MS){
-            // Timed out waiting for onset
-            stopped=true;
-            if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
-            recorderRef.current=null;
-            setRecordingVoice(null);
-            showFlash("NO INPUT");
-            return;
-          }
-          if(peak>ONSET_THRESH){
-            recorder=new MediaRecorder(stream);
-            recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
-            recorder.onstop=finishWith;
-            recorder.start();
-            recorderRef.current=recorder;
-            armed=false;silentSince=null;
-          }
+          const inFloor=now-t0<REC_FLOOR_MS;
+          if(inFloor&&peak<REC_ONSET_MIN*3){ if(peak>floorPk)floorPk=peak; onsetThr=Math.max(REC_ONSET_MIN,floorPk*REC_ONSET_X); }
+          else if(peak>=onsetThr){ armed=false; onsetAt=now; takePk=peak; setRecPhase("rec"); }
+          else if(now-t0>REC_ARM_S*1000){ stopped=true; teardown(); showFlash("NO INPUT"); return; }
         } else {
-          if(peak<SILENCE_THRESH){
-            if(silentSince==null)silentSince=now;
-            else if(now-silentSince>SILENCE_HOLD_MS){
-              if(recorder&&recorder.state==="recording")recorder.stop();
-              return;
-            }
-          } else silentSince=null;
+          if(peak>takePk)takePk=peak;
+          const tailThr=Math.max(floorPk*1.5,0.001,takePk*Math.pow(10,-REC_TAIL_DB/20));
+          if(peak<tailThr){ if(silentSince==null)silentSince=now; else if(now-silentSince>REC_SILENCE_MS){ endTake(); return; } }
+          else silentSince=null;
+          if(now-onsetAt>REC_MAX_S*1000){ endTake(); return; }
         }
         if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
         else setTimeout(tick,30);
       };
-      setRecordingVoice(voiceKey);
+      setRecordingVoice(key);setRecPhase("arm");
       if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
       else setTimeout(tick,30);
     }catch(err){
       console.error("Mic denied:",err);
       showFlash("MIC DENIED");
-      setRecordingVoice(null);
+      setRecordingVoice(null);setRecPhase(null);
     }
   };
+  // STOP: ends the take if one has started (it is then cut and kept), or
+  // tears down an arm that never saw an onset.
   const stopRecord=()=>{
     const r=recorderRef.current;
     if(r&&r.state==="recording"){r.stop();return;}
-    // Armed-but-not-recording (waiting for onset). Tear everything down.
     if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
     recorderRef.current=null;
-    setRecordingVoice(null);
+    setRecordingVoice(null);setRecPhase(null);
   };
   const clearVoiceSample=(voiceKey)=>{
     setVoiceSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
     setUserSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
     samplesDirtyR.current=true; // user cleared → persist the new sample set
+  };
+  // The SAMPLE wave's row under the waveform buttons: REC (then STOP), clear,
+  // the ROOT note, and how long the take is. One body, mounted in both SOUND
+  // pages. `recPhase` says whether REC is still listening or has caught the
+  // onset — a sampler that just says STOP looks stuck while it waits.
+  const _midiName=(n)=>NOTE_NAMES[((n%12)+12)%12]+(Math.floor(n/12)-1);
+  const sampleRow=(compact)=>{
+    const key=activeLayer==="lead"?"lead":"synth";
+    const buf=userSamples[key], isRec=recordingVoice===key;
+    const fs=compact?8:9, h=compact?22:26;
+    const btn=(label,on,color,onClick,style,attrs)=>(
+      <button {...(attrs||{})} onClick={onClick}
+        style={{height:h,padding:"0 8px",fontSize:fs,letterSpacing:0.5,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+          border:"1px solid "+(on?color:"rgba(168,190,212,0.2)"),background:on?color+"22":"transparent",color:on?color:"rgba(178,199,219,0.55)",...(style||{})}}>
+        {label}
+      </button>);
+    return (
+      <div data-smprow={key} style={{padding:compact?"0 8px 8px":"0 12px 10px",display:"flex",alignItems:"center",gap:compact?5:8}}>
+        <div style={{fontSize:compact?7:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:compact?32:36}}>SMP</div>
+        {btn(isRec?(recPhase==="rec"?"STOP \u25cf":"ARMED \u2014 STOP"):buf?"RE-REC":"REC",isRec||!buf,isRec?"#e07060":C_OSC,
+             ()=>isRec?stopRecord():startRecord(key),{flex:1},{"data-smprec":key,"data-recphase":isRec?(recPhase||"arm"):"off"})}
+        {buf&&!isRec&&btn("\u2715",false,C_OSC,()=>clearVoiceSample(key),null,{"data-smpclear":key,title:"Clear the recording"})}
+        <div style={{display:"flex",alignItems:"center",gap:3}}>
+          {btn("\u2212",false,C_OSC,()=>setSampleRoot(Math.max(24,sampleRoot-1)),{padding:"0 6px"},{"data-smproot-dn":1})}
+          <div data-smproot={sampleRoot} title="Root \u2014 the note the recording is" style={{minWidth:30,textAlign:"center",fontSize:fs+2,fontWeight:700,color:C_OSC}}>{_midiName(sampleRoot)}</div>
+          {btn("+",false,C_OSC,()=>setSampleRoot(Math.min(96,sampleRoot+1)),{padding:"0 6px"},{"data-smproot-up":1})}
+        </div>
+        <div data-smplen={buf?buf.duration.toFixed(2):""} style={{fontSize:compact?7:8,color:"rgba(178,199,219,0.45)",minWidth:34,textAlign:"right"}}>{buf?buf.duration.toFixed(1)+"s":"EMPTY"}</div>
+      </div>);
   };
   // The drum "library" is the same pattern list seen through the drums part,
   // so its lifecycle ops are the whole-pattern ones.
@@ -12185,7 +12323,7 @@ export default function LoudLight(){
                   <div style={{display:"flex",gap:5,marginTop:2}}>
                     <button style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:9,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
                       onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                      {isRec?"STOP":hasSample?"● SAMPLE":"REC"}
+                      {isRec?(recPhase==="rec"?"STOP ●":"ARMED — STOP"):hasSample?"● SAMPLE":"REC"}
                     </button>
                     {hasSample&&!isRec&&<button style={{padding:"6px 10px",borderRadius:4,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
                   </div>
@@ -13961,6 +14099,7 @@ export default function LoudLight(){
                           ))}
                         </div>
                       </div>
+                      {waveform==="sample"&&sampleRow(false)}
                     </SynthSection>
                     <SynthSection title="ENV" accent={C_ENV}>
                       <div style={{display:"flex",gap:10,padding:"8px 12px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
@@ -14746,6 +14885,7 @@ export default function LoudLight(){
                                 ))}
                               </div>
                             </div>
+                            {waveform==="sample"&&sampleRow(true)}
                           </SynthSection>
                           <SynthSection title="ENV" accent={C_ENV}>
                             <div style={{display:"flex",gap:6,padding:"6px 8px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>

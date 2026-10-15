@@ -153,17 +153,18 @@ void ll_song_set(const int32_t*ids,int n){ if(n>LL_SONG_MAX)n=LL_SONG_MAX; for(i
 /* ── samples ────────────────────────────────────────────────────────────── */
 void ll_samples_clear(void){
   drums_stop_samples();   /* the arena is about to be reused under them */
-  arenaUsed=0; for(int v=0;v<LL_DRUM_ROWS;v++){ G.smp[v].n=0; G.smp[v].kind=0; G.smp[v].lastRR=-1; }
+  synth_stop_samples();
+  arenaUsed=0; for(int v=0;v<LL_NSMP;v++){ G.smp[v].n=0; G.smp[v].kind=0; G.smp[v].lastRR=-1; }
 }
 float* ll_sample_alloc(int voice,int kind,int slot,int frames,float srcRate){
-  if(voice<0||voice>=LL_DRUM_ROWS||slot<0||slot>=LL_MAX_SLOTS||frames<=0)return 0;
+  if(voice<0||voice>=LL_NSMP||slot<0||slot>=LL_MAX_SLOTS||frames<=0)return 0;
   float*b=(float*)arena_alloc((unsigned long)frames*sizeof(float));
   if(!b)return 0;
   G.smp[voice].p[slot]=b; G.smp[voice].len[slot]=frames; G.smp[voice].kind=kind; G.smp[voice].sr[slot]=srcRate>1000.f?srcRate:G.sr;
   return b;
 }
 void ll_sample_commit(int voice,int kind,int nslots){
-  if(voice<0||voice>=LL_DRUM_ROWS)return;
+  if(voice<0||voice>=LL_NSMP)return;
   G.smp[voice].kind=kind; G.smp[voice].n=nslots>LL_MAX_SLOTS?LL_MAX_SLOTS:nslots; G.smp[voice].lastRR=-1;
 }
 

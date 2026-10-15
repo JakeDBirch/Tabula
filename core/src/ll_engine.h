@@ -21,6 +21,7 @@ void* memset(void*,int,unsigned long);
 #define LL_ATTQ         4096     /* int32s of queued debug attacks */
 #define LL_MAX_SLOTS    8        /* sample slots per voice (rr / vel layers) */
 #define LL_STRIP_W      LL_BLOCK
+#define LL_NSMP         (LL_DRUM_ROWS+2) /* sample sets: 13 drum rows + a one-shot per synth layer */
 
 /* glideT is GLIDE AS A TIME: 0..100, a percentage of the step. `glide` is the
  * old on/off flag and is still read, because a save that predates glideT
@@ -69,6 +70,11 @@ typedef struct {
   ll_osc o1, o2, sub;
   float detRatio, subLvl, gL1, gR1, gL2, gR2, comp, qdb, baseHz, revMul, dlyMul;
   ll_bq fL, fR; int coefN; float lastCut;
+  /* WV_SAMPLE: the layer's one-shot in place of o1. `pos` walks it at
+   * (f1/rootHz)*srcRatio per frame, so the frq auto (glide, OCT mods) moves
+   * the sample exactly as it moves an oscillator; past the end it is silence
+   * and the envelope carries on over nothing — a one-shot, not a loop. */
+  const float* smp; int smpLen; double pos; float srcRatio, rootHz;
 } ll_svoice;
 
 /* One element of a drum hit: an oscillator, a noise burst or a sample, through
@@ -126,7 +132,7 @@ typedef struct {
   ll_svoice sv[LL_NSVOICES]; int monoVoice; int svGen;
   ll_dvoice dv[LL_NDVOICES]; int dvGen; int activeOH, activeOHel, activeOHgen;
   ll_strip strip[LL_DRUM_ROWS];
-  ll_sampleset smp[LL_DRUM_ROWS];
+  ll_sampleset smp[LL_NSMP];
   ll_rng rng;
   /* buses, per block */
   float busL[LL_NLAYERS][LL_BLOCK], busR[LL_NLAYERS][LL_BLOCK];
@@ -188,6 +194,7 @@ void seq_start(void);
 void seq_run(double blockEnd);
 /* ll_synth.c */
 void synth_reset(void);
+void synth_stop_samples(void);
 void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float globalSend,float prevFreq,float glideSec,int layer,const double*modAt,const ll_stepp*modSp,int nmods);
 void synth_render(int n);
 /* ll_drums.c */

@@ -150,7 +150,7 @@ static inline float auto_tick(ll_auto*a,double t){
 }
 
 /* ── Oscillator — polyBLEP saw/square, naive triangle, polynomial sine ──── */
-enum { WV_SINE, WV_SQUARE, WV_SAW, WV_TRI };
+enum { WV_SINE, WV_SQUARE, WV_SAW, WV_TRI, WV_SAMPLE };  /* WV_SAMPLE never reaches osc_run */
 typedef struct { double ph; } ll_osc;
 static inline float osc_blep(float t,float dt){
   if(t<dt){ t/=dt; return t+t-t*t-1.f; }

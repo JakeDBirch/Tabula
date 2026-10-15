@@ -15,7 +15,7 @@ int main(){
   ll_sample_commit(LL_BD,0,1);
   ll_set(LL_P_ACTIVE_PAT,3); ll_set(LL_P_RV_SIZE,0); ll_set_drum(LL_BD,LL_D_RVSEND,0); ll_set_drum(LL_BD,LL_D_DLYSEND,0);
   ll_play();
-  static float L[48000],R[48000];
+  static float L[48256],R[48256];   /* 188 blocks of 256, not 48000: the loop overruns by 128 */
   for(int off=0;off<SR;off+=256)ll_render(L+off,R+off,256);
   ll_stop();
   double e[10]={0}; for(int i=0;i<SR;i++)e[i*10/SR]+=L[i]*L[i];

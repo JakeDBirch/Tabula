@@ -20,7 +20,7 @@ const LLCore=(()=>{
   const VOICES=["BD","SD","RM","CP","HT","MT","LT","CH","OH","CY","CL","SH","CB"];
   const MOTION=["level","pan","rvSend","dlySend","pitch","env","filtCut"];
   const LAYER={synth:0,lead:1,drums:2};
-  const WAVE={sine:0,square:1,sawtooth:2,triangle:3};
+  const WAVE={sine:0,square:1,sawtooth:2,triangle:3,sample:4};
   const FILT={off:0,lp:1,hp:2,bp:3};
   const clamp=(v,a,b)=>v<a?a:v>b?b:v;
   const u8c=(v,a,b)=>{v=Math.round(+v||0);return v<a?a:v>b?b:v;};
@@ -236,6 +236,13 @@ self.onmessage=(e)=>{
         bufs.forEach((b,slot)=>out.push({t:"sample",d,kind,slot,sr:b.sampleRate||sr,data:CoreHost.mono(b)}));
         if(bufs.length)out.push({t:"sample_commit",d,kind,n:bufs.length});
       }
+      const lm=this._lsamples||{};
+      ["synth","lead"].forEach((l,i)=>{
+        const b=lm[l]; if(!b||b.numberOfChannels==null)return;
+        const d=VOICES.length+i;
+        out.push({t:"sample",d,kind:0,slot:0,sr:b.sampleRate||sr,data:CoreHost.mono(b)});
+        out.push({t:"sample_commit",d,kind:0,n:1});
+      });
       return out;
     }
     // Render a bounce OFFLINE, faster than real time, in a Worker: a fresh core
@@ -331,6 +338,8 @@ self.onmessage=(e)=>{
       s("CUTOFF",lp.vcfCutoff??80);s("RES",lp.vcfRes??15);s("FENV",lp.filterEnvAmt??0);s("OCTAVE",lp.octave??0);s("DLYSEND",lp.dlySend??50);s("RVSEND",lp.rvSend??30);
       s("MIX",lp.mix??85);s("FXTRIM",lp.fxTrim??100);s("SUB",lp.subLevel??0);s("SPREAD",lp.spread??50);s("GLIDE",lp.glide??0);s("MONO",lp.monoSingle?1:0);
       s("VELAMP",lp.velAmp??100);s("VELFLT",lp.velFlt??100);s("VELENV",lp.velEnv??0);
+      // The SAMPLE wave's root note (MIDI). Absent means C4.
+      s("ROOT",lp.sampleRoot??60);
     }
     pushDrumMix(voice,mix){
       const D=P.D;
@@ -362,6 +371,23 @@ self.onmessage=(e)=>{
         bufs.forEach((b,slot)=>{const data=CoreHost.mono(b);this.post({t:"sample",d,kind,slot,sr:b.sampleRate||this.sr,data},[data.buffer]);});
         if(bufs.length)this.post({t:"sample_commit",d,kind,n:bufs.length});
       }
+      // The synth layers' one-shots ride the SAME push, because the arena is
+      // cleared wholesale above: a kit switch that forgot them would leave a
+      // POLY sample pointing at freed frames. Voice LL_DRUM_ROWS+layer.
+      const lm=this._lsamples||{};
+      ["synth","lead"].forEach((l,i)=>{
+        const b=lm[l]; if(!b||b.numberOfChannels==null)return;
+        const d=VOICES.length+i, data=CoreHost.mono(b);
+        this.post({t:"sample",d,kind:0,slot:0,sr:b.sampleRate||this.sr,data},[data.buffer]);
+        this.post({t:"sample_commit",d,kind:0,n:1});
+      });
+    }
+    // A synth layer's sample (an AudioBuffer, or null to clear). It cannot
+    // be sent alone — see pushSamples — so this re-sends the kit with it.
+    pushLayerSample(layer,buf){
+      const lm=this._lsamples||(this._lsamples={});
+      if(buf)lm[layer]=buf; else delete lm[layer];
+      this.pushSamples(this._samples);
     }
     static mono(b){
       const n=b.length,ch=b.numberOfChannels;const m=new Float32Array(n);
@@ -398,6 +424,9 @@ self.onmessage=(e)=>{
     setExBody(v){this.host.set(P.P.EX_BODY,v);}
     setExAir(v){this.host.set(P.P.EX_AIR,v);}
     setLayerGain(layer,v){this.host.setLayer(layer,P.L.AUDIBLE,v);}
+    // The layer sampler's buffer. The JS Bell keeps it on the instance; here
+    // it goes into the core's arena beside the kit.
+    setLayerSample(layer,buf){this.host.pushLayerSample(layer,buf);}
     flushTail(){this.host.flush();}
   }
   class Drums{
