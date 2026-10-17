@@ -96,6 +96,10 @@ computed in JS any more.
   voice `LL_DRUM_ROWS + layer`, re-sent after every kit push because the
   arena is cleared wholesale; `synth_play` reads them in place of o1, pitched
   from `LL_L_ROOT`.
+  UNISON (`LL_L_UNISON`, 1..4; 0 = the legacy rule) makes a synth voice `n`
+  readers of one pitch — oscillators or sample positions — detuned by
+  `UNI_OFF` and panned by `UNI_PAN`, three tables carried identically in the
+  JS; `core/test/unison.c` holds 0 bit-identical to 2 on POLY and to 1 on MONO.
 - **Events** come back as `{type, a, b, frame}` quads: the step each part is
   on, the playing pattern, the song position, the pulse for the bar dots, and
   every drum hit. The JS used to write these at *schedule* time (up to 100ms

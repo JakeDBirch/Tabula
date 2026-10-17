@@ -202,6 +202,68 @@ const SPEED_OPTS=[
 const SHIFT_THRESHOLD=10;
 const WAVEFORMS=["sawtooth","square","triangle","sine","sample"];
 const WF_LABELS=["SAW","SQ","TRI","SIN","SMP"];
+// UNISON: a note is n readers of one pitch, 1..UNI_MAX. Offsets are in units
+// of the DETUNE knob, pans in units of SPREAD, and the peak is the old 0.42
+// single / 0.28 pair extended as 0.28*sqrt(2/n) — kept as NUMBERS, because
+// the core carries the same three tables and the two must not drift by a
+// rounding. n=2 is exactly the o1/o2 pair the voice used to be (k=0 at the
+// pitch panned left, k=1 at +detune panned right). `uniCount` is the one
+// resolver: a patch with no `unison` (the oracle's fixtures; fillLayerParams
+// backfills real saves on load) gets the rule that stood before the control.
+const UNI_MAX=4;
+const UNI_OFF=[null,[0],[0,1],[0,1,-1],[0,1,-1,2]];
+const UNI_PAN=[null,[0],[-1,1],[-1,1,0],[-1,1,-1/3,1/3]];
+const UNI_PEAK=[0,0.42,0.28,0.22862,0.19799];
+const uniCount=(p,isSample)=>{const u=p&&p.unison;if(u>=1)return Math.min(UNI_MAX,Math.round(u));return (p&&p.detune>2&&!p.monoSingle&&!isSample)?2:1;};
+// The sample ROOT is found from the take itself. Not by period-matching (YIN
+// and its kin): a chime, a bell, a bowl — the things worth sampling into a
+// synth layer — are INHARMONIC, their partials do not repeat at the
+// fundamental's period, and the first cut of this (YIN, 0.15) read a 1760Hz
+// chime as 599Hz, a third of it. What the ear calls the pitch of such a sound
+// is its STRONGEST partial, so this takes the spectrum of the loudest part of
+// the take (a Hann window, up to 16k points, over three places along the
+// decay) and picks the tallest peak, parabolically interpolated across its
+// bin — with one check: if there is a real peak (a fifth of the tallest)
+// at a half or a third of that frequency, the tallest was an overtone of a
+// harmonic source and the lower one is the pitch. Median of the windows that
+// found anything. Returns Hz, or null for a noise, a click, a crash.
+const _fftRe=(re,im)=>{
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+  for(let len=2;len<=n;len<<=1){const ang=-2*Math.PI/len,wr=Math.cos(ang),wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let k=0;k<len/2;k++){const a=i+k,b=a+len/2;const tr=re[b]*cr-im[b]*ci,ti=re[b]*ci+im[b]*cr;re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;const nr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nr;}}}
+};
+const detectPitch=(buf)=>{
+  const sr=buf.sampleRate,d=buf.getChannelData(0),n=d.length;
+  let W=16384; while(W>n/2&&W>1024)W>>=1; if(W<1024)return null;
+  const starts=[0.02,0.12,0.35].map(x=>Math.round(x*sr)).filter(x=>x+W<=n); if(!starts.length)starts.push(0);
+  const binLo=Math.ceil(40*W/sr), binHi=Math.min(W>>1,Math.floor(5000*W/sr));
+  const ests=[];
+  const re=new Float32Array(W),im=new Float32Array(W),mag=new Float32Array(W>>1);
+  for(const s0 of starts){
+    for(let i=0;i<W;i++){const w=0.5-0.5*Math.cos(2*Math.PI*i/(W-1));re[i]=d[s0+i]*w;im[i]=0;}
+    _fftRe(re,im);
+    let top=0,tb=-1,sum=0;
+    for(let k=binLo;k<=binHi;k++){mag[k]=Math.hypot(re[k],im[k]);sum+=mag[k];if(mag[k]>top){top=mag[k];tb=k;}}
+    // PEAKINESS: a tone stands tens of times over the spectrum's mean; noise
+    // (Rayleigh-spread bins) tops out at three or four times it. Without this
+    // a crash or a breath was handed a pitch — the tallest of its bumps.
+    if(tb<0||top<=0||top<10*sum/(binHi-binLo+1))continue;
+    const peakAt=(k)=>{ // parabolic interpolation on log magnitude
+      if(k<=binLo||k>=binHi)return k;
+      const a=Math.log(mag[k-1]+1e-12),b=Math.log(mag[k]+1e-12),c=Math.log(mag[k+1]+1e-12);
+      const den=a-2*b+c; return Math.abs(den)>1e-12?k+(a-c)/(2*den):k; };
+    // a local peak near bin k0 at least `frac` of the tallest: the overtone check
+    const peakNear=(k0,frac)=>{ const lo=Math.max(binLo,Math.floor(k0*0.97)),hi=Math.min(binHi,Math.ceil(k0*1.03)); let bk=-1,bm=0; for(let k=lo;k<=hi;k++)if(mag[k]>bm){bm=mag[k];bk=k;} return (bk>0&&bm>=frac*top&&mag[bk]>=mag[bk-1]&&mag[bk]>=mag[bk+1])?bk:-1; };
+    let use=tb;
+    for(const div of [2,3]){ const k=peakNear(tb/div,0.2); if(k>0){use=k;break;} }
+    ests.push(peakAt(use)*sr/W);
+  }
+  if(!ests.length)return null;
+  ests.sort((a,b)=>a-b); return ests[ests.length>>1];
+};
+// The recorder's meter and threshold share one scale: -60..0 dBFS across the bar.
+const levelPct=(a)=>Math.max(0,Math.min(100,(20*Math.log10(Math.max(a,1e-4))+60)/60*100));
 // Section accent colors for synth panels
 const C_OSC="#7ecfb3", C_ENV="#d4956a", C_FILT="#c97b8a", C_DLY="#8bbf9f", C_REV="#a8b8d0";
 // MOJO — the master bus. A colour of its own, deliberately not one of the
@@ -2122,8 +2184,10 @@ const HELP_GROUPS=Object.freeze([
   ]},
   {t:"SAMPLING",s:"SOUND \u00b7 the SMP wave",r:[
     ["SMP","POLY or MONO plays a recording instead of an oscillator \u2014 pitched by row, through its own filter and envelope"],
-    ["REC","arms the mic: it starts on the first sound and stops once it has decayed, or when you tap STOP"],
-    ["\u2212 / + beside the note","the ROOT \u2014 the note the recording is, so the grid plays it in tune"],
+    ["ARM","opens the mic; the take starts when the level crosses the line and stops once it has decayed, or on STOP"],
+    ["drag the meter","the line \u2014 where the room ends and the instrument begins"],
+    ["the note beside the length","the ROOT, read off the recording itself, so the grid plays it in tune"],
+    ["UNI 1\u20134","how many of each note \u2014 one is clean, more is the chorus; DETUNE and SPREAD act across them"],
     ["drums: REC on the USER kit","the same sampler, one recording per voice"],
   ]},
   {t:"TRANSPORT",r:[
@@ -3661,6 +3725,8 @@ class Bell{
     const isSample=p.waveform==="sample";
     const smpBuf=isSample?(this.layerSamples&&this.layerSamples[layer])||null:null;
     const rootHz=isSample?440*Math.pow(2,(((p.sampleRoot!=null)?p.sampleRoot:60)-69)/12):0;
+    // UNISON — how many readers this note is (see UNI_* at module scope).
+    const uniN=uniCount(p,isSample);
     // Choke the previous MONO voice before scheduling this one — true mono
     // behaviour, otherwise notes ring out over each other. Fast-fade the
     // previous vca to silence at this note's start time and stop its oscs
@@ -3791,7 +3857,7 @@ class Bell{
     const mixMul=(p&&p.mix!=null)?(p.mix/100):0.85;
     // monoSingle short-circuits the dual-osc check below — peak gain follows the
     // single-osc curve (0.42 vs 0.28) so a culled MONO note doesn't sound thin.
-    const peak=((p.detune>2&&!(p&&p.monoSingle)&&!isSample)?0.28:0.42)*velMulAmp*mixMul;
+    const peak=UNI_PEAK[uniN]*velMulAmp*mixMul;
     // gainAtGate must be computed AFTER peak is defined
     const gainAtGate = decayFraction>=1 ? sus*peak : Math.max(0.001, peak*Math.pow(Math.max(0.001,sus), decayFraction));
     vca.gain.setValueAtTime(0,t);
@@ -3826,7 +3892,7 @@ class Bell{
     // — MONO is a single oscillator regardless of saved detune. Tested below
     // wherever the dual-osc / spread path is gated.
     const isMonoSingle = !!(p && p.monoSingle);
-    const spreadAmt=(!isMonoSingle&&!isSample&&p&&p.spread!=null&&p.detune>2)?Math.max(0,Math.min(100,p.spread))/100:0;
+    const spreadAmt=(uniN>1&&p&&p.spread!=null)?Math.max(0,Math.min(100,p.spread))/100:0;
     let spreadMerger=null;
     if(spreadAmt>0){
       spreadMerger=this.ctx.createChannelMerger(2);
@@ -3853,47 +3919,37 @@ class Bell{
       osc.connect(gL);gL.connect(spreadMerger,0,0);
       osc.connect(gR);gR.connect(spreadMerger,0,1);
     };
-    // o1 — or, on the SAMPLE wave, the layer's recording in its place: an
-    // AudioBufferSourceNode whose playbackRate is hz/root, through the same
-    // VCF and VCA as an oscillator would be. `o1Pitch` and `toPitch` are what
-    // the glide and the mid-note OCT mods write to, so a sample slides and
-    // re-pitches exactly as an oscillator does. With no recording loaded the
-    // source has no buffer and is SILENT — a sampler with nothing in it, which
-    // the SOUND page says in so many words — rather than falling back to a
-    // waveform nobody chose. The core does the same.
-    let o1,o1Pitch,toPitch;
-    if(isSample){
-      o1=this.ctx.createBufferSource(); if(smpBuf)o1.buffer=smpBuf;
-      o1Pitch=o1.playbackRate; toPitch=(hz)=>hz/rootHz;
-    } else {
-      o1=this.ctx.createOscillator(); o1.type=p.waveform;
-      o1Pitch=o1.frequency; toPitch=(hz)=>hz;
-    }
-    if(prevFreq&&glideTime>0){
-      // prevFreq is the actual played frequency from previous step (oct already applied)
-      o1Pitch.setValueAtTime(toPitch(Math.max(1,prevFreq)),t);
-      o1Pitch.exponentialRampToValueAtTime(toPitch(Math.max(1,playFreq)),t+glideTime);
-    } else {
-      o1Pitch.value=toPitch(playFreq);
-    }
-    panOsc(o1,-spreadAmt);
-    o1.start(t);o1.stop(t+end+.05);
-    let o2=null;
-    if(p.detune>2&&!isMonoSingle&&!isSample){
-      o2=this.ctx.createOscillator();
-      o2.type=p.waveform;
-      if(prevFreq&&glideTime>0){
-        o2.frequency.setValueAtTime(Math.max(1,prevFreq),t);
-        o2.frequency.exponentialRampToValueAtTime(Math.max(1,playFreq),t+glideTime);
+    // THE STACK: uniN readers of the pitch — oscillators, or on the SAMPLE
+    // wave AudioBufferSourceNodes at playbackRate hz/root, through the same VCF
+    // and VCA either way. Reader k sits UNI_OFF[k]*detune cents off the pitch
+    // and UNI_PAN[k]*spread across the image; each carries its pitch param and
+    // the scale that turns a frequency into that param's value, so the glide
+    // and the mid-note OCT mods below write every reader the same way. With no
+    // recording loaded a sample reader has no buffer and is SILENT — a sampler
+    // with nothing in it, which the SOUND page says in so many words — rather
+    // than a waveform nobody chose. The core does the same.
+    const det=(p.detune!=null)?p.detune:0;
+    const voices=[];
+    for(let k=0;k<uniN;k++){
+      const cents=UNI_OFF[uniN][k]*det;
+      let node,param,scale;
+      if(isSample){
+        node=this.ctx.createBufferSource(); if(smpBuf)node.buffer=smpBuf;
+        param=node.playbackRate; scale=Math.pow(2,cents/1200)/rootHz;
       } else {
-        o2.frequency.value=playFreq;
+        node=this.ctx.createOscillator(); node.type=p.waveform;
+        param=node.frequency; scale=1; node.detune.value=cents;
       }
-      // No automatic detune widening — SPREAD is purely a pan operation on
-      // the existing dual-osc stack. The user controls the detune cents on
-      // its own knob; SPREAD just decides how L/R-distributed the stack is.
-      o2.detune.value=p.detune;
-      panOsc(o2,+spreadAmt);
-      o2.start(t);o2.stop(t+end+.05);
+      if(prevFreq&&glideTime>0){
+        // prevFreq is the actual played frequency from previous step (oct already applied)
+        param.setValueAtTime(Math.max(1,prevFreq)*scale,t);
+        param.exponentialRampToValueAtTime(Math.max(1,playFreq)*scale,t+glideTime);
+      } else {
+        param.value=playFreq*scale;
+      }
+      panOsc(node,UNI_PAN[uniN][k]*spreadAmt);
+      node.start(t);node.stop(t+end+.05);
+      voices.push({node,param,scale});
     }
     // Sub-oscillator — 1 octave below playFreq, sine for clean low end. Used
     // primarily on MONO; POLY panel doesn't expose this knob but the field
@@ -3927,8 +3983,7 @@ class Bell{
     // Register this voice as the active MONO voice so the next MONO trigger
     // can choke it. Done after osc creation so the oscs array is complete.
     if(p&&p.monoSingle){
-      const oscs=[o1];
-      if(o2)oscs.push(o2);
+      const oscs=voices.map(v=>v.node);
       if(subOsc)oscs.push(subOsc);
       this.monoActiveVoice={vca,oscs};
     }
@@ -3947,12 +4002,10 @@ class Bell{
         const mPlayFreq=freq*Math.pow(2,mStepOct+layerOct);
         if(Math.abs(mPlayFreq-prevModFreq)>0.5){
           if(prevModGlide){
-            o1Pitch.exponentialRampToValueAtTime(toPitch(Math.max(1,mPlayFreq)),m.at);
-            if(o2)o2.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq),m.at);
+            for(const v of voices)v.param.exponentialRampToValueAtTime(Math.max(1,mPlayFreq)*v.scale,m.at);
             if(subOsc)subOsc.frequency.exponentialRampToValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           } else {
-            o1Pitch.setValueAtTime(toPitch(Math.max(1,mPlayFreq)),m.at);
-            if(o2)o2.frequency.setValueAtTime(Math.max(1,mPlayFreq),m.at);
+            for(const v of voices)v.param.setValueAtTime(Math.max(1,mPlayFreq)*v.scale,m.at);
             if(subOsc)subOsc.frequency.setValueAtTime(Math.max(1,mPlayFreq/2),m.at);
           }
         }
@@ -4715,6 +4768,13 @@ export default function LoudLight(){
   // "arm" while waiting for the onset, "rec" once it has landed — the label
   // on the REC button, so you can see that it is listening and not stuck.
   const [recPhase, setRecPhase] = useState(null);
+  // The ARM threshold: the input level a take starts on, as a linear peak
+  // (0.001..1), shown and dragged on a -60..0 dBFS meter. A DEVICE
+  // PREFERENCE, like the row keys — a threshold belongs to the room and the
+  // mic, not to the project — read synchronously and written only by the drag.
+  const [recThresh, setRecThresh] = useState(()=>{try{const v=parseFloat(localStorage.getItem(LS_NS+"recthresh"));return v>0&&v<=1?v:0.03;}catch(e){return 0.03;}});
+  const recThreshR = useRef(recThresh);
+  const setRecThreshAll=(v)=>{v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);try{localStorage.setItem(LS_NS+"recthresh",String(v));}catch(e){}};
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
   // that don't come from a kit — loading a kit replaces them all.
@@ -4880,6 +4940,9 @@ export default function LoudLight(){
     // The SAMPLE wave's root: the MIDI note the recording is taken to be, so
     // that row plays it at its own pitch and the others re-pitch from there.
     sampleRoot:60,
+    // UNISON: readers per note, 1..UNI_MAX. POLY's default is the pair it has
+    // always been; MONO's one. DETUNE and SPREAD act across the stack.
+    unison:2,
     // RELEASE, in ms, and it is its own control rather than a copy of DECAY.
     // It used to BE the decay (`rel = ms(p.decay)`) in both engines, which
     // meant the default patch put a 400ms tail on every note however short the
@@ -4916,6 +4979,7 @@ export default function LoudLight(){
   const DEFAULT_LP_MONO = (octave)=>({
     ...DEFAULT_LP(octave),
     detune:0,
+    unison:1,
     subLevel:50,   // MONO sub-oscillator on by default (1 octave down)
     monoSingle:true,
     glide:0,
@@ -4939,6 +5003,10 @@ export default function LoudLight(){
     // can act on — a field no code reads is the one that gets read again by
     // accident later.
     delete o.velAmpInv; delete o.velFltInv; delete o.velEnvInv;
+    // A patch saved before UNISON existed gets the stack it HAD: two iff
+    // detune>2 on a non-mono patch, else one — not the new default, which
+    // would put a second oscillator under every old single-osc POLY patch.
+    if(saved&&saved.unison==null)o.unison=uniCount(o,false);
     return o;
   };
   const fillLayerParams=(lp)=>({
@@ -5111,6 +5179,7 @@ export default function LoudLight(){
   // read/write the active layer's slot in layerParams.
   const waveform = _lp.waveform,         setWaveform = _setLPStep("waveform");
   const sampleRoot = _lp.sampleRoot??60, setSampleRoot = _setLPStep("sampleRoot");
+  const unison = _lp.unison??uniCount(_lp,false), setUnison = _setLPStep("unison");
   const detune = _lp.detune,             setDetune = _setLP("detune");
   const attack = _lp.attack,             setAttack = _setLP("attack");
   const decay = _lp.decay,               setDecay = _setLP("decay");
@@ -12209,8 +12278,14 @@ export default function LoudLight(){
   //   - The take is NORMALISED to REC_NORM peak and downmixed to mono. A quiet
   //     source at a sensible distance is otherwise a quiet sample that has to
   //     be pushed up on every fader it meets.
-  const REC_FLOOR_MS=250, REC_ONSET_X=4, REC_ONSET_MIN=0.02, REC_TAIL_DB=36, REC_SILENCE_MS=600,
-        REC_MAX_S=12, REC_ARM_S=20, REC_PRE_MS=25, REC_POST_MS=80, REC_NORM=0.8;
+  //   - THE ONSET LEVEL IS THE USER'S (`recThresh`, the amber line on the
+  //     meter), not a guess from the room: ARM opens the mic and shows the
+  //     level live, you drag the line to where the room is not and the
+  //     instrument is, and the take starts the moment the input crosses it.
+  //     Armed is a STATE you leave by taking or by tapping again — not a
+  //     timeout, which is what made a quiet source read as NO INPUT.
+  const REC_FLOOR_MS=250, REC_TAIL_DB=36, REC_SILENCE_MS=600,
+        REC_MAX_S=12, REC_ARM_S=600, REC_PRE_MS=25, REC_POST_MS=80, REC_NORM=0.8;
   // Cut a decoded take to the sound in it: mono, trimmed, normalised, with a
   // 4ms fade either end so the cut is not a click. null = nothing crossed the
   // onset level (a STOP while still armed).
@@ -12274,7 +12349,7 @@ export default function LoudLight(){
       const chunks=[];
       const recorder=new MediaRecorder(stream);
       recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
-      let armed=true,stopped=false,floorPk=0,onsetThr=REC_ONSET_MIN,takePk=0,silentSince=null,onsetAt=0;
+      let armed=true,stopped=false,floorPk=0,onsetThr=recThreshR.current,takePk=0,silentSince=null,onsetAt=0;
       const t0=performance.now();
       const teardown=()=>{
         if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
@@ -12298,7 +12373,17 @@ export default function LoudLight(){
             setUserSamples(prev=>({...prev,[key]:take}));
             if(_isDrumKey(key))setVoiceSamples(prev=>({...prev,[key]:take}));
             samplesDirtyR.current=true; // user recorded → persist to autosave_smp
-            showFlash("REC OK "+(key==="synth"?"POLY":key==="lead"?"MONO":key)+" "+take.duration.toFixed(1)+"s");
+            let note="";
+            if(!_isDrumKey(key)){
+              // The ROOT is READ OFF THE TAKE, not typed in: the layer plays
+              // the recording at its own pitch on the row that matches it.
+              // Kept as a fractional MIDI note so the tuning is exact; the
+              // readout rounds and says the cents.
+              const hz=detectPitch(take);
+              if(hz){ const midi=69+12*Math.log2(hz/440); setLayerParams(lps=>({...lps,[key]:{...lps[key],sampleRoot:midi}})); note=" \u00b7 "+_noteLabel(midi); }
+              else note=" \u00b7 PITCH ?";
+            }
+            showFlash("REC OK "+(key==="synth"?"POLY":key==="lead"?"MONO":key)+" "+take.duration.toFixed(1)+"s"+note);
           } else showFlash("NO INPUT");
         }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
         teardown();
@@ -12313,11 +12398,14 @@ export default function LoudLight(){
         if(fbuf){ analyser.getFloatTimeDomainData(fbuf); for(let i=0;i<fbuf.length;i++){const v=Math.abs(fbuf[i]);if(v>peak)peak=v;} }
         else { analyser.getByteTimeDomainData(buf); for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]-128)/128;if(v>peak)peak=v;} }
         const now=performance.now();
+        // the meter: written straight to the DOM, not through React — sixty
+        // renders a second for a bar is the kind of load this app has learned
+        // to keep off the main thread
+        { const pct=levelPct(peak); const els=document.querySelectorAll('[data-recmeter="'+key+'"]'); for(const el of els)el.style.width=pct+"%"; }
         if(armed){
-          const inFloor=now-t0<REC_FLOOR_MS;
-          if(inFloor&&peak<REC_ONSET_MIN*3){ if(peak>floorPk)floorPk=peak; onsetThr=Math.max(REC_ONSET_MIN,floorPk*REC_ONSET_X); }
-          else if(peak>=onsetThr){ armed=false; onsetAt=now; takePk=peak; setRecPhase("rec"); }
-          else if(now-t0>REC_ARM_S*1000){ stopped=true; teardown(); showFlash("NO INPUT"); return; }
+          onsetThr=Math.max(0.001,recThreshR.current);   /* the line can move while armed */
+          if(peak>=onsetThr){ armed=false; onsetAt=now; takePk=peak; setRecPhase("rec"); }
+          else { if(now-t0<REC_FLOOR_MS&&peak>floorPk)floorPk=peak; if(now-t0>REC_ARM_S*1000){ stopped=true; teardown(); showFlash("DISARMED"); return; } }
         } else {
           if(peak>takePk)takePk=peak;
           const tailThr=Math.max(floorPk*1.5,0.001,takePk*Math.pow(10,-REC_TAIL_DB/20));
@@ -12356,6 +12444,39 @@ export default function LoudLight(){
   // pages. `recPhase` says whether REC is still listening or has caught the
   // onset — a sampler that just says STOP looks stuck while it waits.
   const _midiName=(n)=>NOTE_NAMES[((n%12)+12)%12]+(Math.floor(n/12)-1);
+  // A fractional MIDI note as "A4" or "A4 +12\u00a2" (cents shown past 10).
+  const _noteLabel=(m)=>{const r=Math.round(m),c=Math.round((m-r)*100);return _midiName(r)+(Math.abs(c)>=10?" "+(c>0?"+":"\u2212")+Math.abs(c)+"\u00a2":"");};
+  // THE SAMPLER PANEL — ARM, the input meter with the threshold line on it,
+  // the threshold in dB. One body for a synth layer (the SMP wave) and for a
+  // USER-kit drum voice: the drag sets ONE threshold, because the room and
+  // the mic are the same whichever you are sampling into. Tap ARM and the
+  // mic opens and the meter runs; drag the line to sit above the room; the
+  // take starts when the input crosses it and ends when it has decayed (or
+  // on STOP). Tap ARMED to disarm.
+  const _thrFromEvent=(e,el)=>{const r=el.getBoundingClientRect();const pct=Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width)));setRecThreshAll(Math.pow(10,(-60+60*pct)/20));};
+  const recPanel=(key,compact)=>{
+    const isRec=recordingVoice===key, phase=isRec?(recPhase||"arm"):"off";
+    const h=compact?22:26, fs=compact?8:9;
+    const label=phase==="rec"?"STOP \u25cf":phase==="arm"?"ARMED":"ARM";
+    const color=phase==="rec"?"#e07060":phase==="arm"?"#e6b872":C_OSC;
+    const thrDb=Math.round(20*Math.log10(recThresh));
+    return (
+      <div data-recpanel={key} style={{display:"flex",alignItems:"center",gap:compact?5:8,flex:1,minWidth:0}}>
+        <button data-smprec={key} data-recphase={phase} title={phase==="arm"?"Listening \u2014 tap to disarm":phase==="rec"?"Taking \u2014 tap to stop":"Open the mic and wait for the threshold"}
+          onClick={()=>isRec?stopRecord():startRecord(key)}
+          style={{height:h,padding:"0 9px",minWidth:compact?52:62,fontSize:fs,letterSpacing:0.5,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
+            border:"1px solid "+color,background:phase==="off"?"transparent":color+"22",color}}>{label}</button>
+        <div data-recmeterbox={key} title="Input level \u2014 drag to set the threshold"
+          onPointerDown={e=>{e.preventDefault();e.stopPropagation();const el=e.currentTarget;try{el.setPointerCapture(e.pointerId);}catch(x){}el._thrDrag=true;_thrFromEvent(e,el);}}
+          onPointerMove={e=>{const el=e.currentTarget;if(el._thrDrag)_thrFromEvent(e,el);}}
+          onPointerUp={e=>{e.currentTarget._thrDrag=false;}} onPointerCancel={e=>{e.currentTarget._thrDrag=false;}}
+          style={{position:"relative",flex:1,minWidth:56,height:h,border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,touchAction:"none",cursor:"ew-resize",overflow:"hidden",background:"rgba(0,0,0,0.25)"}}>
+          <div data-recmeter={key} style={{position:"absolute",left:0,top:0,bottom:0,width:"0%",background:"rgba(176,224,152,0.4)"}}/>
+          <div data-recthr={recThresh.toFixed(4)} style={{position:"absolute",top:0,bottom:0,left:levelPct(recThresh)+"%",width:2,marginLeft:-1,background:"#e6b872",boxShadow:"0 0 4px #e6b872"}}/>
+        </div>
+        <div data-recthrdb={thrDb} style={{fontSize:fs,minWidth:36,textAlign:"right",color:"#e6b872",fontWeight:600}}>{thrDb}dB</div>
+      </div>);
+  };
   const sampleRow=(compact)=>{
     const key=activeLayer==="lead"?"lead":"synth";
     const buf=userSamples[key], isRec=recordingVoice===key;
@@ -12369,15 +12490,11 @@ export default function LoudLight(){
     return (
       <div data-smprow={key} style={{padding:compact?"0 8px 8px":"0 12px 10px",display:"flex",alignItems:"center",gap:compact?5:8}}>
         <div style={{fontSize:compact?7:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:compact?32:36}}>SMP</div>
-        {btn(isRec?(recPhase==="rec"?"STOP \u25cf":"ARMED \u2014 STOP"):buf?"RE-REC":"REC",isRec||!buf,isRec?"#e07060":C_OSC,
-             ()=>isRec?stopRecord():startRecord(key),{flex:1},{"data-smprec":key,"data-recphase":isRec?(recPhase||"arm"):"off"})}
+        {recPanel(key,compact)}
         {buf&&!isRec&&btn("\u2715",false,C_OSC,()=>clearVoiceSample(key),null,{"data-smpclear":key,title:"Clear the recording"})}
-        <div style={{display:"flex",alignItems:"center",gap:3}}>
-          {btn("\u2212",false,C_OSC,()=>setSampleRoot(Math.max(24,sampleRoot-1)),{padding:"0 6px"},{"data-smproot-dn":1})}
-          <div data-smproot={sampleRoot} title="Root \u2014 the note the recording is" style={{minWidth:30,textAlign:"center",fontSize:fs+2,fontWeight:700,color:C_OSC}}>{_midiName(sampleRoot)}</div>
-          {btn("+",false,C_OSC,()=>setSampleRoot(Math.min(96,sampleRoot+1)),{padding:"0 6px"},{"data-smproot-up":1})}
-        </div>
-        <div data-smplen={buf?buf.duration.toFixed(2):""} style={{fontSize:compact?7:8,color:"rgba(178,199,219,0.45)",minWidth:34,textAlign:"right"}}>{buf?buf.duration.toFixed(1)+"s":"EMPTY"}</div>
+        {/* the ROOT is read off the take, so it is a readout beside the length and not a control */}
+        <div data-smplen={buf?buf.duration.toFixed(2):""} data-smproot={buf?sampleRoot:""} title={buf?"Root "+_noteLabel(sampleRoot)+" \u2014 found from the recording":""}
+          style={{fontSize:compact?7:8,color:"rgba(178,199,219,0.55)",minWidth:34,textAlign:"right",whiteSpace:"nowrap"}}>{buf?buf.duration.toFixed(1)+"s \u00b7 "+_noteLabel(sampleRoot):"EMPTY"}</div>
       </div>);
   };
   // The drum "library" is the same pattern list seen through the drums part,
@@ -12900,12 +13017,9 @@ export default function LoudLight(){
                 {row("REV",bigSlider(r,"rvSend",md.rvSend,0,100,false,dc),md.rvSend)}
                 {row("DLY",bigSlider(r,"dlySend",md.dlySend,0,100,false,dc),md.dlySend)}
                 {activeKit==="user"&&(
-                  <div style={{display:"flex",gap:5,marginTop:2}}>
-                    <button style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid "+(isRec?"#e07060":hasSample?dc+"99":"rgba(168,190,212,0.18)"),background:isRec?"rgba(224,112,96,0.18)":hasSample?dc+"22":"transparent",color:isRec?"#e07060":hasSample?dc:"rgba(168,190,212,0.6)",fontSize:9,letterSpacing:0.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
-                      onClick={()=>isRec?stopRecord():startRecord(voice.key)}>
-                      {isRec?(recPhase==="rec"?"STOP ●":"ARMED — STOP"):hasSample?"● SAMPLE":"REC"}
-                    </button>
-                    {hasSample&&!isRec&&<button style={{padding:"6px 10px",borderRadius:4,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)}>✕</button>}
+                  <div style={{display:"flex",gap:5,marginTop:2,alignItems:"center"}}>
+                    {recPanel(voice.key,true)}
+                    {hasSample&&!isRec&&<button style={{height:22,padding:"0 10px",borderRadius:4,border:"1px solid rgba(168,190,212,0.18)",background:"transparent",color:"rgba(168,190,212,0.5)",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>clearVoiceSample(voice.key)} title="Clear the recording">✕</button>}
                   </div>
                 )}
               </div>
@@ -14646,10 +14760,10 @@ export default function LoudLight(){
                     <SynthSection title="OSCILLATOR" accent={C_OSC}>
                       <div style={{display:"flex",gap:10,padding:"8px 10px 10px",height:160,alignItems:"stretch",justifyContent:"center"}}>
                         {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
-                        {activeLayer==="synth"&&(
+                        {unison>1&&(
                           <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} def={8} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                         )}
-                        {activeLayer==="synth"&&(
+                        {unison>1&&(
                           <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} def={50} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                         )}
                         {activeLayer==="lead"&&(
@@ -14665,6 +14779,18 @@ export default function LoudLight(){
                           {WAVEFORMS.map((w,i)=>(
                             <button key={w} data-wf={w} aria-pressed={waveform===w} data-knobovr={noteOvr(setWaveform)?"1":undefined} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+(waveform===w?"":"22"),color:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC):"rgba(178,199,219,0.35)",background:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+"14":"transparent"})} onClick={()=>setWaveform(w)}>
                               {WF_LABELS[i]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {/* UNISON — readers per note, 1..4. One is clean; more is the chorus. */}
+                      <div data-unirow style={{padding:"0 12px 6px",display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{fontSize:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:36}}>UNI</div>
+                        <div style={{flex:1,display:"flex",gap:3}}>
+                          {[1,2,3,4].map(n=>(
+                            <button key={n} data-uni={n} onClick={()=>setUnison(n)}
+                              style={{flex:1,height:26,padding:0,fontSize:11,fontWeight:600,border:"1px solid "+C_OSC+(unison===n?"":"22"),background:unison===n?C_OSC+"14":"transparent",color:unison===n?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                              {n}
                             </button>
                           ))}
                         </div>
@@ -15440,10 +15566,10 @@ export default function LoudLight(){
                           <SynthSection title="OSCILLATOR" accent={C_OSC}>
                             <div style={{display:"flex",gap:8,padding:"6px 10px 8px",height:120,alignItems:"stretch",justifyContent:"center"}}>
                               {/* DETUNE and SPREAD are POLY-only — MONO is a single oscillator. */}
-                              {activeLayer==="synth"&&(
+                              {unison>1&&(
                                 <KnobSlider vertical label="DETUNE" value={detune} min={0} max={50} def={8} onChange={setDetune} display={detune+"¢"} accent={C_OSC}/>
                               )}
-                              {activeLayer==="synth"&&(
+                              {unison>1&&(
                                 <KnobSlider vertical label="SPREAD" value={spread} min={0} max={100} def={50} onChange={setSpread} display={spread+"%"} accent={C_OSC}/>
                               )}
                               {activeLayer==="lead"&&(
@@ -15456,6 +15582,17 @@ export default function LoudLight(){
                               <div style={{display:"flex",flexDirection:"column",gap:3,flex:"0 1 40%",minWidth:44}}>
                                 {WAVEFORMS.map((w,i)=>(
                                   <button key={w} data-wf={w} aria-pressed={waveform===w} data-knobovr={noteOvr(setWaveform)?"1":undefined} style={Object.assign({},S.wfBtn,{flex:1,padding:"0",borderColor:(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+(waveform===w?"":"22"),color:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC):"rgba(178,199,219,0.35)",background:waveform===w?(noteOvr(setWaveform)?NOTE_OVR.col:C_OSC)+"14":"transparent"})} onClick={()=>setWaveform(w)}>{WF_LABELS[i]}</button>
+                                ))}
+                              </div>
+                            </div>
+                            <div data-unirow style={{padding:"0 8px 6px",display:"flex",alignItems:"center",gap:6}}>
+                              <div style={{fontSize:7,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:32}}>UNI</div>
+                              <div style={{flex:1,display:"flex",gap:2}}>
+                                {[1,2,3,4].map(n=>(
+                                  <button key={n} data-uni={n} onClick={()=>setUnison(n)}
+                                    style={{flex:1,height:22,padding:0,fontSize:10,fontWeight:600,border:"1px solid "+C_OSC+(unison===n?"":"22"),background:unison===n?C_OSC+"14":"transparent",color:unison===n?C_OSC:"rgba(178,199,219,0.4)",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
+                                    {n}
+                                  </button>
                                 ))}
                               </div>
                             </div>

@@ -22,6 +22,7 @@ void* memset(void*,int,unsigned long);
 #define LL_MAX_SLOTS    8        /* sample slots per voice (rr / vel layers) */
 #define LL_STRIP_W      LL_BLOCK
 #define LL_NSMP         (LL_DRUM_ROWS+2) /* sample sets: 13 drum rows + a one-shot per synth layer */
+#define LL_UNISON_MAX   4        /* readers of one pitch in a synth voice */
 
 /* glideT is GLIDE AS A TIME: 0..100, a percentage of the step. `glide` is the
  * old on/off flag and is still read, because a save that predates glideT
@@ -62,19 +63,24 @@ typedef struct {
  * format zeroes to "inherit", which is what it always did. */
 typedef struct { int used, id, bars, master; float bpm; ll_spart s[2]; ll_dpart d; } ll_pattern;
 
-/* A synth voice — Bell.play, with its node graph flattened. */
+/* A synth voice — Bell.play, with its node graph flattened. UNISON is `n`
+ * readers of one pitch: oscillator k runs at f1*detR[k] and is panned by
+ * gL[k]/gR[k] when `spread` is on. n=2 with k=0 at the pitch (left) and k=1
+ * at +detune (right) is exactly the o1/o2 pair this voice used to be. */
 typedef struct {
-  int active, layer, mono, wave, has2, hasSub, spread, envOn;
+  int active, layer, mono, wave, n, hasSub, spread, envOn;
   double t0, end, chokeAt;
   ll_auto vca, vcf, frq;
-  ll_osc o1, o2, sub;
-  float detRatio, subLvl, gL1, gR1, gL2, gR2, comp, qdb, baseHz, revMul, dlyMul;
+  ll_osc o[LL_UNISON_MAX], sub;
+  float detR[LL_UNISON_MAX], gL[LL_UNISON_MAX], gR[LL_UNISON_MAX];
+  float subLvl, comp, qdb, baseHz, revMul, dlyMul;
   ll_bq fL, fR; int coefN; float lastCut;
-  /* WV_SAMPLE: the layer's one-shot in place of o1. `pos` walks it at
-   * (f1/rootHz)*srcRatio per frame, so the frq auto (glide, OCT mods) moves
-   * the sample exactly as it moves an oscillator; past the end it is silence
-   * and the envelope carries on over nothing — a one-shot, not a loop. */
-  const float* smp; int smpLen; double pos; float srcRatio, rootHz;
+  /* WV_SAMPLE: the layer's one-shot in place of the oscillator. pos[k] walks
+   * it at (f1*detR[k]/rootHz)*srcRatio per frame, so the frq auto (glide,
+   * OCT mods) moves the sample exactly as it moves an oscillator; past the
+   * end it is silence and the envelope carries on over nothing — a one-shot,
+   * not a loop. */
+  const float* smp; int smpLen; double pos[LL_UNISON_MAX]; float srcRatio, rootHz;
 } ll_svoice;
 
 /* One element of a drum hit: an oscillator, a noise burst or a sample, through

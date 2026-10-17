@@ -176,6 +176,12 @@ enum ll_lparam {
    * note at that pitch plays it at rate 1 and every other row re-pitches it
    * from there. 0 = C4 (60), which is what a patch without one means. */
   LL_L_ROOT,
+  /* UNISON: how many readers of one pitch a note is, 1..LL_UNISON_MAX,
+   * detuned by LL_L_DETUNE and panned by LL_L_SPREAD across the stack. 0 is
+   * the rule that stood before the control existed — two oscillators iff
+   * detune>2 on a non-mono, non-sample patch, else one — so a fixture or a
+   * host that never sends it renders exactly as it always did. */
+  LL_L_UNISON,
   LL_L_COUNT
 };
 

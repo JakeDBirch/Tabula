@@ -340,6 +340,8 @@ self.onmessage=(e)=>{
       s("VELAMP",lp.velAmp??100);s("VELFLT",lp.velFlt??100);s("VELENV",lp.velEnv??0);
       // The SAMPLE wave's root note (MIDI). Absent means C4.
       s("ROOT",lp.sampleRoot??60);
+      // UNISON: 0 = the legacy stack rule (two iff detune>2 on a non-mono patch).
+      s("UNISON",lp.unison??0);
     }
     pushDrumMix(voice,mix){
       const D=P.D;

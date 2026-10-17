@@ -92,6 +92,7 @@ static void defaults(void){
     q[LL_L_MIX]=85; q[LL_L_FXTRIM]=100; q[LL_L_SUB]=l?50:0; q[LL_L_SPREAD]=50; q[LL_L_GLIDE]=0; q[LL_L_MONO]=l?1:0;
     q[LL_L_VELAMP]=100; q[LL_L_VELFLT]=100; q[LL_L_VELENV]=0;
     q[LL_L_AUDIBLE]=1;
+    q[LL_L_RELEASE]=120; q[LL_L_ROOT]=60; q[LL_L_UNISON]=0;   /* 0 = the legacy stack rule */
   }
   for(int v=0;v<LL_DRUM_ROWS;v++){
     float*d=G.dm[v]; d[LL_D_LEVEL]=60; d[LL_D_PAN]=0; d[LL_D_RVSEND]=0; d[LL_D_DLYSEND]=0; d[LL_D_PITCH]=0;

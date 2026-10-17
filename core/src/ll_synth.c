@@ -2,7 +2,7 @@
  * Every AudioParam automation in the JS (setValueAtTime, linearRamp,
  * exponentialRamp, setTargetAtTime, cancelAndHold) becomes a point on an
  * ll_auto, so the two can be read side by side. The node graph is flattened:
- *   o1,o2 → [spread pan + comp] → VCF (LP, Q in dB) → VCA → bus[layer]
+ *   o[0..n) (UNISON) → [spread pan + comp] → VCF (LP, Q in dB) → VCA → bus[layer]
  *   sub (sine, /2) ───────────────────────────────→ VCA        (post-filter)
  *   VCA → rev send, dly send
  * Read the JS for the WHY of each constant; only the how differs here. */
@@ -77,8 +77,20 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
     if(ss->n>0&&ss->p[0]){ v->smp=ss->p[0]; v->smpLen=ss->len[0]; v->srcRatio=ss->sr[0]/sr; }
     float root=p[LL_L_ROOT]>0.f?p[LL_L_ROOT]:60.f;
     v->rootHz=440.f*ll_exp2((root-69.f)/12.f);
-    v->pos=0;
   }
+  /* ── UNISON ── n readers of the pitch. The three tables are the JS's
+   * UNI_OFF / UNI_PAN / UNI_PEAK, kept as numbers rather than formulas so the
+   * two engines cannot drift by a rounding: n=2 is the old o1/o2 pair exactly
+   * (k=0 at the pitch panned left, k=1 at +detune panned right, peak 0.28),
+   * n=1 the old single oscillator (peak 0.42). */
+  static const float UNI_OFF[LL_UNISON_MAX+1][LL_UNISON_MAX]={{0},{0},{0,1},{0,1,-1},{0,1,-1,2}};
+  static const float UNI_PAN[LL_UNISON_MAX+1][LL_UNISON_MAX]={{0},{0},{-1,1},{-1,1,0},{-1,1,-1.f/3.f,1.f/3.f}};
+  static const float UNI_PEAK[LL_UNISON_MAX+1]={0.f,0.42f,0.28f,0.22862f,0.19799f};
+  int uni=(int)p[LL_L_UNISON];
+  if(uni<1)uni=(p[LL_L_DETUNE]>2.f&&!monoSingle&&!isSample)?2:1;   /* the rule before the control */
+  if(uni>LL_UNISON_MAX)uni=LL_UNISON_MAX;
+  v->n=uni;
+  for(int k=0;k<uni;k++){ v->detR[k]=ll_exp2(UNI_OFF[uni][k]*p[LL_L_DETUNE]/1200.f); v->pos[k]=0; }
 
   /* ── VCF ── */
   float rawCut=ll_clamp(p[LL_L_CUTOFF]+cutOff,0,100);
@@ -116,7 +128,7 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   }
   /* ── VCA ── */
   float mixMul=p[LL_L_MIX]/100.f;
-  float peak=((p[LL_L_DETUNE]>2.f&&!monoSingle&&!isSample)?0.28f:0.42f)*velMulAmp*mixMul;
+  float peak=UNI_PEAK[uni]*velMulAmp*mixMul;
   float gainAtGate=decayFraction>=1.f?sus*peak:ll_max(0.001f,peak*ll_pow(ll_max(0.001f,sus),decayFraction));
   auto_init(&v->vca,0.f);
   auto_set(&v->vca,t,0.f);
@@ -129,20 +141,17 @@ void synth_play(float freq,double at,const ll_stepp*sp,double noteDurF,float glo
   }
   auto_exp(&v->vca,t+sec2f(end),0.0001f);
   /* ── spread ── */
-  float spreadAmt=(!monoSingle&&!isSample&&p[LL_L_DETUNE]>2.f)?ll_clamp(p[LL_L_SPREAD],0,100)/100.f:0.f;
+  float spreadAmt=(uni>1)?ll_clamp(p[LL_L_SPREAD],0,100)/100.f:0.f;
   if(spreadAmt>0.f){
     v->spread=1; v->comp=1.f+spreadAmt;
-    v->gL1=ll_min(1.f,1.f+spreadAmt); v->gR1=ll_min(1.f,1.f-spreadAmt);   /* o1 panned left  */
-    v->gL2=ll_min(1.f,1.f-spreadAmt); v->gR2=ll_min(1.f,1.f+spreadAmt);   /* o2 panned right */
-  } else { v->spread=0; v->comp=1.f; v->gL1=v->gR1=v->gL2=v->gR2=1.f; }
+    for(int k=0;k<uni;k++){ float pan=UNI_PAN[uni][k]*spreadAmt; v->gL[k]=ll_min(1.f,1.f-pan); v->gR[k]=ll_min(1.f,1.f+pan); }
+  } else { v->spread=0; v->comp=1.f; for(int k=0;k<uni;k++)v->gL[k]=v->gR[k]=1.f; }
   /* ── oscillators ── */
   auto_init(&v->frq,playFreq);
   if(prevFreq>0.f&&glideSec>0.f){
     auto_set(&v->frq,t,ll_max(1.f,prevFreq));
     auto_exp(&v->frq,t+sec2f(glideSec),ll_max(1.f,playFreq));
   }
-  v->has2=(p[LL_L_DETUNE]>2.f&&!monoSingle&&!isSample);
-  v->detRatio=ll_exp2(p[LL_L_DETUNE]/1200.f);
   v->subLvl=ll_clamp(p[LL_L_SUB],0,100)/100.f;
   v->hasSub=v->subLvl>0.f;
   if(monoSingle)G.monoVoice=(int)(v-G.sv);
@@ -192,21 +201,21 @@ void synth_render(int n){
       float g=auto_tick(&v->vca,tt);
       float cut=v->envOn?auto_tick(&v->vcf,tt):v->baseHz;
       if(((v->coefN++)&7)==0&&cut!=v->lastCut){ bq_set(&v->fL,BQ_LP,cut,v->qdb,0,sr); v->fR.b0=v->fL.b0;v->fR.b1=v->fL.b1;v->fR.b2=v->fL.b2;v->fR.a1=v->fL.a1;v->fR.a2=v->fL.a2; v->lastCut=cut; }
-      float o1;
-      if(v->wave==WV_SAMPLE){
-        if(v->smp){
-          int ip=(int)v->pos;
-          if(ip+1<v->smpLen){ float fr=(float)(v->pos-ip); o1=v->smp[ip]+(v->smp[ip+1]-v->smp[ip])*fr; } else o1=0.f;
-          v->pos+=(double)((f1/v->rootHz)*v->srcRatio);
-        } else o1=0.f;
-      } else o1=osc_run(&v->o1,v->wave,f1,sr);
-      float o2=v->has2?osc_run(&v->o2,v->wave,f1*v->detRatio,sr):0.f;
+      float sum=0.f,L=0.f,R=0.f;
+      for(int k=0;k<v->n;k++){
+        float x, fk=f1*v->detR[k];
+        if(v->wave==WV_SAMPLE){
+          if(v->smp){
+            int ip=(int)v->pos[k];
+            if(ip+1<v->smpLen){ float fr=(float)(v->pos[k]-ip); x=v->smp[ip]+(v->smp[ip+1]-v->smp[ip])*fr; } else x=0.f;
+            v->pos[k]+=(double)((fk/v->rootHz)*v->srcRatio);
+          } else x=0.f;
+        } else x=osc_run(&v->o[k],v->wave,fk,sr);
+        if(v->spread){ L+=x*v->gL[k]; R+=x*v->gR[k]; } else sum+=x;
+      }
       float sb=v->hasSub?osc_run(&v->sub,WV_SINE,f1*0.5f,sr)*v->subLvl:0.f;
-      float L,R;
-      if(v->spread){
-        L=bq_run(&v->fL,(o1*v->gL1+o2*v->gL2)*v->comp);
-        R=bq_run(&v->fR,(o1*v->gR1+o2*v->gR2)*v->comp);
-      } else { L=R=bq_run(&v->fL,o1+o2); }
+      if(v->spread){ L=bq_run(&v->fL,L*v->comp); R=bq_run(&v->fR,R*v->comp); }
+      else { L=R=bq_run(&v->fL,sum); }
       L=(L+sb)*g; R=(R+sb)*g;
       bL[i]+=L; bR[i]+=R;
       G.rvL[i]+=L*v->revMul; G.rvR[i]+=R*v->revMul;

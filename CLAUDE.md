@@ -1423,11 +1423,10 @@ mid-note OCT mods move a sample exactly as they move an oscillator).
   so the last project's USER-kit recordings rode into the new project's first
   save — a pre-existing leak the layer sampler would have doubled.
 - **The SOUND row** (`sampleRow`, one body, two mounts, under the OSC card's
-  OCT row only while SMP is selected): REC / STOP with its phase in the label
-  (`ARMED — STOP` while listening, `STOP ●` once the onset has landed), ✕,
-  `− C4 +` for the root, and the take's length. `data-smprow`, `data-smprec`
-  (+`data-recphase`), `data-smpclear`, `data-smproot(-up/-dn)`, `data-smplen`
-  are the hooks.
+  OCT row only while SMP is selected): the `recPanel` (ARM, the meter, the
+  threshold — below), ✕, and the take's length with its detected root beside
+  it. `data-smprow`, `data-smpclear`, `data-smplen`, `data-smproot` are the
+  hooks; the root box that was here for a day is gone (below).
 
 **THE RECORDER WAS REWORKED FOR QUIET, LONG-DECAYING SOURCES — "the sampling
 for pocket chimes, specifically the threshold and arm/stop workflow".** It
@@ -1476,6 +1475,80 @@ served the drum sampler too, so the USER kit gets all of this.
   is still untested on a device (see the privacy notes). The web build is
   where the sampler has been exercised; the core's rendering is proven by
   `core/test/lsample.c` and the oracle, not yet by ear.
+
+**THE ROOT IS READ OFF THE TAKE, AND THE BOX THAT EDITED IT IS GONE** (asked
+for the day after the sampler landed: "Pocket Chimes has some kind of auto
+pitch detect and I'd like that for this as well. I don't want to see the
+current note definition box"). `detectPitch` runs on the cut take and writes
+`sampleRoot` as a FRACTIONAL MIDI note, so the tuning is exact; the readout
+beside the length says `3.6s · A6 +12¢` and is a readout, not a control.
+- **It is a SPECTRAL PEAK, not a period match, and that was learned the hard
+  way.** The first cut was YIN. A chime is INHARMONIC — its partials do not
+  repeat at the fundamental's period — and YIN read a 1760Hz chime as 599Hz,
+  a third of it. What the ear calls the pitch of a bell is its strongest
+  partial, so the detector takes a Hann-windowed FFT (up to 16k points, three
+  places along the decay, median) and picks the tallest peak, interpolated
+  across its bin. Two guards: a real peak (a fifth of the tallest) at a half
+  or a third of it means the tallest was an overtone of a HARMONIC source and
+  the lower one is the pitch; and the tallest must stand ten times over the
+  spectrum's mean, or a breath or a crash would be handed the pitch of its
+  tallest bump. `_pitch.mjs` drives it on a chime, a saw, a source whose 2nd
+  and 3rd harmonics beat its fundamental, a 55Hz bass and white noise.
+- Drum voices get no root: their pitch is the strip's PITCH, as before.
+
+**THE THRESHOLD IS THE USER'S, AND ARMED IS A STATE.** `recPanel` is one body
+for a synth layer's SMP row and a USER-kit drum voice's channel: ARM opens the
+mic and runs a live meter (−60..0 dBFS, written straight to the DOM from the
+analyser tick, never through React), the amber line on it is the threshold,
+and you DRAG the meter to put the line above the room. The take starts when
+the input crosses it and ends when it has decayed (the take-relative stop
+above) or on STOP; tapping ARMED disarms. Asked for in one line — "I need to
+be able to set a threshold for auto record and arm that stage… make sure
+that's the mechanism for both the oscillator and the drum" — and it replaced
+the floor-times-four guess, which was a guess about the room the sampler had
+no way to be right about.
+- `recThresh` is a DEVICE PREFERENCE (`recthresh` through `LS_NS`, default
+  0.03 ≈ −30dB): the room and the mic are the same whichever voice you sample
+  into, so it is one line, not one per target, and it is not project state.
+  Read synchronously, written only by the drag.
+- The line can move WHILE ARMED (the tick re-reads the ref), and there is no
+  arm timeout any more — a quiet source waiting ten seconds was NO INPUT
+  under the old one. A ten-minute cap says DISARMED rather than holding the
+  mic open for ever.
+- `data-recpanel`, `data-smprec` (+`data-recphase` off/arm/rec),
+  `data-recmeterbox`, `data-recmeter`, `data-recthr`, `data-recthrdb` are the
+  hooks. `_lsample.mjs` drags the meter to three quarters and asserts −15dB
+  on the readout, on disk, and after a relaunch.
+
+**UNISON: A NOTE IS 1–4 READERS OF ONE PITCH, ON BOTH LAYERS AND BOTH
+WAVES.** Reported on the sampler the day it landed: "it sounds like chorusing
+or phasing, which is cool, but I'd love the option to not have that… this
+unison stacking titration will be useful in the oscillators as well." The
+`UNI 1 2 3 4` row under the waveform buttons (`unison`, a layer param,
+`_setLPStep`); DETUNE and SPREAD act ACROSS the stack and leave the card at
+UNI 1, where there is nothing to detune.
+- **UNI 2 IS BIT-IDENTICAL TO THE PAIR THE VOICE ALWAYS WAS**, and that is
+  the whole design: reader k=0 at the pitch panned left, k=1 at +DETUNE
+  panned right, peak 0.28 — the old o1/o2. The three tables (`UNI_OFF`,
+  `UNI_PAN`, `UNI_PEAK`) are NUMBERS carried identically in `loudlight.jsx`
+  and `synth_play`, not formulas, so the engines cannot drift by a rounding;
+  `core/test/unison.c` asserts the legacy rule (param 0) renders bit for bit
+  as UNI 2 on POLY and as UNI 1 on MONO.
+- **A patch saved before the control gets the stack it HAD**, not the new
+  default: `_withRel` backfills `unison` as `uniCount` — two iff detune>2 on
+  a non-mono patch, else one. The new default is 2 on POLY and 1 on MONO,
+  which is also what every patch already had. `LL_L_UNISON` is appended; 0
+  means that same legacy rule, so the oracle's fixtures (which carry no
+  `unison`) are unchanged and it passes untouched.
+- MONO can stack now too — `monoSingle` still owns the CHOKE and nothing
+  else. The sub oscillator is outside the stack, as it always was.
+- What was probably being heard as chorus on a sample at UNI 1 is the
+  DELAY send (POLY defaults to 50): a one-shot through a tempo delay reads as
+  doubling. UNI 1 is the clean stack; DLY is the other knob.
+- `_unison.mjs` counts the oscillators a note STARTS (above 20Hz, past the
+  reverb's LFOs) for UNI 1–4 on POLY, MONO's 1+sub and 3+sub, and the legacy
+  backfill. One harness trap: the FIRST play builds the engine, so count from
+  the second.
 
 **A TEST RENDER LOOP THAT OVERRUNS ITS BUFFER LOOKS LIKE AN ENGINE BUG.**
 `for(off=0;off<48000;off+=256)` renders 48128 frames into `L[48000]`; the
