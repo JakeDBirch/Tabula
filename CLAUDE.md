@@ -1371,13 +1371,16 @@ could only find by tapping a layer button you were ALREADY on.
   of. Same lesson as the landscape bar menu.
 - Desktop's tab row is `EDIT | SOUND` for the same reason.
 
-**THE MAIN-SCREEN LAYER BUTTONS ONLY SWITCH LAYERS.** The tap-again is gone. It
-cost more than it looked: a mis-tap on the layer you were already editing threw a
-full-screen sheet over the instrument, which is something you do constantly on
-three buttons your thumb lives on. **Their HOLD carries that part's RAND and
-CLEAR** — bar-scoped, like the bar menu's, and it switches to that layer as it
-opens so you can see what you are about to change. `layerBtnProps` is one
-contract for all three mounts.
+**TAP-AGAIN ON A LAYER BUTTON OPENS ITS SOUND PAGE — BACK, on Jake's call,
+2026-10-18.** It was removed once because a mis-tap on the layer you were
+already on threw a full-screen sheet over the instrument; with the sampler
+living on that page the trip became a daily one and the chip was the long way
+round. Only the SOUND surface moves (the sheet on mobile, the page toggles on
+desktop); `switchLayer` and the transport are untouched, so `_layerfollow`'s
+"tapping the layer you are on must not touch FOLLOW" still holds. **Their HOLD
+carries that part's RAND and CLEAR** — bar-scoped, like the bar menu's, and it
+switches to that layer as it opens so you can see what you are about to
+change. `layerBtnProps` is one contract for all three mounts.
 
 ### THE LAYER SAMPLER — POLY and MONO can play a recording
 
@@ -1444,9 +1447,17 @@ served the drum sampler too, so the USER kit gets all of this.
   arming measure the floor; onset = 4× that, never under 0.02; a hit inside
   that window is an onset, not a floor). **The stop level is relative to the
   TAKE** (36dB under its peak, never under the floor), held 600ms, with a 12s
-  cap and STOP always a tap away. The take is normalised to 0.8 and
-  downmixed to mono — a quiet source at a sensible distance is otherwise a
-  quiet sample that every fader has to push up.
+  cap and STOP always a tap away. The take is downmixed to mono and
+  NORMALISED BY LOUDNESS (the loudest 100ms window to an RMS of 0.4, held
+  back only by a 0.98 peak cap). It was peak-to-0.8 first and the takes
+  "came out pretty quiet": a bell has a crest factor of three or four, so a
+  take whose peak matches an oscillator's carries a fraction of its energy.
+  **The cap is the whole safety** — asked "I'd worry about clipping with
+  loudness normalization", and the answer is that the gain is the SMALLER of
+  the two, so a high-crest source is still peak-held; an engine-side make-up
+  for sample readers was tried for an hour and dropped for exactly that
+  worry, since it lifted a sample's peak 4dB over an oscillator's. The gap
+  that remains is crest factor, and the fader is the tool for it.
 - **The analyser reads FLOAT, not bytes** (`getFloatTimeDomainData`, bytes as
   the fallback). The 8-bit read quantises at 0.8%, and a quiet tail is under
   that for most of its length: the first version of the harness measured a
@@ -1507,10 +1518,26 @@ be able to set a threshold for auto record and arm that stage… make sure
 that's the mechanism for both the oscillator and the drum" — and it replaced
 the floor-times-four guess, which was a guess about the room the sampler had
 no way to be right about.
-- `recThresh` is a DEVICE PREFERENCE (`recthresh` through `LS_NS`, default
-  0.03 ≈ −30dB): the room and the mic are the same whichever voice you sample
-  into, so it is one line, not one per target, and it is not project state.
-  Read synchronously, written only by the drag.
+- `recThresh` is a DEVICE PREFERENCE (`recthresh` through `LS_NS`): the room
+  and the mic are the same whichever voice you sample into, so it is one
+  line, not one per target, and it is not project state. Read synchronously,
+  written only by the drag. **It STARTS AT 0dB and is pulled DOWN** (asked
+  for: an unarmed line at the top can never fire on the room), and the meter
+  carries a **PEAK HOLD** (`data-recpeak`, the loudest since ARM, reset on
+  each arm) so the line is set against the instrument's own level rather
+  than against the moment you happen to be looking.
+- **ONE TARGET AT A TIME, VISIBLY.** The recorder serialises on
+  `recordingVoice`, and it used to return SILENTLY from a second ARM —
+  reported as "I'm unable to arm the drum recorder" while POLY was holding
+  the mic on another page. The other panels' ARM dims (`data-recbusy` names
+  the holder) and a tap flashes `DISARM POLY FIRST`.
+- **ARM SILENCES THE APP** ("we need arming to disable sound output so we're
+  not just recording playback into the mic"): a running or held transport is
+  stopped on ARM (its tail dies inside the floor window), and PLAY, the
+  space bar and both auditions refuse with `DISARM … FIRST` while
+  `recordingVoiceR` names a target. The ref is written beside the state at
+  every site that sets it, because the transport reads it inside closures
+  that cannot see the state.
 - The line can move WHILE ARMED (the tick re-reads the ref), and there is no
   arm timeout any more — a quiet source waiting ten seconds was NO INPUT
   under the old one. A ten-minute cap says DISARMED rather than holding the

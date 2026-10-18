@@ -4768,11 +4768,14 @@ export default function LoudLight(){
   // "arm" while waiting for the onset, "rec" once it has landed — the label
   // on the REC button, so you can see that it is listening and not stuck.
   const [recPhase, setRecPhase] = useState(null);
+  // The transport and the auditions read this: while a target is armed the
+  // app is SILENT, or the mic records the song. Written beside the state.
+  const recordingVoiceR = useRef(null);
   // The ARM threshold: the input level a take starts on, as a linear peak
   // (0.001..1), shown and dragged on a -60..0 dBFS meter. A DEVICE
   // PREFERENCE, like the row keys — a threshold belongs to the room and the
   // mic, not to the project — read synchronously and written only by the drag.
-  const [recThresh, setRecThresh] = useState(()=>{try{const v=parseFloat(localStorage.getItem(LS_NS+"recthresh"));return v>0&&v<=1?v:0.03;}catch(e){return 0.03;}});
+  const [recThresh, setRecThresh] = useState(()=>{try{const v=parseFloat(localStorage.getItem(LS_NS+"recthresh"));return v>0&&v<=1?v:1;}catch(e){return 1;}});
   const recThreshR = useRef(recThresh);
   const setRecThreshAll=(v)=>{v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);try{localStorage.setItem(LS_NS+"recthresh",String(v));}catch(e){}};
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
@@ -6607,6 +6610,10 @@ export default function LoudLight(){
       // switch layer underneath the menu.
       if(layerHoldR.current.held){layerHoldR.current.held=false;return;}
       if(activeLayerR.current!==lyr)switchLayer(lyr);
+      // TAP-AGAIN opens that layer's SOUND page — brought back on Jake's call
+      // (2026-10-18) now that the sampler lives there and the trip is a daily
+      // one. Only the SOUND surface moves; the transport is untouched.
+      else if(IS_MOBILE)setActiveSheet("sound"); else setPage(p=>p==="sound"?"edit":"sound");
     },
   });
   const spillLane=spillParam?laneSpec(spillParam):null;
@@ -10584,6 +10591,7 @@ export default function LoudLight(){
   // Deliberately independent of the transport: it works stopped, and while
   // playing it just adds a voice.
   const auditionFreq=async(f)=>{
+    if(recordingVoiceR.current)return;
     if(!(f>0))return;
     try{
       await startEngines();
@@ -10598,6 +10606,7 @@ export default function LoudLight(){
   // Drums audition their own engine — the row keys on the drum page play the
   // voice at the velocity its mixer strip is set to.
   const auditionDrum=async(r)=>{
+    if(recordingVoiceR.current)return;
     try{
       await startEngines();
       const v=DRUM_VOICES[r];if(!v)return;
@@ -10830,6 +10839,7 @@ export default function LoudLight(){
   // The play button. Unchanged in meaning — play from the top, or stop and
   // rewind — which is why the MP3 bounce and every other caller still work.
   const startStop=async()=>{
+    if(!playingR.current&&_armedRefuse())return;
     // Read/write the LIVE ref (not the `playing` state closure) so rapid
     // programmatic start→stop calls (the MP3 bounce) resolve correctly within
     // one render. Button clicks are unaffected (state is settled there).
@@ -10850,8 +10860,10 @@ export default function LoudLight(){
   // Note it does NOT go through `startStop`. That function still means
   // play-from-the-top / stop, because the MP3 bounce and the lock-screen
   // `start` command both mean exactly that, and neither wants a pause.
+  const _armedRefuse=()=>{ if(recordingVoiceR.current){showFlash("DISARM "+_recName(recordingVoiceR.current)+" FIRST");return true;} return false; };
   const togglePlayPause=async()=>{
     if(exportingR.current||engagingR.current)return;
+    if(!playingR.current&&_armedRefuse())return;
     if(playingR.current){ pauseTransport(); return; }
     if(pausedR.current){ await resumePlay(); return; }
     await startPlaying();
@@ -12285,7 +12297,7 @@ export default function LoudLight(){
   //     Armed is a STATE you leave by taking or by tapping again — not a
   //     timeout, which is what made a quiet source read as NO INPUT.
   const REC_FLOOR_MS=250, REC_TAIL_DB=36, REC_SILENCE_MS=600,
-        REC_MAX_S=12, REC_ARM_S=600, REC_PRE_MS=25, REC_POST_MS=80, REC_NORM=0.8;
+        REC_MAX_S=12, REC_ARM_S=600, REC_PRE_MS=25, REC_POST_MS=80, REC_NORM=0.98, REC_RMS=0.4;
   // Cut a decoded take to the sound in it: mono, trimmed, normalised, with a
   // 4ms fade either end so the cut is not a click. null = nothing crossed the
   // onset level (a STOP while still armed).
@@ -12308,15 +12320,27 @@ export default function LoudLight(){
     b=Math.min(n,b+Math.round(sr*REC_POST_MS/1000));
     const len=Math.min(b-a,Math.round(sr*REC_MAX_S));
     if(len<=0)return null;
-    const out=ctx.createBuffer(1,len,sr),o=out.getChannelData(0),g=REC_NORM/pk;
+    // NORMALISE BY LOUDNESS, NOT PEAK. Peak-to-0.8 left a chime "pretty
+    // quiet": a bell has a crest factor of three or four, so a take whose
+    // peak matches an oscillator's carries a fraction of its energy. The gain
+    // puts the loudest 100ms window at REC_RMS, and only the peak cap
+    // (REC_NORM) holds it back — a hit, a crash, a chime all come out at a
+    // level a fader can meet.
+    let rmsPk=0; { const w=Math.max(1,Math.round(sr*0.1)); let acc=0; for(let i=0;i<len;i++){ const v=m[a+i]; acc+=v*v; if(i>=w)acc-=m[a+i-w]*m[a+i-w]; if(i>=w-1){const r=acc/w;if(r>rmsPk)rmsPk=r;} } rmsPk=Math.sqrt(Math.max(rmsPk,1e-12)); }
+    const g=Math.min(REC_NORM/pk,REC_RMS/rmsPk);
+    const out=ctx.createBuffer(1,len,sr),o=out.getChannelData(0);
     for(let i=0;i<len;i++)o[i]=m[a+i]*g;
     const f=Math.min(len>>1,Math.round(sr*0.004));
     for(let i=0;i<f;i++){const w=i/f;o[i]*=w;o[len-1-i]*=w;}
     return out;
   };
   const _isDrumKey=(k)=>DRUM_VOICES.some(v=>v.key===k);
+  const _recName=(k)=>k==="synth"?"POLY":k==="lead"?"MONO":k;
   const startRecord=async(key)=>{
-    if(recordingVoice)return; // serialize — one target at a time
+    // One target at a time — and SAY SO. It returned silently here, which
+    // read as "I'm unable to arm the drum recorder" while POLY was holding
+    // the mic on another page.
+    if(recordingVoice){ if(recordingVoice!==key)showFlash("DISARM "+_recName(recordingVoice)+" FIRST"); return; }
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined"){
       showFlash("MIC UNSUPPORTED");return;
     }
@@ -12349,11 +12373,12 @@ export default function LoudLight(){
       const chunks=[];
       const recorder=new MediaRecorder(stream);
       recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
-      let armed=true,stopped=false,floorPk=0,onsetThr=recThreshR.current,takePk=0,silentSince=null,onsetAt=0;
+      let armed=true,stopped=false,floorPk=0,onsetThr=recThreshR.current,takePk=0,silentSince=null,onsetAt=0,holdPk=0;
       const t0=performance.now();
       const teardown=()=>{
         if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
         recorderRef.current=null;
+        recordingVoiceR.current=null;
         setRecordingVoice(null);setRecPhase(null);
       };
       const finishWith=async()=>{
@@ -12401,7 +12426,9 @@ export default function LoudLight(){
         // the meter: written straight to the DOM, not through React — sixty
         // renders a second for a bar is the kind of load this app has learned
         // to keep off the main thread
-        { const pct=levelPct(peak); const els=document.querySelectorAll('[data-recmeter="'+key+'"]'); for(const el of els)el.style.width=pct+"%"; }
+        { const pct=levelPct(peak); if(peak>holdPk)holdPk=peak; const hp=levelPct(holdPk);
+          for(const el of document.querySelectorAll('[data-recmeter="'+key+'"]'))el.style.width=pct+"%";
+          for(const el of document.querySelectorAll('[data-recpeak="'+key+'"]')){el.style.left=hp+"%";el.dataset.recpeak=key;el.dataset.peakdb=Math.round(20*Math.log10(Math.max(holdPk,1e-4)));} }
         if(armed){
           onsetThr=Math.max(0.001,recThreshR.current);   /* the line can move while armed */
           if(peak>=onsetThr){ armed=false; onsetAt=now; takePk=peak; setRecPhase("rec"); }
@@ -12416,12 +12443,18 @@ export default function LoudLight(){
         if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
         else setTimeout(tick,30);
       };
+      // SILENCE ON ARM: a mic a hand's width from the speaker records the
+      // song, so the transport stops (its tail dies inside the floor window)
+      // and PLAY and the auditions refuse until the target is disarmed.
+      if(playingR.current||pausedR.current)stopTransport("arm");
+      recordingVoiceR.current=key;
       setRecordingVoice(key);setRecPhase("arm");
       if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(tick);
       else setTimeout(tick,30);
     }catch(err){
       console.error("Mic denied:",err);
       showFlash("MIC DENIED");
+      recordingVoiceR.current=null;
       setRecordingVoice(null);setRecPhase(null);
     }
   };
@@ -12432,6 +12465,7 @@ export default function LoudLight(){
     if(r&&r.state==="recording"){r.stop();return;}
     if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(t=>t.stop());recordStreamRef.current=null;}
     recorderRef.current=null;
+    recordingVoiceR.current=null;
     setRecordingVoice(null);setRecPhase(null);
   };
   const clearVoiceSample=(voiceKey)=>{
@@ -12456,22 +12490,26 @@ export default function LoudLight(){
   const _thrFromEvent=(e,el)=>{const r=el.getBoundingClientRect();const pct=Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width)));setRecThreshAll(Math.pow(10,(-60+60*pct)/20));};
   const recPanel=(key,compact)=>{
     const isRec=recordingVoice===key, phase=isRec?(recPhase||"arm"):"off";
+    const busy=!!recordingVoice&&!isRec;   // another target holds the mic
     const h=compact?22:26, fs=compact?8:9;
     const label=phase==="rec"?"STOP \u25cf":phase==="arm"?"ARMED":"ARM";
     const color=phase==="rec"?"#e07060":phase==="arm"?"#e6b872":C_OSC;
     const thrDb=Math.round(20*Math.log10(recThresh));
     return (
       <div data-recpanel={key} style={{display:"flex",alignItems:"center",gap:compact?5:8,flex:1,minWidth:0}}>
-        <button data-smprec={key} data-recphase={phase} title={phase==="arm"?"Listening \u2014 tap to disarm":phase==="rec"?"Taking \u2014 tap to stop":"Open the mic and wait for the threshold"}
+        <button data-smprec={key} data-recphase={phase} data-recbusy={busy?_recName(recordingVoice):undefined}
+          title={busy?_recName(recordingVoice)+" is armed \u2014 disarm it first":phase==="arm"?"Listening \u2014 tap to disarm":phase==="rec"?"Taking \u2014 tap to stop":"Open the mic and wait for the threshold"}
           onClick={()=>isRec?stopRecord():startRecord(key)}
           style={{height:h,padding:"0 9px",minWidth:compact?52:62,fontSize:fs,letterSpacing:0.5,fontWeight:700,borderRadius:4,cursor:"pointer",fontFamily:"inherit",
-            border:"1px solid "+color,background:phase==="off"?"transparent":color+"22",color}}>{label}</button>
+            border:"1px solid "+color,background:phase==="off"?"transparent":color+"22",color,opacity:busy?0.35:1}}>{label}</button>
         <div data-recmeterbox={key} title="Input level \u2014 drag to set the threshold"
           onPointerDown={e=>{e.preventDefault();e.stopPropagation();const el=e.currentTarget;try{el.setPointerCapture(e.pointerId);}catch(x){}el._thrDrag=true;_thrFromEvent(e,el);}}
           onPointerMove={e=>{const el=e.currentTarget;if(el._thrDrag)_thrFromEvent(e,el);}}
           onPointerUp={e=>{e.currentTarget._thrDrag=false;}} onPointerCancel={e=>{e.currentTarget._thrDrag=false;}}
           style={{position:"relative",flex:1,minWidth:56,height:h,border:"1px solid rgba(168,190,212,0.2)",borderRadius:4,touchAction:"none",cursor:"ew-resize",overflow:"hidden",background:"rgba(0,0,0,0.25)"}}>
           <div data-recmeter={key} style={{position:"absolute",left:0,top:0,bottom:0,width:"0%",background:"rgba(176,224,152,0.4)"}}/>
+          {/* the PEAK HOLD: the loudest the input has been since ARM, so the line can be set against the instrument rather than the moment */}
+          <div data-recpeak={key} style={{position:"absolute",top:0,bottom:0,left:"0%",width:2,marginLeft:-1,background:"rgba(176,224,152,0.9)"}}/>
           <div data-recthr={recThresh.toFixed(4)} style={{position:"absolute",top:0,bottom:0,left:levelPct(recThresh)+"%",width:2,marginLeft:-1,background:"#e6b872",boxShadow:"0 0 4px #e6b872"}}/>
         </div>
         <div data-recthrdb={thrDb} style={{fontSize:fs,minWidth:36,textAlign:"right",color:"#e6b872",fontWeight:600}}>{thrDb}dB</div>
