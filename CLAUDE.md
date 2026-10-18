@@ -1526,11 +1526,17 @@ no way to be right about.
   carries a **PEAK HOLD** (`data-recpeak`, the loudest since ARM, reset on
   each arm) so the line is set against the instrument's own level rather
   than against the moment you happen to be looking.
-- **ONE TARGET AT A TIME, VISIBLY.** The recorder serialises on
-  `recordingVoice`, and it used to return SILENTLY from a second ARM —
-  reported as "I'm unable to arm the drum recorder" while POLY was holding
-  the mic on another page. The other panels' ARM dims (`data-recbusy` names
-  the holder) and a tap flashes `DISARM POLY FIRST`.
+- **THE ARM BELONGS TO THE PANEL YOU ARE LOOKING AT.** Leave it — switch
+  layer or face, close the sheet, change drum channel, go back to EDIT — and
+  the mic is released; a take already running is ended and kept. An effect
+  after every commit checks the armed key's `data-recpanel` is still in the
+  DOM, the one test every route out shares. It shipped for an hour the other
+  way (a second ARM dimmed and said `DISARM POLY FIRST`), reported as "I'm
+  unable to arm the drum recorder" while POLY held the mic on another page,
+  and Jake called the design: "I'll never arm then navigate away in any
+  working situation. If I'm armed then I go somewhere else, it should
+  release that arming." The busy dimming survives but can no longer be
+  reached, since the armed panel is never off-screen.
 - **ARM SILENCES THE APP** ("we need arming to disable sound output so we're
   not just recording playback into the mic"): a running or held transport is
   stopped on ARM (its tail dies inside the floor window), and PLAY, the

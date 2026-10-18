@@ -11767,6 +11767,18 @@ export default function LoudLight(){
   };
   const _isDrumKey=(k)=>DRUM_VOICES.some(v=>v.key===k);
   const _recName=(k)=>k==="synth"?"POLY":k==="lead"?"MONO":k;
+  // THE ARM BELONGS TO THE PANEL YOU ARE LOOKING AT. Leave it — switch layer
+  // or face, close the sheet, change drum channel, go back to EDIT — and the
+  // mic is released. "I'll never arm then navigate away in any working
+  // situation": an arm that outlived its panel was a mic held open by a
+  // control you could no longer see. A take already running is ended and
+  // kept. Checked after every commit, by presence in the DOM, because that is
+  // the one test every route out of the panel shares.
+  const recQuietR=useRef(false);
+  useEffect(()=>{
+    const key=recordingVoice; if(!key)return;
+    if(!document.querySelector('[data-recpanel="'+key+'"]')){ recQuietR.current=true; stopRecord(); }
+  });
   const startRecord=async(key)=>{
     // One target at a time — and SAY SO. It returned silently here, which
     // read as "I'm unable to arm the drum recorder" while POLY was holding
@@ -11821,6 +11833,7 @@ export default function LoudLight(){
             const audioBuf=await ctx.decodeAudioData(await blob.arrayBuffer());
             take=cutTake(ctx,audioBuf,onsetThr,floorPk*1.5);
           }
+          const quiet=recQuietR.current; recQuietR.current=false;
           if(take){
             // The persistent map is the one every save reads; the live drum
             // map only for a drum voice (the layer samplers read userSamples
@@ -11840,7 +11853,7 @@ export default function LoudLight(){
               else note=" \u00b7 PITCH ?";
             }
             showFlash("REC OK "+(key==="synth"?"POLY":key==="lead"?"MONO":key)+" "+take.duration.toFixed(1)+"s"+note);
-          } else showFlash("NO INPUT");
+          } else if(!quiet)showFlash("NO INPUT");
         }catch(err){console.error("Sample decode failed:",err);showFlash("DECODE FAIL");}
         teardown();
       };
