@@ -48,7 +48,7 @@
     // note of the stamp it last chased stops a CDN edge still serving the old
     // file from turning this into a loop; the shortcut's start url is
     // untouched, so nothing about the install changes.
-    window.__LL_BUILD = "2026-10-18 02:40Z LAB";
+    window.__LL_BUILD = "2026-10-18 03:12Z LAB";
     (function () {
       try {
         if (!navigator.onLine) return;
@@ -1555,7 +1555,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-10-18 02:40Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-10-18 03:12Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -5577,15 +5577,23 @@ var playBtnProps={"data-playbtn":"1",onClick:function onClick(){return togglePla
 // readout spells out — `unit` is the chip's own cramped abbreviation.
 var TEMPO_FIELDS=[{key:"bpm",unit:"BPM",label:"BPM",min:40,max:300,gain:0.5,reset:120,live:bpm,get:function get(){return bpmR.current;},set:function set(v){return setBpm(Math.round(v));},show:function show(v){return String(Math.round(v));}},{key:"st",unit:"ST",label:"SEMITONES",min:-24,max:24,gain:1/6,reset:0,live:transpose,get:function get(){return transpR.current;},set:function set(v){return setTranspose(Math.round(v));},show:function show(v){var n=Math.round(v);return n===0?"0":n>0?"+"+n:String(n);}},{key:"swing",unit:"SWG",label:"SWING",min:0,max:100,gain:1/3,reset:0,live:swing,get:function get(){return swingR.current;},set:function set(v){return setSwing(Math.round(v));},show:function show(v){return String(Math.round(v));}}];var tempoFldOf=function tempoFldOf(k){return TEMPO_FIELDS.find(function(f){return f.key===k;})||TEMPO_FIELDS[0];};var tempoFld=tempoFldOf(tempoField);var tempoVal=tempoField==="bpm"?bpm:tempoField==="st"?transpose:swing;var tempoChipR=useRef({tmr:0,held:false,on:false,moved:false,swallow:false,startY:0,lastY:0,val:0});var _tempoHoldEnd=function _tempoHoldEnd(){var t=tempoChipR.current;if(t.tmr){clearTimeout(t.tmr);t.tmr=0;}};// The readout is full-screen, so it needs nothing about where the chip is.
 var _tempoPopOpen=function _tempoPopOpen(sticky){tempoPopAtR.current=Date.now();setTempoPop({sticky:!!sticky});};var tempoChipProps={onPointerDown:function onPointerDown(e){if(e.button===2)return;// right-click is handled by onContextMenu
-e.stopPropagation();var t=tempoChipR.current,f=tempoFldOf(tempoFieldR.current);t.held=false;t.moved=false;t.swallow=false;t.marked=false;_tempoHoldEnd();t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();// Capture BEFORE the hold fires, so the drag that follows keeps landing
+// preventDefault is LOAD-BEARING on iOS. Reported as the hold-drag doing
+// nothing on the phone (the tap still opened the drawer) while every
+// headless pass, mouse and touch, scrubbed fine — and every drag that DOES
+// work on the phone (the bar tile, the grid, the drawer's own scrubbers)
+// claims the touch here. Without it WebKit keeps its own designs on a
+// long still press on a <button>, and the pointer it hands back after the
+// hold is not the one the scrub was reading. A prevented pointerdown does
+// not suppress the click, so the tap is untouched.
+e.preventDefault();e.stopPropagation();var t=tempoChipR.current,f=tempoFldOf(tempoFieldR.current);t.held=false;t.moved=false;t.swallow=false;t.marked=false;_tempoHoldEnd();dgNote("tempochip down "+e.pointerType);t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();// Capture BEFORE the hold fires, so the drag that follows keeps landing
 // here once the finger has wandered off a 42px chip.
-try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}t.tmr=setTimeout(function(){t.tmr=0;t.held=true;t.lastY=t.startY;t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);},450);},onPointerMove:function onPointerMove(e){var t=tempoChipR.current;if(!t.on)return;if(!t.held){// Movement before the hold lands is a slip, not a scrub: drop the
+try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}t.tmr=setTimeout(function(){t.tmr=0;t.held=true;t.lastY=t.startY;t.moves=0;t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);dgNote("tempochip HELD");},450);},onPointerMove:function onPointerMove(e){var t=tempoChipR.current;if(!t.on)return;if(!t.held){// Movement before the hold lands is a slip, not a scrub: drop the
 // whole gesture rather than opening the drawer off a smeared tap.
-if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();}return;}e.preventDefault();e.stopPropagation();var f=tempoFldOf(tempoFieldR.current);var dy=e.clientY-t.lastY;t.lastY=e.clientY;t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));if(Math.round(t.val)!==Math.round(f.get()))histOnce(t);f.set(t.val);},onPointerUp:function onPointerUp(){var t=tempoChipR.current;_tempoHoldEnd();// A hold-drag must swallow its own trailing click, or every edit would be
+if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();dgNote("tempochip slip "+Math.round(e.clientY-t.startY)+"px");}return;}e.preventDefault();e.stopPropagation();if(DIAG&&!(t.moves=(t.moves||0)+1)%8)dgNote("tempochip scrub moves="+t.moves+" buttons="+e.buttons);var f=tempoFldOf(tempoFieldR.current);var dy=e.clientY-t.lastY;t.lastY=e.clientY;t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));if(Math.round(t.val)!==Math.round(f.get()))histOnce(t);f.set(t.val);},onPointerUp:function onPointerUp(){var t=tempoChipR.current;_tempoHoldEnd();dgNote("tempochip up held="+t.held+" moved="+t.moved+" moves="+(t.moves||0));// A hold-drag must swallow its own trailing click, or every edit would be
 // followed by the drawer opening on top of it.
-if(t.held||t.moved)t.swallow=true;if(t.held)setTempoPop(null);t.on=false;t.held=false;},onPointerCancel:function onPointerCancel(){var t=tempoChipR.current;_tempoHoldEnd();if(t.held)setTempoPop(null);t.on=false;t.held=false;t.swallow=true;},onContextMenu:function onContextMenu(e){// Desktop's hold. A right-click can't be dragged, so the readout comes up
+if(t.held||t.moved)t.swallow=true;if(t.held)setTempoPop(null);t.on=false;t.held=false;},onPointerCancel:function onPointerCancel(){var t=tempoChipR.current;_tempoHoldEnd();dgNote("tempochip CANCEL held="+t.held+" moves="+(t.moves||0));if(t.held)setTempoPop(null);t.on=false;t.held=false;t.swallow=true;},onContextMenu:function onContextMenu(e){// Desktop's hold. A right-click can't be dragged, so the readout comes up
 // STICKY instead: it tracks the bare pointer until a click or ESC.
-e.preventDefault();e.stopPropagation();_tempoHoldEnd();var t=tempoChipR.current;t.on=false;t.held=false;t.swallow=true;_tempoPopOpen(true);},onClick:function onClick(e){e.stopPropagation();var t=tempoChipR.current;if(t.swallow){t.swallow=false;return;}setActiveSheet(function(sh){return sh==="tempo"?null:"tempo";});}};// Sticky (right-click) scrubbing: the pointer has no button down, so the move
+e.preventDefault();e.stopPropagation();_tempoHoldEnd();var t=tempoChipR.current;t.on=false;t.held=false;t.swallow=true;dgNote("tempochip contextmenu → sticky");_tempoPopOpen(true);},onClick:function onClick(e){e.stopPropagation();var t=tempoChipR.current;if(t.swallow){t.swallow=false;return;}setActiveSheet(function(sh){return sh==="tempo"?null:"tempo";});}};// Sticky (right-click) scrubbing: the pointer has no button down, so the move
 // has to be read off the window rather than the chip.
 useEffect(function(){if(!tempoPop||!tempoPop.sticky)return;var st={y:null,val:tempoFldOf(tempoFieldR.current).get(),marked:false};var mv=function mv(e){var f=tempoFldOf(tempoFieldR.current);if(st.y===null){st.y=e.clientY;return;}var dy=e.clientY-st.y;st.y=e.clientY;st.val=Math.max(f.min,Math.min(f.max,st.val-ballisticNudge(dy,f.gain)));if(Math.round(st.val)!==Math.round(f.get()))histOnce(st);f.set(st.val);};var kd=function kd(e){if(e.key==="Escape")setTempoPop(null);};window.addEventListener("pointermove",mv);window.addEventListener("keydown",kd);return function(){window.removeEventListener("pointermove",mv);window.removeEventListener("keydown",kd);};},[tempoPop]);// ── ONE full-screen readout for every tempo scrubber ─────────────────────
 // The drawer's three widgets each carried their own copy of this overlay, and

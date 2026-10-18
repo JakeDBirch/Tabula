@@ -1651,6 +1651,20 @@ run the same loop against the baseline before reading the engine.
     be dragged. It then tracks the bare pointer (a window `pointermove`, since no
     button is down) until a click or ESC. That is the honest desktop reading of
     "hold = right-click" for a gesture that is a drag rather than a menu.
+  - **THE CHIP'S POINTERDOWN CALLS `preventDefault`, AND THAT IS LOAD-BEARING
+    ON iOS.** Reported 2026-10-18 as the hold-drag doing nothing on the phone
+    in both layouts — the tap still opened the drawer, the drawer's own
+    scrubbers still worked — and it had been that way "for many builds". Every
+    headless pass, mouse and real touch, scrubbed the chip fine, and nothing in
+    its handlers had changed. What separated it from every drag that DOES work
+    on the phone (the bar tile, the grid, the drawer scrubbers) was one line:
+    all of them claim the touch with `preventDefault` on pointerdown and the
+    chip did not. A prevented pointerdown does not suppress the click, so the
+    tap is untouched (`_tempochip.mjs`, `_tempotouch.mjs`). **Not yet confirmed
+    by hand** — it is the one difference there was, not a reproduced cause —
+    so the chip now narrates its gesture into `?diag=1` (down, HELD, slip,
+    scrub moves, up, CANCEL, contextmenu): if it is still dead, the report says
+    which event the phone is not delivering instead of another guess.
   - The hold-drag **swallows its trailing click**, or every edit would end with
     the drawer opening on top of it — the same trap every hold in here has.
     Movement before the hold lands (>10px) drops the whole gesture rather than

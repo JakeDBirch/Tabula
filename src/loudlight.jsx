@@ -12812,15 +12812,24 @@ export default function LoudLight(){
   const tempoChipProps={
     onPointerDown:(e)=>{
       if(e.button===2)return;                 // right-click is handled by onContextMenu
-      e.stopPropagation();
+      // preventDefault is LOAD-BEARING on iOS. Reported as the hold-drag doing
+      // nothing on the phone (the tap still opened the drawer) while every
+      // headless pass, mouse and touch, scrubbed fine — and every drag that DOES
+      // work on the phone (the bar tile, the grid, the drawer's own scrubbers)
+      // claims the touch here. Without it WebKit keeps its own designs on a
+      // long still press on a <button>, and the pointer it hands back after the
+      // hold is not the one the scrub was reading. A prevented pointerdown does
+      // not suppress the click, so the tap is untouched.
+      e.preventDefault();e.stopPropagation();
       const t=tempoChipR.current, f=tempoFldOf(tempoFieldR.current);
       t.held=false;t.moved=false;t.swallow=false;t.marked=false;_tempoHoldEnd();
+      dgNote("tempochip down "+e.pointerType);
       t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();
       // Capture BEFORE the hold fires, so the drag that follows keeps landing
       // here once the finger has wandered off a 42px chip.
       try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}
-      t.tmr=setTimeout(()=>{ t.tmr=0;t.held=true;t.lastY=t.startY;
-        t.val=tempoFldOf(tempoFieldR.current).get(); _tempoPopOpen(false); },450);
+      t.tmr=setTimeout(()=>{ t.tmr=0;t.held=true;t.lastY=t.startY;t.moves=0;
+        t.val=tempoFldOf(tempoFieldR.current).get(); _tempoPopOpen(false); dgNote("tempochip HELD"); },450);
     },
     onPointerMove:(e)=>{
       const t=tempoChipR.current;
@@ -12828,10 +12837,11 @@ export default function LoudLight(){
       if(!t.held){
         // Movement before the hold lands is a slip, not a scrub: drop the
         // whole gesture rather than opening the drawer off a smeared tap.
-        if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();}
+        if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();dgNote("tempochip slip "+Math.round(e.clientY-t.startY)+"px");}
         return;
       }
       e.preventDefault();e.stopPropagation();
+      if(DIAG&&!(t.moves=(t.moves||0)+1)%8)dgNote("tempochip scrub moves="+t.moves+" buttons="+e.buttons);
       const f=tempoFldOf(tempoFieldR.current);
       const dy=e.clientY-t.lastY; t.lastY=e.clientY;
       t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));
@@ -12840,6 +12850,7 @@ export default function LoudLight(){
     },
     onPointerUp:()=>{
       const t=tempoChipR.current;_tempoHoldEnd();
+      dgNote("tempochip up held="+t.held+" moved="+t.moved+" moves="+(t.moves||0));
       // A hold-drag must swallow its own trailing click, or every edit would be
       // followed by the drawer opening on top of it.
       if(t.held||t.moved)t.swallow=true;
@@ -12847,6 +12858,7 @@ export default function LoudLight(){
       t.on=false;t.held=false;
     },
     onPointerCancel:()=>{const t=tempoChipR.current;_tempoHoldEnd();
+      dgNote("tempochip CANCEL held="+t.held+" moves="+(t.moves||0));
       if(t.held)setTempoPop(null);
       t.on=false;t.held=false;t.swallow=true;},
     onContextMenu:(e)=>{
@@ -12854,6 +12866,7 @@ export default function LoudLight(){
       // STICKY instead: it tracks the bare pointer until a click or ESC.
       e.preventDefault();e.stopPropagation();_tempoHoldEnd();
       const t=tempoChipR.current;t.on=false;t.held=false;t.swallow=true;
+      dgNote("tempochip contextmenu → sticky");
       _tempoPopOpen(true);
     },
     onClick:(e)=>{
