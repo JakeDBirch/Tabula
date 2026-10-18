@@ -4775,9 +4775,16 @@ export default function LoudLight(){
   // (0.001..1), shown and dragged on a -60..0 dBFS meter. A DEVICE
   // PREFERENCE, like the row keys — a threshold belongs to the room and the
   // mic, not to the project — read synchronously and written only by the drag.
-  const [recThresh, setRecThresh] = useState(()=>{try{const v=parseFloat(localStorage.getItem(LS_NS+"recthresh"));return v>0&&v<=1?v:1;}catch(e){return 1;}});
+  // The onset threshold. It is NOT persisted and ARM RESETS IT TO 0dB every
+  // time ("when I tap arm, the threshold goes to 0 so I don't accidentally
+  // trigger recording"): a line left where the last take put it is a line the
+  // room can cross the moment the mic opens, and an unarmed line at the top
+  // can never fire on its own. You arm, then pull it down against the peak
+  // hold. It was a device preference for a day, which is exactly the wrong
+  // shape for a value whose whole job is to start safe.
+  const [recThresh, setRecThresh] = useState(1);
   const recThreshR = useRef(recThresh);
-  const setRecThreshAll=(v)=>{v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);try{localStorage.setItem(LS_NS+"recthresh",String(v));}catch(e){}};
+  const setRecThreshAll=(v)=>{v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);};
   // Active kit id ("synth" = no samples, use synthesizer; any other id loads
   // from DRUM_KITS. "user" is the implicit id for individual mic recordings
   // that don't come from a kit — loading a kit replaces them all.
@@ -12389,6 +12396,7 @@ export default function LoudLight(){
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined"){
       showFlash("MIC UNSUPPORTED");return;
     }
+    setRecThreshAll(1);   // every ARM starts with the line at 0dB — see recThresh
     try{
       // RAW audio, as far as the browser allows: the three "voice call" processors
       // are on by default and all three fight a sampler. Auto gain pumps a

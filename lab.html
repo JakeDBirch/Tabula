@@ -48,7 +48,7 @@
     // note of the stamp it last chased stops a CDN edge still serving the old
     // file from turning this into a loop; the shortcut's start url is
     // untouched, so nothing about the install changes.
-    window.__LL_BUILD = "2026-10-18 03:22Z LAB";
+    window.__LL_BUILD = "2026-10-18 20:44Z LAB";
     (function () {
       try {
         if (!navigator.onLine) return;
@@ -1555,7 +1555,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-10-18 03:22Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-10-18 20:44Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -2567,7 +2567,14 @@ var recordingVoiceR=useRef(null);// The ARM threshold: the input level a take st
 // (0.001..1), shown and dragged on a -60..0 dBFS meter. A DEVICE
 // PREFERENCE, like the row keys — a threshold belongs to the room and the
 // mic, not to the project — read synchronously and written only by the drag.
-var _useState109=useState(function(){try{var v=parseFloat(localStorage.getItem(LS_NS+"recthresh"));return v>0&&v<=1?v:1;}catch(e){return 1;}}),_useState110=_slicedToArray(_useState109,2),recThresh=_useState110[0],setRecThresh=_useState110[1];var recThreshR=useRef(recThresh);var setRecThreshAll=function setRecThreshAll(v){v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);try{localStorage.setItem(LS_NS+"recthresh",String(v));}catch(e){}};// Active kit id ("synth" = no samples, use synthesizer; any other id loads
+// The onset threshold. It is NOT persisted and ARM RESETS IT TO 0dB every
+// time ("when I tap arm, the threshold goes to 0 so I don't accidentally
+// trigger recording"): a line left where the last take put it is a line the
+// room can cross the moment the mic opens, and an unarmed line at the top
+// can never fire on its own. You arm, then pull it down against the peak
+// hold. It was a device preference for a day, which is exactly the wrong
+// shape for a value whose whole job is to start safe.
+var _useState109=useState(1),_useState110=_slicedToArray(_useState109,2),recThresh=_useState110[0],setRecThresh=_useState110[1];var recThreshR=useRef(recThresh);var setRecThreshAll=function setRecThreshAll(v){v=Math.max(0.001,Math.min(1,v));recThreshR.current=v;setRecThresh(v);};// Active kit id ("synth" = no samples, use synthesizer; any other id loads
 // from DRUM_KITS. "user" is the implicit id for individual mic recordings
 // that don't come from a kit — loading a kit replaces them all.
 var _useState111=useState(DEFAULT_KIT),_useState112=_slicedToArray(_useState111,2),activeKit=_useState112[0],setActiveKit=_useState112[1];var _useState113=useState(false),_useState114=_slicedToArray(_useState113,2),kitLoading=_useState114[0],setKitLoading=_useState114[1];var _useState115=useState(false),_useState116=_slicedToArray(_useState115,2),exporting=_useState116[0],setExporting=_useState116[1];// MP3 bounce in progress
@@ -5346,10 +5353,11 @@ var rmsPk=0;{var w=Math.max(1,Math.round(sr*0.1));var acc=0;for(var _i37=0;_i37<
 // control you could no longer see. A take already running is ended and
 // kept. Checked after every commit, by presence in the DOM, because that is
 // the one test every route out of the panel shares.
-var recQuietR=useRef(false);useEffect(function(){var key=recordingVoice;if(!key)return;if(!document.querySelector('[data-recpanel="'+key+'"]')){recQuietR.current=true;stopRecord();}});var startRecord=/*#__PURE__*/function(){var _ref94=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee52(key){var stream,ctx,source,analyser,fbuf,buf,chunks,recorder,armed,stopped,floorPk,onsetThr,takePk,silentSince,onsetAt,holdPk,t0,teardown,finishWith,endTake,_tick,_t47;return _regenerator().w(function(_context53){while(1)switch(_context53.p=_context53.n){case 0:if(!recordingVoice){_context53.n=1;break;}if(recordingVoice!==key)showFlash("DISARM "+_recName(recordingVoice)+" FIRST");return _context53.a(2);case 1:if(!(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined")){_context53.n=2;break;}showFlash("MIC UNSUPPORTED");return _context53.a(2);case 2:_context53.p=2;_context53.n=3;return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,autoGainControl:false,noiseSuppression:false}});case 3:stream=_context53.v;recordStreamRef.current=stream;// The recorder needs a REAL AudioContext (a stream source and an
+var recQuietR=useRef(false);useEffect(function(){var key=recordingVoice;if(!key)return;if(!document.querySelector('[data-recpanel="'+key+'"]')){recQuietR.current=true;stopRecord();}});var startRecord=/*#__PURE__*/function(){var _ref94=_asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee52(key){var stream,ctx,source,analyser,fbuf,buf,chunks,recorder,armed,stopped,floorPk,onsetThr,takePk,silentSince,onsetAt,holdPk,t0,teardown,finishWith,endTake,_tick,_t47;return _regenerator().w(function(_context53){while(1)switch(_context53.p=_context53.n){case 0:if(!recordingVoice){_context53.n=1;break;}if(recordingVoice!==key)showFlash("DISARM "+_recName(recordingVoice)+" FIRST");return _context53.a(2);case 1:if(!(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==="undefined")){_context53.n=2;break;}showFlash("MIC UNSUPPORTED");return _context53.a(2);case 2:setRecThreshAll(1);// every ARM starts with the line at 0dB — see recThresh
+_context53.p=3;_context53.n=4;return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,autoGainControl:false,noiseSuppression:false}});case 4:stream=_context53.v;recordStreamRef.current=stream;// The recorder needs a REAL AudioContext (a stream source and an
 // analyser). The JS engine's is one; with the core on there may be none,
 // so make one for the mic — this runs from a tap, so it can start.
-ctx=_micCtx();if(ctx){_context53.n=4;break;}stream.getTracks().forEach(function(t){return t.stop();});recordStreamRef.current=null;showFlash("AUDIO INIT");return _context53.a(2);case 4:source=ctx.createMediaStreamSource(stream);analyser=ctx.createAnalyser();analyser.fftSize=512;source.connect(analyser);// FLOAT samples where the browser has them. The 8-bit read quantises at
+ctx=_micCtx();if(ctx){_context53.n=5;break;}stream.getTracks().forEach(function(t){return t.stop();});recordStreamRef.current=null;showFlash("AUDIO INIT");return _context53.a(2);case 5:source=ctx.createMediaStreamSource(stream);analyser=ctx.createAnalyser();analyser.fftSize=512;source.connect(analyser);// FLOAT samples where the browser has them. The 8-bit read quantises at
 // 0.8%, and a quiet source's tail — the thing the stop level is waiting
 // to fall below — is under that for most of its length: measured, a
 // 0.06-peak chime with a 1.2s decay was cut at 2.2s instead of ringing
@@ -5369,7 +5377,7 @@ hz=detectPitch(take);if(hz){midi=69+12*Math.log2(hz/440);setLayerParams(function
 {var pct=levelPct(peak);if(peak>holdPk)holdPk=peak;var hp=levelPct(holdPk);var _iterator40=_createForOfIteratorHelper(document.querySelectorAll('[data-recmeter="'+key+'"]')),_step40;try{for(_iterator40.s();!(_step40=_iterator40.n()).done;){var el=_step40.value;el.style.width=pct+"%";}}catch(err){_iterator40.e(err);}finally{_iterator40.f();}var _iterator41=_createForOfIteratorHelper(document.querySelectorAll('[data-recpeak="'+key+'"]')),_step41;try{for(_iterator41.s();!(_step41=_iterator41.n()).done;){var _el=_step41.value;_el.style.left=hp+"%";_el.dataset.recpeak=key;_el.dataset.peakdb=Math.round(20*Math.log10(Math.max(holdPk,1e-4)));}}catch(err){_iterator41.e(err);}finally{_iterator41.f();}}if(armed){onsetThr=Math.max(0.001,recThreshR.current);/* the line can move while armed */if(peak>=onsetThr){armed=false;onsetAt=now;takePk=peak;setRecPhase("rec");}else{if(now-t0<REC_FLOOR_MS&&peak>floorPk)floorPk=peak;if(now-t0>REC_ARM_S*1000){stopped=true;teardown();showFlash("DISARMED");return;}}}else{if(peak>takePk)takePk=peak;var tailThr=Math.max(floorPk*1.5,0.001,takePk*Math.pow(10,-REC_TAIL_DB/20));if(peak<tailThr){if(silentSince==null)silentSince=now;else if(now-silentSince>REC_SILENCE_MS){endTake();return;}}else silentSince=null;if(now-onsetAt>REC_MAX_S*1000){endTake();return;}}if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(_tick);else setTimeout(_tick,30);};// SILENCE ON ARM: a mic a hand's width from the speaker records the
 // song, so the transport stops (its tail dies inside the floor window)
 // and PLAY and the auditions refuse until the target is disarmed.
-if(playingR.current||pausedR.current)stopTransport("arm");recordingVoiceR.current=key;setRecordingVoice(key);setRecPhase("arm");if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(_tick);else setTimeout(_tick,30);_context53.n=6;break;case 5:_context53.p=5;_t47=_context53.v;console.error("Mic denied:",_t47);showFlash("MIC DENIED");recordingVoiceR.current=null;setRecordingVoice(null);setRecPhase(null);case 6:return _context53.a(2);}},_callee52,null,[[2,5]]);}));return function startRecord(_x40){return _ref94.apply(this,arguments);};}();// STOP: ends the take if one has started (it is then cut and kept), or
+if(playingR.current||pausedR.current)stopTransport("arm");recordingVoiceR.current=key;setRecordingVoice(key);setRecPhase("arm");if(typeof requestAnimationFrame!=="undefined")requestAnimationFrame(_tick);else setTimeout(_tick,30);_context53.n=7;break;case 6:_context53.p=6;_t47=_context53.v;console.error("Mic denied:",_t47);showFlash("MIC DENIED");recordingVoiceR.current=null;setRecordingVoice(null);setRecPhase(null);case 7:return _context53.a(2);}},_callee52,null,[[3,6]]);}));return function startRecord(_x40){return _ref94.apply(this,arguments);};}();// STOP: ends the take if one has started (it is then cut and kept), or
 // tears down an arm that never saw an onset.
 var stopRecord=function stopRecord(){var r=recorderRef.current;if(r&&r.state==="recording"){r.stop();return;}if(recordStreamRef.current){recordStreamRef.current.getTracks().forEach(function(t){return t.stop();});recordStreamRef.current=null;}recorderRef.current=null;recordingVoiceR.current=null;setRecordingVoice(null);setRecPhase(null);};var clearVoiceSample=function clearVoiceSample(voiceKey){setVoiceSamples(function(prev){var o=_objectSpread({},prev);delete o[voiceKey];return o;});setUserSamples(function(prev){var o=_objectSpread({},prev);delete o[voiceKey];return o;});samplesDirtyR.current=true;// user cleared → persist the new sample set
 };// The SAMPLE wave's row under the waveform buttons: REC (then STOP), clear,

@@ -1558,14 +1558,21 @@ be able to set a threshold for auto record and arm that stage… make sure
 that's the mechanism for both the oscillator and the drum" — and it replaced
 the floor-times-four guess, which was a guess about the room the sampler had
 no way to be right about.
-- `recThresh` is a DEVICE PREFERENCE (`recthresh` through `LS_NS`): the room
-  and the mic are the same whichever voice you sample into, so it is one
-  line, not one per target, and it is not project state. Read synchronously,
-  written only by the drag. **It STARTS AT 0dB and is pulled DOWN** (asked
-  for: an unarmed line at the top can never fire on the room), and the meter
-  carries a **PEAK HOLD** (`data-recpeak`, the loudest since ARM, reset on
-  each arm) so the line is set against the instrument's own level rather
-  than against the moment you happen to be looking.
+- **`recThresh` IS NOT PERSISTED, AND EVERY ARM RESETS IT TO 0dB.** "When I
+  tap arm, the threshold goes to 0 so I don't accidentally trigger
+  recording." It was a device preference for a day — the room and the mic
+  are the same whichever voice you sample into, so one line seemed right —
+  and that is exactly the wrong shape for a value whose whole job is to START
+  SAFE: a line left where the last take put it is a line the room can cross
+  the moment the mic opens. So `startRecord` calls `setRecThreshAll(1)`
+  before it asks for the mic, there is no `recthresh` key any more, and the
+  gesture is arm, THEN pull the line down against the **PEAK HOLD**
+  (`data-recpeak`, the loudest since ARM, reset on each arm) so it is set
+  against the instrument's own level rather than the moment you happen to be
+  looking. One line for every target, not one per voice. `_lsample.mjs`
+  asserts ARM lands at 0dB, that nothing fires until the line is pulled to
+  -30dB, that a re-ARM after a -15dB drag is back at 0, and that nothing is
+  written to disk.
 - **THE ARM BELONGS TO THE PANEL YOU ARE LOOKING AT.** Leave it — switch
   layer or face, close the sheet, change drum channel, go back to EDIT — and
   the mic is released; a take already running is ended and kept. An effect
@@ -1591,7 +1598,7 @@ no way to be right about.
 - `data-recpanel`, `data-smprec` (+`data-recphase` off/arm/rec),
   `data-recmeterbox`, `data-recmeter`, `data-recthr`, `data-recthrdb` are the
   hooks. `_lsample.mjs` drags the meter to three quarters and asserts −15dB
-  on the readout, on disk, and after a relaunch.
+  on the readout.
 
 **UNISON: A NOTE IS 1–4 READERS OF ONE PITCH, ON BOTH LAYERS AND BOTH
 WAVES.** Reported on the sampler the day it landed: "it sounds like chorusing
