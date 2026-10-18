@@ -8116,9 +8116,14 @@ export default function LoudLight(){
   // was most of the cure, and the curve could come back toward the middle:
   // a 6px/frame nudge is ~40px a bar, a 2px crawl ~90, a 12px move ~21, and
   // a 30px flick 3.4 bars a frame.
-  const BAR_PX_PER_BAR=24;   // px per bar at 1:1, before the speed curve
-  const BAR_FAST=2.7;        // the ratio a flick reaches (cf. NUDGE_FAST)
-  const BAR_FASTPX=30;       // px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
+  //   THEN THE CURVE CAME OUT ALTOGETHER (2026-10-18, "let's lose the
+  // acceleration on the bar change tap and drag, and make it a little more
+  // responsive"). Three regearings in a day is the tell that a speed curve on
+  // a control with ENDS and a HOLD was the wrong instrument: the edge dwell
+  // already carries a long part, so the ballistic fast end had nothing left to
+  // do except make a nudge unpredictable. FLAT: every bar is BAR_PX_PER_BAR of
+  // travel whatever the speed, so a bar is a distance you can learn.
+  const BAR_PX_PER_BAR=20;   // px per bar, flat — one bar is a short deliberate nudge
   const BAR_TAP_PX=8;        // raw travel past which a release is a scrub, not a tap
   const BAR_EDGE_MS=160;     // one bar per tick while the finger RESTS past the edge
   const BAR_EDGE_DWELL=380;  // how long it has to rest there before the first tick
@@ -8130,13 +8135,12 @@ export default function LoudLight(){
   // (~39px a frame), so it bounds the pathological case without costing the
   // expressive one.
   const BAR_MAX_PER_MOVE=6;
-  // The accumulator is what makes a ballistic gearing possible at all: the gain
-  // belongs to ONE pointermove, so bars have to be consumed out of a running
-  // total rather than measured from an anchor. The fraction carries between
-  // moves, which is what keeps a slow drag smooth instead of stalling.
+  // Still consumed out of a running accumulator rather than measured from an
+  // anchor: the fraction carries between moves, which is what keeps a slow
+  // drag smooth instead of stalling, and the per-move cap still bounds a
+  // coalesced stall.
   const _barSpinDelta=(dy)=>{
-    const speed=Math.min(1,Math.abs(dy)/BAR_FASTPX);
-    const bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;
+    const bars=dy/BAR_PX_PER_BAR;
     return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));
   };
   const barTile=(extra)=>{
@@ -8183,7 +8187,9 @@ export default function LoudLight(){
         // must not open the bar's ops menu.
         if(g.trav>BAR_TAP_PX)g.moved=true;
         g.acc+=_barSpinDelta(dy);
-        const d=Math.trunc(g.acc);
+        // Truncate with a tolerance: twenty 6px moves at 20px a bar sum to
+        // 5.999… in floating point and a bare trunc hands back five.
+        const d=Math.trunc(g.acc+Math.sign(g.acc)*1e-6);
         // At either end, drop what is left rather than banking travel against
         // the clamp — otherwise dragging back up does nothing until the
         // overshoot has been unwound.
@@ -12835,9 +12841,22 @@ export default function LoudLight(){
       const t=tempoChipR.current;
       if(!t.on)return;
       if(!t.held){
-        // Movement before the hold lands is a slip, not a scrub: drop the
-        // whole gesture rather than opening the drawer off a smeared tap.
-        if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();dgNote("tempochip slip "+Math.round(e.clientY-t.startY)+"px");}
+        // A vertical move past the deadzone BEFORE the hold lands STARTS the
+        // scrub, it does not cancel it. It cancelled for a long time, and that
+        // is the phone report "dragging doesn't allow for editing": a hand that
+        // wants to scrub presses and MOVES, it does not press, count to half a
+        // second, and then move — so on the phone the hold was cancelled by the
+        // very drag it was waiting for, every time, while a headless pointer
+        // that waits 600ms and then moves passed. Same contract as the bar
+        // tile now: a release inside the deadzone is a tap (the drawer), and
+        // anything else is a scrub. The hold is still there for a finger that
+        // wants the readout before it commits to a direction.
+        const dy=e.clientY-t.startY;
+        if(Math.abs(dy)>10){
+          _tempoHoldEnd();t.held=true;t.moved=true;t.lastY=e.clientY;t.moves=0;
+          t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);
+          dgNote("tempochip drag-start "+Math.round(dy)+"px");
+        }
         return;
       }
       e.preventDefault();e.stopPropagation();

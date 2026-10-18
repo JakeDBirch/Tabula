@@ -582,8 +582,22 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     - **Then "this is too slow now."** With the dwell doing the real work the
       curve came back toward the middle: `BAR_PX_PER_BAR` 24, `BAR_FAST` 2.7,
       `BAR_FASTPX` 30 — a 6px/frame nudge is ~40px a bar, a 2px crawl ~90, a
-      12px move ~21, a 30px flick 3.4 bars a frame. Two reports a day apart
-      bracketed it; the next number to move is `BAR_PX_PER_BAR`.
+      12px move ~21, a 30px flick 3.4 bars a frame.
+    - **THEN THE CURVE CAME OUT ALTOGETHER** — "let's lose the acceleration on
+      the bar change tap and drag, and make it a little more responsive", the
+      third regearing in a day, which is the tell that a speed curve was the
+      wrong instrument for a control with ENDS and a HOLD. The ballistic
+      section below describes what it was and why; it is kept because the
+      argument against a flat gearing ("slow enough for one bar is too slow
+      for sixteen") was right at the time and is answered now by the EDGE
+      DWELL, not by the curve: a long part is a flick to the edge and a rest,
+      so the fast end of a curve had nothing left to do except make a nudge
+      unpredictable. **FLAT, `BAR_PX_PER_BAR`=20, whatever the speed** — a
+      bar is a distance you can learn. `BAR_FAST` and `BAR_FASTPX` are gone;
+      `BAR_MAX_PER_MOVE`, `BAR_TAP_PX` and the dwell stay. `_barspin2.mjs`
+      now asserts the ABSENCE of acceleration: 40px in one frame and 40px at
+      a 2px crawl are the same two bars. `_barspin.mjs` asserted the curve as
+      a property and is therefore wrong by construction now.
   - **AND IT IS BALLISTIC, on the sliders' own speed curve.** It was a flat
     18px a bar, and a flat gearing cannot serve both of the things this control
     is for: reported as "way too sensitive for moving just a single bar", with
@@ -1660,11 +1674,25 @@ run the same loop against the baseline before reading the engine.
     on the phone (the bar tile, the grid, the drawer scrubbers) was one line:
     all of them claim the touch with `preventDefault` on pointerdown and the
     chip did not. A prevented pointerdown does not suppress the click, so the
-    tap is untouched (`_tempochip.mjs`, `_tempotouch.mjs`). **Not yet confirmed
-    by hand** — it is the one difference there was, not a reproduced cause —
-    so the chip now narrates its gesture into `?diag=1` (down, HELD, slip,
-    scrub moves, up, CANCEL, contextmenu): if it is still dead, the report says
-    which event the phone is not delivering instead of another guess.
+    tap is untouched (`_tempochip.mjs`, `_tempotouch.mjs`). **It was not the
+    cause** — "it's still not working for me" — but it stays, because it is
+    what every working drag does. The chip narrates its gesture into `?diag=1`
+    (down, HELD, drag-start, scrub moves, up, CANCEL, contextmenu).
+  - **A VERTICAL MOVE BEFORE THE HOLD LANDS STARTS THE SCRUB; IT USED TO
+    CANCEL IT.** That is the actual report. The chip demanded press, stay
+    still for 450ms, THEN move — and a hand that wants to scrub presses and
+    MOVES, so on the phone the hold was cancelled by the very drag it was
+    waiting for, every time, while the harness (wait 600ms, then move) passed
+    for months. Reread: "dragging doesn't allow for editing" is literally
+    that. The contract is the bar tile's now — a release inside the 10px
+    deadzone is a tap and opens the drawer, anything past it is a scrub
+    (`t.moved` swallows the trailing click), and the hold still brings the
+    readout up for a finger that wants to see the number before committing
+    to a direction. The old worry, "every drag that failed to clear the
+    deadzone would also open the sheet", is exactly what the deadzone is for.
+    `_tempotouch.mjs` presses and moves at 60ms with real touch events and
+    asserts the scrub AND that the drawer stayed shut. **Still not confirmed
+    by hand** — this one is a reading of the report, not a reproduction.
   - The hold-drag **swallows its trailing click**, or every edit would end with
     the drawer opening on top of it — the same trap every hold in here has.
     Movement before the hold lands (>10px) drops the whole gesture rather than

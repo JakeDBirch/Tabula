@@ -1480,7 +1480,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-10-18 03:11Z";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-10-18 03:21Z";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -3790,9 +3790,14 @@ var _spinTo=function _spinTo(g,n){if(!n)return false;var want=Math.max(0,Math.mi
 // was most of the cure, and the curve could come back toward the middle:
 // a 6px/frame nudge is ~40px a bar, a 2px crawl ~90, a 12px move ~21, and
 // a 30px flick 3.4 bars a frame.
-var BAR_PX_PER_BAR=24;// px per bar at 1:1, before the speed curve
-var BAR_FAST=2.7;// the ratio a flick reaches (cf. NUDGE_FAST)
-var BAR_FASTPX=30;// px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
+//   THEN THE CURVE CAME OUT ALTOGETHER (2026-10-18, "let's lose the
+// acceleration on the bar change tap and drag, and make it a little more
+// responsive"). Three regearings in a day is the tell that a speed curve on
+// a control with ENDS and a HOLD was the wrong instrument: the edge dwell
+// already carries a long part, so the ballistic fast end had nothing left to
+// do except make a nudge unpredictable. FLAT: every bar is BAR_PX_PER_BAR of
+// travel whatever the speed, so a bar is a distance you can learn.
+var BAR_PX_PER_BAR=20;// px per bar, flat — one bar is a short deliberate nudge
 var BAR_TAP_PX=8;// raw travel past which a release is a scrub, not a tap
 var BAR_EDGE_MS=160;// one bar per tick while the finger RESTS past the edge
 var BAR_EDGE_DWELL=380;// how long it has to rest there before the first tick
@@ -3803,11 +3808,11 @@ var BAR_EDGE_DWELL=380;// how long it has to rest there before the first tick
 // never made. Six is above anything a real flick produces on a 60Hz pointer
 // (~39px a frame), so it bounds the pathological case without costing the
 // expressive one.
-var BAR_MAX_PER_MOVE=6;// The accumulator is what makes a ballistic gearing possible at all: the gain
-// belongs to ONE pointermove, so bars have to be consumed out of a running
-// total rather than measured from an anchor. The fraction carries between
-// moves, which is what keeps a slow drag smooth instead of stalling.
-var _barSpinDelta=function _barSpinDelta(dy){var speed=Math.min(1,Math.abs(dy)/BAR_FASTPX);var bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));};var barTile=function barTile(extra){var isPlaying=curBar===playingBar;var isLoop=loopMode===2?true:!!loopMode&&function(){for(var j=0;j<Math.max(1,loopBars);j++)if(curBar===((loopBar+j)%barCount+barCount)%barCount)return true;return false;}();return/*#__PURE__*/React.createElement("div",{"data-barspin":"1",title:"Drag up and down to change bar \u2014 tap for this bar's ops",style:Object.assign({flex:"0 0 auto",width:64,height:"100%",position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",cursor:"ns-resize",userSelect:"none",// OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
+var BAR_MAX_PER_MOVE=6;// Still consumed out of a running accumulator rather than measured from an
+// anchor: the fraction carries between moves, which is what keeps a slow
+// drag smooth instead of stalling, and the per-move cap still bounds a
+// coalesced stall.
+var _barSpinDelta=function _barSpinDelta(dy){var bars=dy/BAR_PX_PER_BAR;return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));};var barTile=function barTile(extra){var isPlaying=curBar===playingBar;var isLoop=loopMode===2?true:!!loopMode&&function(){for(var j=0;j<Math.max(1,loopBars);j++)if(curBar===((loopBar+j)%barCount+barCount)%barCount)return true;return false;}();return/*#__PURE__*/React.createElement("div",{"data-barspin":"1",title:"Drag up and down to change bar \u2014 tap for this bar's ops",style:Object.assign({flex:"0 0 auto",width:64,height:"100%",position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",cursor:"ns-resize",userSelect:"none",// OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
 // song lane brought down it became the loudest object on the page —
 // for a readout that says which of four bars you are looking at. The
 // number is the thing you read, so the number keeps the colour and the
@@ -3822,7 +3827,9 @@ var dy=g.y-e.clientY;g.y=e.clientY;g.trav+=Math.abs(dy);// A release is a TAP on
 // gearing "did a bar change" was a good enough proxy; with a ballistic
 // one a careful 40px drag can legitimately change nothing, and that
 // must not open the bar's ops menu.
-if(g.trav>BAR_TAP_PX)g.moved=true;g.acc+=_barSpinDelta(dy);var d=Math.trunc(g.acc);// At either end, drop what is left rather than banking travel against
+if(g.trav>BAR_TAP_PX)g.moved=true;g.acc+=_barSpinDelta(dy);// Truncate with a tolerance: twenty 6px moves at 20px a bar sum to
+// 5.999… in floating point and a bare trunc hands back five.
+var d=Math.trunc(g.acc+Math.sign(g.acc)*1e-6);// At either end, drop what is left rather than banking travel against
 // the clamp — otherwise dragging back up does nothing until the
 // overshoot has been unwound.
 if(d){g.acc-=d;if(!_spinTo(g,d))g.acc=0;}// Past either edge of the tile, keep going for as long as you hold it
@@ -5260,9 +5267,17 @@ var _tempoPopOpen=function _tempoPopOpen(sticky){tempoPopAtR.current=Date.now();
 // not suppress the click, so the tap is untouched.
 e.preventDefault();e.stopPropagation();var t=tempoChipR.current,f=tempoFldOf(tempoFieldR.current);t.held=false;t.moved=false;t.swallow=false;t.marked=false;_tempoHoldEnd();dgNote("tempochip down "+e.pointerType);t.on=true;t.startY=e.clientY;t.lastY=e.clientY;t.val=f.get();// Capture BEFORE the hold fires, so the drag that follows keeps landing
 // here once the finger has wandered off a 42px chip.
-try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}t.tmr=setTimeout(function(){t.tmr=0;t.held=true;t.lastY=t.startY;t.moves=0;t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);dgNote("tempochip HELD");},450);},onPointerMove:function onPointerMove(e){var t=tempoChipR.current;if(!t.on)return;if(!t.held){// Movement before the hold lands is a slip, not a scrub: drop the
-// whole gesture rather than opening the drawer off a smeared tap.
-if(Math.abs(e.clientY-t.startY)>10){t.moved=true;_tempoHoldEnd();dgNote("tempochip slip "+Math.round(e.clientY-t.startY)+"px");}return;}e.preventDefault();e.stopPropagation();if(DIAG&&!(t.moves=(t.moves||0)+1)%8)dgNote("tempochip scrub moves="+t.moves+" buttons="+e.buttons);var f=tempoFldOf(tempoFieldR.current);var dy=e.clientY-t.lastY;t.lastY=e.clientY;t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));if(Math.round(t.val)!==Math.round(f.get()))histOnce(t);f.set(t.val);},onPointerUp:function onPointerUp(){var t=tempoChipR.current;_tempoHoldEnd();dgNote("tempochip up held="+t.held+" moved="+t.moved+" moves="+(t.moves||0));// A hold-drag must swallow its own trailing click, or every edit would be
+try{e.currentTarget.setPointerCapture(e.pointerId);}catch(_){}t.tmr=setTimeout(function(){t.tmr=0;t.held=true;t.lastY=t.startY;t.moves=0;t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);dgNote("tempochip HELD");},450);},onPointerMove:function onPointerMove(e){var t=tempoChipR.current;if(!t.on)return;if(!t.held){// A vertical move past the deadzone BEFORE the hold lands STARTS the
+// scrub, it does not cancel it. It cancelled for a long time, and that
+// is the phone report "dragging doesn't allow for editing": a hand that
+// wants to scrub presses and MOVES, it does not press, count to half a
+// second, and then move — so on the phone the hold was cancelled by the
+// very drag it was waiting for, every time, while a headless pointer
+// that waits 600ms and then moves passed. Same contract as the bar
+// tile now: a release inside the deadzone is a tap (the drawer), and
+// anything else is a scrub. The hold is still there for a finger that
+// wants the readout before it commits to a direction.
+var _dy=e.clientY-t.startY;if(Math.abs(_dy)>10){_tempoHoldEnd();t.held=true;t.moved=true;t.lastY=e.clientY;t.moves=0;t.val=tempoFldOf(tempoFieldR.current).get();_tempoPopOpen(false);dgNote("tempochip drag-start "+Math.round(_dy)+"px");}return;}e.preventDefault();e.stopPropagation();if(DIAG&&!(t.moves=(t.moves||0)+1)%8)dgNote("tempochip scrub moves="+t.moves+" buttons="+e.buttons);var f=tempoFldOf(tempoFieldR.current);var dy=e.clientY-t.lastY;t.lastY=e.clientY;t.val=Math.max(f.min,Math.min(f.max,t.val-ballisticNudge(dy,f.gain)));if(Math.round(t.val)!==Math.round(f.get()))histOnce(t);f.set(t.val);},onPointerUp:function onPointerUp(){var t=tempoChipR.current;_tempoHoldEnd();dgNote("tempochip up held="+t.held+" moved="+t.moved+" moves="+(t.moves||0));// A hold-drag must swallow its own trailing click, or every edit would be
 // followed by the drawer opening on top of it.
 if(t.held||t.moved)t.swallow=true;if(t.held)setTempoPop(null);t.on=false;t.held=false;},onPointerCancel:function onPointerCancel(){var t=tempoChipR.current;_tempoHoldEnd();dgNote("tempochip CANCEL held="+t.held+" moves="+(t.moves||0));if(t.held)setTempoPop(null);t.on=false;t.held=false;t.swallow=true;},onContextMenu:function onContextMenu(e){// Desktop's hold. A right-click can't be dragged, so the readout comes up
 // STICKY instead: it tracks the bare pointer until a click or ESC.
