@@ -48,7 +48,7 @@
     // note of the stamp it last chased stops a CDN edge still serving the old
     // file from turning this into a loop; the shortcut's start url is
     // untouched, so nothing about the install changes.
-    window.__LL_BUILD = "2026-10-18 01:09Z LAB";
+    window.__LL_BUILD = "2026-10-18 01:17Z LAB";
     (function () {
       try {
         if (!navigator.onLine) return;
@@ -1555,7 +1555,7 @@ var CLOUD_URL="https://dpduydztidcwsezrdmsp.supabase.co";var CLOUD_KEY="sb_publi
 var CLOUD_OTP_MIN=6,CLOUD_OTP_MAX=10;var CLOUD_EMAIL_RE=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;// Replaced by build.mjs with the build time. Shown at the foot of the PROJECT
 // menu — the cheapest way to tell a stale cache from a real bug when the only
 // device that reproduces something is one I can't inspect.
-var BUILD_ID="2026-10-18 01:09Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
+var BUILD_ID="2026-10-18 01:17Z LAB";// Refuse to upload past this. A project carrying recorded samples runs to
 // megabytes, and a phone on cellular shouldn't find that out mid-save.
 var CLOUD_MAX_BYTES=6*1024*1024;// Supabase reports failures as JSON in half a dozen shapes; surface whichever
 // message it actually sent, else the status code.
@@ -4024,7 +4024,15 @@ var playGlyph=function playGlyph(sz){return/*#__PURE__*/React.createElement(LLIc
 // It absorbs the track row when collapsed, so the tile is the full height of
 // the strip block rather than a chip with a scrollbar under it. Same total
 // height in both states — the thing the rest of the column budgets against.
-var _spinR=useRef({y:0,start:0,moved:false,tmr:0,top:0,bot:0});var _spinEdgeR=useRef(0);var _spinEdgeStop=function _spinEdgeStop(){if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}};var _spinEnd=function _spinEnd(){if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}_spinEdgeStop();};useEffect(function(){return function(){return _spinEdgeStop();};},[]);// Both the drag and the edge timer go through here, so "where am I" lives in
+var _spinR=useRef({y:0,start:0,moved:false,tmr:0,top:0,bot:0});var _spinEdgeR=useRef(0);// The edge hold is a DWELL, not a crossing. It used to start stepping the
+// instant the finger left the 58px tile — which a one-bar nudge of 60–70px
+// always does — so every deliberate nudge handed the rest of its travel to a
+// timer running nine bars a second. "Basically impossible to move one bar
+// at a time" was mostly this. Now the finger has to REST past the edge for
+// BAR_EDGE_DWELL before the stepping begins, and every move while it is out
+// there restarts the wait: a moving finger is scrubbing, a still one is
+// holding.
+var _spinEdgeDwellR=useRef(0);var _spinEdgeStop=function _spinEdgeStop(){if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}if(_spinEdgeDwellR.current){clearTimeout(_spinEdgeDwellR.current);_spinEdgeDwellR.current=0;}};var _spinEnd=function _spinEnd(){if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}_spinEdgeStop();};useEffect(function(){return function(){return _spinEdgeStop();};},[]);// Both the drag and the edge timer go through here, so "where am I" lives in
 // one place and the two can't disagree about which bar is current.
 // IT CLAMPS. It used to wrap, and wrapping is wrong for this control however
 // neatly a part loops: a scrub with no ends has no position you can feel,
@@ -4051,10 +4059,20 @@ var _spinTo=function _spinTo(g,n){if(!n)return false;var want=Math.max(0,Math.mi
 //   BAR_FAST is its own constant rather than NUDGE_FAST, because the dynamic
 // range wanted here is wider than a tempo readout's: this control has to be
 // able to express BOTH ends of a 32-bar part.
-var BAR_PX_PER_BAR=26;// px per bar at 1:1, before the speed curve
-var BAR_FAST=4.0;// the ratio a flick reaches (cf. NUDGE_FAST)
+//   REGEARED 2026-10-18 — "basically impossible to move one bar at a time".
+// The curve reached its fast regime at DRAG_FASTPX=14, and a normal thumb
+// move on a phone is 5–10px a FRAME, so an ordinary nudge was already geared
+// for flicking: at 6px a frame it spent a bar every 40ms. The fast regime
+// now begins at BAR_FASTPX=36 (a real flick), so everything a thumb does
+// deliberately sits on the slow half: a 2px crawl is ~77px a bar, 6px ~72,
+// 12px ~40, and a 36px flick 2.5 bars a frame — one bar is one nudge, and
+// the edge hold still walks a 32-bar part.
+var BAR_PX_PER_BAR=36;// px per bar at 1:1, before the speed curve
+var BAR_FAST=2.5;// the ratio a flick reaches (cf. NUDGE_FAST)
+var BAR_FASTPX=36;// px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
 var BAR_TAP_PX=8;// raw travel past which a release is a scrub, not a tap
-var BAR_EDGE_MS=110;// one bar per tick while the finger is past the edge
+var BAR_EDGE_MS=160;// one bar per tick while the finger RESTS past the edge
+var BAR_EDGE_DWELL=380;// how long it has to rest there before the first tick
 // ONE MOVE MAY NOT CARRY MORE THAN THIS, whatever distance it claims. A
 // pointermove is normally a frame of travel, but a stalled main thread — which
 // this app has a long history of — delivers the whole stall COALESCED into one
@@ -4066,7 +4084,7 @@ var BAR_MAX_PER_MOVE=6;// The accumulator is what makes a ballistic gearing poss
 // belongs to ONE pointermove, so bars have to be consumed out of a running
 // total rather than measured from an anchor. The fraction carries between
 // moves, which is what keeps a slow drag smooth instead of stalling.
-var _barSpinDelta=function _barSpinDelta(dy){var speed=Math.min(1,Math.abs(dy)/DRAG_FASTPX);var bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));};var barTile=function barTile(extra){var isPlaying=curBar===playingBar;var isLoop=loopMode===2?true:!!loopMode&&function(){for(var j=0;j<Math.max(1,loopBars);j++)if(curBar===((loopBar+j)%barCount+barCount)%barCount)return true;return false;}();return/*#__PURE__*/React.createElement("div",{"data-barspin":"1",title:"Drag up and down to change bar \u2014 tap for this bar's ops",style:Object.assign({flex:"0 0 auto",width:64,height:"100%",position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",cursor:"ns-resize",userSelect:"none",// OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
+var _barSpinDelta=function _barSpinDelta(dy){var speed=Math.min(1,Math.abs(dy)/BAR_FASTPX);var bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));};var barTile=function barTile(extra){var isPlaying=curBar===playingBar;var isLoop=loopMode===2?true:!!loopMode&&function(){for(var j=0;j<Math.max(1,loopBars);j++)if(curBar===((loopBar+j)%barCount+barCount)%barCount)return true;return false;}();return/*#__PURE__*/React.createElement("div",{"data-barspin":"1",title:"Drag up and down to change bar \u2014 tap for this bar's ops",style:Object.assign({flex:"0 0 auto",width:64,height:"100%",position:"relative",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",cursor:"ns-resize",userSelect:"none",// OUTLINED, NOT FLOODED. It was a solid block of amber, and with the
 // song lane brought down it became the loudest object on the page —
 // for a readout that says which of four bars you are looking at. The
 // number is the thing you read, so the number keeps the colour and the
@@ -4087,9 +4105,10 @@ if(g.trav>BAR_TAP_PX)g.moved=true;g.acc+=_barSpinDelta(dy);var d=Math.trunc(g.ac
 if(d){g.acc-=d;if(!_spinTo(g,d))g.acc=0;}// Past either edge of the tile, keep going for as long as you hold it
 // there. The same answer the song lane and the bar strip already use
 // when a drag needs somewhere off-screen.
-var dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;if(dir!==g.edge){g.edge=dir;_spinEdgeStop();// The timer stops itself at the end of the travel — without that it
-// would sit there ticking against a clamp for as long as you held it.
-if(dir){g.moved=true;_spinEdgeR.current=setInterval(function(){if(!_spinTo(g,dir))_spinEdgeStop();},BAR_EDGE_MS);}}},onPointerUp:function onPointerUp(e){_spinEnd();var g=_spinR.current;if(e.button===2)return;// A tap — not the release of a scrub — opens this bar's ops.
+var dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;if(dir!==g.edge){g.edge=dir;_spinEdgeStop();}if(dir&&!_spinEdgeR.current){// Restart the dwell on every move out there; only a resting finger
+// reaches the interval. The interval stops itself at the end of the
+// travel — without that it would sit ticking against a clamp.
+if(_spinEdgeDwellR.current)clearTimeout(_spinEdgeDwellR.current);_spinEdgeDwellR.current=setTimeout(function(){_spinEdgeDwellR.current=0;g.moved=true;if(!_spinTo(g,dir))return;_spinEdgeR.current=setInterval(function(){if(!_spinTo(g,dir))_spinEdgeStop();},BAR_EDGE_MS);},BAR_EDGE_DWELL);}},onPointerUp:function onPointerUp(e){_spinEnd();var g=_spinR.current;if(e.button===2)return;// A tap — not the release of a scrub — opens this bar's ops.
 if(!g.moved)_openBarOps(curBar,e.clientX,e.clientY,120);g.moved=false;},onPointerCancel:function onPointerCancel(){_spinEnd();_spinR.current.moved=false;},onContextMenu:function onContextMenu(e){e.preventDefault();e.stopPropagation();_openBarOps(curBar,e.clientX,e.clientY,120);}},/*#__PURE__*/React.createElement("span",null,curBar+1),/*#__PURE__*/React.createElement("span",{style:{fontSize:10,fontWeight:600,opacity:0.5,marginLeft:1}},"/"+barCount),isLoop?/*#__PURE__*/React.createElement("div",{style:{position:"absolute",left:3,right:3,bottom:2,height:2,borderRadius:1,background:C_LOOP}}):null);};// The full scrolling strip, kept intact: it is what the spinner EXPANDS into
 // while a loop is being set up, and the only view that can draw a four-bar
 // window. Every gesture on it is unchanged.

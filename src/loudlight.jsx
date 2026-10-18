@@ -8059,7 +8059,16 @@ export default function LoudLight(){
   // height in both states — the thing the rest of the column budgets against.
   const _spinR=useRef({y:0,start:0,moved:false,tmr:0,top:0,bot:0});
   const _spinEdgeR=useRef(0);
-  const _spinEdgeStop=()=>{if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}};
+  // The edge hold is a DWELL, not a crossing. It used to start stepping the
+  // instant the finger left the 58px tile — which a one-bar nudge of 60–70px
+  // always does — so every deliberate nudge handed the rest of its travel to a
+  // timer running nine bars a second. "Basically impossible to move one bar
+  // at a time" was mostly this. Now the finger has to REST past the edge for
+  // BAR_EDGE_DWELL before the stepping begins, and every move while it is out
+  // there restarts the wait: a moving finger is scrubbing, a still one is
+  // holding.
+  const _spinEdgeDwellR=useRef(0);
+  const _spinEdgeStop=()=>{if(_spinEdgeR.current){clearInterval(_spinEdgeR.current);_spinEdgeR.current=0;}if(_spinEdgeDwellR.current){clearTimeout(_spinEdgeDwellR.current);_spinEdgeDwellR.current=0;}};
   const _spinEnd=()=>{if(_spinR.current.tmr){clearTimeout(_spinR.current.tmr);_spinR.current.tmr=0;}_spinEdgeStop();};
   useEffect(()=>()=>_spinEdgeStop(),[]);
   // Both the drag and the edge timer go through here, so "where am I" lives in
@@ -8095,10 +8104,20 @@ export default function LoudLight(){
   //   BAR_FAST is its own constant rather than NUDGE_FAST, because the dynamic
   // range wanted here is wider than a tempo readout's: this control has to be
   // able to express BOTH ends of a 32-bar part.
-  const BAR_PX_PER_BAR=26;   // px per bar at 1:1, before the speed curve
-  const BAR_FAST=4.0;        // the ratio a flick reaches (cf. NUDGE_FAST)
+  //   REGEARED 2026-10-18 — "basically impossible to move one bar at a time".
+  // The curve reached its fast regime at DRAG_FASTPX=14, and a normal thumb
+  // move on a phone is 5–10px a FRAME, so an ordinary nudge was already geared
+  // for flicking: at 6px a frame it spent a bar every 40ms. The fast regime
+  // now begins at BAR_FASTPX=36 (a real flick), so everything a thumb does
+  // deliberately sits on the slow half: a 2px crawl is ~77px a bar, 6px ~72,
+  // 12px ~40, and a 36px flick 2.5 bars a frame — one bar is one nudge, and
+  // the edge hold still walks a 32-bar part.
+  const BAR_PX_PER_BAR=36;   // px per bar at 1:1, before the speed curve
+  const BAR_FAST=2.5;        // the ratio a flick reaches (cf. NUDGE_FAST)
+  const BAR_FASTPX=36;       // px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
   const BAR_TAP_PX=8;        // raw travel past which a release is a scrub, not a tap
-  const BAR_EDGE_MS=110;     // one bar per tick while the finger is past the edge
+  const BAR_EDGE_MS=160;     // one bar per tick while the finger RESTS past the edge
+  const BAR_EDGE_DWELL=380;  // how long it has to rest there before the first tick
   // ONE MOVE MAY NOT CARRY MORE THAN THIS, whatever distance it claims. A
   // pointermove is normally a frame of travel, but a stalled main thread — which
   // this app has a long history of — delivers the whole stall COALESCED into one
@@ -8112,7 +8131,7 @@ export default function LoudLight(){
   // total rather than measured from an anchor. The fraction carries between
   // moves, which is what keeps a slow drag smooth instead of stalling.
   const _barSpinDelta=(dy)=>{
-    const speed=Math.min(1,Math.abs(dy)/DRAG_FASTPX);
+    const speed=Math.min(1,Math.abs(dy)/BAR_FASTPX);
     const bars=dy*(DRAG_SLOW+(BAR_FAST-DRAG_SLOW)*speed)/BAR_PX_PER_BAR;
     return Math.max(-BAR_MAX_PER_MOVE,Math.min(BAR_MAX_PER_MOVE,bars));
   };
@@ -8169,13 +8188,17 @@ export default function LoudLight(){
         // there. The same answer the song lane and the bar strip already use
         // when a drag needs somewhere off-screen.
         const dir=e.clientY<g.top-10?1:e.clientY>g.bot+10?-1:0;
-        if(dir!==g.edge){
-          g.edge=dir;_spinEdgeStop();
-          // The timer stops itself at the end of the travel — without that it
-          // would sit there ticking against a clamp for as long as you held it.
-          if(dir){g.moved=true;_spinEdgeR.current=setInterval(()=>{
-            if(!_spinTo(g,dir))_spinEdgeStop();
-          },BAR_EDGE_MS);}
+        if(dir!==g.edge){g.edge=dir;_spinEdgeStop();}
+        if(dir&&!_spinEdgeR.current){
+          // Restart the dwell on every move out there; only a resting finger
+          // reaches the interval. The interval stops itself at the end of the
+          // travel — without that it would sit ticking against a clamp.
+          if(_spinEdgeDwellR.current)clearTimeout(_spinEdgeDwellR.current);
+          _spinEdgeDwellR.current=setTimeout(()=>{
+            _spinEdgeDwellR.current=0;g.moved=true;
+            if(!_spinTo(g,dir))return;
+            _spinEdgeR.current=setInterval(()=>{ if(!_spinTo(g,dir))_spinEdgeStop(); },BAR_EDGE_MS);
+          },BAR_EDGE_DWELL);
         }
       }}
       onPointerUp={e=>{

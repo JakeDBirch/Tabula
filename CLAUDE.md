@@ -558,6 +558,27 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
     one bar per 110ms and stops itself at the end — which is the travel a thumb
     can actually use, since the original complaint was never the wrap, it was
     that an upward swipe runs out of phone.
+  - **REGEARED 2026-10-18: "basically impossible to move one bar at a
+    time."** The numbers below were measured and right, and still wrong for
+    a thumb: the curve reached its fast regime at `DRAG_FASTPX`=14px a
+    move, and a normal phone thumb moves 5–10px a FRAME, so an ordinary
+    nudge was already geared for flicking — at 6px a frame it spent a bar
+    every 40ms. The tile has its own `BAR_FASTPX`=36 now (a real flick),
+    `BAR_PX_PER_BAR` 26→36 and `BAR_FAST` 4→2.5: a 2px crawl is ~77px a
+    bar, 6px ~72, 12px ~40, a 36px flick 2.5 bars a frame. One bar is one
+    nudge; a part is still a flick plus the edge hold. **A speed curve is
+    judged at the speeds a hand makes, not the ones a harness is told to.**
+    - **AND THE EDGE HOLD WAS MOST OF IT.** The tile is 58px tall and the
+      hold started stepping the INSTANT the finger crossed its edge — which a
+      one-bar nudge of 60–70px always does — so every deliberate nudge handed
+      the rest of its travel to a timer at nine bars a second. The regearing
+      alone measured 72px → THREE bars. The hold is a DWELL now
+      (`BAR_EDGE_DWELL`=380ms, then `BAR_EDGE_MS`=160): the finger has to rest
+      past the edge, and every move out there restarts the wait, so a moving
+      finger is scrubbing and a still one is holding. `_barspin2.mjs` paces
+      the moves per frame at a thumb's speeds: 72px at 6px/frame is one bar,
+      36px is none, 150px is two, a 40px/frame flick still crosses the part,
+      and a rest past the edge still walks.
   - **AND IT IS BALLISTIC, on the sliders' own speed curve.** It was a flat
     18px a bar, and a flat gearing cannot serve both of the things this control
     is for: reported as "way too sensitive for moving just a single bar", with
