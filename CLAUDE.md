@@ -576,9 +576,14 @@ Each pattern: `grid[r][c]` (bool), `durs[r][c]` (int ≥1 note length in cells),
       (`BAR_EDGE_DWELL`=380ms, then `BAR_EDGE_MS`=160): the finger has to rest
       past the edge, and every move out there restarts the wait, so a moving
       finger is scrubbing and a still one is holding. `_barspin2.mjs` paces
-      the moves per frame at a thumb's speeds: 72px at 6px/frame is one bar,
-      36px is none, 150px is two, a 40px/frame flick still crosses the part,
-      and a rest past the edge still walks.
+      the moves per frame at a thumb's speeds: 40px at 6px/frame is one bar,
+      20px is none, 120px is three, a 40px/frame flick still crosses the
+      part, and a rest past the edge still walks.
+    - **Then "this is too slow now."** With the dwell doing the real work the
+      curve came back toward the middle: `BAR_PX_PER_BAR` 24, `BAR_FAST` 2.7,
+      `BAR_FASTPX` 30 — a 6px/frame nudge is ~40px a bar, a 2px crawl ~90, a
+      12px move ~21, a 30px flick 3.4 bars a frame. Two reports a day apart
+      bracketed it; the next number to move is `BAR_PX_PER_BAR`.
   - **AND IT IS BALLISTIC, on the sliders' own speed curve.** It was a flat
     18px a bar, and a flat gearing cannot serve both of the things this control
     is for: reported as "way too sensitive for moving just a single bar", with

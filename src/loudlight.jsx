@@ -8112,9 +8112,13 @@ export default function LoudLight(){
   // deliberately sits on the slow half: a 2px crawl is ~77px a bar, 6px ~72,
   // 12px ~40, and a 36px flick 2.5 bars a frame — one bar is one nudge, and
   // the edge hold still walks a 32-bar part.
-  const BAR_PX_PER_BAR=36;   // px per bar at 1:1, before the speed curve
-  const BAR_FAST=2.5;        // the ratio a flick reaches (cf. NUDGE_FAST)
-  const BAR_FASTPX=36;       // px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
+  //   Then "this is too slow now" at 36/2.5/36 — the dwell on the edge hold
+  // was most of the cure, and the curve could come back toward the middle:
+  // a 6px/frame nudge is ~40px a bar, a 2px crawl ~90, a 12px move ~21, and
+  // a 30px flick 3.4 bars a frame.
+  const BAR_PX_PER_BAR=24;   // px per bar at 1:1, before the speed curve
+  const BAR_FAST=2.7;        // the ratio a flick reaches (cf. NUDGE_FAST)
+  const BAR_FASTPX=30;       // px in one move that counts as a flick (DRAG_FASTPX is 14: too eager for a thumb)
   const BAR_TAP_PX=8;        // raw travel past which a release is a scrub, not a tap
   const BAR_EDGE_MS=160;     // one bar per tick while the finger RESTS past the edge
   const BAR_EDGE_DWELL=380;  // how long it has to rest there before the first tick
