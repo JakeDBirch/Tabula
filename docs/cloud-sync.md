@@ -59,6 +59,33 @@ create policy "own rows only" on public.projects
 -- needs to touch this table.
 grant select, insert, update, delete on public.projects to authenticated;
 
+-- THE SAMPLE LIBRARY. Recordings kept outside any project so a take can be
+-- a POLY/MONO oscillator in every project on the account. Same shape and the
+-- same single policy as projects; `data` is a base64 16-bit WAV (~1.5MB for a
+-- 12s take, well under the app's 6MB cloud ceiling). Entries are immutable
+-- apart from `name`, which is why there is no conflict handling. The FK
+-- cascade means delete_account() below takes these with it too.
+create table if not exists public.samples (
+  user_id    uuid        not null references auth.users(id) on delete cascade default auth.uid(),
+  id         text        not null,
+  name       text,
+  root       real,
+  dur        real,
+  data       text        not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
+
+alter table public.samples enable row level security;
+
+drop policy if exists "own rows only" on public.samples;
+create policy "own rows only" on public.samples
+  for all
+  using      (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.samples to authenticated;
+
 -- ACCOUNT DELETION. App Store guideline 5.1.1(v): an app that can create an
 -- account must be able to delete one from inside itself. The row that matters
 -- is in auth.users, which no client may touch directly — the service-role key

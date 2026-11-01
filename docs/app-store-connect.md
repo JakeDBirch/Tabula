@@ -321,7 +321,9 @@ What each one actually is, in case review asks:
   one-time sign-in code and to own the rows. Linked by definition.
 - **Audio Data** — samples recorded with the drum sampler's REC. They are stored
   in the project; they leave the device only when a project carrying one is
-  saved to the **cloud** (`getShareState(true)` base64s them into the payload).
+  saved to the **cloud** (`getShareState(true)` base64s them into the payload),
+  or when a take is added to the **sample library** while signed in (the
+  `samples` table — same purpose, same linkage, so the answer does not change).
   A save to the **device** transmits nothing.
 - **Other User Content** — the projects themselves: patterns, songs, sound
   settings.

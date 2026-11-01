@@ -1527,6 +1527,45 @@ served the drum sampler too, so the USER kit gets all of this.
   where the sampler has been exercised; the core's rendering is proven by
   `core/test/lsample.c` and the oracle, not yet by ear.
 
+**THE SAMPLE LIBRARY: A TAKE CAN OUTLIVE ITS PROJECT** (2026-11-01, asked
+for as "save the samples I record … for use as oscillator options across
+various projects in my account"). `LIB` on the SMP row opens `smpLibPanel`:
+name the current take and SAVE TAKE, or tap a row to load it into this layer
+(it sets the wave to SMP and brings the saved root with it).
+- **Two stores, one list.** DEVICE is **IndexedDB** (`SMPLIB_DB`, namespaced
+  through `LS_NS` so the lab keeps its own), not localStorage — a 12s take is
+  ~1.5MB of base64 and localStorage's ~5MB is the project library's whole
+  budget. CLOUD is a `samples` table beside `projects`, same RLS, same
+  base64-in-text payload; **its SQL is in `docs/cloud-sync.md` and has to be
+  run once** — until then a signed-in save keeps the device copy and flashes
+  CLOUD TABLE MISSING. The list is merged by id and each row says DEVICE /
+  ACCOUNT.
+- **ENTRIES ARE IMMUTABLE, which is what makes two stores honest without a
+  sync engine**: SAVE always makes a new id, so there is never a "which copy is
+  newer" — only "which store has it". Rename is the one edit and writes both.
+  Signed in, SAVE writes both; signed out, the device only, and `↑` puts a
+  device entry on the account later. An account-only entry loaded on another
+  device is cached into IndexedDB on the way.
+- **LOADING COPIES THE AUDIO INTO THE PROJECT** (`userSamples`), so a project
+  stays self-contained and deleting a library entry can never silence a song.
+  It is account/device state, never project state: nothing in
+  `SESSION_DEFAULTS`, the snapshot or the save pair.
+- **No undo step on load**, on purpose: the snapshot does not carry
+  `userSamples`, so a step would undo the root and the wave and leave the
+  audio. A fresh recording does not push one either.
+- **The SMP row WRAPS** now: the desktop SOUND card is ~236px and could not
+  hold another button, so the readout / ✕ / LIB group drops to a second line
+  there; phones stay one line.
+- POLY/MONO only. The storage is keyed generically, so a drum voice could load
+  from it with a LIB on its channel — not built, since it was not asked for.
+- `privacy.html` and `docs/app-store-connect.md` say a library save uploads
+  audio; the questionnaire answer (Audio Data, collected, linked, app
+  functionality) did not change. `_smplib.mjs` is the harness: a real fake-mic
+  take, save, relaunch into another project, load (length and root match),
+  rename, delete-asks-first, and against a mocked Supabase the upload, a
+  signed-in save, a second device seeing and caching account entries, and
+  delete removing from both — plus the phone sheet.
+
 **THE ROOT IS READ OFF THE TAKE, AND THE BOX THAT EDITED IT IS GONE** (asked
 for the day after the sampler landed: "Pocket Chimes has some kind of auto
 pitch detect and I'd like that for this as well. I don't want to see the

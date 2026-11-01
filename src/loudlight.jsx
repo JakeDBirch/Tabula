@@ -2134,6 +2134,7 @@ const HELP_GROUPS=Object.freeze([
   ]},
   {t:"SAMPLING",s:"SOUND \u00b7 the SMP wave",r:[
     ["SMP","POLY or MONO plays a recording instead of an oscillator \u2014 pitched by row, through its own filter and envelope"],
+    ["LIB","the sample library: SAVE TAKE keeps a recording outside the project, and any project can load it back \u2014 on your account too when signed in"],
     ["ARM","opens the mic; the take starts when the level crosses the line and stops once it has decayed, or on STOP"],
     ["drag the meter","the line \u2014 where the room ends and the instrument begins"],
     ["the note beside the length","the ROOT, read off the recording itself, so the grid plays it in tune"],
@@ -2319,6 +2320,51 @@ const serializeSamples=(map)=>{
   for(const k of Object.keys(map)){const b=map[k];if(b&&b.numberOfChannels!=null){try{out[k]=abToBase64(audioBufToWav(b));}catch(e){}}}
   return out;
 };
+
+// ── THE SAMPLE LIBRARY ───────────────────────────────────────────────────────
+// Recordings kept OUTSIDE any project, so a take made for one song can be the
+// oscillator in the next. Two stores, one list, the same shape the project
+// library has:
+//   - DEVICE is IndexedDB, not localStorage. A 12s take is ~1.5MB of base64,
+//     and localStorage's ~5MB is already the project library's whole budget;
+//     IndexedDB holds binary as binary and has room. Namespaced through LS_NS
+//     like every other key, so the LAB build has its own island here too.
+//   - CLOUD is a `samples` table beside `projects` (docs/cloud-sync.md), the
+//     same RLS, the same base64-in-a-text-column payload the projects use.
+// An entry is IMMUTABLE once saved — SAVE always makes a new one — and that is
+// what makes keeping two stores honest without a sync engine: there is no
+// "which copy is newer", only "which store has this id". Rename is the one
+// edit, and it is a metadata write on both.
+// LOADING COPIES the audio into the project (userSamples), so a project stays
+// self-contained: deleting a library entry can never silence a song.
+const SMPLIB_DB=LS_NS+"samplelib";
+const _smpDb=()=>new Promise((res,rej)=>{
+  if(typeof indexedDB==="undefined"){rej(new Error("NO DEVICE STORE"));return;}
+  const rq=indexedDB.open(SMPLIB_DB,1);
+  rq.onupgradeneeded=()=>{const db=rq.result;if(!db.objectStoreNames.contains("s"))db.createObjectStore("s",{keyPath:"id"});};
+  rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error||new Error("NO DEVICE STORE"));
+});
+const _smpTx=async(mode,fn)=>{
+  const db=await _smpDb();
+  try{
+    return await new Promise((res,rej)=>{
+      const tx=db.transaction("s",mode), st=tx.objectStore("s"); let out;
+      const r=fn(st); if(r)r.onsuccess=()=>{out=r.result;};
+      tx.oncomplete=()=>res(out); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error||new Error("ABORTED"));
+    });
+  } finally { db.close(); }
+};
+// The list is metadata only — the bytes are read when you load one.
+const smpDevList=async()=>((await _smpTx("readonly",st=>st.getAll()))||[]).map(r=>({id:r.id,name:r.name,root:r.root,dur:r.dur,updated:r.updated}));
+const smpDevGet=id=>_smpTx("readonly",st=>st.get(id));
+const smpDevPut=rec=>_smpTx("readwrite",st=>st.put(rec));
+const smpDevDel=id=>_smpTx("readwrite",st=>st.delete(id));
+const smpNewId=()=>"s"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const cloudSmpList=sess=>cloudRest(sess,"samples?select=id,name,root,dur,updated_at");
+const cloudSmpGet=async(sess,id)=>{const rows=await cloudRest(sess,"samples?select=data&id=eq."+encodeURIComponent(id));return rows&&rows[0]?rows[0].data:null;};
+const cloudSmpPut=(sess,e,data)=>cloudRest(sess,"samples?on_conflict=user_id,id",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({user_id:sess.uid,id:e.id,name:e.name,root:e.root,dur:e.dur,data,updated_at:new Date().toISOString()})});
+const cloudSmpRename=(sess,id,name)=>cloudRest(sess,"samples?id=eq."+encodeURIComponent(id),{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({name})});
+const cloudSmpDel=(sess,id)=>cloudRest(sess,"samples?id=eq."+encodeURIComponent(id),{method:"DELETE",headers:{Prefer:"return=minimal"}});
 
 // ── MIDI (Standard MIDI File) export ─────────────────────────────────────────
 // General-MIDI note number per drum voice (channel 10). Best-fit GM percussion.
@@ -5536,6 +5582,7 @@ export default function LoudLight(){
       // re-registers every render and the values are never stale.)
       // The LAYER hold menu too — it was missed when this landed, so ESC on it
       // fell through to the transport exactly as the others once did.
+      if(e.key==="Escape"&&smpLibOpen){e.preventDefault();if(smpRename)setSmpRename(null);else setSmpLibOpen(null);return;}
       if(!isEditable&&e.key==="Escape"&&(patMenu||barMenu||addMenu||layerMenu)){
         e.preventDefault();
         setPatMenu(null);setDelArm(null);setBarMenu(null);setAddMenu(null);setLayerMenu(null);
@@ -11958,6 +12005,105 @@ export default function LoudLight(){
     setUserSamples(prev=>{const o={...prev};delete o[voiceKey];return o;});
     samplesDirtyR.current=true; // user cleared → persist the new sample set
   };
+  // ── THE SAMPLE LIBRARY (actions) ──────────────────────────────────────────
+  // See the module-level note at SMPLIB_DB. `smpLib` is the MERGED list — one
+  // row per id, flagged with which stores hold it — newest first.
+  const [smpLibOpen,setSmpLibOpen]=useState(null);   // the layer key the panel loads into, or null
+  const [smpLib,setSmpLib]=useState([]);
+  const [smpLibBusy,setSmpLibBusy]=useState("");
+  const [smpLibName,setSmpLibName]=useState("");
+  const [smpDelArm,setSmpDelArm]=useState(null);
+  const [smpRename,setSmpRename]=useState(null);     // {id,name} while a row's name is being edited
+  const smpLibAtR=useRef(0);
+  const smpLibRefresh=async()=>{
+    let dev=[],cloud=[],devErr=null;
+    try{dev=await smpDevList();}catch(e){devErr=e;console.warn("sample library: device store",e);}
+    if(CLOUD_ON&&cloudSessR.current){
+      try{cloud=(await cloudSmpList(await cloudTokenR.current()))||[];}
+      catch(e){console.error("sample library: cloud list",e);showFlash(cloudSay(e),"warn");}
+    }
+    const m=new Map();
+    for(const d of dev)m.set(d.id,{...d,dev:true,cloud:false});
+    for(const c of cloud){const u=Date.parse(c.updated_at||0)||0;const o=m.get(c.id);
+      if(o)o.cloud=true; else m.set(c.id,{id:c.id,name:c.name,root:c.root,dur:c.dur,updated:u,dev:false,cloud:true});}
+    setSmpLib([...m.values()].sort((a,b)=>(b.updated||0)-(a.updated||0)));
+    if(devErr&&!cloud.length)showFlash("DEVICE LIBRARY UNAVAILABLE","warn");
+  };
+  const openSmpLib=(key)=>{
+    smpLibAtR.current=Date.now();
+    setSmpDelArm(null);setSmpRename(null);
+    setSmpLibName(randomName(smpLib.map(e=>e.name)));
+    setSmpLibOpen(key);smpLibRefresh();
+  };
+  const _smpRun=async(label,fn)=>{setSmpLibBusy(label);try{return await fn();}finally{setSmpLibBusy("");}};
+  // SAVE: the device always; the account too when signed in. A cloud failure
+  // keeps the device copy and says so — the take is never lost to a network.
+  const smpLibSave=(key)=>_smpRun("SAVING",async()=>{
+    const buf=userSamplesR.current[key]; if(!buf){showFlash("NOTHING TO SAVE","warn");return;}
+    const lp=layerParamsR.current&&layerParamsR.current[key];
+    const e={id:smpNewId(),name:(smpLibName||"").trim().slice(0,40)||randomName(smpLib.map(x=>x.name)),
+      root:(lp&&lp.sampleRoot!=null)?lp.sampleRoot:60,dur:Math.round(buf.duration*100)/100,updated:Date.now()};
+    const wav=audioBufToWav(buf);
+    let onDev=false,onCloud=false;
+    try{await smpDevPut({...e,wav});onDev=true;}catch(err){console.error("sample library: device save",err);}
+    if(CLOUD_ON&&cloudSessR.current){
+      const b64=abToBase64(wav);
+      if(b64.length>CLOUD_MAX_BYTES)showFlash("TOO BIG FOR THE CLOUD","warn");
+      else{try{await cloudSmpPut(await cloudTokenR.current(),e,b64);onCloud=true;}catch(err){console.error("sample library: cloud save",err);showFlash(cloudSay(err),"warn");}}
+    }
+    if(!onDev&&!onCloud){showFlash("SAVE FAILED","warn");return;}
+    if(onCloud||!(CLOUD_ON&&cloudSessR.current))showFlash("SAVED "+e.name+(onCloud?" · ACCOUNT":" · DEVICE"));
+    setSmpLibName(randomName(smpLib.map(x=>x.name).concat(e.name)));
+    await smpLibRefresh();
+  });
+  // LOAD copies the audio into the project, and brings its root with it.
+  const smpLibLoad=(key,ent)=>_smpRun("LOADING",async()=>{
+    let ab=null;
+    try{const r=ent.dev?await smpDevGet(ent.id):null;if(r&&r.wav)ab=r.wav;}catch(e){console.warn("sample library: device read",e);}
+    if(!ab&&ent.cloud&&cloudSessR.current){
+      try{const b64=await cloudSmpGet(await cloudTokenR.current(),ent.id);
+        if(b64){ab=base64ToAb(b64);
+          // cache it, so the next load is local and works offline
+          try{await smpDevPut({id:ent.id,name:ent.name,root:ent.root,dur:ent.dur,updated:ent.updated||Date.now(),wav:ab.slice(0)});}catch(e){}}
+      }catch(err){console.error("sample library: cloud read",err);showFlash(cloudSay(err),"warn");return;}
+    }
+    if(!ab){showFlash("SAMPLE NOT FOUND","warn");return;}
+    let buf;
+    try{buf=await _decodeCtx().decodeAudioData(ab.slice(0));}catch(err){console.error("sample library: decode",err);showFlash("DECODE FAIL","warn");return;}
+    // No pushHistory: the undo snapshot does not carry userSamples (nor does a
+    // fresh recording push one), so a step here would undo the root and the
+    // wave and leave the audio — half an undo is worse than none.
+    setUserSamples(prev=>({...prev,[key]:buf}));userSamplesR.current={...userSamplesR.current,[key]:buf};
+    samplesDirtyR.current=true;
+    const root=(typeof ent.root==="number"&&isFinite(ent.root))?ent.root:60;
+    setLayerParams(lps=>({...lps,[key]:{...lps[key],waveform:"sample",sampleRoot:root}}));
+    showFlash((key==="synth"?"POLY":"MONO")+" ← "+ent.name);
+    setSmpLibOpen(null);
+    if(!ent.dev)smpLibRefresh();
+  });
+  const smpLibDelete=(ent)=>_smpRun("DELETING",async()=>{
+    let failed=false;
+    if(ent.dev){try{await smpDevDel(ent.id);}catch(e){failed=true;console.error(e);}}
+    if(ent.cloud&&cloudSessR.current){try{await cloudSmpDel(await cloudTokenR.current(),ent.id);}catch(e){failed=true;showFlash(cloudSay(e),"warn");}}
+    setSmpDelArm(null);
+    if(!failed)showFlash("DELETED "+ent.name);
+    await smpLibRefresh();
+  });
+  // A take saved while signed out lives on the device only; this puts it on the account.
+  const smpLibUpload=(ent)=>_smpRun("UPLOADING",async()=>{
+    try{const r=await smpDevGet(ent.id);if(!r||!r.wav)throw new Error("SAMPLE NOT FOUND");
+      await cloudSmpPut(await cloudTokenR.current(),ent,abToBase64(r.wav));showFlash("ON ACCOUNT · "+ent.name);}
+    catch(err){console.error("sample library: upload",err);showFlash(cloudSay(err),"warn");}
+    await smpLibRefresh();
+  });
+  const smpLibRenameCommit=()=>_smpRun("RENAMING",async()=>{
+    const r=smpRename;setSmpRename(null);if(!r)return;
+    const ent=smpLib.find(e=>e.id===r.id);const name=(r.name||"").trim().slice(0,40);
+    if(!ent||!name||name===ent.name)return;
+    if(ent.dev){try{const rec=await smpDevGet(ent.id);if(rec)await smpDevPut({...rec,name});}catch(e){console.error(e);}}
+    if(ent.cloud&&cloudSessR.current){try{await cloudSmpRename(await cloudTokenR.current(),ent.id,name);}catch(e){showFlash(cloudSay(e),"warn");}}
+    await smpLibRefresh();
+  });
   // The SAMPLE wave's row under the waveform buttons: REC (then STOP), clear,
   // the ROOT note, and how long the take is. One body, mounted in both SOUND
   // pages. `recPhase` says whether REC is still listening or has caught the
@@ -12011,15 +12157,106 @@ export default function LoudLight(){
         {label}
       </button>);
     return (
-      <div data-smprow={key} style={{padding:compact?"0 8px 8px":"0 12px 10px",display:"flex",alignItems:"center",gap:compact?5:8}}>
+      <div data-smprow={key} style={{padding:compact?"0 8px 8px":"0 12px 10px",display:"flex",flexWrap:"wrap",alignItems:"center",rowGap:6,columnGap:compact?5:8}}>
         <div style={{fontSize:compact?7:8,letterSpacing:1.5,color:"rgba(178,199,219,0.4)",minWidth:compact?32:36}}>SMP</div>
-        {recPanel(key,compact)}
+        {/* A WRAP, not a hand-split row: on a phone everything fits on one line;
+            the desktop SOUND card is ~236px wide, where the meter keeps line one
+            and the readout, \u2715 and LIB drop to a second line at the right. */}
+        <div style={{flex:"1 1 160px",minWidth:0,display:"flex"}}>{recPanel(key,compact)}</div>
+        <div style={{flex:"0 0 auto",marginLeft:"auto",display:"flex",alignItems:"center",gap:compact?5:8}}>
         {buf&&!isRec&&btn("\u2715",false,C_OSC,()=>clearVoiceSample(key),null,{"data-smpclear":key,title:"Clear the recording"})}
+        {/* the LIBRARY: recordings kept outside the project, for every project on this device and account */}
+        {!isRec&&btn("LIB",smpLibOpen===key,C_OSC,()=>openSmpLib(key),null,{"data-smplib":key,title:"Sample library \u2014 save this take, or load one from another project"})}
         {/* the ROOT is read off the take, so it is a readout beside the length and not a control */}
         <div data-smplen={buf?buf.duration.toFixed(2):""} data-smproot={buf?sampleRoot:""} title={buf?"Root "+_noteLabel(sampleRoot)+" \u2014 found from the recording":""}
           style={{fontSize:compact?7:8,color:"rgba(178,199,219,0.55)",minWidth:34,textAlign:"right",whiteSpace:"nowrap"}}>{buf?buf.duration.toFixed(1)+"s \u00b7 "+_noteLabel(sampleRoot):"EMPTY"}</div>
+        </div>
       </div>);
   };
+  // The library panel: one mount, both platforms (it is a modal over whatever
+  // SOUND surface opened it). Tap a row to load it into the layer the LIB
+  // button belongs to; ✎ renames, ✕ asks once and deletes from every store.
+  const smpLibPanel=!smpLibOpen?null:(()=>{
+    const key=smpLibOpen, lbl=key==="synth"?"POLY":"MONO", col=key==="synth"?"#a8c5a0":"#8279e0";
+    const cur=userSamples[key], signedIn=!!(CLOUD_ON&&cloudSess), busy=!!smpLibBusy, cc="#8fb0c9";
+    const close=()=>{if(Date.now()-smpLibAtR.current>400)setSmpLibOpen(null);};
+    const tag=(t,c)=>(<span style={{fontSize:7,letterSpacing:1,padding:"2px 4px",borderRadius:3,border:"1px solid "+c+"66",color:c}}>{t}</span>);
+    const small=(label,c,onClick,attrs)=>(
+      <button {...(attrs||{})} disabled={busy} onClick={e=>{e.stopPropagation();onClick();}}
+        style={{flexShrink:0,minWidth:34,height:34,padding:"0 8px",borderRadius:6,border:"1px solid "+c+"55",background:"transparent",
+          color:c,fontSize:10,fontWeight:700,letterSpacing:0.8,cursor:"pointer",fontFamily:"inherit",opacity:busy?0.5:1}}>{label}</button>);
+    return(
+      <div data-smplibpanel={key} style={{position:"fixed",inset:0,zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",
+        background:"rgba(0,0,0,0.55)",backdropFilter:"blur(3px)",WebkitBackdropFilter:"blur(3px)",
+        padding:"calc(env(safe-area-inset-top,0px) + 12px) 12px calc(env(safe-area-inset-bottom,0px) + 12px)"}}
+        onPointerDown={close} onClick={close}>
+        <div onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
+          style={{width:"min(440px,100%)",maxHeight:"100%",display:"flex",flexDirection:"column",background:"rgba(10,18,28,0.97)",
+            borderRadius:12,border:"1px solid rgba(168,190,212,0.16)",boxShadow:"0 10px 36px rgba(0,0,0,0.65)",overflow:"hidden"}}>
+          <div style={{padding:"10px 12px",display:"flex",alignItems:"center",gap:8,borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+            <span style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(212,226,240,0.85)"}}>SAMPLE LIBRARY</span>
+            <span style={{fontSize:11,fontWeight:700,color:col}}>{"→ "+lbl}</span>
+            <span style={{flex:1,fontSize:8,letterSpacing:1.2,color:"rgba(178,199,219,0.4)"}}>{smpLibBusy}</span>
+            <button data-smplibclose="1" aria-label="Close sample library" onClick={()=>setSmpLibOpen(null)}
+              style={{width:30,height:30,padding:0,borderRadius:7,border:"1px solid rgba(168,190,212,0.2)",background:"transparent",color:"rgba(178,199,219,0.6)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
+          {cur&&(
+            <div style={{padding:"10px 12px",display:"flex",gap:6,alignItems:"center",borderBottom:"1px solid rgba(168,190,212,0.1)"}}>
+              <input data-smplibname="1" value={smpLibName} maxLength={40} onChange={e=>setSmpLibName(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter")smpLibSave(key);}}
+                style={{flex:1,minWidth:0,height:34,padding:"0 10px",borderRadius:6,border:"1px solid rgba(168,190,212,0.2)",background:"rgba(0,0,0,0.25)",color:"rgba(222,234,246,0.9)",fontSize:13,fontFamily:"inherit"}}/>
+              <button data-smplibsave="1" disabled={busy} onClick={()=>smpLibSave(key)}
+                title={"Save this "+lbl+" take ("+cur.duration.toFixed(1)+"s) to the library"+(signedIn?" and your account":"")}
+                style={{flexShrink:0,height:34,padding:"0 12px",borderRadius:6,border:"1px solid "+C_OSC+"88",background:C_OSC+"1a",color:C_OSC,fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",fontFamily:"inherit",opacity:busy?0.5:1}}>
+                SAVE TAKE</button>
+            </div>
+          )}
+          <div data-smpliblist="1" style={{flex:1,minHeight:60,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+            {!smpLib.length&&(
+              <div style={{padding:"18px 12px",fontSize:10,lineHeight:1.5,color:"rgba(178,199,219,0.45)",textAlign:"center"}}>
+                {busy?"…":cur?"Nothing saved yet. Name this take and SAVE it, and it will be here in every project.":"Nothing saved yet. Record a take, then SAVE it here."}
+              </div>
+            )}
+            {smpLib.map(ent=>{
+              const renaming=smpRename&&smpRename.id===ent.id, arm=smpDelArm===ent.id;
+              return(
+                <div key={ent.id} data-smplibrow={ent.id} data-smplibwhere={(ent.dev?"dev":"")+(ent.cloud?"cloud":"")}
+                  onClick={()=>{if(!busy&&!renaming&&!arm)smpLibLoad(key,ent);}}
+                  style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",minHeight:48,borderBottom:"1px solid rgba(168,190,212,0.06)",cursor:busy?"default":"pointer"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    {renaming?(
+                      <input data-smplibrename="1" autoFocus value={smpRename.name} maxLength={40}
+                        onClick={e=>e.stopPropagation()} onChange={e=>setSmpRename({id:ent.id,name:e.target.value})}
+                        onKeyDown={e=>{if(e.key==="Enter")smpLibRenameCommit();}} onBlur={()=>smpLibRenameCommit()}
+                        style={{width:"100%",height:30,padding:"0 8px",borderRadius:5,border:"1px solid rgba(168,190,212,0.3)",background:"rgba(0,0,0,0.25)",color:"rgba(222,234,246,0.9)",fontSize:13,fontFamily:"inherit"}}/>
+                    ):(
+                      <div style={{fontSize:13,color:"rgba(222,234,246,0.88)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ent.name}</div>
+                    )}
+                    <div style={{display:"flex",gap:5,alignItems:"center",marginTop:3,fontSize:9,color:"rgba(178,199,219,0.5)"}}>
+                      <span>{(typeof ent.dur==="number"?ent.dur.toFixed(1)+"s":"")+(typeof ent.root==="number"?" · "+_noteLabel(ent.root):"")}</span>
+                      {ent.dev&&tag("DEVICE","rgba(178,199,219,0.6)")}
+                      {ent.cloud&&tag("ACCOUNT",cc)}
+                    </div>
+                  </div>
+                  {arm?(<>
+                    {small("DELETE","#e07060",()=>smpLibDelete(ent),{"data-smplibdelok":ent.id})}
+                    {small("KEEP","rgba(178,199,219,0.7)",()=>setSmpDelArm(null))}
+                  </>):(<>
+                    {signedIn&&ent.dev&&!ent.cloud&&small("↑",cc,()=>smpLibUpload(ent),{"data-smplibup":ent.id,title:"Put this on your account"})}
+                    {!renaming&&small("✎","rgba(178,199,219,0.7)",()=>setSmpRename({id:ent.id,name:ent.name}),{"data-smplibren":ent.id,title:"Rename"})}
+                    {small("✕","rgba(224,112,96,0.8)",()=>setSmpDelArm(ent.id),{"data-smplibdel":ent.id,title:"Delete from the library"})}
+                  </>)}
+                </div>);
+            })}
+          </div>
+          <div style={{padding:"8px 12px",fontSize:8.5,lineHeight:1.5,letterSpacing:0.3,color:"rgba(178,199,219,0.4)",borderTop:"1px solid rgba(168,190,212,0.08)"}}>
+            {signedIn?"Saved to this device and your account ("+cloudSess.email+"). Loading copies the take into this project, so deleting it here never silences a song."
+              :CLOUD_ON?"Saved to this device only. Sign in under PROJECT ▸ CLOUD to keep samples on your account across devices."
+              :"Saved to this device. Loading copies the take into this project."}
+          </div>
+        </div>
+      </div>);
+  })();
   // The drum "library" is the same pattern list seen through the drums part,
   // so its lifecycle ops are the whole-pattern ones.
   const dupDrumPat=()=>dupPatternId(activeDrumId);
@@ -13787,6 +14024,7 @@ export default function LoudLight(){
       {/* Bar ops — a bar chip's hold menu, same shell, one mount. */}
       {barOpsMenu}
       {layerOpsMenu}
+      {smpLibPanel}
       {paramOpsMenu}
       {scrubOverlay}
 
