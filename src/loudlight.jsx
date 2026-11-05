@@ -12703,8 +12703,12 @@ export default function LoudLight(){
         // `alignContent:stretch` is what makes those rows SHARE the height
         // rather than sitting at the top of it: the same trap as the sheet
         // above, one level down.
+        // Mixer order is the grid's display order REVERSED: kick on the
+        // left, cowbell on the right, the way a desk is laid out — the grid
+        // stacks top-down with the core at the bottom, a desk reads
+        // left-to-right with the core first.
         <div style={{flex:1,minHeight:0,display:"flex",flexWrap:"wrap",alignContent:"stretch",gap:4}}>
-          {DRUM_DISPLAY.map((r)=>{
+          {DRUM_DISPLAY.slice().reverse().map((r)=>{
             const voice=DRUM_VOICES[r];
             const m=mix[r], md=effDispMix(dPat,r,m);
             const dc=drumColor(r,linkHat,linkTom);
